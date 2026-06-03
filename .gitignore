@@ -29,3 +29,6 @@ coverage/
 
 # Misc
 *.tsbuildinfo
+
+# Local design demo HTMLs (not for repo)
+demo/

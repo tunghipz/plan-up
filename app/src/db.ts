@@ -644,7 +644,13 @@ export async function moveUnfinishedToNextSprint(
     .toArray()
 
   for (const t of unfinished) {
-    const patch: Partial<Task> = { sprintId: target.id }
+    // Sequence is per-sprint, so a moved task must be renumbered into the
+    // target — otherwise it keeps its source number and collides with an
+    // existing task there. Awaited in-loop so each call sees the prior insert.
+    const patch: Partial<Task> = {
+      sprintId: target.id,
+      sequence: await nextSequence(target.id),
+    }
     // Pull stale starts forward so the task lands inside the new sprint.
     if (!t.startDate || t.startDate < target.startDate) {
       patch.startDate = target.startDate
@@ -955,10 +961,15 @@ export async function dedupeSprints(): Promise<number> {
       const keeper = group[0]
       const dups = group.slice(1)
       for (const dup of dups) {
-        await db.tasks
-          .where('sprintId')
-          .equals(dup.id)
-          .modify({ sprintId: keeper.id })
+        // Renumber as we move — sequence is per-sprint, so a plain sprintId
+        // swap would carry the dup's numbers over and collide with the keeper's.
+        const dupTasks = await db.tasks.where('sprintId').equals(dup.id).toArray()
+        for (const t of dupTasks) {
+          await db.tasks.update(t.id, {
+            sprintId: keeper.id,
+            sequence: await nextSequence(keeper.id),
+          })
+        }
         await db.sprints.delete(dup.id)
         removed++
       }

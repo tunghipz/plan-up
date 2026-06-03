@@ -169,6 +169,24 @@ describe('dedupeSprints', () => {
     expect(await dedupeSprints()).toBe(1)
     expect(await dedupeSprints()).toBe(0)
   })
+
+  it('renumbers merged tasks so sequences stay unique in the keeper', async () => {
+    const s1 = { id: 'k', projectId: P, name: 'Dup', startDate: '2026-01-01', endDate: '2026-01-14' }
+    const s2 = { id: 'd', projectId: P, name: 'Dup', startDate: '2026-01-01', endDate: '2026-01-14' }
+    await db.sprints.bulkAdd([s1, s2])
+    const mk = (id: string, sid: string, seq: number) => ({
+      id, projectId: P, sequence: seq, title: id, assigneeId: null, sprintId: sid,
+      status: 'todo' as const, priority: 'normal' as const,
+      startDate: null, dueDate: null, estimate: null, createdAt: 0, dependsOn: [] as string[],
+    })
+    // Both sprints number their tasks 1 & 2 — merge must renumber, not collide.
+    await db.tasks.bulkAdd([mk('k1', 'k', 1), mk('k2', 'k', 2), mk('d1', 'd', 1), mk('d2', 'd', 2)])
+    await dedupeSprints()
+    const keeperId = (await db.sprints.toArray())[0].id
+    const inKeeper = await db.tasks.where('sprintId').equals(keeperId).toArray()
+    expect(inKeeper).toHaveLength(4)
+    expect(new Set(inKeeper.map((t) => t.sequence)).size).toBe(4) // no collision
+  })
 })
 
 describe('task dependencies', () => {
@@ -819,6 +837,31 @@ describe('moveUnfinishedToNextSprint', () => {
     })
     const result = await moveUnfinishedToNextSprint('only')
     expect(result).toEqual({ movedCount: 0, targetSprintId: null })
+  })
+
+  it('renumbers moved tasks so sequences stay unique in the target sprint', async () => {
+    const s1 = { id: 's1', projectId: P, name: 'A', startDate: '2026-06-01', endDate: '2026-06-14' }
+    const s2 = { id: 's2', projectId: P, name: 'B', startDate: '2026-06-15', endDate: '2026-06-28' }
+    await db.sprints.bulkAdd([s1, s2])
+    const mk = (id: string, sprintId: string, sequence: number, status: Task['status']): Task => ({
+      id, projectId: P, sequence, title: id, assigneeId: null, sprintId,
+      status, priority: 'normal',
+      startDate: '2026-06-01', dueDate: null, estimate: null, createdAt: 0, dependsOn: [],
+    })
+    // Target sprint already owns sequences 1 and 2; the unfinished source tasks
+    // are ALSO numbered 1 and 2 — moving them must renumber, not collide.
+    await db.tasks.bulkAdd([
+      mk('x', s2.id, 1, 'todo'),
+      mk('y', s2.id, 2, 'todo'),
+      mk('a', s1.id, 1, 'todo'),
+      mk('b', s1.id, 2, 'in_progress'),
+    ])
+    await moveUnfinishedToNextSprint(s1.id)
+    const inS2 = await db.tasks.where('sprintId').equals(s2.id).toArray()
+    const seqs = inS2.map((t) => t.sequence).sort((m, n) => m - n)
+    expect(inS2).toHaveLength(4)
+    expect(new Set(seqs).size).toBe(4) // all unique — no collision
+    expect(seqs).toEqual([1, 2, 3, 4]) // moved tasks appended after existing max
   })
 })
 

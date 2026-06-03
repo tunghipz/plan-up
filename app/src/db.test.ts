@@ -18,6 +18,10 @@ import {
   isWeekend,
   setMemberDaysOff,
   computeWorkingTimes,
+  moveUnfinishedToNextSprint,
+  createProject,
+  deleteProject,
+  nextSequence,
   dedupeSprints,
   exportAll,
   importAll,
@@ -27,12 +31,25 @@ import {
   type Member,
 } from './db'
 
+// All tests run inside this synthetic project. Saves having to thread a
+// projectId everywhere just to satisfy the not-null schema field.
+const P = 'test-project'
+
 beforeEach(async () => {
-  await db.transaction('rw', db.members, db.sprints, db.tasks, async () => {
-    await db.members.clear()
-    await db.sprints.clear()
-    await db.tasks.clear()
-  })
+  await db.transaction(
+    'rw',
+    db.projects,
+    db.members,
+    db.sprints,
+    db.tasks,
+    async () => {
+      await db.tasks.clear()
+      await db.sprints.clear()
+      await db.members.clear()
+      await db.projects.clear()
+      await db.projects.add({ id: P, name: 'Test', createdAt: 0 })
+    }
+  )
   __resetSeedLockForTests()
 })
 
@@ -82,6 +99,7 @@ describe('deleteMember', () => {
     const sprint = (await db.sprints.toArray())[0]
     await db.tasks.add({
       id: uid(),
+      projectId: member.projectId,
       sequence: 2,
       title: 'orphan candidate',
       assigneeId: member.id,
@@ -113,14 +131,14 @@ describe('dedupeSprints', () => {
   })
 
   it('merges duplicate-named sprints, keeping the one with most tasks', async () => {
-    const s1 = { id: uid(), name: 'Sprint 1', startDate: '2026-06-01', endDate: '2026-06-14' }
-    const s2 = { id: uid(), name: 'Sprint 1', startDate: '2026-06-01', endDate: '2026-06-14' }
-    const s3 = { id: uid(), name: 'Sprint 2', startDate: '2026-06-15', endDate: '2026-06-28' }
+    const s1 = { id: uid(), projectId: P, name: 'Sprint 1', startDate: '2026-06-01', endDate: '2026-06-14' }
+    const s2 = { id: uid(), projectId: P, name: 'Sprint 1', startDate: '2026-06-01', endDate: '2026-06-14' }
+    const s3 = { id: uid(), projectId: P, name: 'Sprint 2', startDate: '2026-06-15', endDate: '2026-06-28' }
     await db.sprints.bulkAdd([s1, s2, s3])
     // Give s2 more tasks → s2 should win
     let _seq = 100
     const mk = (sid: string, title: string) => ({
-      id: uid(), sequence: _seq++, title, assigneeId: null, sprintId: sid,
+      id: uid(), projectId: P, sequence: _seq++, title, assigneeId: null, sprintId: sid,
       status: 'todo' as const, priority: 'normal' as const,
       startDate: null, dueDate: null, estimate: null, createdAt: Date.now(),
       dependsOn: [] as string[],
@@ -142,8 +160,8 @@ describe('dedupeSprints', () => {
   })
 
   it('is idempotent — second call returns 0', async () => {
-    const s1 = { id: uid(), name: 'Dup', startDate: '2026-01-01', endDate: '2026-01-14' }
-    const s2 = { id: uid(), name: 'Dup', startDate: '2026-01-01', endDate: '2026-01-14' }
+    const s1 = { id: uid(), projectId: P, name: 'Dup', startDate: '2026-01-01', endDate: '2026-01-14' }
+    const s2 = { id: uid(), projectId: P, name: 'Dup', startDate: '2026-01-01', endDate: '2026-01-14' }
     await db.sprints.bulkAdd([s1, s2])
     expect(await dedupeSprints()).toBe(1)
     expect(await dedupeSprints()).toBe(0)
@@ -153,7 +171,7 @@ describe('dedupeSprints', () => {
 describe('task dependencies', () => {
   let _seq = 1
   const mkTask = (id: string, deps: string[] = [], status: Task['status'] = 'todo'): Task => ({
-    id, sequence: _seq++, title: id, assigneeId: null, sprintId: 's',
+    id, projectId: P, sequence: _seq++, title: id, assigneeId: null, sprintId: 's',
     status, priority: 'normal',
     startDate: null, dueDate: null, estimate: null, createdAt: 0,
     dependsOn: deps,
@@ -258,12 +276,12 @@ describe('date computation', () => {
 
   it('computeStartEnd: prereq ends Friday → dependent starts Monday', () => {
     const p: Task = {
-      id: 'p', sequence: 1, title: 'p', assigneeId: null, sprintId: 's',
+      id: 'p', projectId: P, sequence: 1, title: 'p', assigneeId: null, sprintId: 's',
       status: 'todo', priority: 'normal',
       startDate: '2026-06-05', dueDate: '2026-06-05', // Friday
       estimate: 1, createdAt: 0, dependsOn: [],
     }
-    const a: Task = { ...p, id: 'a', sequence: 2, estimate: 3, dependsOn: ['p'] }
+    const a: Task = { ...p, id: 'a', projectId: P, sequence: 2, estimate: 3, dependsOn: ['p'] }
     const byId = new Map([[p.id, p], [a.id, a]])
     // Fri + 1 calendar = Sat → next Monday 06-08, effort 3 → 06-08, 06-09, 06-10
     expect(computeStartEnd(a, byId)).toEqual({
@@ -288,16 +306,16 @@ describe('date computation', () => {
 
   it('computeStartEnd uses assignee daysOff', () => {
     const member: Member = {
-      id: 'm1', name: 'X', color: '#000',
+      id: 'm1', projectId: P, name: 'X', color: '#000',
       daysOff: [{ date: '2026-06-08' }], // Monday full off
     }
     const p: Task = {
-      id: 'p', sequence: 1, title: 'p', assigneeId: 'm1', sprintId: 's',
+      id: 'p', projectId: P, sequence: 1, title: 'p', assigneeId: 'm1', sprintId: 's',
       status: 'todo', priority: 'normal',
       startDate: '2026-06-05', dueDate: '2026-06-05', // Friday
       estimate: 1, createdAt: 0, dependsOn: [],
     }
-    const a: Task = { ...p, id: 'a', sequence: 2, estimate: 2, dependsOn: ['p'] }
+    const a: Task = { ...p, id: 'a', projectId: P, sequence: 2, estimate: 2, dependsOn: ['p'] }
     const byId = new Map([[p.id, p], [a.id, a]])
     const memberById = new Map([[member.id, member]])
     // Fri + 1 = Sat → next biz = Mon 06-08, but Mon is off → Tue 06-09
@@ -309,17 +327,17 @@ describe('date computation', () => {
 
   it('setMemberDaysOff recomputes tasks owned by that member', async () => {
     await db.members.add({
-      id: 'm1', name: 'X', color: '#000', daysOff: [],
+      id: 'm1', projectId: P, name: 'X', color: '#000', daysOff: [],
     })
     await db.tasks.bulkAdd([
       {
-        id: 'p', sequence: 1, title: 'p', assigneeId: 'm1', sprintId: 's',
+        id: 'p', projectId: P, sequence: 1, title: 'p', assigneeId: 'm1', sprintId: 's',
         status: 'todo', priority: 'normal',
         startDate: '2026-06-05', dueDate: '2026-06-05', // Fri
         estimate: 1, createdAt: 0, dependsOn: [],
       },
       {
-        id: 'a', sequence: 2, title: 'a', assigneeId: 'm1', sprintId: 's',
+        id: 'a', projectId: P, sequence: 2, title: 'a', assigneeId: 'm1', sprintId: 's',
         status: 'todo', priority: 'normal',
         startDate: null, dueDate: null,
         estimate: 2, createdAt: 1, dependsOn: ['p'],
@@ -341,16 +359,16 @@ describe('date computation', () => {
   it('half-day off: effort 1 day starting on a half-off day spans 2 days', () => {
     // Mon AM-off → Mon contributes 0.5, Tue contributes 1
     const member: Member = {
-      id: 'm', name: 'X', color: '#000',
+      id: 'm', projectId: P, name: 'X', color: '#000',
       daysOff: [{ date: '2026-06-08', half: 'am' }],
     }
     const p: Task = {
-      id: 'p', sequence: 1, title: 'p', assigneeId: 'm', sprintId: 's',
+      id: 'p', projectId: P, sequence: 1, title: 'p', assigneeId: 'm', sprintId: 's',
       status: 'todo', priority: 'normal',
       startDate: '2026-06-05', dueDate: '2026-06-05', // Fri
       estimate: 1, createdAt: 0, dependsOn: [],
     }
-    const a: Task = { ...p, id: 'a', sequence: 2, estimate: 1, dependsOn: ['p'] }
+    const a: Task = { ...p, id: 'a', projectId: P, sequence: 2, estimate: 1, dependsOn: ['p'] }
     const byId = new Map([[p.id, p], [a.id, a]])
     const memberById = new Map([[member.id, member]])
     // Start = Mon 06-08 (half-off still works in PM). effort 1.0
@@ -362,17 +380,17 @@ describe('date computation', () => {
 
   it('half-day off: decimal effort fits within a single half-day', () => {
     const member: Member = {
-      id: 'm', name: 'X', color: '#000',
+      id: 'm', projectId: P, name: 'X', color: '#000',
       daysOff: [{ date: '2026-06-08', half: 'pm' }],
     }
     const p: Task = {
-      id: 'p', sequence: 1, title: 'p', assigneeId: 'm', sprintId: 's',
+      id: 'p', projectId: P, sequence: 1, title: 'p', assigneeId: 'm', sprintId: 's',
       status: 'todo', priority: 'normal',
       startDate: '2026-06-05', dueDate: '2026-06-05',
       estimate: 1, createdAt: 0, dependsOn: [],
     }
     // 0.5d task starting Mon (PM-off) → Mon contributes 0.5, fits exactly
-    const a: Task = { ...p, id: 'a', sequence: 2, estimate: 0.5, dependsOn: ['p'] }
+    const a: Task = { ...p, id: 'a', projectId: P, sequence: 2, estimate: 0.5, dependsOn: ['p'] }
     const byId = new Map([[p.id, p], [a.id, a]])
     const memberById = new Map([[member.id, member]])
     expect(computeStartEnd(a, byId, memberById)).toEqual({
@@ -382,12 +400,12 @@ describe('date computation', () => {
 
   it('half-day off: decimal effort 1.5d crosses 2 days normally', () => {
     const p: Task = {
-      id: 'p', sequence: 1, title: 'p', assigneeId: null, sprintId: 's',
+      id: 'p', projectId: P, sequence: 1, title: 'p', assigneeId: null, sprintId: 's',
       status: 'todo', priority: 'normal',
       startDate: '2026-06-05', dueDate: '2026-06-05', // Fri
       estimate: 1, createdAt: 0, dependsOn: [],
     }
-    const a: Task = { ...p, id: 'a', sequence: 2, estimate: 1.5, dependsOn: ['p'] }
+    const a: Task = { ...p, id: 'a', projectId: P, sequence: 2, estimate: 1.5, dependsOn: ['p'] }
     const byId = new Map([[p.id, p], [a.id, a]])
     // Start Mon 06-08 (1.0), remaining 0.5. Tue 06-09 (1.0), exit → end Tue
     expect(computeStartEnd(a, byId)).toEqual({
@@ -397,13 +415,13 @@ describe('date computation', () => {
 
   it('computeStartEnd: effort spans weekend → end pushed past Sat/Sun', () => {
     const p: Task = {
-      id: 'p', sequence: 1, title: 'p', assigneeId: null, sprintId: 's',
+      id: 'p', projectId: P, sequence: 1, title: 'p', assigneeId: null, sprintId: 's',
       status: 'todo', priority: 'normal',
       startDate: '2026-06-03', dueDate: '2026-06-03', // Wednesday
       estimate: 1, createdAt: 0, dependsOn: [],
     }
     // a: 4 days, starts Thursday 06-04 → Thu, Fri, Mon, Tue → ends Tue 06-09
-    const a: Task = { ...p, id: 'a', sequence: 2, estimate: 4, dependsOn: ['p'] }
+    const a: Task = { ...p, id: 'a', projectId: P, sequence: 2, estimate: 4, dependsOn: ['p'] }
     const byId = new Map([[p.id, p], [a.id, a]])
     expect(computeStartEnd(a, byId)).toEqual({
       startDate: '2026-06-04', dueDate: '2026-06-09',
@@ -412,7 +430,7 @@ describe('date computation', () => {
 
   it('computeStartEnd: no prereqs → returns existing dates', () => {
     const t: Task = {
-      id: 'a', sequence: 1, title: 'a', assigneeId: null, sprintId: 's',
+      id: 'a', projectId: P, sequence: 1, title: 'a', assigneeId: null, sprintId: 's',
       status: 'todo', priority: 'normal',
       startDate: '2026-06-01', dueDate: '2026-06-05',
       estimate: 5, createdAt: 0, dependsOn: [],
@@ -424,15 +442,15 @@ describe('date computation', () => {
 
   it('computeStartEnd: start = latest prereq end + 1, end = start + (effort-1)', () => {
     const p1: Task = {
-      id: 'p1', sequence: 1, title: 'p1', assigneeId: null, sprintId: 's',
+      id: 'p1', projectId: P, sequence: 1, title: 'p1', assigneeId: null, sprintId: 's',
       status: 'todo', priority: 'normal',
       startDate: '2026-06-01', dueDate: '2026-06-01',
       estimate: 1, createdAt: 0, dependsOn: [],
     }
     // estimate = 3 so prereq's own walk produces dueDate 06-03 consistently.
-    const p2: Task = { ...p1, id: 'p2', sequence: 2, estimate: 3, dueDate: '2026-06-03' }
+    const p2: Task = { ...p1, id: 'p2', projectId: P, sequence: 2, estimate: 3, dueDate: '2026-06-03' }
     const a: Task = {
-      id: 'a', sequence: 3, title: 'a', assigneeId: null, sprintId: 's',
+      id: 'a', projectId: P, sequence: 3, title: 'a', assigneeId: null, sprintId: 's',
       status: 'todo', priority: 'normal',
       startDate: null, dueDate: null, estimate: 2,
       createdAt: 0, dependsOn: ['p1', 'p2'],
@@ -446,7 +464,7 @@ describe('date computation', () => {
 
   it('computeStartEnd: no effort → start computed from prereq, end stays manual', () => {
     const p: Task = {
-      id: 'p', sequence: 1, title: 'p', assigneeId: null, sprintId: 's',
+      id: 'p', projectId: P, sequence: 1, title: 'p', assigneeId: null, sprintId: 's',
       status: 'todo', priority: 'normal',
       startDate: '2026-06-01', dueDate: '2026-06-01',
       estimate: null, createdAt: 0, dependsOn: [],
@@ -454,7 +472,7 @@ describe('date computation', () => {
     // a has prereq + manual dueDate, no effort → start is computed but
     // end is left as user set it (manual).
     const a: Task = {
-      ...p, id: 'a', sequence: 2, estimate: null, dependsOn: ['p'],
+      ...p, id: 'a', projectId: P, sequence: 2, estimate: null, dependsOn: ['p'],
       startDate: null, dueDate: '2026-06-10',
     }
     const byId = new Map([[p.id, p], [a.id, a]])
@@ -466,7 +484,7 @@ describe('date computation', () => {
   it('computeStartEnd: no prereqs but effort set → end derived from start + effort', () => {
     // start = Mon 06-01, effort = 3 → end = Wed 06-03 (skip nothing)
     const t: Task = {
-      id: 't', sequence: 1, title: 't', assigneeId: null, sprintId: 's',
+      id: 't', projectId: P, sequence: 1, title: 't', assigneeId: null, sprintId: 's',
       status: 'todo', priority: 'normal',
       startDate: '2026-06-01', dueDate: null, estimate: 3,
       createdAt: 0, dependsOn: [],
@@ -478,7 +496,7 @@ describe('date computation', () => {
 
   it('computeStartEnd: no prereqs, no effort → unchanged', () => {
     const t: Task = {
-      id: 't', sequence: 1, title: 't', assigneeId: null, sprintId: 's',
+      id: 't', projectId: P, sequence: 1, title: 't', assigneeId: null, sprintId: 's',
       status: 'todo', priority: 'normal',
       startDate: '2026-06-01', dueDate: '2026-06-15', estimate: null,
       createdAt: 0, dependsOn: [],
@@ -492,13 +510,13 @@ describe('date computation', () => {
     // A: 1.5d starting Wed 06-03 → ends Thu 06-04 noon. dueFraction = 0.5.
     // B: 1d depending on A → should start Thu 13:00, end Fri 12:00.
     const a: Task = {
-      id: 'a', sequence: 1, title: 'a', assigneeId: null, sprintId: 's',
+      id: 'a', projectId: P, sequence: 1, title: 'a', assigneeId: null, sprintId: 's',
       status: 'todo', priority: 'normal',
       startDate: '2026-06-03', dueDate: null, estimate: 1.5,
       createdAt: 0, dependsOn: [],
     }
     const b: Task = {
-      id: 'b', sequence: 2, title: 'b', assigneeId: null, sprintId: 's',
+      id: 'b', projectId: P, sequence: 2, title: 'b', assigneeId: null, sprintId: 's',
       status: 'todo', priority: 'normal',
       startDate: null, dueDate: null, estimate: 1,
       createdAt: 1, dependsOn: ['a'],
@@ -517,13 +535,13 @@ describe('date computation', () => {
     // A: 1d Wed → ends Wed 17:00. dueFraction = 1.
     // B: 1d depending on A → should start Thu 08:00.
     const a: Task = {
-      id: 'a', sequence: 1, title: 'a', assigneeId: null, sprintId: 's',
+      id: 'a', projectId: P, sequence: 1, title: 'a', assigneeId: null, sprintId: 's',
       status: 'todo', priority: 'normal',
       startDate: '2026-06-03', dueDate: null, estimate: 1,
       createdAt: 0, dependsOn: [],
     }
     const b: Task = {
-      id: 'b', sequence: 2, title: 'b', assigneeId: null, sprintId: 's',
+      id: 'b', projectId: P, sequence: 2, title: 'b', assigneeId: null, sprintId: 's',
       status: 'todo', priority: 'normal',
       startDate: null, dueDate: null, estimate: 1,
       createdAt: 1, dependsOn: ['a'],
@@ -540,9 +558,9 @@ describe('date computation', () => {
   it('adding member day-off shifts a no-prereq task with effort set', async () => {
     // The new behavior the user asked for: off-days affect ALL of the
     // member's tasks with effort, not only ones with prereqs.
-    await db.members.add({ id: 'm', name: 'X', color: '#000', daysOff: [] })
+    await db.members.add({ id: 'm', projectId: P, name: 'X', color: '#000', daysOff: [] })
     await db.tasks.add({
-      id: 't', sequence: 1, title: 't', assigneeId: 'm', sprintId: 's',
+      id: 't', projectId: P, sequence: 1, title: 't', assigneeId: 'm', sprintId: 's',
       status: 'todo', priority: 'normal',
       startDate: '2026-06-01', dueDate: null, estimate: 3,
       createdAt: 0, dependsOn: [],
@@ -564,19 +582,19 @@ describe('date computation', () => {
     // Three tasks: a (1d, due 2026-06-01), b (2d, no deps), c (1d, depends on b)
     await db.tasks.bulkAdd([
       {
-        id: 'a', sequence: 1, title: 'a', assigneeId: null, sprintId: 's',
+        id: 'a', projectId: P, sequence: 1, title: 'a', assigneeId: null, sprintId: 's',
         status: 'todo', priority: 'normal',
         startDate: '2026-06-01', dueDate: '2026-06-01',
         estimate: 1, createdAt: 0, dependsOn: [],
       },
       {
-        id: 'b', sequence: 2, title: 'b', assigneeId: null, sprintId: 's',
+        id: 'b', projectId: P, sequence: 2, title: 'b', assigneeId: null, sprintId: 's',
         status: 'todo', priority: 'normal',
         startDate: null, dueDate: null,
         estimate: 2, createdAt: 1, dependsOn: [],
       },
       {
-        id: 'c', sequence: 3, title: 'c', assigneeId: null, sprintId: 's',
+        id: 'c', projectId: P, sequence: 3, title: 'c', assigneeId: null, sprintId: 's',
         status: 'todo', priority: 'normal',
         startDate: null, dueDate: null,
         estimate: 1, createdAt: 2, dependsOn: ['b'],
@@ -597,13 +615,13 @@ describe('date computation', () => {
   it('setDependencies drops cycles silently', async () => {
     await db.tasks.bulkAdd([
       {
-        id: 'a', sequence: 1, title: 'a', assigneeId: null, sprintId: 's',
+        id: 'a', projectId: P, sequence: 1, title: 'a', assigneeId: null, sprintId: 's',
         status: 'todo', priority: 'normal',
         startDate: null, dueDate: null, estimate: 1, createdAt: 0,
         dependsOn: ['b'],
       },
       {
-        id: 'b', sequence: 2, title: 'b', assigneeId: null, sprintId: 's',
+        id: 'b', projectId: P, sequence: 2, title: 'b', assigneeId: null, sprintId: 's',
         status: 'todo', priority: 'normal',
         startDate: null, dueDate: null, estimate: 1, createdAt: 1,
         dependsOn: [],
@@ -612,6 +630,96 @@ describe('date computation', () => {
     // Cycle attempt: b depends on a, but a already depends on b.
     const saved = await setDependencies('b', ['a'])
     expect(saved).toEqual([])
+  })
+})
+
+describe('projects', () => {
+  it('createProject adds a row', async () => {
+    const p = await createProject('Side Project')
+    expect(p.id).toBeTruthy()
+    expect(p.name).toBe('Side Project')
+    expect(await db.projects.count()).toBe(2) // P + Side Project
+  })
+
+  it('nextSequence is per-sprint', async () => {
+    const mk = (id: string, sid: string, seq: number) =>
+      db.tasks.add({
+        id, projectId: P, sequence: seq, title: id,
+        assigneeId: null, sprintId: sid,
+        status: 'todo' as const, priority: 'normal' as const,
+        startDate: null, dueDate: null, estimate: null,
+        createdAt: 0, dependsOn: [],
+      })
+    await mk('a1', 's1', 1)
+    await mk('a2', 's1', 2)
+    await mk('b1', 's2', 1)
+    expect(await nextSequence('s1')).toBe(3)
+    expect(await nextSequence('s2')).toBe(2)
+  })
+
+  it('deleteProject cascades members + sprints + tasks', async () => {
+    await db.projects.add({ id: 'pX', name: 'X', createdAt: 0 })
+    await db.members.add({ id: 'mX', projectId: 'pX', name: 'M', color: '#000', daysOff: [] })
+    await db.sprints.add({ id: 'sX', projectId: 'pX', name: 'S', startDate: '2026-06-01', endDate: '2026-06-14' })
+    await db.tasks.add({
+      id: 'tX', projectId: 'pX', sequence: 1, title: 't',
+      assigneeId: 'mX', sprintId: 'sX',
+      status: 'todo', priority: 'normal',
+      startDate: null, dueDate: null, estimate: null, createdAt: 0, dependsOn: [],
+    })
+
+    await deleteProject('pX')
+    expect(await db.projects.get('pX')).toBeUndefined()
+    expect(await db.members.get('mX')).toBeUndefined()
+    expect(await db.sprints.get('sX')).toBeUndefined()
+    expect(await db.tasks.get('tX')).toBeUndefined()
+  })
+})
+
+describe('moveUnfinishedToNextSprint', () => {
+  it('moves only not-done tasks to the next sprint', async () => {
+    const s1 = { id: 's1', projectId: P, name: 'A', startDate: '2026-06-01', endDate: '2026-06-14' }
+    const s2 = { id: 's2', projectId: P, name: 'B', startDate: '2026-06-15', endDate: '2026-06-28' }
+    await db.sprints.bulkAdd([s1, s2])
+    const mk = (id: string, sprintId: string, status: Task['status']): Task => ({
+      id, projectId: P, sequence: id.charCodeAt(0), title: id, assigneeId: null, sprintId,
+      status, priority: 'normal',
+      startDate: '2026-06-01', dueDate: null, estimate: null, createdAt: 0,
+      dependsOn: [],
+    })
+    await db.tasks.bulkAdd([
+      mk('a', s1.id, 'todo'),
+      mk('b', s1.id, 'in_progress'),
+      mk('c', s1.id, 'done'),
+    ])
+    const result = await moveUnfinishedToNextSprint(s1.id)
+    expect(result).toEqual({ movedCount: 2, targetSprintId: s2.id })
+    expect((await db.tasks.get('a'))?.sprintId).toBe(s2.id)
+    expect((await db.tasks.get('b'))?.sprintId).toBe(s2.id)
+    expect((await db.tasks.get('c'))?.sprintId).toBe(s1.id) // done stays
+  })
+
+  it('bumps stale start dates up to the target sprint start', async () => {
+    const s1 = { id: 's1', projectId: P, name: 'A', startDate: '2026-06-01', endDate: '2026-06-14' }
+    const s2 = { id: 's2', projectId: P, name: 'B', startDate: '2026-06-15', endDate: '2026-06-28' }
+    await db.sprints.bulkAdd([s1, s2])
+    await db.tasks.add({
+      id: 't', projectId: P, sequence: 1, title: 't', assigneeId: null, sprintId: s1.id,
+      status: 'todo', priority: 'normal',
+      startDate: '2026-06-02', dueDate: null, estimate: null, createdAt: 0,
+      dependsOn: [],
+    })
+    await moveUnfinishedToNextSprint(s1.id)
+    const t = await db.tasks.get('t')
+    expect(t?.startDate).toBe('2026-06-15') // bumped to s2.startDate
+  })
+
+  it('returns null target when there is no next sprint', async () => {
+    await db.sprints.add({
+      id: 'only', projectId: P, name: 'Only', startDate: '2026-06-01', endDate: '2026-06-14',
+    })
+    const result = await moveUnfinishedToNextSprint('only')
+    expect(result).toEqual({ movedCount: 0, targetSprintId: null })
   })
 })
 
@@ -637,9 +745,9 @@ describe('export / import round-trip', () => {
     const legacy = {
       version: 1 as const,
       exportedAt: '2026-05-01T00:00:00Z',
-      members: [{ id: 'm1', name: 'X', color: '#000000' }],
+      members: [{ id: 'm1', projectId: P, name: 'X', color: '#000000' }],
       sprints: [
-        { id: 's1', name: 'Old Sprint', startDate: '2026-05-01', endDate: '2026-05-14' },
+        { id: 's1', projectId: P, name: 'Old Sprint', startDate: '2026-05-01', endDate: '2026-05-14' },
       ],
       // Note: no startDate field — legacy shape
       tasks: [

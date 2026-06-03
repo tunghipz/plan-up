@@ -16,8 +16,15 @@ export interface DayOff {
   half?: 'am' | 'pm'
 }
 
+export interface Project {
+  id: string
+  name: string
+  createdAt: number
+}
+
 export interface Member {
   id: string
+  projectId: string
   name: string
   color: string
   /**
@@ -29,6 +36,7 @@ export interface Member {
 
 export interface Sprint {
   id: string
+  projectId: string
   name: string
   startDate: string
   endDate: string
@@ -36,7 +44,8 @@ export interface Sprint {
 
 export interface Task {
   id: string
-  /** Stable, never-reused sequence number. Used in the UI for prereq input. */
+  projectId: string
+  /** Stable, never-reused sequence number (per-project). UI prereq input. */
   sequence: number
   title: string
   assigneeId: string | null
@@ -53,6 +62,7 @@ export interface Task {
 }
 
 class PlanDB extends Dexie {
+  projects!: Table<Project, string>
   members!: Table<Member, string>
   sprints!: Table<Sprint, string>
   tasks!: Table<Task, string>
@@ -118,6 +128,60 @@ class PlanDB extends Dexie {
           )
         })
     )
+    // v7 (2026-06-03): multi-project. Add projects table + projectId on
+    // members/sprints/tasks. Backfill existing data to a default project.
+    this.version(7)
+      .stores({
+        projects: 'id, name, createdAt',
+        members: 'id, name, projectId',
+        sprints: 'id, startDate, projectId',
+        tasks: 'id, sprintId, assigneeId, status, createdAt, projectId',
+      })
+      .upgrade(async (tx) => {
+        const projects = tx.table<Project>('projects')
+        const existing = await projects.toArray()
+        let defaultId: string
+        if (existing.length > 0) {
+          defaultId = existing[0].id
+        } else {
+          defaultId =
+            typeof crypto !== 'undefined' && crypto.randomUUID
+              ? crypto.randomUUID()
+              : Math.random().toString(36).slice(2, 10)
+          await projects.add({
+            id: defaultId,
+            name: 'My Project',
+            createdAt: Date.now(),
+          })
+        }
+        for (const table of ['members', 'sprints', 'tasks']) {
+          await tx
+            .table(table)
+            .toCollection()
+            .modify((row: { projectId?: string }) => {
+              if (!row.projectId) row.projectId = defaultId
+            })
+        }
+      })
+    // v8 (2026-06-03): sequence becomes per-SPRINT (was per-project). Each
+    // sprint resets at 1 so users see a clean 1..N column per sprint view.
+    // Existing dependsOn references point to task IDs — unaffected.
+    this.version(8).upgrade(async (tx) => {
+      const tasks = await tx.table('tasks').toArray()
+      const bySprint = new Map<string, typeof tasks>()
+      for (const t of tasks) {
+        const arr = bySprint.get(t.sprintId) ?? []
+        arr.push(t)
+        bySprint.set(t.sprintId, arr)
+      }
+      for (const arr of bySprint.values()) {
+        arr.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0))
+        let n = 1
+        for (const t of arr) {
+          await tx.table('tasks').update(t.id, { sequence: n++ })
+        }
+      }
+    })
   }
 }
 
@@ -138,12 +202,58 @@ export function colorForName(name: string): string {
   return PALETTE[Math.abs(h) % PALETTE.length]
 }
 
-/** Next available sequence number. Sequences are never reused. */
-export async function nextSequence(): Promise<number> {
-  const all = await db.tasks.toArray()
+/** Next sequence number within a sprint. Sequences are never reused. */
+export async function nextSequence(sprintId: string): Promise<number> {
+  const all = await db.tasks.where('sprintId').equals(sprintId).toArray()
   let max = 0
   for (const t of all) if ((t.sequence ?? 0) > max) max = t.sequence ?? 0
   return max + 1
+}
+
+/**
+ * Create a new project. The new project is empty — caller is responsible
+ * for adding members / sprints. Returns the created project.
+ */
+export async function createProject(name: string): Promise<Project> {
+  const trimmed = name.trim() || 'Untitled Project'
+  const project: Project = { id: uid(), name: trimmed, createdAt: Date.now() }
+  await db.projects.add(project)
+  return project
+}
+
+/**
+ * Delete a project and everything it owns: members, sprints, tasks. Tasks
+ * in this project that are referenced as dependsOn by tasks in OTHER
+ * projects (rare) are stripped from those references.
+ */
+export async function deleteProject(projectId: string): Promise<void> {
+  await db.transaction(
+    'rw',
+    db.projects,
+    db.members,
+    db.sprints,
+    db.tasks,
+    async () => {
+      const taskIds = (
+        await db.tasks.where('projectId').equals(projectId).toArray()
+      ).map((t) => t.id)
+      // Strip cross-project dep references (paranoid; same-project case is
+      // moot because dependents are deleted alongside).
+      const taskIdSet = new Set(taskIds)
+      const others = await db.tasks
+        .filter((t) => t.projectId !== projectId && t.dependsOn?.some((id) => taskIdSet.has(id)))
+        .toArray()
+      for (const t of others) {
+        await db.tasks.update(t.id, {
+          dependsOn: t.dependsOn.filter((id) => !taskIdSet.has(id)),
+        })
+      }
+      await db.tasks.where('projectId').equals(projectId).delete()
+      await db.sprints.where('projectId').equals(projectId).delete()
+      await db.members.where('projectId').equals(projectId).delete()
+      await db.projects.delete(projectId)
+    }
+  )
 }
 
 /**
@@ -452,6 +562,50 @@ export async function recomputeDates(taskId: string): Promise<void> {
  * then recomputes every task assigned to that member (forward through their
  * dependents too).
  */
+/**
+ * Move every not-done task in `sourceSprintId` to the next sprint
+ * (chronologically — the smallest startDate greater than source's).
+ *
+ * Returns `{ movedCount, targetSprintId }`. Returns null target if there
+ * is no next sprint.
+ *
+ * Behavior:
+ * - Done tasks stay put.
+ * - Moved tasks get the new sprintId. If their startDate is now before
+ *   the target sprint's start, it's bumped to the target start. Dates
+ *   are then recomputed (effort + off-days + prereq chain still apply).
+ * - dependsOn links survive across sprints — prereq IDs stay valid.
+ */
+export async function moveUnfinishedToNextSprint(
+  sourceSprintId: string
+): Promise<{ movedCount: number; targetSprintId: string | null }> {
+  const sprints = await db.sprints.orderBy('startDate').toArray()
+  const sourceIdx = sprints.findIndex((s) => s.id === sourceSprintId)
+  if (sourceIdx === -1) return { movedCount: 0, targetSprintId: null }
+  const target = sprints[sourceIdx + 1]
+  if (!target) return { movedCount: 0, targetSprintId: null }
+
+  const unfinished = await db.tasks
+    .where('sprintId')
+    .equals(sourceSprintId)
+    .filter((t) => t.status !== 'done')
+    .toArray()
+
+  for (const t of unfinished) {
+    const patch: Partial<Task> = { sprintId: target.id }
+    // Pull stale starts forward so the task lands inside the new sprint.
+    if (!t.startDate || t.startDate < target.startDate) {
+      patch.startDate = target.startDate
+    }
+    await db.tasks.update(t.id, patch)
+  }
+  // Recompute after the bulk move so prereq chains settle in their new
+  // home (and assignee off-days reapply).
+  for (const t of unfinished) await recomputeDates(t.id)
+
+  return { movedCount: unfinished.length, targetSprintId: target.id }
+}
+
 export async function setMemberDaysOff(
   memberId: string,
   daysOff: DayOff[]
@@ -603,22 +757,26 @@ export async function deleteMember(memberId: string) {
 }
 
 export interface ExportPayload {
-  version: 1
+  version: 1 | 2
   exportedAt: string
+  /** v2 introduces multi-project. v1 payloads have no `projects` field. */
+  projects?: Project[]
   members: Member[]
   sprints: Sprint[]
   tasks: Task[]
 }
 
 export async function exportAll(): Promise<ExportPayload> {
-  const [members, sprints, tasks] = await Promise.all([
+  const [projects, members, sprints, tasks] = await Promise.all([
+    db.projects.toArray(),
     db.members.toArray(),
     db.sprints.toArray(),
     db.tasks.toArray(),
   ])
   return {
-    version: 1,
+    version: 2,
     exportedAt: new Date().toISOString(),
+    projects,
     members,
     sprints,
     tasks,
@@ -626,35 +784,77 @@ export async function exportAll(): Promise<ExportPayload> {
 }
 
 export async function importAll(data: ExportPayload) {
-  if (!data || data.version !== 1) throw new Error('Unsupported export version')
-  await db.transaction('rw', db.members, db.sprints, db.tasks, async () => {
-    await db.members.clear()
-    await db.sprints.clear()
-    await db.tasks.clear()
-    const members: Member[] = data.members.map((m) => {
-      const raw = (m.daysOff ?? []) as Array<string | DayOff>
-      const daysOff: DayOff[] = raw.map((d) =>
-        typeof d === 'string' ? { date: d } : d
+  if (!data || (data.version !== 1 && data.version !== 2)) {
+    throw new Error('Unsupported export version')
+  }
+  await db.transaction(
+    'rw',
+    db.projects,
+    db.members,
+    db.sprints,
+    db.tasks,
+    async () => {
+      await db.tasks.clear()
+      await db.sprints.clear()
+      await db.members.clear()
+      await db.projects.clear()
+      // v1 payloads predate multi-project — synthesize a default project
+      // and stamp it onto every row.
+      let projects: Project[]
+      let defaultId: string | null = null
+      if (data.version === 2 && data.projects && data.projects.length > 0) {
+        projects = data.projects
+      } else {
+        defaultId = uid()
+        projects = [
+          { id: defaultId, name: 'My Project', createdAt: Date.now() },
+        ]
+      }
+      await db.projects.bulkAdd(projects)
+      const fallbackId = defaultId ?? projects[0].id
+      const pidOf = (row: { projectId?: string }) => row.projectId ?? fallbackId
+
+      const members: Member[] = data.members.map((m) => {
+        const raw = (m.daysOff ?? []) as Array<string | DayOff>
+        const daysOff: DayOff[] = raw.map((d) =>
+          typeof d === 'string' ? { date: d } : d
+        )
+        return { ...m, projectId: pidOf(m), daysOff }
+      })
+      await db.members.bulkAdd(members)
+
+      const sprints: Sprint[] = data.sprints.map((s) => ({
+        ...s,
+        projectId: pidOf(s),
+      }))
+      await db.sprints.bulkAdd(sprints)
+
+      // Sequence backfill is per-project for v1 payloads.
+      const seqCounter = new Map<string, number>()
+      const sorted = [...data.tasks].sort(
+        (a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0)
       )
-      return { ...m, daysOff }
-    })
-    await db.members.bulkAdd(members)
-    await db.sprints.bulkAdd(data.sprints)
-    // Backfill missing fields from older exports (pre-startDate). Older
-    // payloads may have `startDate === undefined` at runtime even though the
-    // declared type is `string | null`. The `??` covers both cases.
-    let seq = 1
-    const sorted = [...data.tasks].sort(
-      (a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0)
-    )
-    const tasks: Task[] = sorted.map((t) => ({
-      ...t,
-      startDate: t.startDate ?? null,
-      dependsOn: Array.isArray(t.dependsOn) ? t.dependsOn : [],
-      sequence: typeof t.sequence === 'number' ? t.sequence : seq++,
-    }))
-    await db.tasks.bulkAdd(tasks)
-  })
+      const tasks: Task[] = sorted.map((t) => {
+        const pid = pidOf(t)
+        let seq: number
+        if (typeof t.sequence === 'number') {
+          seq = t.sequence
+        } else {
+          const cur = seqCounter.get(pid) ?? 0
+          seq = cur + 1
+          seqCounter.set(pid, seq)
+        }
+        return {
+          ...t,
+          projectId: pid,
+          startDate: t.startDate ?? null,
+          dependsOn: Array.isArray(t.dependsOn) ? t.dependsOn : [],
+          sequence: seq,
+        }
+      })
+      await db.tasks.bulkAdd(tasks)
+    }
+  )
 }
 
 // Module-level promise lock prevents StrictMode double-mount from seeding twice.
@@ -679,11 +879,15 @@ export async function dedupeSprints(): Promise<number> {
     const sprints = await db.sprints.toArray()
     const tasks = await db.tasks.toArray()
 
+    // Scope by (projectId, name) — same name across projects is NOT a
+    // duplicate. (Pre-v7 single-project bucketed by name alone, which
+    // accidentally merged cross-project sprints once multi-project shipped.)
     const byName = new Map<string, Sprint[]>()
     for (const s of sprints) {
-      const bucket = byName.get(s.name) ?? []
+      const key = `${s.projectId}::${s.name}`
+      const bucket = byName.get(key) ?? []
       bucket.push(s)
-      byName.set(s.name, bucket)
+      byName.set(key, bucket)
     }
 
     let removed = 0
@@ -712,18 +916,36 @@ export async function dedupeSprints(): Promise<number> {
 }
 
 async function doSeed() {
-  await db.transaction('rw', db.members, db.sprints, db.tasks, async () => {
-    const memberCount = await db.members.count()
-    if (memberCount > 0) return
-
-    await seedFresh()
-  })
+  await db.transaction(
+    'rw',
+    db.projects,
+    db.members,
+    db.sprints,
+    db.tasks,
+    async () => {
+      // Ensure at least one project exists (the migration creates one for
+      // upgrading users; first-launch needs us to handle it here too).
+      let project = (await db.projects.toArray())[0]
+      if (!project) {
+        project = {
+          id: uid(),
+          name: 'My Project',
+          createdAt: Date.now(),
+        }
+        await db.projects.add(project)
+      }
+      const memberCount = await db.members.count()
+      if (memberCount > 0) return
+      await seedFresh(project.id)
+    }
+  )
 }
 
-async function seedFresh() {
+async function seedFresh(projectId: string) {
   const names = ['Alice', 'Bob', 'Charlie']
   const members: Member[] = names.map((name) => ({
     id: uid(),
+    projectId,
     name,
     color: colorForName(name),
     daysOff: [],
@@ -735,6 +957,7 @@ async function seedFresh() {
   end.setDate(end.getDate() + 13)
   const sprint: Sprint = {
     id: uid(),
+    projectId,
     name: 'Sprint 1',
     startDate: today.toISOString().slice(0, 10),
     endDate: end.toISOString().slice(0, 10),
@@ -743,6 +966,7 @@ async function seedFresh() {
 
   await db.tasks.add({
     id: uid(),
+    projectId,
     sequence: 1,
     title: 'Welcome — click to edit, or use ＋ Add Task',
     assigneeId: members[0].id,

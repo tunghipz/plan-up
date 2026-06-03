@@ -55,17 +55,22 @@ function saveCollapsed(sprintId: string, set: Set<string>) {
 }
 
 export function SprintView({
+  projectId,
   sprintId,
   sprintStartDate,
   tasks,
   search,
 }: {
+  projectId: string
   sprintId: string
   sprintStartDate: string
   tasks: Task[]
   search: string
 }) {
-  const members = useLiveQuery(() => db.members.toArray(), [])
+  const members = useLiveQuery(
+    () => db.members.where('projectId').equals(projectId).toArray(),
+    [projectId]
+  )
   const [showAddMember, setShowAddMember] = useState(false)
   const [showEmpty, setShowEmpty] = useState(false)
   const [collapsed, setCollapsed] = useState<Set<string>>(() =>
@@ -106,6 +111,10 @@ export function SprintView({
       if (owner) byMember.get(owner)!.push(t)
       else orphan.push(t)
     }
+    // Sort each member's tasks by sequence so #s read 1, 2, 3... top-down.
+    const bySeq = (a: Task, b: Task) => a.sequence - b.sequence
+    for (const arr of byMember.values()) arr.sort(bySeq)
+    orphan.sort(bySeq)
     const filled = ms.filter((m) => (byMember.get(m.id) ?? []).length > 0)
     const empty = ms.filter((m) => (byMember.get(m.id) ?? []).length === 0)
     return {
@@ -137,6 +146,7 @@ export function SprintView({
       {groups.map(({ member, tasks: t }) => (
         <MemberCard
           key={member.id}
+          projectId={projectId}
           member={member}
           tasks={t}
           sprintId={sprintId}
@@ -160,6 +170,7 @@ export function SprintView({
 
       {emptyMembers.length > 0 && (
         <CollapsedMembers
+          projectId={projectId}
           members={emptyMembers}
           sprintId={sprintId}
           sprintStartDate={sprintStartDate}
@@ -170,6 +181,7 @@ export function SprintView({
       )}
 
       <AddMemberRow
+        projectId={projectId}
         active={showAddMember}
         onActivate={() => setShowAddMember(true)}
         onDeactivate={() => setShowAddMember(false)}
@@ -197,6 +209,7 @@ function EmptyState({ onAddMember }: { onAddMember: () => void }) {
 }
 
 function MemberCard({
+  projectId,
   member,
   tasks,
   sprintId,
@@ -207,6 +220,7 @@ function MemberCard({
   collapsed,
   onToggleCollapse,
 }: {
+  projectId: string
   member: Member
   tasks: Task[]
   sprintId: string
@@ -248,6 +262,7 @@ function MemberCard({
             />
           ))}
           <AddTaskRow
+            projectId={projectId}
             sprintId={sprintId}
             sprintStartDate={sprintStartDate}
             assigneeId={member.id}
@@ -297,6 +312,7 @@ function UnassignedCard({
 }
 
 function CollapsedMembers({
+  projectId,
   members,
   sprintId,
   sprintStartDate,
@@ -304,6 +320,7 @@ function CollapsedMembers({
   expanded,
   onToggle,
 }: {
+  projectId: string
   members: Member[]
   sprintId: string
   sprintStartDate: string
@@ -338,6 +355,7 @@ function CollapsedMembers({
             />
             <div className="divide-y divide-border">
               <AddTaskRow
+                projectId={projectId}
                 sprintId={sprintId}
                 sprintStartDate={sprintStartDate}
                 assigneeId={m.id}
@@ -737,10 +755,12 @@ function MemberScheduleButton({ member }: { member: Member }) {
 }
 
 function AddTaskRow({
+  projectId,
   sprintId,
   sprintStartDate,
   assigneeId,
 }: {
+  projectId: string
   sprintId: string
   sprintStartDate: string
   assigneeId: string | null
@@ -749,9 +769,10 @@ function AddTaskRow({
   const add = async () => {
     const t = title.trim()
     if (!t) return
-    const seq = await nextSequence()
+    const seq = await nextSequence(sprintId)
     await db.tasks.add({
       id: uid(),
+      projectId,
       sequence: seq,
       title: t,
       assigneeId,
@@ -1261,11 +1282,16 @@ function PrereqInput({
     if (!focused) setDraft(currentLabel)
   }, [currentLabel, focused])
 
+  // Sequence numbers are per-sprint now, so resolve only within the same
+  // sprint as this task. Cross-sprint dependencies (rare) can't be set by
+  // number — would need a different UX if we ever need them.
   const seqToId = useMemo(() => {
     const m = new Map<number, string>()
-    for (const t of allTasks) m.set(t.sequence, t.id)
+    for (const t of allTasks) {
+      if (t.sprintId === task.sprintId) m.set(t.sequence, t.id)
+    }
     return m
-  }, [allTasks])
+  }, [allTasks, task.sprintId])
 
   const commit = async () => {
     const nums = draft
@@ -1311,10 +1337,12 @@ function PrereqInput({
 }
 
 function AddMemberRow({
+  projectId,
   active,
   onActivate,
   onDeactivate,
 }: {
+  projectId: string
   active: boolean
   onActivate: () => void
   onDeactivate: () => void
@@ -1332,7 +1360,13 @@ function AddMemberRow({
       onDeactivate()
       return
     }
-    await db.members.add({ id: uid(), name: n, color: colorForName(n), daysOff: [] })
+    await db.members.add({
+      id: uid(),
+      projectId,
+      name: n,
+      color: colorForName(n),
+      daysOff: [],
+    })
     setName('')
     inputRef.current?.focus()
   }

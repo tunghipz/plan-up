@@ -115,15 +115,20 @@ h1, h2, h3, .display-tight {
   font-feature-settings: 'tnum';
 }
 
-/* Inline edit fields — Jira-style focus halo.
+/* Inline edit fields — Cupertino soft-fill affordance.
  * Apply via `editable` class on any inline-edit <input>/<textarea>/<button>.
- * Uses box-shadow (not border) so focus state never shifts layout. */
+ * Rest = invisible; hover = subtle fill (signals "click to edit"); focus =
+ * white surface + accent border. Margin offsets the padding so the chip never
+ * shifts layout. Hover rule sits before focus so focus wins when both apply. */
 .editable {
   padding: 4px 8px;
   margin: -4px -8px;
-  border-radius: 5px;
+  border-radius: 6px;
   border: 1px solid transparent;
   transition: background 0.12s, border-color 0.12s;
+}
+.editable:hover {
+  background: var(--color-fill);
 }
 .editable:focus,
 .editable:focus-within {

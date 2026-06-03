@@ -181,7 +181,7 @@ export function SprintView({
   const isFilteredEmpty = filteredTasks.length === 0 && search.trim() !== ''
 
   return (
-    <div className="space-y-3 max-w-5xl">
+    <div className="space-y-4 max-w-5xl">
       {isEmpty && <EmptyState onAddMember={() => setShowAddMember(true)} />}
 
       {isFilteredEmpty && (
@@ -294,7 +294,6 @@ function MemberCard({
         avatar={<Avatar member={member} />}
         name={member.name}
         count={tasks.length}
-        tint={member.color}
         collapsed={collapsed}
         onToggleCollapse={onToggleCollapse}
         onRename={(n) => db.members.update(member.id, { name: n })}
@@ -441,7 +440,7 @@ function CollapsedMembers({
 function Card({ children }: { children: React.ReactNode }) {
   // `group/card` enables hover-reveal of delete button inside GroupHeader.
   return (
-    <div className="group/card bg-surface border border-border rounded-xl overflow-hidden shadow-[0_1px_2px_rgba(9,30,66,0.06)]">
+    <div className="group/card bg-surface rounded-[14px] overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_22px_rgba(0,0,0,0.05)]">
       {children}
     </div>
   )
@@ -457,7 +456,6 @@ function GroupHeader({
   collapsed,
   onToggleCollapse,
   extras,
-  tint,
 }: {
   avatar: React.ReactNode
   name: string
@@ -469,8 +467,6 @@ function GroupHeader({
   onToggleCollapse?: () => void
   /** Extra action buttons rendered before rename/delete in the action group. */
   extras?: React.ReactNode
-  /** Member color — when set, tints the header background (V2 pattern). */
-  tint?: string
 }) {
   const collapsible = onToggleCollapse !== undefined
   const [editing, setEditing] = useState(false)
@@ -500,25 +496,11 @@ function GroupHeader({
 
   return (
     <div
-      className={`flex items-center gap-2.5 px-4 py-3 ${
+      className={`flex items-center gap-2.5 px-[18px] py-[13px] ${
         collapsed ? '' : 'border-b border-border'
       } ${
-        collapsible && !editing
-          ? `cursor-pointer transition ${tint ? '' : 'hover:bg-surface-hover'}`
-          : ''
+        collapsible && !editing ? 'cursor-pointer transition hover:bg-surface-hover' : ''
       }`}
-      style={
-        tint
-          ? {
-              background: `color-mix(in srgb, ${tint} 12%, var(--color-surface))`,
-              ...(collapsed
-                ? {}
-                : {
-                    borderBottomColor: `color-mix(in srgb, ${tint} 16%, transparent)`,
-                  }),
-            }
-          : undefined
-      }
       onClick={collapsible && !editing ? onToggleCollapse : undefined}
       role={collapsible ? 'button' : undefined}
       aria-expanded={collapsible ? !collapsed : undefined}
@@ -917,22 +899,20 @@ const COL = {
 }
 
 /**
- * Trello-style colorful priority sticker. Only renders for urgent/high/low —
- * 'normal' and 'none' are the silent default. Saturated label palette echoes
- * Trello's signature sticker labels.
+ * Cupertino priority tag — soft-tint pill, only for urgent/high. Normal/Low/None
+ * are the silent default (no tag), keeping the title row calm.
  */
 const PRIORITY_STICKER: Record<string, { label: string; bg: string; fg: string }> = {
-  urgent: { label: 'Urgent', bg: '#EB5A46', fg: '#fff' },
-  high: { label: 'High', bg: '#FF9F1A', fg: 'rgba(0,0,0,0.78)' },
-  low: { label: 'Low', bg: '#61BD4F', fg: '#fff' },
+  urgent: { label: 'Urgent', bg: 'rgba(255,59,48,0.12)', fg: '#d70015' },
+  high: { label: 'High', bg: 'rgba(255,149,0,0.15)', fg: '#b25e00' },
 }
 function PriorityChip({ priority }: { priority: string }) {
   const meta = PRIORITY_STICKER[priority]
   if (!meta) return null
   return (
     <span
-      className="inline-flex items-center text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded shrink-0 mt-[3px]"
-      style={{ background: meta.bg, color: meta.fg, letterSpacing: '0.04em' }}
+      className="inline-flex items-center text-[11px] font-semibold px-2 py-0.5 rounded-full shrink-0 mt-[2px]"
+      style={{ background: meta.bg, color: meta.fg }}
       title={`Priority: ${meta.label}`}
     >
       {meta.label}
@@ -1364,12 +1344,12 @@ function StatusPicker({
   onChange: (s: Status) => void
 }) {
   const meta = STATUS_META[status]
-  // Trello-style chip: 4px square radius, soft tinted bg, colored dot + label.
-  const bg = `color-mix(in srgb, ${meta.varName} 18%, transparent)`
-  const fg = `color-mix(in srgb, ${meta.varName} 100%, #000 25%)`
+  // Cupertino status pill: soft tinted bg, colored dot + label, fully rounded.
+  const bg = `color-mix(in srgb, ${meta.varName} 15%, transparent)`
+  const fg = `color-mix(in srgb, ${meta.varName} 100%, #000 22%)`
   return (
     <div
-      className="relative inline-flex items-center gap-1.5 rounded px-2 py-1 cursor-pointer transition hover:opacity-90 leading-none"
+      className="relative inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 cursor-pointer transition hover:opacity-90 leading-none"
       style={{ background: bg }}
     >
       <span

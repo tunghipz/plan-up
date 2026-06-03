@@ -10,16 +10,17 @@ function dayDiff(dateStr: string): number {
   return Math.round((b.getTime() - a.getTime()) / MS)
 }
 
-function pad2(n: number): string {
-  return n < 10 ? `0${n}` : String(n)
-}
+// (dd/mm/yy padding helper removed in v2 — dates now render as `MMM d`.)
+const MON = [
+  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+]
 
-/** Format as dd/mm/yy — unambiguous, locale-independent. */
+/** Format as `MMM d` (Cupertino DNA) — e.g. "May 19". Locale-independent
+ * (fixed English month abbreviations) so it reads the same on every machine. */
 export function formatShortDate(dateStr: string): string {
   const d = new Date(dateStr)
-  return `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)}/${pad2(
-    d.getFullYear() % 100
-  )}`
+  return `${MON[d.getMonth()]} ${d.getDate()}`
 }
 
 export function formatRelativeDate(dateStr: string | null): string {
@@ -32,7 +33,13 @@ export function isOverdue(dateStr: string | null, isDone: boolean): boolean {
   return dayDiff(dateStr) < 0
 }
 
+/** `MMM d – d` when same month, else `MMM d – MMM d`. */
 export function formatSprintRange(start: string, end: string): string {
+  const a = new Date(start)
+  const b = new Date(end)
+  if (a.getMonth() === b.getMonth() && a.getFullYear() === b.getFullYear()) {
+    return `${MON[a.getMonth()]} ${a.getDate()} – ${b.getDate()}`
+  }
   return `${formatShortDate(start)} – ${formatShortDate(end)}`
 }
 

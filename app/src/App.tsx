@@ -63,6 +63,36 @@ function App() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
 
+  // Resizable sprint panel. Width persisted across sessions; the icon rail
+  // (58px) sits to its left, so a drag maps to clientX - 58, clamped.
+  const SIDEBAR_MIN = 200
+  const SIDEBAR_MAX = 460
+  const RAIL_W = 58
+  const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
+    const s = Number(localStorage.getItem('plan-tmp:sidebarWidth'))
+    return s >= SIDEBAR_MIN && s <= SIDEBAR_MAX ? s : 248
+  })
+  useEffect(() => {
+    localStorage.setItem('plan-tmp:sidebarWidth', String(sidebarWidth))
+  }, [sidebarWidth])
+  const startSidebarResize = (e: React.MouseEvent) => {
+    e.preventDefault()
+    const onMove = (ev: MouseEvent) => {
+      const w = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, ev.clientX - RAIL_W))
+      setSidebarWidth(w)
+    }
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+      document.body.style.userSelect = ''
+      document.body.style.cursor = ''
+    }
+    document.body.style.userSelect = 'none'
+    document.body.style.cursor = 'col-resize'
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+  }
+
   useEffect(() => {
     seedIfEmpty()
       .then(() => dedupeSprints())
@@ -322,7 +352,10 @@ function App() {
       </aside>
 
       {/* Secondary panel: macOS vibrancy sidebar, accent-filled active row */}
-      <aside className="vibrancy w-[248px] shrink-0 border-r border-border-hair flex flex-col overflow-hidden">
+      <aside
+        className="vibrancy shrink-0 border-r border-border-hair flex flex-col overflow-hidden relative"
+        style={{ width: sidebarWidth }}
+      >
         {currentProject ? (
           <>
             <div className="px-[18px] pt-[18px] pb-3">
@@ -391,6 +424,16 @@ function App() {
             Select a project →
           </div>
         )}
+        {/* Drag handle — resize the panel; persists across sessions */}
+        <div
+          onMouseDown={startSidebarResize}
+          className="group/resize absolute top-0 right-0 h-full w-1.5 cursor-col-resize z-10"
+          role="separator"
+          aria-orientation="vertical"
+          title="Drag to resize"
+        >
+          <div className="absolute right-0 top-0 h-full w-px bg-transparent group-hover/resize:bg-accent transition-colors" />
+        </div>
       </aside>
 
       {/* Main column: thin header + capacity + sprint view */}

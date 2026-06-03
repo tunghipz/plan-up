@@ -208,7 +208,9 @@ Click cả `GroupHeader` row để collapse; ChevronDown rotate; persist localSt
 `/` focus search · `n` new sprint · `Esc` clear search · `⌘⇧D`/`Ctrl⇧D` toggle dark. Phím đơn chỉ khi không trong input; combo cho global; mỗi shortcut mới phải tránh conflict OS + có hint.
 
 ### 6.2 Persistence
-IndexedDB: data. localStorage: chỉ UI pref (`plan-tmp:dark`, collapse). URL: chưa dùng.
+IndexedDB: data. localStorage: chỉ UI pref (`plan-tmp:dark`, collapse, `plan-tmp:sidebarWidth`, `plan-tmp:view`, `plan-tmp:currentProjectId`). URL: chưa dùng.
+
+**Sidebar resize**: panel sprint kéo được (drag handle mép phải, clamp 200–460px, lưu `plan-tmp:sidebarWidth`). Icon rail giữ cố định (dải icon). Drag dùng document-level mousemove/up + khoá `userSelect`/`cursor` khi kéo.
 
 ### 6.3 Form submit
 Inline input: Enter commit, Escape cancel khi add-mode. Click outside KHÔNG cancel.

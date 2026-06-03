@@ -1,10 +1,10 @@
 # plan-tmp
 
-ClickUp without the seat tax — a single-user, local-first task & sprint planner. No auth, no backend, no team plan. Members are just labels you create. Data lives in your browser (IndexedDB); export/import JSON for backup.
+ClickUp without the seat tax — a single-user, local-first task & sprint planner. Multi-project, no auth, no backend, no team plan. Members are just labels you create. Data lives in your browser (IndexedDB); export/import JSON for backup.
 
 ## Stack
 
-React 19 · TypeScript · Vite · Tailwind v4 · Dexie (IndexedDB) · TanStack Table · lucide-react
+React 19 · TypeScript · Vite · Tailwind v4 · Dexie (IndexedDB) · Geist + Geist Mono · lucide-react
 
 ## Run
 
@@ -24,12 +24,18 @@ npm run lint       # eslint .
 
 ## What's inside
 
-- **Sprint folder** (biweekly) with start/end dates
-- **Group-by-Assignee** view — each member is a card with their tasks
-- **Task fields**: title, assignee, sprint, status, priority, start date, due date
+- **Multi-project** — Slack/Discord-style icon rail (left), sprint panel (middle), task view (right)
+- **Sprint folder** (biweekly) with start/end dates + per-sprint task sequence (resets to 1..N)
+- **Two views**:
+  - **List** — grouped by assignee, with per-group column headers (ClickUp style)
+  - **Board** — Kanban 3 columns (Todo / In Progress / Done), click status icon to cycle
+- **Task fields**: title, assignee, sprint, status, priority, start/end date, estimate, dependencies
+- **Auto-scheduling** — set effort + prereqs, dates compute automatically (skips weekends + per-member off-days, supports half-day off)
+- **Sprint rollover** — move unfinished tasks to next sprint in one click
+- **Inline rename** — double-click sprint name or member name to edit
+- **Apple-direction UI** — rounded pill active states · canvas-sunk sidebar · hairline borders · Geist + Geist Mono typography
 - **Keyboard-first**: `/` focus search · `n` new sprint · `⌘⇧D` toggle dark mode
-- **Export / Import JSON** — local-first backup
-- **Auto seed + dedupe** on first load
+- **Export / Import JSON** — local-first backup, no sync
 - **Dark mode** with rust `#C04A1A` accent
 
 ## Layout
@@ -48,15 +54,16 @@ Read `design-system.md` **before** building any new component.
 
 ## Data model
 
-Three IndexedDB tables in `app/src/db.ts`:
+Four IndexedDB tables in `app/src/db.ts`:
 
-| Table     | Fields                                                                  |
-| --------- | ----------------------------------------------------------------------- |
-| `members` | id, name, color                                                         |
-| `sprints` | id, name, startDate, endDate                                            |
-| `tasks`   | id, title, assigneeId, sprintId, status, priority, startDate, dueDate, … |
+| Table      | Fields                                                                            |
+| ---------- | --------------------------------------------------------------------------------- |
+| `projects` | id, name, createdAt                                                               |
+| `members`  | id, projectId, name, color, daysOff (`{date, half?}[]`)                           |
+| `sprints`  | id, projectId, name, startDate, endDate                                           |
+| `tasks`    | id, projectId, sequence, title, assigneeId, sprintId, status, priority, dependsOn, startDate, dueDate, estimate, … |
 
-Schema version bumps via Dexie's `version().stores()` + upgrade callback.
+Schema version bumps via Dexie's `version().stores()` + upgrade callback (currently v8).
 
 ## Philosophy
 

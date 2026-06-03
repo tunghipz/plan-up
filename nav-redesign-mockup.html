@@ -1,0 +1,804 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8" />
+<title>plan-tmp · Navigation Redesign — 3 Options</title>
+<style>
+  :root {
+    --accent: #c04a1a;
+    --accent-hover: #a03e16;
+    --accent-soft: #fbeee5;
+    --accent-strong: #8a3411;
+    --canvas: #fafaf7;
+    --surface: #ffffff;
+    --surface-hover: #f5f5f3;
+    --border: #e5e5e0;
+    --border-strong: #d4d4cf;
+    --ink: #18181b;
+    --ink-muted: #71717a;
+    --ink-faint: #a1a1aa;
+    --status-todo: #a1a1aa;
+    --status-progress: #c04a1a;
+    --status-done: #16a34a;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    background: #efece6;
+    color: var(--ink);
+    -webkit-font-smoothing: antialiased;
+    padding: 56px 40px 80px;
+  }
+
+  /* page header */
+  .page-h1 { font-size: 28px; font-weight: 700; letter-spacing: -0.01em; margin: 0 0 6px; }
+  .page-sub { color: var(--ink-muted); font-size: 14px; max-width: 720px; line-height: 1.5; margin: 0 0 48px; }
+
+  /* mockup grid */
+  .grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 56px;
+    max-width: 1280px;
+  }
+  .case {
+    background: var(--canvas);
+    border: 1px solid var(--border-strong);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 12px 32px -16px rgba(0,0,0,.18), 0 2px 6px -2px rgba(0,0,0,.06);
+  }
+  .case-label {
+    padding: 18px 22px 14px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+  }
+  .case-tag {
+    background: var(--ink); color: white; font-size: 11px; font-weight: 600;
+    padding: 3px 8px; border-radius: 4px; letter-spacing: 0.04em;
+  }
+  .case-title { font-size: 15px; font-weight: 600; margin: 0; }
+  .case-desc { font-size: 13px; color: var(--ink-muted); margin: 0; flex: 1 1 100%; padding-top: 4px; line-height: 1.5; }
+
+  .frame {
+    height: 580px;
+    display: flex;
+    background: var(--canvas);
+    overflow: hidden;
+    font-size: 13px;
+  }
+
+  /* ============================================================ */
+  /* shared bits */
+  /* ============================================================ */
+  .app-name {
+    font-weight: 700; letter-spacing: -0.01em;
+    color: var(--ink);
+  }
+  .add-btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 12px; color: var(--ink-muted);
+    padding: 6px 8px; border-radius: 6px;
+    cursor: pointer;
+  }
+  .add-btn:hover { background: var(--surface-hover); color: var(--ink); }
+
+  /* status dot */
+  .dot {
+    width: 12px; height: 12px; border-radius: 50%;
+    flex-shrink: 0; display: inline-block;
+  }
+  .dot.todo { border: 1.5px dashed var(--status-todo); background: transparent; }
+  .dot.prog { background: conic-gradient(var(--status-progress) 0 50%, transparent 50% 100%); border: 1.5px solid var(--status-progress); }
+  .dot.done { background: var(--status-done); border: 1.5px solid var(--status-done); }
+
+  /* avatar */
+  .av {
+    width: 22px; height: 22px; border-radius: 50%;
+    color: white; font-size: 10px; font-weight: 600;
+    display: inline-flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .av.sm { width: 18px; height: 18px; font-size: 9px; }
+
+  /* main content area (reused across all 3) */
+  .main {
+    flex: 1; min-width: 0;
+    display: flex; flex-direction: column;
+    background: var(--canvas);
+  }
+  .main-head {
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  }
+  .crumbs {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 13px; color: var(--ink-muted);
+  }
+  .crumbs strong { color: var(--ink); font-weight: 600; }
+  .crumbs .sep { color: var(--ink-faint); }
+  .pill-date {
+    font-size: 12px; color: var(--ink-muted);
+    padding: 4px 10px; border-radius: 999px;
+    background: var(--surface-hover); border: 1px solid var(--border);
+  }
+  .btn-task {
+    background: var(--accent); color: white;
+    border: none; border-radius: 6px;
+    padding: 6px 12px; font-size: 12px; font-weight: 600; cursor: pointer;
+  }
+  .main-body { flex: 1; padding: 20px; overflow: auto; }
+
+  .group-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 10px; margin-bottom: 14px; overflow: hidden;
+  }
+  .group-head {
+    display: flex; align-items: center; gap: 10px;
+    padding: 12px 16px; border-bottom: 1px solid var(--border);
+    font-size: 13px;
+  }
+  .group-head .name { font-weight: 600; color: var(--ink); }
+  .group-head .count { color: var(--ink-faint); font-size: 11px; }
+  .task-row {
+    display: grid;
+    grid-template-columns: 28px 1fr 90px 110px;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 16px;
+    border-top: 1px solid var(--border);
+    font-size: 13px;
+  }
+  .task-row:first-of-type { border-top: none; }
+  .task-row .num { color: var(--ink-faint); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .task-row .title { color: var(--ink); }
+  .task-row .date { color: var(--ink-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .task-row .status-cell {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 11px; color: var(--ink-muted);
+  }
+
+  /* ============================================================ */
+  /* OPTION A · Sidebar Native (ClickUp-faithful) */
+  /* ============================================================ */
+  .a-side {
+    width: 232px;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex; flex-direction: column;
+    flex-shrink: 0;
+  }
+  .a-side-head {
+    padding: 14px 16px 12px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .a-section-label {
+    font-size: 11px; font-weight: 600; color: var(--ink-faint);
+    letter-spacing: 0.06em; text-transform: uppercase;
+    padding: 14px 16px 6px;
+  }
+  .a-proj {
+    display: flex; align-items: center; gap: 8px;
+    padding: 7px 16px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .a-proj:hover { background: var(--surface-hover); }
+  .a-proj .caret {
+    color: var(--ink-faint); width: 10px; font-size: 9px;
+    transition: transform .15s;
+  }
+  .a-proj.expanded .caret { transform: rotate(90deg); }
+  .a-proj .pname { font-weight: 500; flex: 1; }
+  .a-proj .lock { color: var(--ink-faint); font-size: 11px; }
+  .a-sprint {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 16px 6px 36px;
+    font-size: 12.5px;
+    color: var(--ink-muted);
+    cursor: pointer;
+  }
+  .a-sprint:hover { background: var(--surface-hover); color: var(--ink); }
+  .a-sprint.active {
+    background: var(--accent-soft);
+    color: var(--accent-strong);
+    font-weight: 600;
+    box-shadow: inset 2px 0 0 var(--accent);
+  }
+  .a-sprint .count {
+    margin-left: auto; font-size: 10px; color: var(--ink-faint);
+    background: var(--surface-hover); padding: 1px 6px; border-radius: 999px;
+  }
+  .a-sprint.active .count { background: white; color: var(--accent-strong); }
+  .a-side-foot {
+    margin-top: auto;
+    padding: 10px 12px;
+    border-top: 1px solid var(--border);
+    display: flex; flex-direction: column; gap: 2px;
+  }
+
+  /* ============================================================ */
+  /* OPTION B · Workspace switcher + sprint pills */
+  /* ============================================================ */
+  .b-frame { flex-direction: column; }
+  .b-top {
+    height: 48px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center;
+    padding: 0 18px;
+    gap: 16px;
+  }
+  .b-proj-switch {
+    display: flex; align-items: center; gap: 8px;
+    padding: 5px 10px 5px 6px;
+    border-radius: 6px;
+    cursor: pointer;
+    background: var(--surface-hover);
+    border: 1px solid var(--border);
+  }
+  .b-proj-switch:hover { border-color: var(--border-strong); }
+  .b-proj-switch .pavatar {
+    width: 22px; height: 22px; border-radius: 5px;
+    background: var(--accent); color: white;
+    font-size: 11px; font-weight: 700;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  .b-proj-switch .pname { font-size: 13px; font-weight: 600; }
+  .b-proj-switch .caret { color: var(--ink-faint); font-size: 10px; }
+  .b-sub {
+    height: 44px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center;
+    padding: 0 14px;
+    gap: 4px;
+    overflow-x: auto;
+  }
+  .b-pill {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 6px 14px;
+    font-size: 12.5px;
+    color: var(--ink-muted);
+    border-radius: 6px;
+    cursor: pointer;
+    white-space: nowrap;
+    border: 1px solid transparent;
+  }
+  .b-pill:hover { background: var(--surface-hover); color: var(--ink); }
+  .b-pill.active {
+    background: var(--accent-soft);
+    color: var(--accent-strong);
+    font-weight: 600;
+    border-color: rgba(192, 74, 26, 0.2);
+  }
+  .b-pill .meta { font-size: 11px; color: var(--ink-faint); font-weight: 500; }
+  .b-pill.active .meta { color: var(--accent); }
+  .b-pill.add { color: var(--ink-faint); padding-left: 10px; }
+
+  /* ============================================================ */
+  /* OPTION C · Icon rail + floating panel */
+  /* ============================================================ */
+  .c-rail {
+    width: 60px;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex; flex-direction: column;
+    align-items: center;
+    padding: 12px 0;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+  .c-badge {
+    width: 36px; height: 36px;
+    border-radius: 9px;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 13px;
+    color: white;
+    cursor: pointer;
+    position: relative;
+    transition: border-radius .12s;
+  }
+  .c-badge:hover { border-radius: 11px; }
+  .c-badge.active::before {
+    content: ''; position: absolute; left: -12px; top: 4px; bottom: 4px;
+    width: 3px; border-radius: 0 3px 3px 0;
+    background: var(--accent);
+  }
+  .c-badge.muted {
+    background: var(--surface-hover);
+    color: var(--ink-faint);
+    border: 1px dashed var(--border-strong);
+  }
+  .c-rail .divider {
+    width: 24px; height: 1px; background: var(--border); margin: 4px 0;
+  }
+
+  .c-panel {
+    width: 224px;
+    background: var(--canvas);
+    border-right: 1px solid var(--border);
+    display: flex; flex-direction: column;
+    flex-shrink: 0;
+  }
+  .c-panel-head {
+    padding: 14px 18px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .c-panel-head .pname {
+    font-size: 15px; font-weight: 700; letter-spacing: -0.01em;
+  }
+  .c-panel-head .pmeta {
+    font-size: 11px; color: var(--ink-faint);
+    margin-top: 2px;
+  }
+  .c-panel-section {
+    font-size: 10px; font-weight: 600; color: var(--ink-faint);
+    letter-spacing: 0.08em; text-transform: uppercase;
+    padding: 14px 18px 6px;
+  }
+  .c-sprint {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 18px;
+    font-size: 13px;
+    color: var(--ink-muted);
+    cursor: pointer;
+    border-left: 2px solid transparent;
+  }
+  .c-sprint:hover { background: var(--surface-hover); color: var(--ink); }
+  .c-sprint.active {
+    background: white;
+    color: var(--ink);
+    font-weight: 600;
+    border-left-color: var(--accent);
+  }
+  .c-sprint .dot-sm {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--ink-faint);
+  }
+  .c-sprint.done .dot-sm { background: var(--status-done); }
+  .c-sprint.active .dot-sm { background: var(--accent); }
+  .c-sprint .stxt { flex: 1; }
+  .c-sprint .scount { font-size: 11px; color: var(--ink-faint); }
+  .c-panel-foot { margin-top: auto; padding: 10px 14px; border-top: 1px solid var(--border); }
+
+  /* tradeoff card */
+  .trade {
+    display: grid; grid-template-columns: 1fr 1fr 1fr;
+    gap: 16px;
+    padding: 16px 22px 20px;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    font-size: 12.5px;
+  }
+  .trade h4 { margin: 0 0 6px; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-faint); }
+  .trade ul { margin: 0; padding: 0; list-style: none; }
+  .trade li { padding: 3px 0; line-height: 1.45; color: var(--ink); }
+  .trade li::before { content: '·'; color: var(--accent); margin-right: 6px; font-weight: 700; }
+
+  /* footnote */
+  .footer {
+    margin-top: 64px; max-width: 1280px;
+    padding: 24px 28px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    font-size: 13px; color: var(--ink-muted); line-height: 1.6;
+  }
+  .footer strong { color: var(--ink); }
+  .footer code {
+    background: var(--surface-hover); padding: 1px 6px; border-radius: 4px;
+    font-size: 12px; color: var(--accent-strong);
+  }
+</style>
+</head>
+<body>
+
+<h1 class="page-h1">Project / Sprint navigation — 3 design options</h1>
+<p class="page-sub">
+  Tham khảo ClickUp left sidebar pattern. Cùng một stack thông tin (2 projects · mỗi project vài sprints · current sprint highlight),
+  3 cách bố trí khác nhau về screen real estate vs discoverability. Sample data: project <strong>My Project</strong> đang active sprint
+  <strong>Sprint 42</strong>; project khác là <strong>godot framework</strong>.
+</p>
+
+<div class="grid">
+
+  <!-- ============================================================ -->
+  <!-- OPTION A · Sidebar Native -->
+  <!-- ============================================================ -->
+  <div class="case">
+    <div class="case-label">
+      <span class="case-tag">A</span>
+      <h3 class="case-title">Sidebar Native — bám sát ClickUp</h3>
+      <p class="case-desc">
+        Left rail 232px, Projects expand → Sprints lồng vào. Highlight rust-accent + inset border-left cho sprint đang chọn. Mọi thứ trên 1 view, không cần dropdown.
+      </p>
+    </div>
+    <div class="frame">
+      <!-- sidebar -->
+      <aside class="a-side">
+        <div class="a-side-head">
+          <span class="app-name">plan-tmp</span>
+          <span style="font-size:12px;color:var(--ink-faint);">⌘K</span>
+        </div>
+
+        <div class="a-section-label">Projects</div>
+
+        <div class="a-proj expanded">
+          <span class="caret">▸</span>
+          <span class="pname">My Project</span>
+          <span class="add-btn" style="padding:2px 4px;">＋</span>
+        </div>
+        <div class="a-sprint">
+          <span style="color:var(--ink-faint);">✓</span> Sprint 40 <span class="count">8</span>
+        </div>
+        <div class="a-sprint">
+          <span style="color:var(--ink-faint);">✓</span> Sprint 41 <span class="count">11</span>
+        </div>
+        <div class="a-sprint active">
+          <span class="dot prog" style="width:9px;height:9px;border-width:1.5px;"></span>
+          Sprint 42 <span class="count">11</span>
+        </div>
+        <div class="a-sprint">
+          <span class="dot todo" style="width:9px;height:9px;"></span> Sprint 43 <span class="count">20</span>
+        </div>
+        <div class="a-sprint" style="color:var(--ink-faint);font-style:italic;">＋ Create Sprint</div>
+
+        <div class="a-proj">
+          <span class="caret">▸</span>
+          <span class="pname">godot framework</span>
+          <span class="lock">🔒</span>
+        </div>
+
+        <div class="a-side-foot">
+          <span class="add-btn">＋ New Project</span>
+          <span class="add-btn">⚙ Settings</span>
+        </div>
+      </aside>
+
+      <!-- main -->
+      <section class="main">
+        <div class="main-head">
+          <div class="crumbs">
+            <strong>My Project</strong>
+            <span class="sep">/</span>
+            <strong>Sprint 42</strong>
+            <span class="pill-date">04/06 – 17/06</span>
+          </div>
+          <button class="btn-task">＋ Task</button>
+        </div>
+        <div class="main-body">
+          <div class="group-card">
+            <div class="group-head">
+              <span class="av" style="background:#7c3aed;">A</span>
+              <span class="name">AnhBV</span>
+              <span class="count">3</span>
+            </div>
+            <div class="task-row">
+              <span class="num">#1</span>
+              <span><span class="dot done"></span> &nbsp; Stick collection</span>
+              <span class="status-cell">Done</span>
+              <span class="date">27/05/26</span>
+            </div>
+            <div class="task-row">
+              <span class="num">#2</span>
+              <span><span class="dot prog"></span> &nbsp; Grateful event</span>
+              <span class="status-cell">In progress</span>
+              <span class="date">06/06/26</span>
+            </div>
+            <div class="task-row">
+              <span class="num">#3</span>
+              <span><span class="dot todo"></span> &nbsp; Sprint planning</span>
+              <span class="status-cell">Todo</span>
+              <span class="date">10/06/26</span>
+            </div>
+          </div>
+          <div class="group-card">
+            <div class="group-head">
+              <span class="av" style="background:#0891b2;">H</span>
+              <span class="name">Ho Ngoc Minh</span>
+              <span class="count">2</span>
+            </div>
+            <div class="task-row">
+              <span class="num">#4</span>
+              <span><span class="dot prog"></span> &nbsp; DDC task 2</span>
+              <span class="status-cell">In progress</span>
+              <span class="date">11/06/26</span>
+            </div>
+            <div class="task-row">
+              <span class="num">#5</span>
+              <span><span class="dot todo"></span> &nbsp; Gậy mới 2</span>
+              <span class="status-cell">Todo</span>
+              <span class="date">14/06/26</span>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+    <div class="trade">
+      <div>
+        <h4>Ưu</h4>
+        <ul>
+          <li>Mọi project + sprint thấy một lần, không cần click mới biết có gì</li>
+          <li>Quen thuộc nhất (ClickUp/Linear/Notion users hiểu ngay)</li>
+          <li>Drag-drop reorder sprint dễ thêm sau</li>
+        </ul>
+      </div>
+      <div>
+        <h4>Nhược</h4>
+        <ul>
+          <li>Chiếm 232px chiều ngang vĩnh viễn — task table hẹp đi</li>
+          <li>Single-user app với 2-3 projects thì hơi over-engineered</li>
+        </ul>
+      </div>
+      <div>
+        <h4>Phù hợp khi</h4>
+        <ul>
+          <li>Có ≥3 projects và mỗi project ≥4 sprints</li>
+          <li>User muốn jump cross-project nhanh</li>
+          <li>Future: nested lists/folders trong project</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- OPTION B · Workspace switcher + pills -->
+  <!-- ============================================================ -->
+  <div class="case">
+    <div class="case-label">
+      <span class="case-tag">B</span>
+      <h3 class="case-title">Top Bar + Sprint Pills — Linear/Vercel-style</h3>
+      <p class="case-desc">
+        Compact project switcher trên góc trái (click → menu chọn project), sprint thành hàng pills bên dưới. Không sidebar — task area giữ nguyên width tối đa.
+      </p>
+    </div>
+    <div class="frame b-frame">
+      <!-- top bar -->
+      <div class="b-top">
+        <span class="app-name" style="margin-right:4px;">plan-tmp</span>
+        <span style="color:var(--ink-faint);">/</span>
+        <div class="b-proj-switch">
+          <span class="pavatar">M</span>
+          <span class="pname">My Project</span>
+          <span class="caret">▾</span>
+        </div>
+        <div style="flex:1;"></div>
+        <span style="font-size:12px; color:var(--ink-muted);">🔍 ⌘K</span>
+        <span style="font-size:12px; color:var(--ink-muted);">☼</span>
+      </div>
+      <!-- sub bar: sprint pills -->
+      <div class="b-sub">
+        <div class="b-pill">Sprint 40 <span class="meta">✓ 8</span></div>
+        <div class="b-pill">Sprint 41 <span class="meta">✓ 11</span></div>
+        <div class="b-pill active">Sprint 42 <span class="meta">04/06–17/06 · 11</span></div>
+        <div class="b-pill">Sprint 43 <span class="meta">18/06–01/07 · 20</span></div>
+        <div class="b-pill">Sprint 44 <span class="meta">02/07–15/07</span></div>
+        <div class="b-pill add">＋ New sprint</div>
+      </div>
+      <!-- main -->
+      <section class="main" style="flex:1;">
+        <div class="main-head">
+          <div class="crumbs">
+            <strong>Sprint 42</strong>
+            <span class="sep">·</span>
+            <span>11 tasks · 3 done</span>
+          </div>
+          <button class="btn-task">＋ Task</button>
+        </div>
+        <div class="main-body">
+          <div class="group-card">
+            <div class="group-head">
+              <span class="av" style="background:#7c3aed;">A</span>
+              <span class="name">AnhBV</span>
+              <span class="count">3</span>
+            </div>
+            <div class="task-row">
+              <span class="num">#1</span>
+              <span><span class="dot done"></span> &nbsp; Stick collection</span>
+              <span class="status-cell">Done</span>
+              <span class="date">27/05/26</span>
+            </div>
+            <div class="task-row">
+              <span class="num">#2</span>
+              <span><span class="dot prog"></span> &nbsp; Grateful event</span>
+              <span class="status-cell">In progress</span>
+              <span class="date">06/06/26</span>
+            </div>
+            <div class="task-row">
+              <span class="num">#3</span>
+              <span><span class="dot todo"></span> &nbsp; Sprint planning</span>
+              <span class="status-cell">Todo</span>
+              <span class="date">10/06/26</span>
+            </div>
+          </div>
+          <div class="group-card">
+            <div class="group-head">
+              <span class="av" style="background:#0891b2;">H</span>
+              <span class="name">Ho Ngoc Minh</span>
+              <span class="count">2</span>
+            </div>
+            <div class="task-row">
+              <span class="num">#4</span>
+              <span><span class="dot prog"></span> &nbsp; DDC task 2</span>
+              <span class="status-cell">In progress</span>
+              <span class="date">11/06/26</span>
+            </div>
+            <div class="task-row">
+              <span class="num">#5</span>
+              <span><span class="dot todo"></span> &nbsp; Gậy mới 2</span>
+              <span class="status-cell">Todo</span>
+              <span class="date">14/06/26</span>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+    <div class="trade">
+      <div>
+        <h4>Ưu</h4>
+        <ul>
+          <li>Task area rộng nhất — table 5 cột thoải mái thở</li>
+          <li>Sprint switch 1 click, không phải mở dropdown</li>
+          <li>Hợp với calm utility — minh bạch, không ồn</li>
+        </ul>
+      </div>
+      <div>
+        <h4>Nhược</h4>
+        <ul>
+          <li>Pills hàng dưới scroll horizontal khi >6 sprints — hơi phiền</li>
+          <li>Project switcher vẫn là dropdown (cùng cost như hiện tại)</li>
+        </ul>
+      </div>
+      <div>
+        <h4>Phù hợp khi</h4>
+        <ul>
+          <li>1-3 projects, mỗi project 4-8 sprints active gần đây</li>
+          <li>User chủ yếu làm 1 project, đổi sprint nhiều hơn đổi project</li>
+          <li>Muốn giữ DNA "speed > breadth" của plan-tmp</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- OPTION C · Icon rail + floating panel -->
+  <!-- ============================================================ -->
+  <div class="case">
+    <div class="case-label">
+      <span class="case-tag">C</span>
+      <h3 class="case-title">Icon Rail + Panel — Slack/Discord hybrid</h3>
+      <p class="case-desc">
+        Slim 60px rail với project initials (rust badge cho current). Click rail → 224px secondary panel show sprint list. Compact, scale tốt với nhiều projects.
+      </p>
+    </div>
+    <div class="frame">
+      <aside class="c-rail">
+        <div class="c-badge active" style="background:var(--accent);">M</div>
+        <div class="c-badge" style="background:#1e293b;">G</div>
+        <div class="c-badge muted">＋</div>
+        <div style="flex:1;"></div>
+        <div class="divider"></div>
+        <div class="c-badge muted" style="font-size:14px;">⚙</div>
+      </aside>
+
+      <aside class="c-panel">
+        <div class="c-panel-head">
+          <div class="pname">My Project</div>
+          <div class="pmeta">3 active sprints · 39 tasks</div>
+        </div>
+        <div class="c-panel-section">Sprints</div>
+        <div class="c-sprint done"><span class="dot-sm"></span> <span class="stxt">Sprint 40</span> <span class="scount">8</span></div>
+        <div class="c-sprint done"><span class="dot-sm"></span> <span class="stxt">Sprint 41</span> <span class="scount">11</span></div>
+        <div class="c-sprint active"><span class="dot-sm"></span> <span class="stxt">Sprint 42</span> <span class="scount">11</span></div>
+        <div class="c-sprint"><span class="dot-sm"></span> <span class="stxt">Sprint 43</span> <span class="scount">20</span></div>
+        <div class="c-sprint"><span class="dot-sm"></span> <span class="stxt">Sprint 44</span></div>
+        <div class="c-panel-foot">
+          <span class="add-btn">＋ New sprint</span>
+        </div>
+      </aside>
+
+      <section class="main">
+        <div class="main-head">
+          <div class="crumbs">
+            <strong>Sprint 42</strong>
+            <span class="pill-date">04/06 – 17/06</span>
+          </div>
+          <button class="btn-task">＋ Task</button>
+        </div>
+        <div class="main-body">
+          <div class="group-card">
+            <div class="group-head">
+              <span class="av" style="background:#7c3aed;">A</span>
+              <span class="name">AnhBV</span>
+              <span class="count">3</span>
+            </div>
+            <div class="task-row">
+              <span class="num">#1</span>
+              <span><span class="dot done"></span> &nbsp; Stick collection</span>
+              <span class="status-cell">Done</span>
+              <span class="date">27/05/26</span>
+            </div>
+            <div class="task-row">
+              <span class="num">#2</span>
+              <span><span class="dot prog"></span> &nbsp; Grateful event</span>
+              <span class="status-cell">In progress</span>
+              <span class="date">06/06/26</span>
+            </div>
+            <div class="task-row">
+              <span class="num">#3</span>
+              <span><span class="dot todo"></span> &nbsp; Sprint planning</span>
+              <span class="status-cell">Todo</span>
+              <span class="date">10/06/26</span>
+            </div>
+          </div>
+          <div class="group-card">
+            <div class="group-head">
+              <span class="av" style="background:#0891b2;">H</span>
+              <span class="name">Ho Ngoc Minh</span>
+              <span class="count">2</span>
+            </div>
+            <div class="task-row">
+              <span class="num">#4</span>
+              <span><span class="dot prog"></span> &nbsp; DDC task 2</span>
+              <span class="status-cell">In progress</span>
+              <span class="date">11/06/26</span>
+            </div>
+            <div class="task-row">
+              <span class="num">#5</span>
+              <span><span class="dot todo"></span> &nbsp; Gậy mới 2</span>
+              <span class="status-cell">Todo</span>
+              <span class="date">14/06/26</span>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+    <div class="trade">
+      <div>
+        <h4>Ưu</h4>
+        <ul>
+          <li>Project switch 1 click trên rail — fastest cross-project</li>
+          <li>Scale tốt: 10+ projects vẫn vừa rail</li>
+          <li>Cảm giác "workspace" có cấu trúc, hợp khi sau này thêm Inbox / My Tasks</li>
+        </ul>
+      </div>
+      <div>
+        <h4>Nhược</h4>
+        <ul>
+          <li>Tốn 284px (60 rail + 224 panel) — task area hẹp nhất 3 options</li>
+          <li>2 cấp navigation hơi phức tạp cho single-user</li>
+          <li>Panel có thể collapse được nhưng tăng thêm state</li>
+        </ul>
+      </div>
+      <div>
+        <h4>Phù hợp khi</h4>
+        <ul>
+          <li>Tương lai có nhiều projects (5+), hoặc thêm Inbox/Reports global</li>
+          <li>User quen Slack/Discord/Linear desktop</li>
+          <li>Sẵn sàng tradeoff width để có structure</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="footer">
+  <p style="margin:0 0 10px;"><strong>Recommendation:</strong> Với DNA hiện tại của plan-tmp (single-user · 1-3 projects · "speed &gt; breadth")
+    → <strong>Option B</strong> hợp nhất. Nó giữ task area rộng, sprint switch 1-click không cần dropdown, và đổi project vẫn là dropdown (cùng cost
+    với header hiện tại — chỉ thay layout của sprint picker).</p>
+  <p style="margin:0 0 10px;">Nếu kế hoạch dài hạn là <em>nhiều projects + nested lists/folders trong project</em> → chuyển luôn sang
+    <strong>Option A</strong>, đỡ phải refactor 2 lần.</p>
+  <p style="margin:0;">Tao có thể: <code>1)</code> implement Option B vào <code>app/src/App.tsx</code> luôn,
+    <code>2)</code> mix attributes (vd: rail của C + pills của B),
+    hoặc <code>3)</code> show thêm variation thứ 4 (combo / dark mode / mobile crop). Tell tao đi nào.</p>
+</div>
+
+</body>
+</html>

@@ -7,10 +7,13 @@ import {
   Sun,
   Search,
   ArrowRightCircle,
+  List,
+  LayoutGrid,
 } from 'lucide-react'
 import {
   db,
   uid,
+  colorForName,
   exportAll,
   importAll,
   seedIfEmpty,
@@ -23,11 +26,12 @@ import {
   type ExportPayload,
 } from './db'
 import { SprintView } from './SprintView'
+import { BoardView } from './BoardView'
 import { formatShortDate, formatSprintRange, useDarkMode } from './lib'
 
-const NEW_SPRINT_VALUE = '__new__'
-const NEW_PROJECT_VALUE = '__new_project__'
 const CURRENT_PROJECT_KEY = 'plan-tmp:currentProjectId'
+const VIEW_KEY = 'plan-tmp:view'
+type ViewMode = 'list' | 'board'
 
 function App() {
   const [seedError, setSeedError] = useState<string | null>(null)
@@ -41,6 +45,14 @@ function App() {
     else localStorage.removeItem(CURRENT_PROJECT_KEY)
   }
   const [currentSprintId, setCurrentSprintId] = useState<string | null>(null)
+  const [view, setViewState] = useState<ViewMode>(() => {
+    const v = localStorage.getItem(VIEW_KEY)
+    return v === 'board' ? 'board' : 'list'
+  })
+  const setView = (v: ViewMode) => {
+    setViewState(v)
+    localStorage.setItem(VIEW_KEY, v)
+  }
   const [showNewSprint, setShowNewSprint] = useState(false)
   const [showNewProject, setShowNewProject] = useState(false)
   const [search, setSearch] = useState('')
@@ -99,6 +111,25 @@ function App() {
         : Promise.resolve([] as Task[]),
     [currentSprintId]
   )
+
+  // Per-sprint task counts for the sidebar panel.
+  const projectTasks = useLiveQuery<Task[]>(
+    () =>
+      seeded && currentProjectId
+        ? db.tasks.where('projectId').equals(currentProjectId).toArray()
+        : Promise.resolve([] as Task[]),
+    [seeded, currentProjectId]
+  )
+  const sprintTaskCounts = useMemo(() => {
+    const counts = new Map<string, { total: number; done: number }>()
+    for (const t of projectTasks ?? []) {
+      const c = counts.get(t.sprintId) ?? { total: 0, done: 0 }
+      c.total++
+      if (t.status === 'done') c.done++
+      counts.set(t.sprintId, c)
+    }
+    return counts
+  }, [projectTasks])
 
   // When project changes (or first loads), reset sprint to latest in project.
   useEffect(() => {
@@ -190,15 +221,9 @@ function App() {
     }
   }
 
-  const handleSprintChange = (value: string) => {
-    if (value === NEW_SPRINT_VALUE) {
-      setShowNewSprint(true)
-      return
-    }
-    setCurrentSprintId(value)
-  }
-
   const currentSprint = sprints?.find((s) => s.id === currentSprintId) ?? null
+  const currentProject =
+    projects?.find((p) => p.id === currentProjectId) ?? null
   const nextSprint = useMemo(() => {
     if (!sprints || !currentSprint) return null
     const idx = sprints.findIndex((s) => s.id === currentSprint.id)
@@ -240,157 +265,263 @@ function App() {
   }, [tasks])
 
   return (
-    <div className="min-h-screen bg-canvas text-ink">
-      <header className="border-b border-border bg-surface px-6 py-4 flex items-center gap-4 sticky top-0 z-10">
-        <div className="flex items-baseline gap-2">
-          <span
-            className="inline-block w-2 h-2 rounded-full bg-accent"
-            aria-hidden
-          />
-          <h1 className="text-2xl font-semibold tracking-tight">Plan</h1>
+    <div className="h-screen flex bg-canvas text-ink overflow-hidden">
+      {/* Icon rail: Apple Finder–style. Circle badges, ring on active, no rust bar. */}
+      <aside className="w-[60px] shrink-0 bg-canvas-sunk border-r border-border-hair flex flex-col items-center py-3 gap-2.5">
+        <div
+          className="text-[10px] font-semibold tracking-[0.18em] text-ink-faint mb-1 select-none"
+          title="plan-tmp"
+        >
+          PLAN
         </div>
-
-        <div className="flex items-center gap-2 ml-2">
-          <select
-            value={currentProjectId ?? ''}
-            onChange={(e) => {
-              if (e.target.value === NEW_PROJECT_VALUE) {
-                setShowNewProject(true)
-                return
-              }
-              setCurrentProjectId(e.target.value)
-            }}
-            className="text-sm border border-border bg-surface text-ink rounded-md px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-accent/40 font-medium"
-            disabled={!projects || projects.length === 0}
-            title="Project"
-          >
-            {projects?.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-            <option value={NEW_PROJECT_VALUE}>＋ New Project…</option>
-          </select>
-          <span className="text-ink-faint text-sm">/</span>
-          <select
-            value={currentSprintId ?? ''}
-            onChange={(e) => handleSprintChange(e.target.value)}
-            className="text-sm border border-border bg-surface text-ink rounded-md px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-accent/40"
-            disabled={!sprints || sprints.length === 0}
-          >
-            {sprints?.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name} · {formatSprintRange(s.startDate, s.endDate)}
-              </option>
-            ))}
-            <option value={NEW_SPRINT_VALUE}>＋ New Sprint…</option>
-          </select>
-          {currentSprint && (
-            <span className="text-xs text-ink-faint">
-              {formatSprintRange(currentSprint.startDate, currentSprint.endDate)}
-            </span>
-          )}
-          {currentSprint && nextSprint && unfinishedCount > 0 && (
+        {projects?.map((p) => {
+          const isActive = p.id === currentProjectId
+          const initial = p.name.trim().charAt(0).toUpperCase() || '·'
+          return (
             <button
-              onClick={rollover}
-              className="text-xs flex items-center gap-1 text-ink-muted hover:text-ink border border-border rounded px-2 py-1 hover:bg-canvas transition"
-              title={`Move ${unfinishedCount} unfinished task${
-                unfinishedCount === 1 ? '' : 's'
-              } to "${nextSprint.name}"`}
+              key={p.id}
+              onClick={() => setCurrentProjectId(p.id)}
+              title={p.name}
+              className={`w-[34px] h-[34px] rounded-full flex items-center justify-center text-white text-[13px] font-semibold transition-opacity ${
+                isActive
+                  ? 'opacity-100 ring-2 ring-accent/35 ring-offset-2 ring-offset-canvas-sunk'
+                  : 'opacity-70 hover:opacity-90'
+              }`}
+              style={{
+                background: colorForName(p.name),
+                letterSpacing: '-0.01em',
+              }}
             >
-              <ArrowRightCircle size={13} />
-              <span>Roll over</span>
-              <span className="text-ink-faint">{unfinishedCount}</span>
+              {initial}
             </button>
-          )}
-        </div>
+          )
+        })}
+        <button
+          onClick={() => setShowNewProject(true)}
+          title="New project"
+          className="w-[34px] h-[34px] rounded-full border border-dashed border-border-strong text-ink-faint hover:text-accent hover:border-accent flex items-center justify-center text-base leading-none transition"
+        >
+          ＋
+        </button>
+        <div className="flex-1" />
+        <div className="w-6 h-px bg-border-hair my-1" />
+        <button
+          onClick={() => setDark(!dark)}
+          title={dark ? 'Switch to light' : 'Switch to dark'}
+          className="w-[34px] h-[34px] rounded-full text-ink-faint hover:text-ink hover:bg-surface-hover flex items-center justify-center transition"
+        >
+          {dark ? <Sun size={15} /> : <Moon size={15} />}
+        </button>
+      </aside>
 
-        <div className="ml-auto flex items-center gap-2">
-          <div className="relative">
-            <Search
-              size={14}
-              className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-faint pointer-events-none"
-            />
-            <input
-              ref={searchRef}
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search tasks…"
-              className="text-sm bg-surface border border-border rounded-md pl-8 pr-8 py-1.5 w-56 focus:outline-none focus:ring-2 focus:ring-accent/40 text-ink"
-            />
-            <kbd className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-ink-faint border border-border rounded px-1 py-0.5 bg-canvas pointer-events-none">
-              /
-            </kbd>
-          </div>
-          <button
-            onClick={handleExport}
-            className="text-sm flex items-center gap-1.5 px-3 py-1.5 text-ink-muted hover:bg-surface-hover rounded transition"
-            title="Export JSON backup"
-          >
-            <Download size={14} /> Export
-          </button>
-          <button
-            onClick={handleImportClick}
-            className="text-sm flex items-center gap-1.5 px-3 py-1.5 text-ink-muted hover:bg-surface-hover rounded transition"
-            title="Import JSON backup"
-          >
-            <Upload size={14} /> Import
-          </button>
-          <button
-            onClick={() => setDark(!dark)}
-            className="p-2 text-ink-muted hover:bg-surface-hover rounded transition"
-            title={dark ? 'Switch to light' : 'Switch to dark'}
-          >
-            {dark ? <Sun size={14} /> : <Moon size={14} />}
-          </button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="application/json,.json"
-            onChange={handleImportFile}
-            className="hidden"
-          />
-        </div>
-      </header>
-
-      {currentSprint && (
-        <CapacityBanner
-          total={capacity.total}
-          assigned={capacity.assigned}
-          pctAssigned={capacity.pctAssigned}
-          done={capacity.done}
-          pctDone={capacity.pctDone}
-          notEstimated={capacity.notEstimated}
-        />
-      )}
-
-      <main className="px-6 pb-12">
-        {!projects || !sprints ? (
-          <p className="text-ink-muted py-12 text-center">Loading…</p>
-        ) : sprints.length === 0 ? (
-          <div className="py-20 text-center space-y-4">
-            <p className="text-ink-muted">
-              This project has no sprints yet.
-            </p>
-            <button
-              onClick={() => setShowNewSprint(true)}
-              className="text-sm bg-accent hover:bg-accent-hover text-white rounded-md px-4 py-2 transition"
-            >
-              Create the first sprint
-            </button>
-          </div>
-        ) : currentSprint && currentProjectId && tasks !== undefined ? (
-          <SprintView
-            projectId={currentProjectId}
-            sprintId={currentSprint.id}
-            sprintStartDate={currentSprint.startDate}
-            tasks={tasks}
-            search={search}
-          />
+      {/* Secondary panel: cooler bg, inset rounded-pill active state, no border-left accent */}
+      <aside className="w-[224px] shrink-0 bg-canvas-sunk border-r border-border-hair flex flex-col overflow-hidden">
+        {currentProject ? (
+          <>
+            <div className="px-4 pt-4 pb-3">
+              <div className="text-[15px] font-semibold text-ink truncate display-tight">
+                {currentProject.name}
+              </div>
+              <div className="text-[11px] text-ink-faint mt-0.5">
+                <span className="font-mono">{sprints?.length ?? 0}</span> sprint
+                {(sprints?.length ?? 0) === 1 ? '' : 's'} ·{' '}
+                <span className="font-mono">{projectTasks?.length ?? 0}</span>{' '}
+                task{(projectTasks?.length ?? 0) === 1 ? '' : 's'}
+              </div>
+            </div>
+            <div className="px-4 pt-2 pb-1 text-[11px] font-semibold text-ink-faint">
+              Sprints
+            </div>
+            <div className="flex-1 overflow-auto px-2">
+              {sprints?.map((s) => {
+                const isActive = s.id === currentSprintId
+                const c = sprintTaskCounts.get(s.id)
+                const allDone = c && c.total > 0 && c.done === c.total
+                return (
+                  <button
+                    key={s.id}
+                    onClick={() => setCurrentSprintId(s.id)}
+                    className={`w-full text-left flex items-center gap-2.5 px-2.5 py-1.5 my-px text-[13px] rounded-lg transition ${
+                      isActive
+                        ? 'bg-accent-tint text-accent-strong font-semibold'
+                        : 'text-ink-muted hover:bg-black/[0.04] hover:text-ink'
+                    }`}
+                  >
+                    <span
+                      className={`w-[7px] h-[7px] rounded-full shrink-0 ${
+                        isActive
+                          ? 'bg-accent'
+                          : allDone
+                            ? 'bg-status-done'
+                            : 'bg-ink-faint'
+                      }`}
+                    />
+                    <span className="flex-1 truncate">{s.name}</span>
+                    {c && c.total > 0 && (
+                      <span
+                        className={`text-[11px] font-mono ${isActive ? 'text-accent' : 'text-ink-faint'}`}
+                      >
+                        {c.total}
+                      </span>
+                    )}
+                  </button>
+                )
+              })}
+              {sprints && sprints.length === 0 && (
+                <div className="px-2.5 py-3 text-[12px] text-ink-faint italic">
+                  No sprints yet
+                </div>
+              )}
+            </div>
+            <div className="p-2">
+              <button
+                onClick={() => setShowNewSprint(true)}
+                className="w-full text-left text-[12px] text-ink-muted hover:text-ink hover:bg-black/[0.04] px-2.5 py-2 rounded-lg transition"
+              >
+                ＋ New sprint
+                <kbd className="ml-2 text-[9px] text-ink-faint border border-border-hair rounded px-1 py-0.5 bg-surface">
+                  n
+                </kbd>
+              </button>
+            </div>
+          </>
         ) : (
-          <p className="text-ink-muted py-12 text-center">Loading…</p>
+          <div className="p-4 text-[12px] text-ink-faint">
+            Select a project →
+          </div>
         )}
-      </main>
+      </aside>
+
+      {/* Main column: thin header + capacity + sprint view */}
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        <header className="h-12 shrink-0 border-b border-border-hair bg-surface flex items-center px-5 gap-3">
+          <div className="flex items-center gap-2.5 text-sm min-w-0">
+            {currentSprint ? (
+              <>
+                <SprintNameEditor
+                  key={currentSprint.id}
+                  sprint={currentSprint}
+                />
+                <span className="text-ink-faint shrink-0" aria-hidden>
+                  ·
+                </span>
+                <span className="text-xs text-ink-muted shrink-0 font-mono">
+                  {formatSprintRange(
+                    currentSprint.startDate,
+                    currentSprint.endDate
+                  )}
+                </span>
+              </>
+            ) : (
+              <span className="text-ink-faint">No sprint selected</span>
+            )}
+            {currentSprint && nextSprint && unfinishedCount > 0 && (
+              <button
+                onClick={rollover}
+                className="text-xs flex items-center gap-1 text-ink-muted hover:text-ink rounded-md px-2 py-1 hover:bg-surface-hover transition ml-1"
+                title={`Move ${unfinishedCount} unfinished task${
+                  unfinishedCount === 1 ? '' : 's'
+                } to "${nextSprint.name}"`}
+              >
+                <ArrowRightCircle size={13} strokeWidth={1.75} />
+                <span>Roll over</span>
+                <span className="text-ink-faint">{unfinishedCount}</span>
+              </button>
+            )}
+          </div>
+          <div className="ml-auto flex items-center gap-1.5">
+            <ViewToggle view={view} onChange={setView} />
+            <div className="w-px h-5 bg-border-hair mx-1" />
+            <div className="relative">
+              <Search
+                size={14}
+                strokeWidth={1.75}
+                className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-faint pointer-events-none"
+              />
+              <input
+                ref={searchRef}
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search tasks…"
+                className="text-sm bg-canvas-sunk border border-border-hair rounded-lg pl-8 pr-8 py-1.5 w-52 focus:outline-none focus:ring-2 focus:ring-accent/40 focus:bg-surface text-ink transition"
+              />
+              <kbd className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-ink-faint border border-border-hair rounded px-1 py-0.5 bg-surface pointer-events-none">
+                /
+              </kbd>
+            </div>
+            <button
+              onClick={handleExport}
+              className="text-xs flex items-center gap-1.5 px-2.5 py-1.5 text-ink-muted hover:bg-surface-hover rounded transition"
+              title="Export JSON backup"
+            >
+              <Download size={13} /> Export
+            </button>
+            <button
+              onClick={handleImportClick}
+              className="text-xs flex items-center gap-1.5 px-2.5 py-1.5 text-ink-muted hover:bg-surface-hover rounded transition"
+              title="Import JSON backup"
+            >
+              <Upload size={13} /> Import
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="application/json,.json"
+              onChange={handleImportFile}
+              className="hidden"
+            />
+          </div>
+        </header>
+
+        <div className="flex-1 overflow-auto">
+          {currentSprint && (
+            <CapacityBanner
+              total={capacity.total}
+              assigned={capacity.assigned}
+              pctAssigned={capacity.pctAssigned}
+              done={capacity.done}
+              pctDone={capacity.pctDone}
+              notEstimated={capacity.notEstimated}
+            />
+          )}
+
+          <main className="px-6 pb-12">
+            {!projects || !sprints ? (
+              <p className="text-ink-muted py-12 text-center">Loading…</p>
+            ) : sprints.length === 0 ? (
+              <div className="py-20 text-center space-y-4">
+                <p className="text-ink-muted">
+                  This project has no sprints yet.
+                </p>
+                <button
+                  onClick={() => setShowNewSprint(true)}
+                  className="text-sm bg-accent hover:bg-accent-hover text-white rounded-md px-4 py-2 transition"
+                >
+                  Create the first sprint
+                </button>
+              </div>
+            ) : currentSprint && currentProjectId && tasks !== undefined ? (
+              view === 'board' ? (
+                <BoardView
+                  projectId={currentProjectId}
+                  tasks={tasks}
+                  search={search}
+                />
+              ) : (
+                <SprintView
+                  projectId={currentProjectId}
+                  sprintId={currentSprint.id}
+                  sprintStartDate={currentSprint.startDate}
+                  tasks={tasks}
+                  search={search}
+                />
+              )
+            ) : (
+              <p className="text-ink-muted py-12 text-center">Loading…</p>
+            )}
+          </main>
+        </div>
+      </div>
 
       {showNewProject && (
         <NewProjectDialog
@@ -652,6 +783,109 @@ function NewProjectDialog({
         </div>
       </div>
     </div>
+  )
+}
+
+/**
+ * Apple-style segmented control switching between list and board view.
+ */
+function ViewToggle({
+  view,
+  onChange,
+}: {
+  view: ViewMode
+  onChange: (v: ViewMode) => void
+}) {
+  const item = (mode: ViewMode, label: string, Icon: typeof List) => {
+    const active = view === mode
+    return (
+      <button
+        onClick={() => onChange(mode)}
+        className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-md transition ${
+          active
+            ? 'bg-surface text-ink shadow-[0_1px_2px_rgba(0,0,0,0.06)]'
+            : 'text-ink-muted hover:text-ink'
+        }`}
+        title={`${label} view`}
+        aria-pressed={active}
+      >
+        <Icon size={13} strokeWidth={active ? 2 : 1.75} />
+        <span>{label}</span>
+      </button>
+    )
+  }
+  return (
+    <div className="inline-flex items-center gap-0.5 p-0.5 rounded-lg bg-canvas-sunk border border-border-hair">
+      {item('list', 'List', List)}
+      {item('board', 'Board', LayoutGrid)}
+    </div>
+  )
+}
+
+/**
+ * Inline-rename sprint name. Double-click or click pencil → editable input.
+ * Enter commits, Esc cancels, blur commits. Same pattern as SprintView's
+ * MemberGroupHeader rename.
+ */
+function SprintNameEditor({ sprint }: { sprint: Sprint }) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(sprint.name)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (editing) {
+      setDraft(sprint.name)
+      requestAnimationFrame(() => {
+        inputRef.current?.focus()
+        inputRef.current?.select()
+      })
+    }
+  }, [editing, sprint.name])
+
+  const commit = async () => {
+    const n = draft.trim()
+    setEditing(false)
+    if (n && n !== sprint.name) {
+      await db.sprints.update(sprint.id, { name: n })
+    }
+  }
+  const cancel = () => {
+    setDraft(sprint.name)
+    setEditing(false)
+  }
+
+  if (editing) {
+    return (
+      <input
+        ref={inputRef}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault()
+            void commit()
+          } else if (e.key === 'Escape') {
+            e.preventDefault()
+            cancel()
+          }
+        }}
+        onBlur={() => void commit()}
+        className="font-semibold text-ink display-tight bg-canvas-sunk border border-border-hair focus:border-accent rounded-md px-2 py-0.5 outline-none focus:ring-2 focus:ring-accent/30 min-w-0 max-w-[260px]"
+        aria-label="Rename sprint"
+      />
+    )
+  }
+  return (
+    <span
+      className="font-semibold text-ink truncate display-tight cursor-text hover:underline decoration-dotted underline-offset-4"
+      onDoubleClick={(e) => {
+        e.stopPropagation()
+        setEditing(true)
+      }}
+      title="Double-click to rename"
+    >
+      {sprint.name}
+    </span>
   )
 }
 

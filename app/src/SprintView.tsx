@@ -28,11 +28,13 @@ import { formatRelativeDate, formatShortDate, isOverdue } from './lib'
 
 const WELCOME_PREFIX = 'Welcome —'
 
-const STATUS_META: Record<Status, { label: string; varName: string }> = {
+export const STATUS_META: Record<Status, { label: string; varName: string }> = {
   todo: { label: 'To do', varName: 'var(--color-status-todo)' },
   in_progress: { label: 'In progress', varName: 'var(--color-status-progress)' },
   done: { label: 'Done', varName: 'var(--color-status-done)' },
 }
+
+export const STATUS_ORDER: Status[] = ['todo', 'in_progress', 'done']
 
 const COLLAPSE_KEY = (sprintId: string) => `plan-tmp:collapsed:${sprintId}`
 
@@ -129,8 +131,6 @@ export function SprintView({
   const isEmpty = tasks.length === 0 && members.length === 0
   const isFilteredEmpty = filteredTasks.length === 0 && search.trim() !== ''
 
-  const hasAnyTask = groups.length > 0 || unassigned.length > 0
-
   return (
     <div className="space-y-3 max-w-5xl">
       {isEmpty && <EmptyState onAddMember={() => setShowAddMember(true)} />}
@@ -140,8 +140,6 @@ export function SprintView({
           No tasks match "{search}".
         </div>
       )}
-
-      {hasAnyTask && <TaskColumnHeader />}
 
       {groups.map(({ member, tasks: t }) => (
         <MemberCard
@@ -251,23 +249,26 @@ function MemberCard({
         }}
       />
       {!collapsed && (
-        <div className="divide-y divide-border">
-          {tasks.map((t) => (
-            <TaskRow
-              key={t.id}
-              task={t}
-              members={members}
-              allTasks={allTasks}
-              tasksById={tasksById}
+        <>
+          {tasks.length > 0 && <TaskColumnHeader />}
+          <div className="divide-y divide-border">
+            {tasks.map((t) => (
+              <TaskRow
+                key={t.id}
+                task={t}
+                members={members}
+                allTasks={allTasks}
+                tasksById={tasksById}
+              />
+            ))}
+            <AddTaskRow
+              projectId={projectId}
+              sprintId={sprintId}
+              sprintStartDate={sprintStartDate}
+              assigneeId={member.id}
             />
-          ))}
-          <AddTaskRow
-            projectId={projectId}
-            sprintId={sprintId}
-            sprintStartDate={sprintStartDate}
-            assigneeId={member.id}
-          />
-        </div>
+          </div>
+        </>
       )}
     </Card>
   )
@@ -296,6 +297,7 @@ function UnassignedCard({
         count={tasks.length}
         muted
       />
+      {tasks.length > 0 && <TaskColumnHeader />}
       <div className="divide-y divide-border">
         {tasks.map((t) => (
           <TaskRow
@@ -565,7 +567,9 @@ function DateField({
       className="relative flex-1 text-xs bg-canvas border border-border rounded px-2 py-1 text-left h-7 focus:border-accent outline-none"
     >
       {value ? (
-        <span className="text-ink tabular-nums">{formatShortDate(value)}</span>
+        <span className="text-ink tabular-nums font-mono">
+          {formatShortDate(value)}
+        </span>
       ) : (
         <span className="text-ink-faint">{placeholder}</span>
       )}
@@ -816,9 +820,9 @@ function AddTaskRow({
 // change the other. Order: status-dot · seq · title · assignee · effort · start · due · priority · status · prereq · delete
 const COL = {
   dot: 'w-4 shrink-0',
-  seq: 'w-7 text-xs text-ink-faint tabular-nums text-right shrink-0',
+  seq: 'w-9 text-xs text-ink-faint tabular-nums text-right shrink-0 font-mono',
   title: 'flex-1 min-w-0',
-  assignee: 'w-7 flex justify-center shrink-0',
+  assignee: 'w-16 flex justify-center shrink-0',
   effort: 'w-12 flex justify-end shrink-0',
   start: 'w-28 flex justify-end shrink-0',
   due: 'w-28 flex justify-end shrink-0',
@@ -869,7 +873,7 @@ function TaskRow({
         />
       </div>
 
-      <div className={COL.seq} title="Task number">{task.sequence})</div>
+      <div className={COL.seq} title="Task number">{task.sequence}</div>
 
       <input
         value={task.title}
@@ -944,22 +948,27 @@ function TaskRow({
   )
 }
 
+/**
+ * Per-group column header rendered inside each MemberCard / UnassignedCard
+ * (ClickUp pattern — every group has its own labelled columns right under
+ * the member name). Quiet styling: no background, hairline border below.
+ */
 function TaskColumnHeader() {
   const labelCls = 'text-[10px] uppercase tracking-wider text-ink-faint font-medium'
   return (
     <div
-      className="flex items-center gap-3 px-4 py-1.5 sticky top-[57px] z-[5] bg-canvas/80 backdrop-blur-sm rounded-md"
+      className="flex items-center gap-3 px-4 py-1.5 border-b border-border-hair bg-canvas-sunk/40"
       aria-hidden
     >
       <div className={COL.dot} />
-      <div className={`${COL.seq} ${labelCls}`}>#</div>
+      <div className={`${COL.seq} ${labelCls}`}>ID</div>
       <div className={`${labelCls} flex-1 min-w-0`}>Task</div>
-      <div className={`${COL.assignee} ${labelCls}`}>Who</div>
-      <div className={`${COL.effort} ${labelCls} justify-end`}>Eff</div>
-      <div className={`${COL.start} ${labelCls} justify-end`}>Start</div>
-      <div className={`${COL.due} ${labelCls} justify-end`}>End</div>
+      <div className={`${COL.assignee} ${labelCls} text-center`}>Assignee</div>
+      <div className={`${COL.effort} ${labelCls} justify-end flex`}>Effort</div>
+      <div className={`${COL.start} ${labelCls} justify-end flex`}>Start</div>
+      <div className={`${COL.due} ${labelCls} justify-end flex`}>End</div>
       <div className={`${COL.status} ${labelCls}`}>Status</div>
-      <div className={`${COL.prereq} ${labelCls} justify-end`}>Pre</div>
+      <div className={`${COL.prereq} ${labelCls} justify-end flex`}>Prereq</div>
       <div className={COL.trash} />
       {/* Priority column removed — Task.priority still exists in the DB
           and defaults to 'normal' on new tasks. Re-add this column if you
@@ -996,7 +1005,7 @@ function StatusDot({
  *   - in_progress: outline with bottom-half filled (50% pie)
  *   - done:        filled circle with white check
  */
-function StatusIcon({ status }: { status: Status }) {
+export function StatusIcon({ status }: { status: Status }) {
   if (status === 'todo') {
     return (
       <svg viewBox="0 0 16 16" className="w-full h-full" aria-hidden="true">

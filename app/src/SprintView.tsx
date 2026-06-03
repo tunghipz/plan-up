@@ -205,6 +205,7 @@ function MemberCard({
         count={tasks.length}
         collapsed={collapsed}
         onToggleCollapse={onToggleCollapse}
+        onRename={(n) => db.members.update(member.id, { name: n })}
         onDelete={() => {
           if (
             confirm(
@@ -292,6 +293,7 @@ function CollapsedMembers({
               avatar={<Avatar member={m} />}
               name={m.name}
               count={0}
+              onRename={(n) => db.members.update(m.id, { name: n })}
               onDelete={() => {
                 if (confirm(`Remove ${m.name}?`)) deleteMember(m.id)
               }}
@@ -326,6 +328,7 @@ function GroupHeader({
   name,
   count,
   onDelete,
+  onRename,
   muted,
   collapsed,
   onToggleCollapse,
@@ -334,17 +337,43 @@ function GroupHeader({
   name: string
   count: number
   onDelete?: () => void
+  onRename?: (newName: string) => unknown
   muted?: boolean
   collapsed?: boolean
   onToggleCollapse?: () => void
 }) {
   const collapsible = onToggleCollapse !== undefined
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(name)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (editing) {
+      setDraft(name)
+      // next tick — input is freshly mounted
+      requestAnimationFrame(() => {
+        inputRef.current?.focus()
+        inputRef.current?.select()
+      })
+    }
+  }, [editing, name])
+
+  const commit = () => {
+    const n = draft.trim()
+    setEditing(false)
+    if (n && n !== name && onRename) void onRename(n)
+  }
+  const cancel = () => {
+    setDraft(name)
+    setEditing(false)
+  }
+
   return (
     <div
       className={`flex items-center gap-2.5 px-4 py-3 ${
         collapsed ? '' : 'border-b border-border'
-      } ${collapsible ? 'cursor-pointer hover:bg-surface-hover transition' : ''}`}
-      onClick={collapsible ? onToggleCollapse : undefined}
+      } ${collapsible && !editing ? 'cursor-pointer hover:bg-surface-hover transition' : ''}`}
+      onClick={collapsible && !editing ? onToggleCollapse : undefined}
       role={collapsible ? 'button' : undefined}
       aria-expanded={collapsible ? !collapsed : undefined}
     >
@@ -357,25 +386,72 @@ function GroupHeader({
         />
       )}
       {avatar}
-      <span
-        className={`font-medium text-sm select-none ${muted ? 'text-ink-muted' : 'text-ink'}`}
-      >
-        {name}
-      </span>
-      <span className="text-xs text-ink-faint select-none">{count}</span>
-      {onDelete && (
-        <button
-          onClick={(e) => {
-            e.stopPropagation()
-            onDelete()
+      {editing ? (
+        <input
+          ref={inputRef}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              commit()
+            } else if (e.key === 'Escape') {
+              e.preventDefault()
+              cancel()
+            }
           }}
-          className="ml-auto text-ink-faint hover:text-red-500 opacity-0 group-hover/card:opacity-100 transition"
-          title="Remove member"
-          aria-label="Remove member"
+          onBlur={commit}
+          className="font-medium text-sm bg-canvas border border-border-strong rounded px-1.5 py-0.5 outline-none focus:border-accent w-40"
+          aria-label="Rename member"
+        />
+      ) : (
+        <span
+          className={`font-medium text-sm select-none ${muted ? 'text-ink-muted' : 'text-ink'} ${
+            onRename ? 'cursor-text hover:underline decoration-dotted underline-offset-4' : ''
+          }`}
+          onDoubleClick={
+            onRename
+              ? (e) => {
+                  e.stopPropagation()
+                  setEditing(true)
+                }
+              : undefined
+          }
+          title={onRename ? 'Double-click to rename' : undefined}
         >
-          <Trash2 size={14} />
-        </button>
+          {name}
+        </span>
       )}
+      <span className="text-xs text-ink-faint select-none">{count}</span>
+      <div className="ml-auto flex items-center gap-2">
+        {onRename && !editing && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              setEditing(true)
+            }}
+            className="text-ink-faint hover:text-ink opacity-0 group-hover/card:opacity-100 transition text-xs leading-none"
+            title="Rename member"
+            aria-label="Rename member"
+          >
+            ✎
+          </button>
+        )}
+        {onDelete && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              onDelete()
+            }}
+            className="text-ink-faint hover:text-red-500 opacity-0 group-hover/card:opacity-100 transition"
+            title="Remove member"
+            aria-label="Remove member"
+          >
+            <Trash2 size={14} />
+          </button>
+        )}
+      </div>
     </div>
   )
 }

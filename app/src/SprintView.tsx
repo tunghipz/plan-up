@@ -752,7 +752,7 @@ function MemberScheduleButton({ member }: { member: Member }) {
           style={{ position: 'fixed', top: pos.top, right: pos.right }}
           className="z-50 w-72 bg-surface border border-border rounded-lg shadow-lg p-2"
         >
-          <div className="text-[10px] uppercase tracking-wider text-ink-faint px-1 pb-1.5">
+          <div className="text-[11px] tracking-normal text-ink-faint px-1 pb-1.5">
             Days off — {member.name}
           </div>
           {days.length === 0 && (
@@ -1170,7 +1170,7 @@ function TaskColumnHeader({
         sort={sort}
         onSort={onSort}
       />
-      <div className={`${COL.assignee} text-[10px] uppercase tracking-wider text-ink-faint font-medium text-center`}>
+      <div className={`${COL.assignee} text-[11px] tracking-normal text-ink-faint font-medium text-center`}>
         Assignee
       </div>
       <SortHeader
@@ -1237,7 +1237,7 @@ function SortHeader({
     <button
       type="button"
       onClick={() => onSort(field)}
-      className={`${className} group flex items-center gap-1 text-[10px] uppercase tracking-wider font-medium select-none py-0.5 hover:bg-black/[0.04] rounded transition ${
+      className={`${className} group flex items-center gap-1 text-[11px] tracking-normal font-medium select-none py-0.5 hover:bg-black/[0.04] rounded transition ${
         align === 'end'
           ? 'justify-end'
           : align === 'center'

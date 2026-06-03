@@ -5,9 +5,9 @@ import { formatShortDate } from './lib'
 import { STATUS_META, STATUS_ORDER, StatusIcon } from './SprintView'
 
 /**
- * Trello-style kanban board. Full gradient canvas with translucent list
- * containers; cards are pure white with a colored label strip on top.
- * Read-mostly — full editing happens in the list view.
+ * Cupertino kanban board. Three columns on the grey canvas; cards are white,
+ * large-radius, soft-shadowed (inset-grouped feel). Read-mostly — full editing
+ * happens in the list view.
  */
 export function BoardView({
   projectId,
@@ -36,11 +36,7 @@ export function BoardView({
   }, [tasks, search])
 
   const byStatus = useMemo(() => {
-    const out: Record<Status, Task[]> = {
-      todo: [],
-      in_progress: [],
-      done: [],
-    }
+    const out: Record<Status, Task[]> = { todo: [], in_progress: [], done: [] }
     for (const t of filtered) out[t.status].push(t)
     for (const s of STATUS_ORDER) {
       out[s].sort((a, b) =>
@@ -60,66 +56,51 @@ export function BoardView({
     return <p className="text-ink-muted py-12 text-center">Loading…</p>
 
   return (
-    <div
-      className="rounded-2xl p-5 max-w-6xl shadow-[0_4px_14px_rgba(9,30,66,0.15),inset_0_1px_0_rgba(255,255,255,0.1)]"
-      style={{
-        background:
-          'linear-gradient(135deg, #026AA7 0%, #0098E5 100%)',
-      }}
-    >
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        {STATUS_ORDER.map((status) => {
-          const meta = STATUS_META[status]
-          const list = byStatus[status]
-          return (
-            <section
-              key={status}
-              className="rounded-xl flex flex-col min-h-[200px] p-2 backdrop-blur-sm"
-              style={{
-                background: 'rgba(244, 245, 247, 0.92)',
-              }}
-            >
-              <header className="flex items-center gap-2 px-2 py-2">
-                <span
-                  className="w-3.5 h-3.5"
-                  style={{ color: meta.varName }}
-                  aria-hidden
-                >
-                  <StatusIcon status={status} />
-                </span>
-                <span className="text-[14px] font-semibold text-ink">
-                  {meta.label}
-                </span>
-                <span className="text-[11.5px] ml-auto font-semibold text-ink-faint">
-                  {list.length}
-                </span>
-              </header>
-              <div className="flex-1 flex flex-col gap-2">
-                {list.length === 0 ? (
-                  <div className="text-[13px] text-ink-faint italic px-2 py-3 text-center">
-                    Empty
-                  </div>
-                ) : (
-                  list.map((t) => (
-                    <BoardCard
-                      key={t.id}
-                      task={t}
-                      member={
-                        t.assigneeId
-                          ? membersById.get(t.assigneeId) ?? null
-                          : null
-                      }
-                      onCycleStatus={() => cycleStatus(t)}
-                    />
-                  ))
-                )}
-              </div>
-            </section>
-          )
-        })}
-      </div>
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-5 max-w-6xl">
+      {STATUS_ORDER.map((status) => {
+        const meta = STATUS_META[status]
+        const list = byStatus[status]
+        return (
+          <section key={status} className="flex flex-col gap-2.5 min-h-[200px]">
+            <header className="flex items-center gap-2 px-1.5 py-1">
+              <span className="w-4 h-4" style={{ color: meta.varName }} aria-hidden>
+                <StatusIcon status={status} />
+              </span>
+              <span className="text-[15px] font-semibold text-ink tracking-[-0.01em]">
+                {meta.label}
+              </span>
+              <span className="text-[12.5px] ml-auto text-ink-faint tab-data">
+                {list.length}
+              </span>
+            </header>
+            <div className="flex-1 flex flex-col gap-2.5">
+              {list.length === 0 ? (
+                <div className="text-[13px] text-ink-faint px-2 py-6 text-center">
+                  No tasks
+                </div>
+              ) : (
+                list.map((t) => (
+                  <BoardCard
+                    key={t.id}
+                    task={t}
+                    member={
+                      t.assigneeId ? membersById.get(t.assigneeId) ?? null : null
+                    }
+                    onCycleStatus={() => cycleStatus(t)}
+                  />
+                ))
+              )}
+            </div>
+          </section>
+        )
+      })}
     </div>
   )
+}
+
+const PRIO_TAG: Record<string, { label: string; bg: string; fg: string }> = {
+  urgent: { label: 'Urgent', bg: 'rgba(255,59,48,0.12)', fg: '#d70015' },
+  high: { label: 'High', bg: 'rgba(255,149,0,0.15)', fg: '#b25e00' },
 }
 
 function BoardCard({
@@ -132,82 +113,84 @@ function BoardCard({
   onCycleStatus: () => void
 }) {
   const meta = STATUS_META[task.status]
-  // Label strip color derived from priority (Trello signature visual).
-  const priorityColor: Record<string, string> = {
-    urgent: 'var(--color-priority-urgent)',
-    high: 'var(--color-priority-high)',
-    normal: 'var(--color-priority-normal)',
-    low: 'var(--color-priority-low)',
-    none: 'transparent',
-  }
-  const stripColor = priorityColor[task.priority ?? 'none'] ?? 'transparent'
+  const prio = PRIO_TAG[task.priority ?? 'none']
 
-  // Due date chip tinting — overdue red, due-soon orange, normal grey.
-  const dueChipClass = (() => {
-    if (!task.dueDate) return ''
-    const now = new Date()
-    const due = new Date(task.dueDate)
-    const days = (due.getTime() - now.getTime()) / 86400000
-    if (task.status === 'done') return 'bg-[#E3FCEF] text-[#006644]'
-    if (days < 0) return 'bg-[#FFEBE5] text-[#BF2600]'
-    if (days < 3) return 'bg-[#FFF7E5] text-[#B25500]'
-    return 'bg-[#EBECF0] text-ink-muted'
+  // Due chip — soft-tinted via tokens (works in dark too). No emoji.
+  const due = (() => {
+    if (!task.dueDate) return null
+    const c =
+      task.status === 'done'
+        ? 'var(--color-status-done)'
+        : (() => {
+            const days =
+              (new Date(task.dueDate).getTime() - Date.now()) / 86400000
+            if (days < 0) return 'var(--color-priority-urgent)'
+            if (days < 3) return 'var(--color-priority-high)'
+            return 'var(--color-ink-faint)'
+          })()
+    return {
+      bg: `color-mix(in srgb, ${c} 13%, transparent)`,
+      fg: `color-mix(in srgb, ${c} 100%, #000 25%)`,
+    }
   })()
 
   return (
-    <article className="bg-surface rounded-md shadow-[0_1px_0_rgba(9,30,66,0.13)] hover:shadow-[0_4px_12px_rgba(9,30,66,0.18)] transition cursor-pointer overflow-hidden">
-      {stripColor !== 'transparent' && (
+    <article className="bg-surface rounded-[12px] p-3 shadow-[0_1px_2px_rgba(0,0,0,0.05),0_3px_10px_rgba(0,0,0,0.05)] hover:shadow-[0_2px_4px_rgba(0,0,0,0.06),0_10px_24px_rgba(0,0,0,0.08)] transition cursor-pointer">
+      <div className="flex items-start gap-2.5">
+        <button
+          onClick={onCycleStatus}
+          className="w-[18px] h-[18px] shrink-0 mt-0.5 transition hover:scale-110 flex items-center justify-center"
+          style={{ color: meta.varName }}
+          title={`${meta.label} — click to cycle`}
+          aria-label={`Status: ${meta.label}`}
+        >
+          <StatusIcon status={task.status} />
+        </button>
         <div
-          className="h-2 w-10 rounded-full mx-2.5 mt-2.5"
-          style={{ background: stripColor }}
-        />
-      )}
-      <div className="px-2.5 py-2">
-        <div className="flex items-start gap-2">
-          <button
-            onClick={onCycleStatus}
-            className="w-4 h-4 shrink-0 mt-0.5 transition hover:scale-110 flex items-center justify-center"
-            style={{ color: meta.varName }}
-            title={`${meta.label} — click to cycle`}
-            aria-label={`Status: ${meta.label}`}
-          >
-            <StatusIcon status={task.status} />
-          </button>
-          <div className="flex-1 min-w-0 text-[14px] text-ink leading-snug break-words">
-            {task.title || (
-              <span className="text-ink-faint italic">Untitled</span>
-            )}
-          </div>
+          className={`flex-1 min-w-0 text-[14px] leading-snug break-words ${
+            task.status === 'done' ? 'text-ink-faint' : 'text-ink'
+          }`}
+        >
+          {task.title || <span className="text-ink-faint italic">Untitled</span>}
         </div>
-        <div className="flex items-center gap-1.5 mt-2 text-[11.5px] flex-wrap">
-          <span className="text-ink-faint font-mono">#{task.sequence}</span>
-          {task.dueDate && (
+      </div>
+      <div className="flex items-center gap-2 mt-2.5 text-[11.5px] flex-wrap">
+        <span className="text-ink-faint tab-data">#{task.sequence}</span>
+        {prio && (
+          <span
+            className="inline-flex items-center font-semibold px-2 py-0.5 rounded-full"
+            style={{ background: prio.bg, color: prio.fg }}
+          >
+            {prio.label}
+          </span>
+        )}
+        {due && (
+          <span
+            className="inline-flex items-center px-2 py-0.5 rounded-full font-medium tab-data"
+            style={{ background: due.bg, color: due.fg }}
+            title={`Due ${task.dueDate}`}
+          >
+            {formatShortDate(task.dueDate!)}
+          </span>
+        )}
+        <div className="ml-auto">
+          {member ? (
             <span
-              className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded font-medium font-mono ${dueChipClass}`}
-              title={`Due ${task.dueDate}`}
+              className="inline-flex items-center justify-center w-6 h-6 rounded-full text-white text-[10px] font-semibold"
+              style={{ background: member.color }}
+              title={member.name}
+              aria-label={member.name}
             >
-              📅 {formatShortDate(task.dueDate)}
+              {member.name.trim().charAt(0).toUpperCase()}
+            </span>
+          ) : (
+            <span
+              className="inline-flex items-center justify-center w-6 h-6 rounded-full border border-dashed border-border-strong text-ink-faint text-[10px]"
+              aria-hidden
+            >
+              ?
             </span>
           )}
-          <div className="ml-auto">
-            {member ? (
-              <span
-                className="inline-flex items-center justify-center w-6 h-6 rounded-full text-white text-[10px] font-semibold ring-2 ring-white shadow-[0_0_0_1px_rgba(9,30,66,0.13)]"
-                style={{ background: member.color }}
-                title={member.name}
-                aria-label={member.name}
-              >
-                {member.name.trim().charAt(0).toUpperCase()}
-              </span>
-            ) : (
-              <span
-                className="inline-flex items-center justify-center w-6 h-6 rounded-full border border-dashed border-border-strong text-ink-faint text-[10px]"
-                aria-hidden
-              >
-                ?
-              </span>
-            )}
-          </div>
         </div>
       </div>
     </article>

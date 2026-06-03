@@ -43,6 +43,10 @@ html.dark input, html.dark select, html.dark textarea, html.dark button {
   /* Vibrancy base for sidebars (paired with backdrop-blur at component level) */
   --color-vibrancy: rgba(248, 248, 250, 0.72);
 
+  /* Subtle control fill (search field, segmented track, date pill). Flips with
+     theme so it stays visible on dark surfaces. */
+  --color-fill: rgba(0, 0, 0, 0.05);
+
   --color-status-todo: #8e8e93;
   --color-status-progress: #0071e3;
   --color-status-done: #34c759;
@@ -73,6 +77,7 @@ html.dark input, html.dark select, html.dark textarea, html.dark button {
   --color-ink-faint: #8e8e93;
 
   --color-vibrancy: rgba(30, 30, 32, 0.62);
+  --color-fill: rgba(255, 255, 255, 0.09);
 
   --color-status-todo: #8e8e93;
   --color-status-progress: #0a84ff;

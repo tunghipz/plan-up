@@ -307,7 +307,7 @@ function App() {
         <button
           onClick={() => setShowNewProject(true)}
           title="New project"
-          className="w-[36px] h-[36px] rounded-[10px] text-ink-faint hover:text-accent hover:bg-black/[0.05] flex items-center justify-center transition"
+          className="w-[36px] h-[36px] rounded-[10px] text-ink-faint hover:text-accent hover:bg-surface-hover flex items-center justify-center transition"
         >
           <Plus size={18} strokeWidth={2} />
         </button>
@@ -315,7 +315,7 @@ function App() {
         <button
           onClick={() => setDark(!dark)}
           title={dark ? 'Switch to light' : 'Switch to dark'}
-          className="w-[36px] h-[36px] rounded-[10px] text-ink-faint hover:text-ink hover:bg-black/[0.05] flex items-center justify-center transition"
+          className="w-[36px] h-[36px] rounded-[10px] text-ink-faint hover:text-ink hover:bg-surface-hover flex items-center justify-center transition"
         >
           {dark ? <Sun size={16} /> : <Moon size={16} />}
         </button>
@@ -360,7 +360,7 @@ function App() {
                     className={`w-full text-left flex items-center gap-2.5 px-2.5 py-2 mb-0.5 text-[14px] rounded-lg transition ${
                       isActive
                         ? 'bg-accent text-white'
-                        : 'text-ink hover:bg-black/[0.045]'
+                        : 'text-ink hover:bg-surface-hover'
                     }`}
                   >
                     <span
@@ -410,7 +410,7 @@ function App() {
                 >
                   <Star size={14} />
                 </button>
-                <span className="inline-flex items-center text-xs text-ink-muted shrink-0 tab-data bg-black/[0.05] rounded-full px-2.5 py-1">
+                <span className="inline-flex items-center text-xs text-ink-muted shrink-0 tab-data bg-fill rounded-full px-2.5 py-1">
                   {formatSprintRange(
                     currentSprint.startDate,
                     currentSprint.endDate
@@ -448,7 +448,7 @@ function App() {
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search"
-                className="text-sm bg-black/[0.05] border border-transparent rounded-full pl-9 pr-9 py-1.5 w-52 focus:outline-none focus:bg-surface focus:ring-2 focus:ring-accent/40 text-ink transition"
+                className="text-sm bg-fill border border-transparent rounded-full pl-9 pr-9 py-1.5 w-52 focus:outline-none focus:bg-surface focus:ring-2 focus:ring-accent/40 text-ink transition"
               />
               <kbd className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] text-ink-faint pointer-events-none">
                 /
@@ -818,7 +818,7 @@ function ViewToggle({
     )
   }
   return (
-    <div className="inline-flex items-center gap-0.5 p-0.5 rounded-[9px] bg-black/[0.06]">
+    <div className="inline-flex items-center gap-0.5 p-0.5 rounded-[9px] bg-fill">
       {item('list', 'List', List)}
       {item('board', 'Board', LayoutGrid)}
     </div>

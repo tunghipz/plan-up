@@ -320,7 +320,7 @@ function MemberCard({
         // Assignee column is omitted — every row in a member group is the same
         // person (shown in the group header avatar).
         <div className="overflow-x-auto">
-          <div className="min-w-[940px]">
+          <div className="min-w-[820px]">
             {tasks.length > 0 && (
               <TaskColumnHeader sort={sort} setSort={setSort} showAssignee={false} />
             )}
@@ -380,7 +380,7 @@ function UnassignedCard({
         muted
       />
       <div className="overflow-x-auto">
-        <div className="min-w-[1020px]">
+        <div className="min-w-[896px]">
           {tasks.length > 0 && <TaskColumnHeader sort={sort} setSort={setSort} />}
           <div className="divide-y divide-border">
             {tasks.map((t) => (
@@ -993,15 +993,18 @@ function AddTaskRow({
 
 // Column widths — kept in sync with TaskColumnHeader. If you change one,
 // change the other. Order: status-dot · seq · title · assignee · effort · start · due · priority · status · prereq · delete
+// Widths sized to measured content + a small buffer (see commit notes):
+//   seq "123"≈24 · "Effort (day)" hdr 73 · date "Jun 30, 17:00"≈99 · "In progress"
+//   pill 97 (+ pl-2). Title takes the slack via flex-1.
 const COL = {
   dot: 'w-4 shrink-0',
-  seq: 'w-9 text-sm text-ink-faint tabular-nums text-center shrink-0 font-mono',
+  seq: 'w-8 text-sm text-ink-faint tabular-nums text-center shrink-0 font-mono',
   title: 'flex-1 min-w-[150px]',
   assignee: 'w-16 flex justify-center shrink-0',
-  effort: 'w-24 flex justify-center shrink-0',
-  start: 'w-36 flex justify-end shrink-0',
-  due: 'w-36 flex justify-end shrink-0',
-  status: 'w-36 flex justify-start shrink-0 pl-2',
+  effort: 'w-20 flex justify-center shrink-0',
+  start: 'w-28 flex justify-end shrink-0',
+  due: 'w-28 flex justify-end shrink-0',
+  status: 'w-28 flex justify-start shrink-0 pl-2',
   prereq: 'w-14 flex justify-end shrink-0',
   actions: 'w-4 flex justify-center shrink-0',
 }

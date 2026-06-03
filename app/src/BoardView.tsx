@@ -68,9 +68,19 @@ export function BoardView({
         return (
           <section
             key={status}
-            className="bg-canvas-sunk/60 rounded-xl border border-border-hair flex flex-col min-h-[200px]"
+            className="rounded-xl border flex flex-col min-h-[200px]"
+            style={{
+              background: `color-mix(in srgb, ${meta.varName} 6%, var(--color-canvas))`,
+              borderColor: `color-mix(in srgb, ${meta.varName} 22%, var(--color-border))`,
+            }}
           >
-            <header className="flex items-center gap-2 px-3 py-2.5 border-b border-border-hair">
+            <header
+              className="flex items-center gap-2 px-3 py-2.5 border-b"
+              style={{
+                borderColor: `color-mix(in srgb, ${meta.varName} 22%, var(--color-border))`,
+                background: `color-mix(in srgb, ${meta.varName} 10%, transparent)`,
+              }}
+            >
               <span
                 className="w-3.5 h-3.5"
                 style={{ color: meta.varName }}
@@ -78,16 +88,25 @@ export function BoardView({
               >
                 <StatusIcon status={status} />
               </span>
-              <span className="text-[13px] font-semibold text-ink display-tight">
+              <span
+                className="text-[15px] font-semibold display-tight"
+                style={{ color: meta.varName }}
+              >
                 {meta.label}
               </span>
-              <span className="text-[11px] text-ink-faint ml-1">
+              <span
+                className="text-[12.5px] ml-1 font-mono font-semibold px-1.5 py-0.5 rounded"
+                style={{
+                  color: meta.varName,
+                  background: `color-mix(in srgb, ${meta.varName} 14%, transparent)`,
+                }}
+              >
                 {list.length}
               </span>
             </header>
             <div className="flex-1 p-2 space-y-2">
               {list.length === 0 ? (
-                <div className="text-[12px] text-ink-faint italic px-2 py-3 text-center">
+                <div className="text-[13px] text-ink-faint italic px-2 py-3 text-center">
                   Empty
                 </div>
               ) : (
@@ -133,12 +152,12 @@ function BoardCard({
           <StatusIcon status={task.status} />
         </button>
         <div className="flex-1 min-w-0">
-          <div className="text-[13px] text-ink leading-snug break-words">
+          <div className="text-[14px] text-ink leading-snug break-words">
             {task.title || (
               <span className="text-ink-faint italic">Untitled</span>
             )}
           </div>
-          <div className="flex items-center gap-2 mt-2 text-[11.5px] text-ink-muted flex-wrap">
+          <div className="flex items-center gap-2 mt-2 text-[12.5px] text-ink-muted flex-wrap">
             <span className="text-ink-faint font-mono">#{task.sequence}</span>
             {task.dueDate && (
               <>

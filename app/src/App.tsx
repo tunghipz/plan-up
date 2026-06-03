@@ -315,22 +315,31 @@ function App() {
       </aside>
 
       {/* Secondary panel: cooler bg, inset rounded-pill active state, no border-left accent */}
-      <aside className="w-[224px] shrink-0 bg-canvas-sunk border-r border-border-hair flex flex-col overflow-hidden">
+      <aside className="w-[248px] shrink-0 bg-canvas-sunk border-r border-border-hair flex flex-col overflow-hidden">
         {currentProject ? (
           <>
             <div className="px-4 pt-4 pb-3">
-              <div className="text-[15px] font-semibold text-ink truncate display-tight">
+              <div className="text-[16px] font-semibold text-ink truncate display-tight">
                 {currentProject.name}
               </div>
-              <div className="text-[11px] text-ink-faint mt-0.5">
+              <div className="text-[12.5px] text-ink-faint mt-1">
                 <span className="font-mono">{sprints?.length ?? 0}</span> sprint
                 {(sprints?.length ?? 0) === 1 ? '' : 's'} ·{' '}
                 <span className="font-mono">{projectTasks?.length ?? 0}</span>{' '}
                 task{(projectTasks?.length ?? 0) === 1 ? '' : 's'}
               </div>
             </div>
-            <div className="px-4 pt-2 pb-1 text-[11px] font-semibold text-ink-faint">
-              Sprints
+            <div className="flex items-center justify-between px-4 pt-2 pb-1.5">
+              <span className="text-[12.5px] font-semibold text-ink-faint">
+                Sprints
+              </span>
+              <button
+                onClick={() => setShowNewSprint(true)}
+                title="New sprint (n)"
+                className="inline-flex items-center text-[15px] leading-none text-ink-muted hover:text-ink hover:bg-black/[0.04] -mr-1 px-1.5 py-1 rounded transition"
+              >
+                ＋
+              </button>
             </div>
             <div className="flex-1 overflow-auto px-2">
               {sprints?.map((s) => {
@@ -341,14 +350,14 @@ function App() {
                   <button
                     key={s.id}
                     onClick={() => setCurrentSprintId(s.id)}
-                    className={`w-full text-left flex items-center gap-2.5 px-2.5 py-1.5 my-px text-[13px] rounded-lg transition ${
+                    className={`w-full text-left flex items-start gap-3 px-3 py-2 my-px text-[15px] rounded-lg transition ${
                       isActive
                         ? 'bg-accent-tint text-accent-strong font-semibold'
-                        : 'text-ink-muted hover:bg-black/[0.04] hover:text-ink'
+                        : 'text-ink-muted font-medium hover:bg-black/[0.04] hover:text-ink'
                     }`}
                   >
                     <span
-                      className={`w-[7px] h-[7px] rounded-full shrink-0 ${
+                      className={`w-2 h-2 rounded-full shrink-0 mt-2 ${
                         isActive
                           ? 'bg-accent'
                           : allDone
@@ -356,10 +365,19 @@ function App() {
                             : 'bg-ink-faint'
                       }`}
                     />
-                    <span className="flex-1 truncate">{s.name}</span>
+                    <span className="flex-1 min-w-0">
+                      <span className="block truncate">{s.name}</span>
+                      <span
+                        className={`block text-[12.5px] font-mono font-normal leading-tight mt-1 ${
+                          isActive ? 'text-accent/80' : 'text-ink-faint'
+                        }`}
+                      >
+                        {formatSprintRange(s.startDate, s.endDate)}
+                      </span>
+                    </span>
                     {c && c.total > 0 && (
                       <span
-                        className={`text-[11px] font-mono ${isActive ? 'text-accent' : 'text-ink-faint'}`}
+                        className={`text-[12.5px] font-mono mt-0.5 ${isActive ? 'text-accent' : 'text-ink-faint'}`}
                       >
                         {c.total}
                       </span>
@@ -368,25 +386,14 @@ function App() {
                 )
               })}
               {sprints && sprints.length === 0 && (
-                <div className="px-2.5 py-3 text-[12px] text-ink-faint italic">
+                <div className="px-3 py-3 text-[13px] text-ink-faint italic">
                   No sprints yet
                 </div>
               )}
             </div>
-            <div className="p-2">
-              <button
-                onClick={() => setShowNewSprint(true)}
-                className="w-full text-left text-[12px] text-ink-muted hover:text-ink hover:bg-black/[0.04] px-2.5 py-2 rounded-lg transition"
-              >
-                ＋ New sprint
-                <kbd className="ml-2 text-[9px] text-ink-faint border border-border-hair rounded px-1 py-0.5 bg-surface">
-                  n
-                </kbd>
-              </button>
-            </div>
           </>
         ) : (
-          <div className="p-4 text-[12px] text-ink-faint">
+          <div className="p-4 text-[13px] text-ink-faint">
             Select a project →
           </div>
         )}
@@ -870,7 +877,7 @@ function SprintNameEditor({ sprint }: { sprint: Sprint }) {
           }
         }}
         onBlur={() => void commit()}
-        className="font-semibold text-ink display-tight bg-canvas-sunk border border-border-hair focus:border-accent rounded-md px-2 py-0.5 outline-none focus:ring-2 focus:ring-accent/30 min-w-0 max-w-[260px]"
+        className="editable font-semibold text-ink display-tight bg-transparent min-w-0 max-w-[260px]"
         aria-label="Rename sprint"
       />
     )

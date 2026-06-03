@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
@@ -28,10 +28,54 @@ import { formatRelativeDate, formatShortDate, isOverdue } from './lib'
 
 const WELCOME_PREFIX = 'Welcome —'
 
+type SortField =
+  | 'seq'
+  | 'title'
+  | 'effort'
+  | 'startDate'
+  | 'dueDate'
+  | 'status'
+  | 'dependsOn'
+const STATUS_RANK: Record<Status, number> = {
+  todo: 0,
+  in_progress: 1,
+  done: 2,
+}
+function compareTasks(a: Task, b: Task, field: SortField, dir: 'asc' | 'desc'): number {
+  const mul = dir === 'asc' ? 1 : -1
+  const va: string | number =
+    field === 'seq'
+      ? a.sequence
+      : field === 'title'
+        ? (a.title || '').toLowerCase()
+        : field === 'effort'
+          ? (a.estimate ?? Number.POSITIVE_INFINITY)
+          : field === 'status'
+            ? STATUS_RANK[a.status]
+            : field === 'dependsOn'
+              ? (a.dependsOn?.length ?? 0)
+              : (a[field] ?? '￿')
+  const vb: string | number =
+    field === 'seq'
+      ? b.sequence
+      : field === 'title'
+        ? (b.title || '').toLowerCase()
+        : field === 'effort'
+          ? (b.estimate ?? Number.POSITIVE_INFINITY)
+          : field === 'status'
+            ? STATUS_RANK[b.status]
+            : field === 'dependsOn'
+              ? (b.dependsOn?.length ?? 0)
+              : (b[field] ?? '￿')
+  if (va < vb) return -1 * mul
+  if (va > vb) return 1 * mul
+  return a.sequence - b.sequence // stable tiebreak by seq
+}
+
 export const STATUS_META: Record<Status, { label: string; varName: string }> = {
-  todo: { label: 'To do', varName: 'var(--color-status-todo)' },
-  in_progress: { label: 'In progress', varName: 'var(--color-status-progress)' },
-  done: { label: 'Done', varName: 'var(--color-status-done)' },
+  todo: { label: 'TO DO', varName: 'var(--color-status-todo)' },
+  in_progress: { label: 'IN PROGRESS', varName: 'var(--color-status-progress)' },
+  done: { label: 'DONE', varName: 'var(--color-status-done)' },
 }
 
 export const STATUS_ORDER: Status[] = ['todo', 'in_progress', 'done']
@@ -78,6 +122,10 @@ export function SprintView({
   const [collapsed, setCollapsed] = useState<Set<string>>(() =>
     loadCollapsed(sprintId)
   )
+  const [sort, setSort] = useState<{ field: SortField; dir: 'asc' | 'desc' }>({
+    field: 'seq',
+    dir: 'asc',
+  })
 
   useEffect(() => {
     setCollapsed(loadCollapsed(sprintId))
@@ -113,10 +161,10 @@ export function SprintView({
       if (owner) byMember.get(owner)!.push(t)
       else orphan.push(t)
     }
-    // Sort each member's tasks by sequence so #s read 1, 2, 3... top-down.
-    const bySeq = (a: Task, b: Task) => a.sequence - b.sequence
-    for (const arr of byMember.values()) arr.sort(bySeq)
-    orphan.sort(bySeq)
+    // Sort each member's tasks by the user-selected field (defaults to seq asc).
+    const cmp = (a: Task, b: Task) => compareTasks(a, b, sort.field, sort.dir)
+    for (const arr of byMember.values()) arr.sort(cmp)
+    orphan.sort(cmp)
     const filled = ms.filter((m) => (byMember.get(m.id) ?? []).length > 0)
     const empty = ms.filter((m) => (byMember.get(m.id) ?? []).length === 0)
     return {
@@ -124,7 +172,7 @@ export function SprintView({
       emptyMembers: empty,
       unassigned: orphan,
     }
-  }, [members, filteredTasks])
+  }, [members, filteredTasks, sort])
 
   if (!members) return <p className="text-ink-muted py-12 text-center">Loading…</p>
 
@@ -154,6 +202,8 @@ export function SprintView({
           tasksById={tasksById}
           collapsed={collapsed.has(member.id)}
           onToggleCollapse={() => toggleCollapse(member.id)}
+          sort={sort}
+          setSort={setSort}
         />
       ))}
 
@@ -163,6 +213,8 @@ export function SprintView({
           members={members}
           allTasks={tasks}
           tasksById={tasksById}
+          sort={sort}
+          setSort={setSort}
         />
       )}
 
@@ -217,6 +269,8 @@ function MemberCard({
   tasksById,
   collapsed,
   onToggleCollapse,
+  sort,
+  setSort,
 }: {
   projectId: string
   member: Member
@@ -228,6 +282,10 @@ function MemberCard({
   tasksById: Map<string, Task>
   collapsed: boolean
   onToggleCollapse: () => void
+  sort: { field: SortField; dir: 'asc' | 'desc' }
+  setSort: React.Dispatch<
+    React.SetStateAction<{ field: SortField; dir: 'asc' | 'desc' }>
+  >
 }) {
   return (
     <Card>
@@ -250,7 +308,7 @@ function MemberCard({
       />
       {!collapsed && (
         <>
-          {tasks.length > 0 && <TaskColumnHeader />}
+          {tasks.length > 0 && <TaskColumnHeader sort={sort} setSort={setSort} />}
           <div className="divide-y divide-border">
             {tasks.map((t) => (
               <TaskRow
@@ -279,11 +337,17 @@ function UnassignedCard({
   members,
   allTasks,
   tasksById,
+  sort,
+  setSort,
 }: {
   tasks: Task[]
   members: Member[]
   allTasks: Task[]
   tasksById: Map<string, Task>
+  sort: { field: SortField; dir: 'asc' | 'desc' }
+  setSort: React.Dispatch<
+    React.SetStateAction<{ field: SortField; dir: 'asc' | 'desc' }>
+  >
 }) {
   return (
     <Card>
@@ -297,7 +361,7 @@ function UnassignedCard({
         count={tasks.length}
         muted
       />
-      {tasks.length > 0 && <TaskColumnHeader />}
+      {tasks.length > 0 && <TaskColumnHeader sort={sort} setSort={setSort} />}
       <div className="divide-y divide-border">
         {tasks.map((t) => (
           <TaskRow
@@ -334,7 +398,7 @@ function CollapsedMembers({
     <div className="space-y-3">
       <button
         onClick={onToggle}
-        className="text-xs text-ink-muted hover:text-ink flex items-center gap-1.5 pl-1"
+        className="text-sm text-ink-muted hover:text-ink flex items-center gap-1.5 pl-1"
       >
         <ChevronDown
           size={12}
@@ -463,7 +527,7 @@ function GroupHeader({
             }
           }}
           onBlur={commit}
-          className="font-medium text-sm bg-canvas border border-border-strong rounded px-1.5 py-0.5 outline-none focus:border-accent w-40"
+          className="editable font-medium text-sm bg-transparent w-40"
           aria-label="Rename member"
         />
       ) : (
@@ -484,7 +548,7 @@ function GroupHeader({
           {name}
         </span>
       )}
-      <span className="text-xs text-ink-faint select-none">{count}</span>
+      <span className="text-xs text-ink-faint select-none font-mono">{count}</span>
       <div className="ml-auto flex items-center gap-2">
         {extras}
         {onRename && !editing && (
@@ -564,7 +628,7 @@ function DateField({
     <button
       type="button"
       onClick={open}
-      className="relative flex-1 text-xs bg-canvas border border-border rounded px-2 py-1 text-left h-7 focus:border-accent outline-none"
+      className="relative flex-1 text-sm bg-canvas border border-border rounded px-2 py-1 text-left h-7 focus:border-accent outline-none"
     >
       {value ? (
         <span className="text-ink tabular-nums font-mono">
@@ -663,7 +727,7 @@ function MemberScheduleButton({ member }: { member: Member }) {
           e.stopPropagation()
           setOpen((v) => !v)
         }}
-        className={`inline-flex items-center gap-0.5 transition text-xs ${
+        className={`inline-flex items-center gap-0.5 transition text-sm ${
           count > 0
             ? 'text-ink opacity-100'
             : 'text-ink-faint opacity-0 group-hover/card:opacity-100'
@@ -689,7 +753,7 @@ function MemberScheduleButton({ member }: { member: Member }) {
             Days off — {member.name}
           </div>
           {days.length === 0 && (
-            <div className="text-xs text-ink-faint px-1 pb-1.5">
+            <div className="text-sm text-ink-faint px-1 pb-1.5">
               None. Weekends are already off.
             </div>
           )}
@@ -698,7 +762,7 @@ function MemberScheduleButton({ member }: { member: Member }) {
               key={d.date}
               className="flex items-center gap-2 px-1.5 py-1 rounded hover:bg-surface-hover group/day"
             >
-              <span className="text-xs text-ink tabular-nums w-16 shrink-0">
+              <span className="text-sm text-ink tabular-nums w-16 shrink-0">
                 {formatShortDate(d.date)}
               </span>
               <select
@@ -706,7 +770,7 @@ function MemberScheduleButton({ member }: { member: Member }) {
                 onChange={(e) =>
                   updateOne(d.date, e.target.value as 'all' | 'am' | 'pm')
                 }
-                className="flex-1 text-xs bg-transparent border border-transparent hover:border-border rounded px-1 py-0.5 outline-none focus:border-accent cursor-pointer"
+                className="flex-1 text-sm bg-transparent border border-transparent hover:border-border rounded px-1 py-0.5 outline-none focus:border-accent cursor-pointer"
               >
                 <option value="all">Off all day</option>
                 <option value="am">AM off (morning)</option>
@@ -733,7 +797,7 @@ function MemberScheduleButton({ member }: { member: Member }) {
                 onChange={(e) =>
                   setDraftHalf(e.target.value as 'all' | 'am' | 'pm')
                 }
-                className="text-xs bg-canvas border border-border rounded px-1.5 py-1 outline-none focus:border-accent cursor-pointer"
+                className="text-sm bg-canvas border border-border rounded px-1.5 py-1 outline-none focus:border-accent cursor-pointer"
               >
                 <option value="all">All</option>
                 <option value="am">AM</option>
@@ -742,7 +806,7 @@ function MemberScheduleButton({ member }: { member: Member }) {
               <button
                 onClick={addDraft}
                 disabled={!draftDate}
-                className="text-xs px-2 py-1 rounded bg-accent text-white disabled:opacity-40"
+                className="text-sm px-2 py-1 rounded bg-accent text-white disabled:opacity-40"
               >
                 Add
               </button>
@@ -803,7 +867,7 @@ function AddTaskRow({
         onChange={(e) => setTitle(e.target.value)}
         onKeyDown={(e) => e.key === 'Enter' && add()}
         placeholder="Add task"
-        className={`${COL.title} outline-none placeholder:text-ink-faint bg-transparent`}
+        className={`${COL.title} editable placeholder:text-ink-faint bg-transparent`}
       />
       <div className={COL.assignee} />
       <div className={COL.effort} />
@@ -811,7 +875,6 @@ function AddTaskRow({
       <div className={COL.due} />
       <div className={COL.status} />
       <div className={COL.prereq} />
-      <div className={COL.trash} />
     </div>
   )
 }
@@ -820,15 +883,55 @@ function AddTaskRow({
 // change the other. Order: status-dot · seq · title · assignee · effort · start · due · priority · status · prereq · delete
 const COL = {
   dot: 'w-4 shrink-0',
-  seq: 'w-9 text-xs text-ink-faint tabular-nums text-right shrink-0 font-mono',
+  seq: 'w-9 text-sm text-ink-faint tabular-nums text-center shrink-0 font-mono',
   title: 'flex-1 min-w-0',
   assignee: 'w-16 flex justify-center shrink-0',
-  effort: 'w-12 flex justify-end shrink-0',
-  start: 'w-28 flex justify-end shrink-0',
-  due: 'w-28 flex justify-end shrink-0',
-  status: 'w-28 flex justify-start shrink-0',
+  effort: 'w-24 flex justify-center shrink-0',
+  start: 'w-36 flex justify-end shrink-0',
+  due: 'w-36 flex justify-end shrink-0',
+  status: 'w-36 flex justify-start shrink-0 pl-2',
   prereq: 'w-14 flex justify-end shrink-0',
   trash: 'w-5 flex justify-end shrink-0',
+}
+
+function TitleTextarea({
+  value,
+  onChange,
+  done,
+  welcomeHint,
+}: {
+  value: string
+  onChange: (v: string) => void
+  done: boolean
+  welcomeHint: boolean
+}) {
+  const ref = useRef<HTMLTextAreaElement>(null)
+  const resize = () => {
+    const el = ref.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = el.scrollHeight + 'px'
+  }
+  // Resize on mount + every value change. useLayoutEffect runs sync before paint
+  // so users never see the "1-line then snap to N lines" flicker.
+  useLayoutEffect(resize, [value])
+  return (
+    <textarea
+      ref={ref}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      rows={1}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault()
+          ;(e.target as HTMLTextAreaElement).blur()
+        }
+      }}
+      className={`${COL.title} editable bg-transparent resize-none overflow-hidden leading-snug whitespace-pre-wrap break-words ${
+        done ? 'line-through text-ink-faint' : ''
+      } ${welcomeHint ? 'welcome-hint' : ''}`}
+    />
+  )
 }
 
 function TaskRow({
@@ -855,7 +958,7 @@ function TaskRow({
 
   return (
     <div
-      className="group/row flex items-center gap-3 px-4 py-2 text-sm hover:bg-surface-hover transition"
+      className="task-row group/row relative flex items-center gap-3 px-4 py-2 text-sm hover:bg-surface-hover transition divide-x divide-border-hair"
       title={blocked ? 'Blocked — waiting on a prerequisite task' : undefined}
     >
       <div className={COL.dot}>
@@ -875,12 +978,11 @@ function TaskRow({
 
       <div className={COL.seq} title="Task number">{task.sequence}</div>
 
-      <input
+      <TitleTextarea
         value={task.title}
-        onChange={(e) => update({ title: e.target.value })}
-        className={`${COL.title} outline-none bg-transparent ${
-          task.status === 'done' ? 'line-through text-ink-faint' : ''
-        } ${isWelcome ? 'welcome-hint' : ''}`}
+        onChange={(v) => update({ title: v })}
+        done={task.status === 'done'}
+        welcomeHint={isWelcome}
       />
 
       <div className={COL.assignee}>
@@ -933,17 +1035,15 @@ function TaskRow({
         <PrereqInput task={task} allTasks={allTasks} tasksById={tasksById} />
       </div>
 
-      <div className={COL.trash}>
-        <button
-          onClick={() => {
-            if (confirm('Delete this task?')) deleteTask(task.id)
-          }}
-          className="text-ink-faint hover:text-red-500 opacity-0 group-hover/row:opacity-100 transition"
-          aria-label="Delete task"
-        >
-          <Trash2 size={14} />
-        </button>
-      </div>
+      <button
+        onClick={() => {
+          if (confirm('Delete this task?')) deleteTask(task.id)
+        }}
+        className="absolute right-2 top-1/2 -translate-y-1/2 text-ink-faint hover:text-red-500 opacity-0 group-hover/row:opacity-100 transition p-1 rounded bg-surface/80 backdrop-blur-sm"
+        aria-label="Delete task"
+      >
+        <Trash2 size={14} />
+      </button>
     </div>
   )
 }
@@ -953,27 +1053,123 @@ function TaskRow({
  * (ClickUp pattern — every group has its own labelled columns right under
  * the member name). Quiet styling: no background, hairline border below.
  */
-function TaskColumnHeader() {
-  const labelCls = 'text-[10px] uppercase tracking-wider text-ink-faint font-medium'
+function TaskColumnHeader({
+  sort,
+  setSort,
+}: {
+  sort: { field: SortField; dir: 'asc' | 'desc' }
+  setSort: React.Dispatch<
+    React.SetStateAction<{ field: SortField; dir: 'asc' | 'desc' }>
+  >
+}) {
+  const onSort = (field: SortField) => {
+    setSort((prev) =>
+      prev.field === field
+        ? { field, dir: prev.dir === 'asc' ? 'desc' : 'asc' }
+        : { field, dir: 'asc' }
+    )
+  }
   return (
-    <div
-      className="flex items-center gap-3 px-4 py-1.5 border-b border-border-hair bg-canvas-sunk/40"
-      aria-hidden
-    >
+    <div className="flex items-center gap-3 px-4 py-1.5 border-b border-border-hair bg-canvas-sunk/40 divide-x divide-border-hair">
       <div className={COL.dot} />
-      <div className={`${COL.seq} ${labelCls}`}>ID</div>
-      <div className={`${labelCls} flex-1 min-w-0`}>Task</div>
-      <div className={`${COL.assignee} ${labelCls} text-center`}>Assignee</div>
-      <div className={`${COL.effort} ${labelCls} justify-end flex`}>Effort</div>
-      <div className={`${COL.start} ${labelCls} justify-end flex`}>Start</div>
-      <div className={`${COL.due} ${labelCls} justify-end flex`}>End</div>
-      <div className={`${COL.status} ${labelCls}`}>Status</div>
-      <div className={`${COL.prereq} ${labelCls} justify-end flex`}>Prereq</div>
-      <div className={COL.trash} />
-      {/* Priority column removed — Task.priority still exists in the DB
-          and defaults to 'normal' on new tasks. Re-add this column if you
-          want to surface it again. */}
+      <SortHeader
+        className={COL.seq}
+        field="seq"
+        label="ID"
+        sort={sort}
+        onSort={onSort}
+        align="center"
+      />
+      <SortHeader
+        className="flex-1 min-w-0"
+        field="title"
+        label="Task"
+        sort={sort}
+        onSort={onSort}
+      />
+      <div className={`${COL.assignee} text-[10px] uppercase tracking-wider text-ink-faint font-medium text-center`}>
+        Assignee
+      </div>
+      <SortHeader
+        className={COL.effort}
+        field="effort"
+        label="Effort (day)"
+        sort={sort}
+        onSort={onSort}
+        align="center"
+      />
+      <SortHeader
+        className={COL.start}
+        field="startDate"
+        label="Start"
+        sort={sort}
+        onSort={onSort}
+        align="end"
+      />
+      <SortHeader
+        className={COL.due}
+        field="dueDate"
+        label="End"
+        sort={sort}
+        onSort={onSort}
+        align="end"
+      />
+      <SortHeader
+        className={COL.status}
+        field="status"
+        label="Status"
+        sort={sort}
+        onSort={onSort}
+      />
+      <SortHeader
+        className={COL.prereq}
+        field="dependsOn"
+        label="Prereq"
+        sort={sort}
+        onSort={onSort}
+        align="end"
+      />
     </div>
+  )
+}
+
+function SortHeader({
+  className,
+  field,
+  label,
+  sort,
+  onSort,
+  align,
+}: {
+  className: string
+  field: SortField
+  label: string
+  sort: { field: SortField; dir: 'asc' | 'desc' }
+  onSort: (f: SortField) => void
+  align?: 'start' | 'center' | 'end'
+}) {
+  const isActive = sort.field === field
+  return (
+    <button
+      type="button"
+      onClick={() => onSort(field)}
+      className={`${className} group flex items-center gap-1 text-[10px] uppercase tracking-wider font-medium select-none py-0.5 hover:bg-black/[0.04] rounded transition ${
+        align === 'end'
+          ? 'justify-end'
+          : align === 'center'
+            ? 'justify-center'
+            : ''
+      } ${isActive ? 'text-accent' : 'text-ink-faint hover:text-ink'}`}
+      aria-label={`Sort by ${label}`}
+    >
+      <span>{label}</span>
+      <span
+        className={`text-[9px] leading-none ${isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-40'}`}
+        aria-hidden
+      >
+        {isActive ? (sort.dir === 'asc' ? '▲' : '▼') : '▲'}
+      </span>
+    </button>
   )
 }
 
@@ -1064,20 +1260,50 @@ function StatusPicker({
   onChange: (s: Status) => void
 }) {
   const meta = STATUS_META[status]
+  // Jira-style lozenge: solid filled for in_progress/done, outline for todo
+  const solid = status !== 'todo'
+  const bg = solid
+    ? meta.varName
+    : `color-mix(in srgb, ${meta.varName} 14%, transparent)`
+  const fg = solid ? '#ffffff' : meta.varName
+  const border = solid ? meta.varName : `color-mix(in srgb, ${meta.varName} 50%, transparent)`
   return (
-    <select
-      value={status}
-      onChange={(e) => onChange(e.target.value as Status)}
-      className="text-xs font-medium rounded px-2 py-1 border-0 bg-transparent appearance-none cursor-pointer hover:bg-surface-hover"
-      style={{ color: meta.varName }}
-      aria-label="Status"
+    <div
+      className="relative inline-flex items-center rounded-full pl-2 pr-1 py-1 cursor-pointer transition hover:opacity-90 leading-none"
+      style={{ background: bg, border: `1px solid ${border}` }}
     >
-      {Object.entries(STATUS_META).map(([k, m]) => (
-        <option key={k} value={k}>
-          {m.label}
-        </option>
-      ))}
-    </select>
+      <span
+        className="w-3 h-3 shrink-0 mr-1.5 inline-flex items-center justify-center"
+        style={{ color: fg }}
+        aria-hidden
+      >
+        <StatusIcon status={status} />
+      </span>
+      <select
+        value={status}
+        onChange={(e) => onChange(e.target.value as Status)}
+        className="text-[10.5px] font-bold tracking-wider uppercase pr-4 pl-0 m-0 border-0 bg-transparent appearance-none cursor-pointer outline-none leading-none h-auto"
+        style={{ color: fg, width: 'auto', minWidth: 'max-content' }}
+        aria-label="Status"
+      >
+        {Object.entries(STATUS_META).map(([k, m]) => (
+          <option
+            key={k}
+            value={k}
+            style={{ color: '#172b4d', background: '#fff' }}
+          >
+            {m.label}
+          </option>
+        ))}
+      </select>
+      <span
+        className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-[8px] leading-none"
+        style={{ color: fg, opacity: 0.7 }}
+        aria-hidden
+      >
+        ▾
+      </span>
+    </div>
   )
 }
 
@@ -1199,7 +1425,7 @@ function DatePickCell({
       }`}
     >
       {value ? (
-        <span className="text-xs whitespace-nowrap">{label}</span>
+        <span className="text-sm whitespace-nowrap">{label}</span>
       ) : (
         <Calendar size={14} />
       )}
@@ -1259,7 +1485,7 @@ function EffortCell({
       placeholder="—"
       title="Effort in days"
       aria-label="Effort in days"
-      className="w-full text-xs text-right tabular-nums bg-transparent outline-none focus:bg-canvas rounded px-1 h-7 placeholder:text-ink-faint"
+      className="w-full text-sm text-center tabular-nums bg-transparent outline-none focus:bg-canvas rounded px-1 h-7 placeholder:text-ink-faint"
     />
   )
 }
@@ -1340,7 +1566,7 @@ function PrereqInput({
       placeholder="—"
       title="Prerequisite task numbers, comma-separated (e.g. 2, 3)"
       aria-label="Prerequisite task numbers"
-      className="w-full text-xs text-right tabular-nums bg-transparent outline-none focus:bg-canvas rounded px-1 h-7 placeholder:text-ink-faint"
+      className="w-full text-sm text-right tabular-nums bg-transparent outline-none focus:bg-canvas rounded px-1 h-7 placeholder:text-ink-faint"
     />
   )
 }
@@ -1413,7 +1639,7 @@ function AddMemberRow({
           setName('')
           onDeactivate()
         }}
-        className="text-xs text-ink-muted px-2 py-1 hover:bg-surface-hover rounded"
+        className="text-sm text-ink-muted px-2 py-1 hover:bg-surface-hover rounded"
       >
         Done
       </button>

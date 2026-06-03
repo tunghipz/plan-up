@@ -24,12 +24,13 @@ npm run lint       # eslint .
 
 ## What's inside
 
-- **Multi-project** — macOS-style icon rail (left), vibrancy sprint panel (middle), task view (right)
+- **Multi-project** — macOS-style icon rail (left), vibrancy sprint panel (middle, drag the edge to resize), task view (right)
 - **Sprint folder** (biweekly) with start/end dates + per-sprint task sequence (resets to 1..N)
 - **Two views**:
-  - **List** — grouped by assignee in inset-grouped cards · Reminders-style status circles · sortable column headers · auto-wrap titles
+  - **List** — grouped by assignee in inset-grouped cards · Reminders-style status circles · sortable column headers · width-aware auto-wrap titles
   - **Board** — Cupertino kanban: three columns on the grey canvas, white soft-shadowed cards · click the status circle to cycle
 - **Task fields**: title, assignee, sprint, status, priority, start/end date, estimate, dependencies
+- **Member header at a glance** — each assignee group shows a progress ring (% done) around the avatar, done/total, an overdue alert (only when > 0), remaining workload (`Nd left`), and days off as effective days (`1.5d off`, half-days count 0.5) — all derived from tasks, no extra fields
 - **Status** — Reminders-style circle (todo / in-progress / done) + soft-tint pill
 - **Auto-scheduling** — set effort + prereqs, dates compute automatically (skips weekends + per-member off-days, supports half-day off)
 - **Sprint rollover** — move unfinished tasks to next sprint in one click

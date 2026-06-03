@@ -21,6 +21,14 @@ npm install   # nếu chưa
 npm run dev   # http://localhost:5173
 ```
 
+## Git workflow
+
+- **Không bao giờ `git push` khi user chưa confirm.** Commit local thoải mái sau khi
+  feature hoàn thành (tsc + tests pass), nhưng push lên remote phải đợi user nói
+  "push" / "đẩy lên" / OK explicit.
+- `git commit` được phép tự chạy sau mỗi feature done.
+- Force push / reset --hard / delete branch → luôn phải hỏi.
+
 ## Data model
 
 3 IndexedDB tables in `app/src/db.ts`:

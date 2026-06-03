@@ -2,6 +2,18 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* Make native widgets (date picker popup, scrollbars, select) follow our theme.
+ * Browsers don't always inherit `color-scheme` from :root into the date
+ * picker popup, so we set it explicitly on the elements that render those
+ * popups too. */
+html { color-scheme: light; }
+html.dark { color-scheme: dark; }
+
+input, select, textarea, button { color-scheme: light; }
+html.dark input, html.dark select, html.dark textarea, html.dark button {
+  color-scheme: dark;
+}
+
 @theme {
   --color-accent: #c04a1a;
   --color-accent-hover: #a03e16;

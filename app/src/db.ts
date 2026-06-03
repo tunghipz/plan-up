@@ -3,10 +3,28 @@ import Dexie, { type Table } from 'dexie'
 export type Status = 'todo' | 'in_progress' | 'done'
 export type Priority = 'urgent' | 'high' | 'normal' | 'low' | 'none'
 
+/**
+ * A day off for a member.
+ * - `half` omitted → entire day off (contributes 0 to effort)
+ * - `half: 'am'` → morning off, afternoon worked (contributes 0.5)
+ * - `half: 'pm'` → afternoon off, morning worked (contributes 0.5)
+ * AM vs PM is for human reference only; both half kinds contribute equally
+ * (0.5 working day) since we don't model intra-day scheduling.
+ */
+export interface DayOff {
+  date: string
+  half?: 'am' | 'pm'
+}
+
 export interface Member {
   id: string
   name: string
   color: string
+  /**
+   * Additional non-working days for this member, on top of weekends.
+   * Pushes tasks forward when their start/end is computed from prereqs.
+   */
+  daysOff: DayOff[]
 }
 
 export interface Sprint {
@@ -74,6 +92,32 @@ class PlanDB extends Dexie {
         await tx.table('tasks').update(r.id, { sequence: n++ })
       }
     })
+    // v5 (2026-06-03): add Member.daysOff (array of yyyy-mm-dd). Backfill [].
+    this.version(5).upgrade((tx) =>
+      tx
+        .table('members')
+        .toCollection()
+        .modify((m: Member) => {
+          if (!Array.isArray(m.daysOff)) m.daysOff = []
+        })
+    )
+    // v6 (2026-06-03): daysOff shape changes from string[] to DayOff[]
+    // (object with optional `half`). Convert old strings → {date: s}.
+    this.version(6).upgrade((tx) =>
+      tx
+        .table('members')
+        .toCollection()
+        .modify((m: Member) => {
+          const raw = m.daysOff as unknown as Array<string | DayOff>
+          if (!Array.isArray(raw)) {
+            m.daysOff = []
+            return
+          }
+          m.daysOff = raw.map((d) =>
+            typeof d === 'string' ? { date: d } : d
+          )
+        })
+    )
   }
 }
 
@@ -112,6 +156,44 @@ export function addDays(dateStr: string, days: number): string {
   return d.toISOString().slice(0, 10)
 }
 
+/** True if the date falls on Saturday or Sunday. */
+export function isWeekend(dateStr: string): boolean {
+  const day = new Date(dateStr + 'T00:00:00Z').getUTCDay()
+  return day === 0 || day === 6
+}
+
+/**
+ * Returns dateStr if it's a working day, else the next working day.
+ * `extraOff` is an optional set of additional yyyy-mm-dd days that count
+ * as non-working (member-specific vacation).
+ */
+export function nextBusinessDay(
+  dateStr: string,
+  extraOff?: ReadonlySet<string>
+): string {
+  let d = dateStr
+  while (isWeekend(d) || extraOff?.has(d)) d = addDays(d, 1)
+  return d
+}
+
+/**
+ * Add `n` working days to `dateStr`. Assumes dateStr is already a working
+ * day. Sat/Sun and any day in `extraOff` do not consume `n`.
+ */
+export function addBusinessDays(
+  dateStr: string,
+  n: number,
+  extraOff?: ReadonlySet<string>
+): string {
+  let d = dateStr
+  let remaining = n
+  while (remaining > 0) {
+    d = addDays(d, 1)
+    if (!isWeekend(d) && !extraOff?.has(d)) remaining--
+  }
+  return d
+}
+
 /**
  * Compute (start, end) for a task based on its prereqs and effort.
  * - If task has no prereqs: returns (task.startDate, task.dueDate) — manual.
@@ -119,24 +201,213 @@ export function addDays(dateStr: string, days: number): string {
  * - end = start + (estimate - 1) days; if no estimate, end = start.
  * Returns null fields if the calculation can't run (e.g. no prereq has an end).
  */
+/**
+ * Working fraction contributed by a single day for the given off-map.
+ * - Sat/Sun: 0
+ * - In off-map with full off (no `half`): 0
+ * - In off-map with `half`: 0.5
+ * - Otherwise: 1
+ */
+export function workingFraction(
+  date: string,
+  contribByDate?: ReadonlyMap<string, 0 | 0.5>
+): number {
+  if (isWeekend(date)) return 0
+  if (contribByDate?.has(date)) return contribByDate.get(date) as number
+  return 1
+}
+
+const EPS = 1e-9
+
+/**
+ * Internal plan for a task — dates, plus the wall-clock fractions of the
+ * start and end days needed to render times and chain to dependents.
+ *
+ * Wall-clock fraction model: 0 = 08:00, 0.5 = 12:00 (lunch / 13:00 resume),
+ * 1 = 17:00. Lunch is treated as a non-counting break; work either fills
+ * (0..0.5] AM or (0.5..1] PM.
+ */
+interface TaskPlan {
+  startDate: string | null
+  dueDate: string | null
+  /** Wall fraction at which work begins on startDate (0=08:00, 0.5=13:00). */
+  startOffset: number
+  /** Wall fraction at which work ends on dueDate (0.5=12:00, 1=17:00). */
+  dueFraction: number
+}
+
+function planFor(
+  task: Task,
+  byId: Map<string, Task>,
+  memberById: Map<string, Member> | undefined,
+  cache: Map<string, TaskPlan>
+): TaskPlan {
+  const hit = cache.get(task.id)
+  if (hit) return hit
+
+  const member = task.assigneeId ? memberById?.get(task.assigneeId) : undefined
+  const halfByDate = new Map<string, 'am' | 'pm'>()
+  const contribByDate = new Map<string, 0 | 0.5>()
+  if (member?.daysOff) {
+    for (const d of member.daysOff) {
+      contribByDate.set(d.date, d.half ? 0.5 : 0)
+      if (d.half) halfByDate.set(d.date, d.half)
+    }
+  }
+  const dayContrib = (date: string): number => {
+    if (isWeekend(date)) return 0
+    if (contribByDate.has(date)) return contribByDate.get(date) as number
+    return 1
+  }
+  // Wall position where work naturally begins on `date`. AM-off → 0.5.
+  const naturalWallStart = (date: string): number =>
+    dayContrib(date) === 0.5 && halfByDate.get(date) === 'am' ? 0.5 : 0
+  // Wall position where work naturally ends on `date`. PM-off → 0.5.
+  const naturalWallEnd = (date: string): number => {
+    const c = dayContrib(date)
+    if (c === 0) return 0
+    if (c === 0.5 && halfByDate.get(date) === 'pm') return 0.5
+    return 1
+  }
+  // Available work fraction on `date` given a wall-clock start offset.
+  const availOnDay = (date: string, offset: number): number => {
+    const ws = naturalWallStart(date)
+    const we = naturalWallEnd(date)
+    return Math.max(0, we - Math.max(offset, ws))
+  }
+
+  // Step 1: pick start. With prereqs, find the latest prereq end moment.
+  let start: string | null = task.startDate
+  let startOffset = 0
+  if (task.dependsOn?.length > 0) {
+    let bestDate: string | null = null
+    let bestFrac = 0
+    for (const id of task.dependsOn) {
+      const p = byId.get(id)
+      if (!p) continue
+      const pPlan = planFor(p, byId, memberById, cache)
+      if (!pPlan.dueDate) continue
+      if (
+        bestDate === null ||
+        pPlan.dueDate > bestDate ||
+        (pPlan.dueDate === bestDate && pPlan.dueFraction > bestFrac)
+      ) {
+        bestDate = pPlan.dueDate
+        bestFrac = pPlan.dueFraction
+      }
+    }
+    if (bestDate) {
+      // Can the dependent start the same day with leftover capacity?
+      // "Leftover" exists if this task's natural-end on bestDate extends
+      // beyond the wall position where the prereq stopped working.
+      if (naturalWallEnd(bestDate) > bestFrac + EPS) {
+        start = bestDate
+        startOffset = Math.max(naturalWallStart(bestDate), bestFrac)
+      } else {
+        let d = addDays(bestDate, 1)
+        while (dayContrib(d) <= 0) d = addDays(d, 1)
+        start = d
+        startOffset = 0
+      }
+    }
+  }
+
+  if (!start) {
+    const plan: TaskPlan = {
+      startDate: null,
+      dueDate: task.dueDate,
+      startOffset: 0,
+      dueFraction: 1,
+    }
+    cache.set(task.id, plan)
+    return plan
+  }
+
+  // Step 2: normalize start past off days when caller set it on one.
+  while (dayContrib(start) <= 0) {
+    start = addDays(start, 1)
+    startOffset = 0
+  }
+  // If the day naturally starts later (AM-off), lift offset to match.
+  startOffset = Math.max(startOffset, naturalWallStart(start))
+
+  // No effort → end stays manual.
+  if (!task.estimate || task.estimate <= 0) {
+    const plan: TaskPlan = {
+      startDate: start,
+      dueDate: task.dueDate,
+      startOffset,
+      dueFraction: 1,
+    }
+    cache.set(task.id, plan)
+    return plan
+  }
+
+  // Step 3: walk forward consuming effort.
+  let d = start
+  let remaining = task.estimate
+  let end = start
+  let isFirst = true
+  let lastUse = 0
+  let lastWallStart = startOffset
+  while (remaining > EPS) {
+    const avail = isFirst ? availOnDay(d, startOffset) : availOnDay(d, 0)
+    if (avail > 0) {
+      const use = Math.min(remaining, avail)
+      remaining -= use
+      end = d
+      lastUse = use
+      lastWallStart = isFirst
+        ? Math.max(naturalWallStart(d), startOffset)
+        : naturalWallStart(d)
+    }
+    isFirst = false
+    if (remaining > EPS) d = addDays(d, 1)
+  }
+  const dueFraction = Math.min(1, lastWallStart + lastUse)
+  const plan: TaskPlan = { startDate: start, dueDate: end, startOffset, dueFraction }
+  cache.set(task.id, plan)
+  return plan
+}
+
+/**
+ * Wall-clock display times. Maps the plan's fractions to {08:00, 12:00,
+ * 13:00, 17:00}. Sub-half-day usage is rounded to lunch (12:00) or 17:00.
+ */
+export function computeWorkingTimes(
+  task: Task,
+  byId: Map<string, Task>,
+  memberById?: Map<string, Member>
+): { startTime: string; endTime: string } {
+  const plan = planFor(task, byId, memberById, new Map())
+  const startTime = plan.startOffset >= 0.5 - EPS ? '13:00' : '08:00'
+  const endTime = plan.dueFraction > 0.5 + EPS ? '17:00' : '12:00'
+  return { startTime, endTime }
+}
+
+/**
+ * Recompute a task's start/end from its prereqs, effort, and the assignee's
+ * off-days.
+ *
+ * Rules:
+ *   - If task has prereqs with end dates → start = next working day after
+ *     latest prereq end. Otherwise start = task.startDate (manual).
+ *   - If effort > 0 → end = start + effort working days, consuming
+ *     half-off days as 0.5 and skipping weekends + full-off days.
+ *     Otherwise end = task.dueDate (manual).
+ *   - If start lands on a non-working day (weekend or full-off), it's
+ *     pushed forward to the next working day.
+ *
+ * Returns task.startDate / task.dueDate unchanged when there's nothing to
+ * compute (no prereqs AND no effort).
+ */
 export function computeStartEnd(
   task: Task,
-  byId: Map<string, Task>
+  byId: Map<string, Task>,
+  memberById?: Map<string, Member>
 ): { startDate: string | null; dueDate: string | null } {
-  if (!task.dependsOn || task.dependsOn.length === 0) {
-    return { startDate: task.startDate, dueDate: task.dueDate }
-  }
-  const ends = task.dependsOn
-    .map((id) => byId.get(id)?.dueDate)
-    .filter((d): d is string => Boolean(d))
-  if (ends.length === 0) {
-    return { startDate: task.startDate, dueDate: task.dueDate }
-  }
-  const latest = ends.reduce((a, b) => (a > b ? a : b))
-  const start = addDays(latest, 1)
-  const effort = task.estimate && task.estimate > 0 ? task.estimate : 1
-  const end = addDays(start, effort - 1)
-  return { startDate: start, dueDate: end }
+  const plan = planFor(task, byId, memberById, new Map())
+  return { startDate: plan.startDate, dueDate: plan.dueDate }
 }
 
 /**
@@ -144,7 +415,9 @@ export function computeStartEnd(
  * it. Idempotent — stops when a task's computed dates equal current ones.
  */
 export async function recomputeDates(taskId: string): Promise<void> {
-  await db.transaction('rw', db.tasks, async () => {
+  await db.transaction('rw', db.tasks, db.members, async () => {
+    const members = await db.members.toArray()
+    const memberById = new Map(members.map((m) => [m.id, m]))
     const visited = new Set<string>()
     const queue: string[] = [taskId]
     while (queue.length) {
@@ -155,7 +428,7 @@ export async function recomputeDates(taskId: string): Promise<void> {
       const byId = new Map(all.map((t) => [t.id, t]))
       const task = byId.get(id)
       if (!task) continue
-      const next = computeStartEnd(task, byId)
+      const next = computeStartEnd(task, byId, memberById)
       if (
         next.startDate !== task.startDate ||
         next.dueDate !== task.dueDate
@@ -165,7 +438,6 @@ export async function recomputeDates(taskId: string): Promise<void> {
           dueDate: next.dueDate,
         })
       }
-      // Enqueue dependents (tasks where dependsOn includes this id).
       for (const t of all) {
         if (t.dependsOn?.includes(id) && !visited.has(t.id)) {
           queue.push(t.id)
@@ -173,6 +445,30 @@ export async function recomputeDates(taskId: string): Promise<void> {
       }
     }
   })
+}
+
+/**
+ * Replace a member's vacation days. Sorts + dedupes + filters invalid dates,
+ * then recomputes every task assigned to that member (forward through their
+ * dependents too).
+ */
+export async function setMemberDaysOff(
+  memberId: string,
+  daysOff: DayOff[]
+): Promise<DayOff[]> {
+  // Dedupe by date (last entry wins), drop bad dates, sort.
+  const byDate = new Map<string, DayOff>()
+  for (const d of daysOff) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(d.date)) continue
+    byDate.set(d.date, d.half ? { date: d.date, half: d.half } : { date: d.date })
+  }
+  const clean = Array.from(byDate.values()).sort((a, b) =>
+    a.date.localeCompare(b.date)
+  )
+  await db.members.update(memberId, { daysOff: clean })
+  const owned = await db.tasks.where('assigneeId').equals(memberId).toArray()
+  for (const t of owned) await recomputeDates(t.id)
+  return clean
 }
 
 /**
@@ -335,7 +631,14 @@ export async function importAll(data: ExportPayload) {
     await db.members.clear()
     await db.sprints.clear()
     await db.tasks.clear()
-    await db.members.bulkAdd(data.members)
+    const members: Member[] = data.members.map((m) => {
+      const raw = (m.daysOff ?? []) as Array<string | DayOff>
+      const daysOff: DayOff[] = raw.map((d) =>
+        typeof d === 'string' ? { date: d } : d
+      )
+      return { ...m, daysOff }
+    })
+    await db.members.bulkAdd(members)
     await db.sprints.bulkAdd(data.sprints)
     // Backfill missing fields from older exports (pre-startDate). Older
     // payloads may have `startDate === undefined` at runtime even though the
@@ -423,6 +726,7 @@ async function seedFresh() {
     id: uid(),
     name,
     color: colorForName(name),
+    daysOff: [],
   }))
   await db.members.bulkAdd(members)
 

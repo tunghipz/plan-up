@@ -13,12 +13,18 @@ import {
   isTaskBlocked,
   computeStartEnd,
   addDays,
+  addBusinessDays,
+  nextBusinessDay,
+  isWeekend,
+  setMemberDaysOff,
+  computeWorkingTimes,
   dedupeSprints,
   exportAll,
   importAll,
   seedIfEmpty,
   __resetSeedLockForTests,
   type Task,
+  type Member,
 } from './db'
 
 beforeEach(async () => {
@@ -228,6 +234,182 @@ describe('date computation', () => {
     expect(addDays('2026-05-30', 3)).toBe('2026-06-02')
   })
 
+  it('isWeekend flags Sat/Sun, not Mon-Fri', () => {
+    expect(isWeekend('2026-06-06')).toBe(true)  // Sat
+    expect(isWeekend('2026-06-07')).toBe(true)  // Sun
+    expect(isWeekend('2026-06-05')).toBe(false) // Fri
+    expect(isWeekend('2026-06-08')).toBe(false) // Mon
+  })
+
+  it('nextBusinessDay: weekday unchanged, weekend → next Monday', () => {
+    expect(nextBusinessDay('2026-06-05')).toBe('2026-06-05') // Fri
+    expect(nextBusinessDay('2026-06-06')).toBe('2026-06-08') // Sat → Mon
+    expect(nextBusinessDay('2026-06-07')).toBe('2026-06-08') // Sun → Mon
+  })
+
+  it('addBusinessDays skips weekends', () => {
+    // Mon 06-01 + 4 business days = Fri 06-05
+    expect(addBusinessDays('2026-06-01', 4)).toBe('2026-06-05')
+    // Fri 06-05 + 1 business day = Mon 06-08 (skips Sat/Sun)
+    expect(addBusinessDays('2026-06-05', 1)).toBe('2026-06-08')
+    // Mon 06-01 + 5 business days = Mon 06-08 (full week)
+    expect(addBusinessDays('2026-06-01', 5)).toBe('2026-06-08')
+  })
+
+  it('computeStartEnd: prereq ends Friday → dependent starts Monday', () => {
+    const p: Task = {
+      id: 'p', sequence: 1, title: 'p', assigneeId: null, sprintId: 's',
+      status: 'todo', priority: 'normal',
+      startDate: '2026-06-05', dueDate: '2026-06-05', // Friday
+      estimate: 1, createdAt: 0, dependsOn: [],
+    }
+    const a: Task = { ...p, id: 'a', sequence: 2, estimate: 3, dependsOn: ['p'] }
+    const byId = new Map([[p.id, p], [a.id, a]])
+    // Fri + 1 calendar = Sat → next Monday 06-08, effort 3 → 06-08, 06-09, 06-10
+    expect(computeStartEnd(a, byId)).toEqual({
+      startDate: '2026-06-08', dueDate: '2026-06-10',
+    })
+  })
+
+  it('addBusinessDays skips member-specific off-days', () => {
+    // Mon 06-01 + 4 with Wed 06-03 off → Mon, Tue, [skip Wed], Thu, Fri, Mon
+    // Wait: counting business days FORWARD from Mon. addBusinessDays(start, n)
+    // advances n working days, returning the n-th. With 06-03 off, the days
+    // counted are Tue, Thu, Fri, Mon → end = Mon 06-08.
+    const off = new Set(['2026-06-03'])
+    expect(addBusinessDays('2026-06-01', 4, off)).toBe('2026-06-08')
+  })
+
+  it('nextBusinessDay skips member-specific off-days', () => {
+    const off = new Set(['2026-06-08']) // Monday off
+    // 06-06 Sat → skip Sat, Sun, Mon (off) → Tue 06-09
+    expect(nextBusinessDay('2026-06-06', off)).toBe('2026-06-09')
+  })
+
+  it('computeStartEnd uses assignee daysOff', () => {
+    const member: Member = {
+      id: 'm1', name: 'X', color: '#000',
+      daysOff: [{ date: '2026-06-08' }], // Monday full off
+    }
+    const p: Task = {
+      id: 'p', sequence: 1, title: 'p', assigneeId: 'm1', sprintId: 's',
+      status: 'todo', priority: 'normal',
+      startDate: '2026-06-05', dueDate: '2026-06-05', // Friday
+      estimate: 1, createdAt: 0, dependsOn: [],
+    }
+    const a: Task = { ...p, id: 'a', sequence: 2, estimate: 2, dependsOn: ['p'] }
+    const byId = new Map([[p.id, p], [a.id, a]])
+    const memberById = new Map([[member.id, member]])
+    // Fri + 1 = Sat → next biz = Mon 06-08, but Mon is off → Tue 06-09
+    // effort 2 → 06-09, 06-10
+    expect(computeStartEnd(a, byId, memberById)).toEqual({
+      startDate: '2026-06-09', dueDate: '2026-06-10',
+    })
+  })
+
+  it('setMemberDaysOff recomputes tasks owned by that member', async () => {
+    await db.members.add({
+      id: 'm1', name: 'X', color: '#000', daysOff: [],
+    })
+    await db.tasks.bulkAdd([
+      {
+        id: 'p', sequence: 1, title: 'p', assigneeId: 'm1', sprintId: 's',
+        status: 'todo', priority: 'normal',
+        startDate: '2026-06-05', dueDate: '2026-06-05', // Fri
+        estimate: 1, createdAt: 0, dependsOn: [],
+      },
+      {
+        id: 'a', sequence: 2, title: 'a', assigneeId: 'm1', sprintId: 's',
+        status: 'todo', priority: 'normal',
+        startDate: null, dueDate: null,
+        estimate: 2, createdAt: 1, dependsOn: ['p'],
+      },
+    ])
+    // Trigger initial recompute by setting empty daysOff
+    await setMemberDaysOff('m1', [])
+    let a = await db.tasks.get('a')
+    expect(a?.startDate).toBe('2026-06-08') // Mon
+    expect(a?.dueDate).toBe('2026-06-09')   // Tue
+
+    // Now mark Monday off
+    await setMemberDaysOff('m1', [{ date: '2026-06-08' }])
+    a = await db.tasks.get('a')
+    expect(a?.startDate).toBe('2026-06-09') // Tue
+    expect(a?.dueDate).toBe('2026-06-10')   // Wed
+  })
+
+  it('half-day off: effort 1 day starting on a half-off day spans 2 days', () => {
+    // Mon AM-off → Mon contributes 0.5, Tue contributes 1
+    const member: Member = {
+      id: 'm', name: 'X', color: '#000',
+      daysOff: [{ date: '2026-06-08', half: 'am' }],
+    }
+    const p: Task = {
+      id: 'p', sequence: 1, title: 'p', assigneeId: 'm', sprintId: 's',
+      status: 'todo', priority: 'normal',
+      startDate: '2026-06-05', dueDate: '2026-06-05', // Fri
+      estimate: 1, createdAt: 0, dependsOn: [],
+    }
+    const a: Task = { ...p, id: 'a', sequence: 2, estimate: 1, dependsOn: ['p'] }
+    const byId = new Map([[p.id, p], [a.id, a]])
+    const memberById = new Map([[member.id, member]])
+    // Start = Mon 06-08 (half-off still works in PM). effort 1.0
+    // Mon contributes 0.5, remaining 0.5. Tue contributes 1, exits → end Tue.
+    expect(computeStartEnd(a, byId, memberById)).toEqual({
+      startDate: '2026-06-08', dueDate: '2026-06-09',
+    })
+  })
+
+  it('half-day off: decimal effort fits within a single half-day', () => {
+    const member: Member = {
+      id: 'm', name: 'X', color: '#000',
+      daysOff: [{ date: '2026-06-08', half: 'pm' }],
+    }
+    const p: Task = {
+      id: 'p', sequence: 1, title: 'p', assigneeId: 'm', sprintId: 's',
+      status: 'todo', priority: 'normal',
+      startDate: '2026-06-05', dueDate: '2026-06-05',
+      estimate: 1, createdAt: 0, dependsOn: [],
+    }
+    // 0.5d task starting Mon (PM-off) → Mon contributes 0.5, fits exactly
+    const a: Task = { ...p, id: 'a', sequence: 2, estimate: 0.5, dependsOn: ['p'] }
+    const byId = new Map([[p.id, p], [a.id, a]])
+    const memberById = new Map([[member.id, member]])
+    expect(computeStartEnd(a, byId, memberById)).toEqual({
+      startDate: '2026-06-08', dueDate: '2026-06-08',
+    })
+  })
+
+  it('half-day off: decimal effort 1.5d crosses 2 days normally', () => {
+    const p: Task = {
+      id: 'p', sequence: 1, title: 'p', assigneeId: null, sprintId: 's',
+      status: 'todo', priority: 'normal',
+      startDate: '2026-06-05', dueDate: '2026-06-05', // Fri
+      estimate: 1, createdAt: 0, dependsOn: [],
+    }
+    const a: Task = { ...p, id: 'a', sequence: 2, estimate: 1.5, dependsOn: ['p'] }
+    const byId = new Map([[p.id, p], [a.id, a]])
+    // Start Mon 06-08 (1.0), remaining 0.5. Tue 06-09 (1.0), exit → end Tue
+    expect(computeStartEnd(a, byId)).toEqual({
+      startDate: '2026-06-08', dueDate: '2026-06-09',
+    })
+  })
+
+  it('computeStartEnd: effort spans weekend → end pushed past Sat/Sun', () => {
+    const p: Task = {
+      id: 'p', sequence: 1, title: 'p', assigneeId: null, sprintId: 's',
+      status: 'todo', priority: 'normal',
+      startDate: '2026-06-03', dueDate: '2026-06-03', // Wednesday
+      estimate: 1, createdAt: 0, dependsOn: [],
+    }
+    // a: 4 days, starts Thursday 06-04 → Thu, Fri, Mon, Tue → ends Tue 06-09
+    const a: Task = { ...p, id: 'a', sequence: 2, estimate: 4, dependsOn: ['p'] }
+    const byId = new Map([[p.id, p], [a.id, a]])
+    expect(computeStartEnd(a, byId)).toEqual({
+      startDate: '2026-06-04', dueDate: '2026-06-09',
+    })
+  })
+
   it('computeStartEnd: no prereqs → returns existing dates', () => {
     const t: Task = {
       id: 'a', sequence: 1, title: 'a', assigneeId: null, sprintId: 's',
@@ -247,7 +429,8 @@ describe('date computation', () => {
       startDate: '2026-06-01', dueDate: '2026-06-01',
       estimate: 1, createdAt: 0, dependsOn: [],
     }
-    const p2: Task = { ...p1, id: 'p2', sequence: 2, dueDate: '2026-06-03' }
+    // estimate = 3 so prereq's own walk produces dueDate 06-03 consistently.
+    const p2: Task = { ...p1, id: 'p2', sequence: 2, estimate: 3, dueDate: '2026-06-03' }
     const a: Task = {
       id: 'a', sequence: 3, title: 'a', assigneeId: null, sprintId: 's',
       status: 'todo', priority: 'normal',
@@ -261,18 +444,120 @@ describe('date computation', () => {
     })
   })
 
-  it('computeStartEnd: missing effort defaults to 1 day (start = end)', () => {
+  it('computeStartEnd: no effort → start computed from prereq, end stays manual', () => {
     const p: Task = {
       id: 'p', sequence: 1, title: 'p', assigneeId: null, sprintId: 's',
       status: 'todo', priority: 'normal',
       startDate: '2026-06-01', dueDate: '2026-06-01',
       estimate: null, createdAt: 0, dependsOn: [],
     }
-    const a: Task = { ...p, id: 'a', sequence: 2, estimate: null, dependsOn: ['p'] }
+    // a has prereq + manual dueDate, no effort → start is computed but
+    // end is left as user set it (manual).
+    const a: Task = {
+      ...p, id: 'a', sequence: 2, estimate: null, dependsOn: ['p'],
+      startDate: null, dueDate: '2026-06-10',
+    }
     const byId = new Map([[p.id, p], [a.id, a]])
     expect(computeStartEnd(a, byId)).toEqual({
-      startDate: '2026-06-02', dueDate: '2026-06-02',
+      startDate: '2026-06-02', dueDate: '2026-06-10',
     })
+  })
+
+  it('computeStartEnd: no prereqs but effort set → end derived from start + effort', () => {
+    // start = Mon 06-01, effort = 3 → end = Wed 06-03 (skip nothing)
+    const t: Task = {
+      id: 't', sequence: 1, title: 't', assigneeId: null, sprintId: 's',
+      status: 'todo', priority: 'normal',
+      startDate: '2026-06-01', dueDate: null, estimate: 3,
+      createdAt: 0, dependsOn: [],
+    }
+    expect(computeStartEnd(t, new Map([[t.id, t]]))).toEqual({
+      startDate: '2026-06-01', dueDate: '2026-06-03',
+    })
+  })
+
+  it('computeStartEnd: no prereqs, no effort → unchanged', () => {
+    const t: Task = {
+      id: 't', sequence: 1, title: 't', assigneeId: null, sprintId: 's',
+      status: 'todo', priority: 'normal',
+      startDate: '2026-06-01', dueDate: '2026-06-15', estimate: null,
+      createdAt: 0, dependsOn: [],
+    }
+    expect(computeStartEnd(t, new Map([[t.id, t]]))).toEqual({
+      startDate: '2026-06-01', dueDate: '2026-06-15',
+    })
+  })
+
+  it('dependent starts same day when prereq ends mid-day', () => {
+    // A: 1.5d starting Wed 06-03 → ends Thu 06-04 noon. dueFraction = 0.5.
+    // B: 1d depending on A → should start Thu 13:00, end Fri 12:00.
+    const a: Task = {
+      id: 'a', sequence: 1, title: 'a', assigneeId: null, sprintId: 's',
+      status: 'todo', priority: 'normal',
+      startDate: '2026-06-03', dueDate: null, estimate: 1.5,
+      createdAt: 0, dependsOn: [],
+    }
+    const b: Task = {
+      id: 'b', sequence: 2, title: 'b', assigneeId: null, sprintId: 's',
+      status: 'todo', priority: 'normal',
+      startDate: null, dueDate: null, estimate: 1,
+      createdAt: 1, dependsOn: ['a'],
+    }
+    const byId = new Map([[a.id, a], [b.id, b]])
+    expect(computeStartEnd(b, byId)).toEqual({
+      startDate: '2026-06-04', dueDate: '2026-06-05',
+    })
+    // Times: B starts PM, ends mid-day Fri.
+    expect(computeWorkingTimes(b, byId)).toEqual({
+      startTime: '13:00', endTime: '12:00',
+    })
+  })
+
+  it('dependent skips to next day when prereq fills its day', () => {
+    // A: 1d Wed → ends Wed 17:00. dueFraction = 1.
+    // B: 1d depending on A → should start Thu 08:00.
+    const a: Task = {
+      id: 'a', sequence: 1, title: 'a', assigneeId: null, sprintId: 's',
+      status: 'todo', priority: 'normal',
+      startDate: '2026-06-03', dueDate: null, estimate: 1,
+      createdAt: 0, dependsOn: [],
+    }
+    const b: Task = {
+      id: 'b', sequence: 2, title: 'b', assigneeId: null, sprintId: 's',
+      status: 'todo', priority: 'normal',
+      startDate: null, dueDate: null, estimate: 1,
+      createdAt: 1, dependsOn: ['a'],
+    }
+    const byId = new Map([[a.id, a], [b.id, b]])
+    expect(computeStartEnd(b, byId)).toEqual({
+      startDate: '2026-06-04', dueDate: '2026-06-04',
+    })
+    expect(computeWorkingTimes(b, byId)).toEqual({
+      startTime: '08:00', endTime: '17:00',
+    })
+  })
+
+  it('adding member day-off shifts a no-prereq task with effort set', async () => {
+    // The new behavior the user asked for: off-days affect ALL of the
+    // member's tasks with effort, not only ones with prereqs.
+    await db.members.add({ id: 'm', name: 'X', color: '#000', daysOff: [] })
+    await db.tasks.add({
+      id: 't', sequence: 1, title: 't', assigneeId: 'm', sprintId: 's',
+      status: 'todo', priority: 'normal',
+      startDate: '2026-06-01', dueDate: null, estimate: 3,
+      createdAt: 0, dependsOn: [],
+    })
+    // Initial: Mon 06-01, effort 3 → end Wed 06-03
+    await setMemberDaysOff('m', [])
+    let t = await db.tasks.get('t')
+    expect(t?.startDate).toBe('2026-06-01')
+    expect(t?.dueDate).toBe('2026-06-03')
+
+    // Add Tuesday 06-02 off → end shifts to Thu 06-04
+    await setMemberDaysOff('m', [{ date: '2026-06-02' }])
+    t = await db.tasks.get('t')
+    expect(t?.startDate).toBe('2026-06-01')
+    expect(t?.dueDate).toBe('2026-06-04')
   })
 
   it('setDependencies recomputes dates and cascades forward', async () => {

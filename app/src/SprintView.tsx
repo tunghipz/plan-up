@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
   Plus,
   Trash2,
-  Flag,
   ChevronDown,
   Calendar,
   UserPlus,
@@ -15,15 +15,16 @@ import {
   deleteMember,
   deleteTask,
   setDependencies,
+  setMemberDaysOff,
   recomputeDates,
+  computeWorkingTimes,
   isTaskBlocked,
   nextSequence,
   type Member,
   type Task,
   type Status,
-  type Priority,
 } from './db'
-import { formatRelativeDate, isOverdue } from './lib'
+import { formatRelativeDate, formatShortDate, isOverdue } from './lib'
 
 const WELCOME_PREFIX = 'Welcome —'
 
@@ -31,14 +32,6 @@ const STATUS_META: Record<Status, { label: string; varName: string }> = {
   todo: { label: 'To do', varName: 'var(--color-status-todo)' },
   in_progress: { label: 'In progress', varName: 'var(--color-status-progress)' },
   done: { label: 'Done', varName: 'var(--color-status-done)' },
-}
-
-const PRIORITY_META: Record<Priority, { label: string; varName: string }> = {
-  urgent: { label: 'Urgent', varName: 'var(--color-priority-urgent)' },
-  high: { label: 'High', varName: 'var(--color-priority-high)' },
-  normal: { label: 'Normal', varName: 'var(--color-priority-normal)' },
-  low: { label: 'Low', varName: 'var(--color-priority-low)' },
-  none: { label: 'None', varName: 'var(--color-priority-none)' },
 }
 
 const COLLAPSE_KEY = (sprintId: string) => `plan-tmp:collapsed:${sprintId}`
@@ -233,6 +226,7 @@ function MemberCard({
         collapsed={collapsed}
         onToggleCollapse={onToggleCollapse}
         onRename={(n) => db.members.update(member.id, { name: n })}
+        extras={<MemberScheduleButton member={member} />}
         onDelete={() => {
           if (
             confirm(
@@ -337,6 +331,7 @@ function CollapsedMembers({
               name={m.name}
               count={0}
               onRename={(n) => db.members.update(m.id, { name: n })}
+              extras={<MemberScheduleButton member={m} />}
               onDelete={() => {
                 if (confirm(`Remove ${m.name}?`)) deleteMember(m.id)
               }}
@@ -375,6 +370,7 @@ function GroupHeader({
   muted,
   collapsed,
   onToggleCollapse,
+  extras,
 }: {
   avatar: React.ReactNode
   name: string
@@ -384,6 +380,8 @@ function GroupHeader({
   muted?: boolean
   collapsed?: boolean
   onToggleCollapse?: () => void
+  /** Extra action buttons rendered before rename/delete in the action group. */
+  extras?: React.ReactNode
 }) {
   const collapsible = onToggleCollapse !== undefined
   const [editing, setEditing] = useState(false)
@@ -468,6 +466,7 @@ function GroupHeader({
       )}
       <span className="text-xs text-ink-faint select-none">{count}</span>
       <div className="ml-auto flex items-center gap-2">
+        {extras}
         {onRename && !editing && (
           <button
             onClick={(e) => {
@@ -508,6 +507,232 @@ function Avatar({ member }: { member: Member }) {
     >
       {member.name.slice(0, 1).toUpperCase()}
     </span>
+  )
+}
+
+/**
+ * Input-styled date picker. Shows formatted dd/mm/yy and opens the native
+ * picker on click. `color-scheme` (set globally) themes the picker popup.
+ */
+function DateField({
+  value,
+  onChange,
+  placeholder = 'dd/mm/yy',
+}: {
+  value: string
+  onChange: (v: string) => void
+  placeholder?: string
+}) {
+  const ref = useRef<HTMLInputElement>(null)
+  const open = (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const el = ref.current
+    if (!el) return
+    if (typeof el.showPicker === 'function') {
+      try {
+        el.showPicker()
+        return
+      } catch {
+        /* fall through */
+      }
+    }
+    el.focus()
+    el.click()
+  }
+  return (
+    <button
+      type="button"
+      onClick={open}
+      className="relative flex-1 text-xs bg-canvas border border-border rounded px-2 py-1 text-left h-7 focus:border-accent outline-none"
+    >
+      {value ? (
+        <span className="text-ink tabular-nums">{formatShortDate(value)}</span>
+      ) : (
+        <span className="text-ink-faint">{placeholder}</span>
+      )}
+      <input
+        ref={ref}
+        type="date"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="absolute inset-0 opacity-0 pointer-events-none"
+        tabIndex={-1}
+        aria-hidden="true"
+      />
+    </button>
+  )
+}
+
+/**
+ * Calendar button on a member's group header. Opens a popover where the
+ * manager picks days the member is off (vacation, holidays). Weekends are
+ * already implicit; this is only the extra off-days. Saving recomputes
+ * every task assigned to this member (and forward through their deps).
+ */
+function MemberScheduleButton({ member }: { member: Member }) {
+  const [open, setOpen] = useState(false)
+  const [draftDate, setDraftDate] = useState('')
+  const [draftHalf, setDraftHalf] = useState<'all' | 'am' | 'pm'>('all')
+  const popRef = useRef<HTMLDivElement>(null)
+  const btnRef = useRef<HTMLButtonElement>(null)
+  // Popover lives in a portal (escapes Card's overflow-hidden). We track the
+  // trigger's screen position and re-pin on scroll/resize so it stays glued.
+  const [pos, setPos] = useState<{ top: number; right: number }>({ top: 0, right: 0 })
+
+  useEffect(() => {
+    if (!open) return
+    const pin = () => {
+      const rect = btnRef.current?.getBoundingClientRect()
+      if (rect) {
+        setPos({
+          top: rect.bottom + 4,
+          right: Math.max(8, window.innerWidth - rect.right),
+        })
+      }
+    }
+    pin()
+    const onClick = (e: MouseEvent) => {
+      const target = e.target as Node
+      if (
+        popRef.current && !popRef.current.contains(target) &&
+        btnRef.current && !btnRef.current.contains(target)
+      ) {
+        setOpen(false)
+      }
+    }
+    window.addEventListener('scroll', pin, true)
+    window.addEventListener('resize', pin)
+    document.addEventListener('mousedown', onClick)
+    return () => {
+      window.removeEventListener('scroll', pin, true)
+      window.removeEventListener('resize', pin)
+      document.removeEventListener('mousedown', onClick)
+    }
+  }, [open])
+
+  const days = member.daysOff ?? []
+  const count = days.length
+
+  const updateOne = async (date: string, half: 'all' | 'am' | 'pm') => {
+    const next = days.filter((d) => d.date !== date)
+    next.push(half === 'all' ? { date } : { date, half })
+    await setMemberDaysOff(member.id, next)
+  }
+  const removeDay = async (date: string) => {
+    await setMemberDaysOff(
+      member.id,
+      days.filter((d) => d.date !== date)
+    )
+  }
+  const addDraft = async () => {
+    if (!draftDate) return
+    await updateOne(draftDate, draftHalf)
+    setDraftDate('')
+    setDraftHalf('all')
+  }
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation()
+          setOpen((v) => !v)
+        }}
+        className={`inline-flex items-center gap-0.5 transition text-xs ${
+          count > 0
+            ? 'text-ink opacity-100'
+            : 'text-ink-faint opacity-0 group-hover/card:opacity-100'
+        } hover:text-ink`}
+        title={
+          count > 0
+            ? `${count} day${count === 1 ? '' : 's'} off`
+            : 'Set days off'
+        }
+        aria-label="Days off"
+      >
+        <Calendar size={14} />
+        {count > 0 && <span className="text-[10px] font-medium">{count}</span>}
+      </button>
+      {open && createPortal(
+        <div
+          ref={popRef}
+          onClick={(e) => e.stopPropagation()}
+          style={{ position: 'fixed', top: pos.top, right: pos.right }}
+          className="z-50 w-72 bg-surface border border-border rounded-lg shadow-lg p-2"
+        >
+          <div className="text-[10px] uppercase tracking-wider text-ink-faint px-1 pb-1.5">
+            Days off — {member.name}
+          </div>
+          {days.length === 0 && (
+            <div className="text-xs text-ink-faint px-1 pb-1.5">
+              None. Weekends are already off.
+            </div>
+          )}
+          {days.map((d) => (
+            <div
+              key={d.date}
+              className="flex items-center gap-2 px-1.5 py-1 rounded hover:bg-surface-hover group/day"
+            >
+              <span className="text-xs text-ink tabular-nums w-16 shrink-0">
+                {formatShortDate(d.date)}
+              </span>
+              <select
+                value={d.half ?? 'all'}
+                onChange={(e) =>
+                  updateOne(d.date, e.target.value as 'all' | 'am' | 'pm')
+                }
+                className="flex-1 text-xs bg-transparent border border-transparent hover:border-border rounded px-1 py-0.5 outline-none focus:border-accent cursor-pointer"
+              >
+                <option value="all">Off all day</option>
+                <option value="am">AM off (morning)</option>
+                <option value="pm">PM off (afternoon)</option>
+              </select>
+              <button
+                onClick={() => removeDay(d.date)}
+                className="text-ink-faint hover:text-red-500 opacity-0 group-hover/day:opacity-100 transition"
+                aria-label={`Remove ${d.date}`}
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+          <div className="border-t border-border mt-1 pt-2 space-y-1.5">
+            <div className="flex gap-2">
+              <DateField
+                value={draftDate}
+                onChange={setDraftDate}
+                placeholder="dd/mm/yy"
+              />
+              <select
+                value={draftHalf}
+                onChange={(e) =>
+                  setDraftHalf(e.target.value as 'all' | 'am' | 'pm')
+                }
+                className="text-xs bg-canvas border border-border rounded px-1.5 py-1 outline-none focus:border-accent cursor-pointer"
+              >
+                <option value="all">All</option>
+                <option value="am">AM</option>
+                <option value="pm">PM</option>
+              </select>
+              <button
+                onClick={addDraft}
+                disabled={!draftDate}
+                className="text-xs px-2 py-1 rounded bg-accent text-white disabled:opacity-40"
+              >
+                Add
+              </button>
+            </div>
+            <div className="text-[10px] text-ink-faint px-1">
+              Half-day off counts as 0.5 day toward effort.
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+    </>
   )
 }
 
@@ -559,7 +784,6 @@ function AddTaskRow({
       <div className={COL.effort} />
       <div className={COL.start} />
       <div className={COL.due} />
-      <div className={COL.priority} />
       <div className={COL.status} />
       <div className={COL.prereq} />
       <div className={COL.trash} />
@@ -575,9 +799,8 @@ const COL = {
   title: 'flex-1 min-w-0',
   assignee: 'w-7 flex justify-center shrink-0',
   effort: 'w-12 flex justify-end shrink-0',
-  start: 'w-20 flex justify-end shrink-0',
-  due: 'w-20 flex justify-end shrink-0',
-  priority: 'w-6 flex justify-center shrink-0',
+  start: 'w-28 flex justify-end shrink-0',
+  due: 'w-28 flex justify-end shrink-0',
   status: 'w-28 flex justify-start shrink-0',
   prereq: 'w-14 flex justify-end shrink-0',
   trash: 'w-5 flex justify-end shrink-0',
@@ -599,12 +822,15 @@ function TaskRow({
   const overdue = isOverdue(task.dueDate, task.status === 'done')
   const blocked = isTaskBlocked(task, tasksById)
   const isWelcome = task.title.startsWith(WELCOME_PREFIX)
+  const memberById = useMemo(
+    () => new Map(members.map((m) => [m.id, m])),
+    [members]
+  )
+  const { startTime, endTime } = computeWorkingTimes(task, tasksById, memberById)
 
   return (
     <div
-      className={`group/row flex items-center gap-3 px-4 py-2 text-sm hover:bg-surface-hover transition ${
-        blocked ? 'opacity-60' : ''
-      }`}
+      className="group/row flex items-center gap-3 px-4 py-2 text-sm hover:bg-surface-hover transition"
       title={blocked ? 'Blocked — waiting on a prerequisite task' : undefined}
     >
       <div className={COL.dot}>
@@ -641,8 +867,7 @@ function TaskRow({
           value={task.estimate}
           onChange={async (v) => {
             await update({ estimate: v })
-            // Recompute if prereqs exist — effort affects end date.
-            if (task.dependsOn.length > 0) await recomputeDates(task.id)
+            await recomputeDates(task.id)
           }}
         />
       </div>
@@ -650,8 +875,13 @@ function TaskRow({
       <div className={COL.start}>
         <DatePickCell
           value={task.startDate}
+          time={startTime}
           locked={task.dependsOn.length > 0}
-          onChange={(v) => update({ startDate: v })}
+          onChange={async (v) => {
+            await update({ startDate: v })
+            // Manual start change recomputes end when effort drives it.
+            await recomputeDates(task.id)
+          }}
           ariaLabel="Start date"
         />
       </div>
@@ -659,17 +889,14 @@ function TaskRow({
       <div className={COL.due}>
         <DatePickCell
           value={task.dueDate}
-          locked={task.dependsOn.length > 0}
+          time={endTime}
+          locked={
+            task.dependsOn.length > 0 ||
+            (task.estimate !== null && task.estimate > 0)
+          }
           highlight={overdue ? 'overdue' : null}
           onChange={(v) => update({ dueDate: v })}
           ariaLabel="Due date"
-        />
-      </div>
-
-      <div className={COL.priority}>
-        <PriorityCell
-          priority={task.priority}
-          onChange={(p) => update({ priority: p })}
         />
       </div>
 
@@ -710,10 +937,12 @@ function TaskColumnHeader() {
       <div className={`${COL.effort} ${labelCls} justify-end`}>Eff</div>
       <div className={`${COL.start} ${labelCls} justify-end`}>Start</div>
       <div className={`${COL.due} ${labelCls} justify-end`}>End</div>
-      <div className={`${COL.priority} ${labelCls}`}>Pri</div>
       <div className={`${COL.status} ${labelCls}`}>Status</div>
       <div className={`${COL.prereq} ${labelCls} justify-end`}>Pre</div>
       <div className={COL.trash} />
+      {/* Priority column removed — Task.priority still exists in the DB
+          and defaults to 'normal' on new tasks. Re-add this column if you
+          want to surface it again. */}
     </div>
   )
 }
@@ -729,14 +958,71 @@ function StatusDot({
   return (
     <button
       onClick={onCycle}
-      className="w-4 h-4 rounded-full border-2 shrink-0 transition hover:scale-110"
-      style={{
-        borderColor: meta.varName,
-        background: status === 'done' ? meta.varName : 'transparent',
-      }}
+      className="w-4 h-4 shrink-0 transition hover:scale-110 flex items-center justify-center"
+      style={{ color: meta.varName }}
       title={`${meta.label} — click to cycle`}
       aria-label={`Status: ${meta.label}`}
-    />
+    >
+      <StatusIcon status={status} />
+    </button>
+  )
+}
+
+/**
+ * ClickUp-style status icons. Color comes from the parent's `color` (via
+ * `currentColor`), so callers control hue with one inline style.
+ *   - todo:        dashed circle outline
+ *   - in_progress: outline with bottom-half filled (50% pie)
+ *   - done:        filled circle with white check
+ */
+function StatusIcon({ status }: { status: Status }) {
+  if (status === 'todo') {
+    return (
+      <svg viewBox="0 0 16 16" className="w-full h-full" aria-hidden="true">
+        <circle
+          cx="8"
+          cy="8"
+          r="6.5"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeDasharray="2 1.5"
+        />
+      </svg>
+    )
+  }
+  if (status === 'in_progress') {
+    return (
+      <svg viewBox="0 0 16 16" className="w-full h-full" aria-hidden="true">
+        <circle
+          cx="8"
+          cy="8"
+          r="6.5"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+        />
+        {/* right-half fill — clockwise arc from top through right to bottom */}
+        <path
+          d="M 8 1.5 A 6.5 6.5 0 0 1 8 14.5 Z"
+          fill="currentColor"
+        />
+      </svg>
+    )
+  }
+  // done
+  return (
+    <svg viewBox="0 0 16 16" className="w-full h-full" aria-hidden="true">
+      <circle cx="8" cy="8" r="7" fill="currentColor" />
+      <path
+        d="M 4.5 8 L 7 10.5 L 11.5 6"
+        stroke="white"
+        strokeWidth="1.6"
+        fill="none"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
   )
 }
 
@@ -798,7 +1084,11 @@ function AssigneePicker({
       <select
         ref={ref}
         value={task.assigneeId ?? ''}
-        onChange={(e) => update({ assigneeId: e.target.value || null })}
+        onChange={async (e) => {
+          update({ assigneeId: e.target.value || null })
+          // Reassign may change which member's daysOff apply → recompute.
+          await recomputeDates(task.id)
+        }}
         className="absolute inset-0 opacity-0 cursor-pointer"
         aria-label="Assignee"
       >
@@ -817,17 +1107,25 @@ function DatePickCell({
   value,
   highlight = null,
   locked = false,
+  time,
   onChange,
   ariaLabel,
 }: {
   value: string | null
   highlight?: 'overdue' | null
   locked?: boolean
+  /**
+   * Optional fixed time-of-day shown after the date (e.g. "08:00" for
+   * start-of-day, "17:00" for end-of-day). Display-only — the underlying
+   * Task.startDate / Task.dueDate values stay yyyy-mm-dd.
+   */
+  time?: string
   onChange: (v: string | null) => void
   ariaLabel: string
 }) {
   const ref = useRef<HTMLInputElement>(null)
-  const label = formatRelativeDate(value)
+  const date = formatRelativeDate(value)
+  const label = value && time ? `${date}, ${time}` : date
 
   const open = (e: React.MouseEvent) => {
     e.preventDefault()
@@ -866,7 +1164,7 @@ function DatePickCell({
       }
       className={`relative inline-flex items-center justify-end w-full h-8 px-2 rounded-md border border-transparent transition ${valueCls} ${
         locked
-          ? 'cursor-not-allowed italic'
+          ? 'cursor-default'
           : 'cursor-pointer hover:border-border-strong hover:bg-canvas'
       }`}
     >
@@ -885,40 +1183,6 @@ function DatePickCell({
         aria-hidden="true"
       />
     </button>
-  )
-}
-
-function PriorityCell({
-  priority,
-  onChange,
-}: {
-  priority: Priority
-  onChange: (p: Priority) => void
-}) {
-  const ref = useRef<HTMLSelectElement>(null)
-  const meta = PRIORITY_META[priority]
-  return (
-    <label className="relative inline-flex" title={`Priority: ${meta.label}`}>
-      <span
-        className="cursor-pointer p-1 rounded hover:bg-surface-hover"
-        onClick={() => ref.current?.focus()}
-      >
-        <Flag size={14} style={{ color: meta.varName }} fill={priority === 'none' ? 'none' : meta.varName} />
-      </span>
-      <select
-        ref={ref}
-        value={priority}
-        onChange={(e) => onChange(e.target.value as Priority)}
-        className="absolute inset-0 opacity-0 cursor-pointer"
-        aria-label="Priority"
-      >
-        {Object.entries(PRIORITY_META).map(([k, m]) => (
-          <option key={k} value={k}>
-            {m.label}
-          </option>
-        ))}
-      </select>
-    </label>
   )
 }
 
@@ -1068,7 +1332,7 @@ function AddMemberRow({
       onDeactivate()
       return
     }
-    await db.members.add({ id: uid(), name: n, color: colorForName(n) })
+    await db.members.add({ id: uid(), name: n, color: colorForName(n), daysOff: [] })
     setName('')
     inputRef.current?.focus()
   }

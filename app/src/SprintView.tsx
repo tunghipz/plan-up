@@ -1675,7 +1675,7 @@ function EffortCell({
       placeholder="—"
       title="Effort in days"
       aria-label="Effort in days"
-      className="w-full text-sm text-center tabular-nums bg-transparent outline-none focus:bg-canvas rounded px-1 h-7 placeholder:text-ink-faint"
+      className="editable w-full text-sm text-center tabular-nums bg-transparent placeholder:text-ink-faint"
     />
   )
 }
@@ -1756,7 +1756,7 @@ function PrereqInput({
       placeholder="—"
       title="Prerequisite task numbers, comma-separated (e.g. 2, 3)"
       aria-label="Prerequisite task numbers"
-      className="w-full text-sm text-right tabular-nums bg-transparent outline-none focus:bg-canvas rounded px-1 h-7 placeholder:text-ink-faint"
+      className="editable w-full text-sm text-right tabular-nums bg-transparent placeholder:text-ink-faint"
     />
   )
 }

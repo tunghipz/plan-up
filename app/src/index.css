@@ -127,6 +127,14 @@ h1, h2, h3, .display-tight {
   border-color: var(--color-accent);
 }
 
+/* Vibrancy — macOS-style translucent sidebar material. Apply to icon rail +
+ * sprint panel. Falls back to an opaque tint where backdrop-filter is absent. */
+.vibrancy {
+  background: var(--color-vibrancy);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+}
+
 /* Cupertino: no zebra striping — rows separate via hairline + plenty of
  * whitespace, like a native macOS list. (Zebra removed in v2 redesign.) */
 

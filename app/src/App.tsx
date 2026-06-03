@@ -10,6 +10,7 @@ import {
   List,
   LayoutGrid,
   Star,
+  Plus,
 } from 'lucide-react'
 import {
   db,
@@ -279,14 +280,8 @@ function App() {
 
   return (
     <div className="h-screen flex bg-canvas text-ink overflow-hidden">
-      {/* Icon rail: Apple Finder–style. Circle badges, ring on active, no rust bar. */}
-      <aside className="w-[60px] shrink-0 bg-canvas-sunk border-r border-border-hair flex flex-col items-center py-3 gap-2.5">
-        <div
-          className="text-[10px] font-semibold tracking-[0.18em] text-ink-faint mb-1 select-none"
-          title="plan-tmp"
-        >
-          PLAN
-        </div>
+      {/* Icon rail: macOS vibrancy. Squircle app-icon tiles, accent ring on active. */}
+      <aside className="vibrancy w-[58px] shrink-0 border-r border-border-hair flex flex-col items-center py-3.5 gap-2.5">
         {projects?.map((p) => {
           const isActive = p.id === currentProjectId
           const initial = p.name.trim().charAt(0).toUpperCase() || '·'
@@ -295,10 +290,10 @@ function App() {
               key={p.id}
               onClick={() => setCurrentProjectId(p.id)}
               title={p.name}
-              className={`w-[34px] h-[34px] rounded-full flex items-center justify-center text-white text-[13px] font-semibold transition-opacity ${
+              className={`w-[36px] h-[36px] rounded-[10px] flex items-center justify-center text-white text-[15px] font-semibold transition ${
                 isActive
-                  ? 'opacity-100 ring-2 ring-accent/35 ring-offset-2 ring-offset-canvas-sunk'
-                  : 'opacity-70 hover:opacity-90'
+                  ? 'shadow-[0_0_0_2.5px_var(--color-accent),0_2px_5px_rgba(0,0,0,0.14)]'
+                  : 'opacity-80 hover:opacity-100'
               }`}
               style={{
                 background: colorForName(p.name),
@@ -312,49 +307,48 @@ function App() {
         <button
           onClick={() => setShowNewProject(true)}
           title="New project"
-          className="w-[34px] h-[34px] rounded-full border border-dashed border-border-strong text-ink-faint hover:text-accent hover:border-accent flex items-center justify-center text-base leading-none transition"
+          className="w-[36px] h-[36px] rounded-[10px] text-ink-faint hover:text-accent hover:bg-black/[0.05] flex items-center justify-center transition"
         >
-          ＋
+          <Plus size={18} strokeWidth={2} />
         </button>
         <div className="flex-1" />
-        <div className="w-6 h-px bg-border-hair my-1" />
         <button
           onClick={() => setDark(!dark)}
           title={dark ? 'Switch to light' : 'Switch to dark'}
-          className="w-[34px] h-[34px] rounded-full text-ink-faint hover:text-ink hover:bg-surface-hover flex items-center justify-center transition"
+          className="w-[36px] h-[36px] rounded-[10px] text-ink-faint hover:text-ink hover:bg-black/[0.05] flex items-center justify-center transition"
         >
-          {dark ? <Sun size={15} /> : <Moon size={15} />}
+          {dark ? <Sun size={16} /> : <Moon size={16} />}
         </button>
       </aside>
 
-      {/* Secondary panel: cooler bg, inset rounded-pill active state, no border-left accent */}
-      <aside className="w-[248px] shrink-0 bg-canvas-sunk border-r border-border-hair flex flex-col overflow-hidden">
+      {/* Secondary panel: macOS vibrancy sidebar, accent-filled active row */}
+      <aside className="vibrancy w-[248px] shrink-0 border-r border-border-hair flex flex-col overflow-hidden">
         {currentProject ? (
           <>
-            <div className="px-4 pt-4 pb-3">
-              <div className="text-[16px] font-semibold text-ink truncate display-tight">
+            <div className="px-[18px] pt-[18px] pb-3">
+              <div className="text-[21px] font-bold text-ink truncate tracking-[-0.022em]">
                 {currentProject.name}
               </div>
               <div className="text-[12.5px] text-ink-faint mt-1">
-                <span className="font-mono">{sprints?.length ?? 0}</span> sprint
+                <span className="tab-data">{sprints?.length ?? 0}</span> sprint
                 {(sprints?.length ?? 0) === 1 ? '' : 's'} ·{' '}
-                <span className="font-mono">{projectTasks?.length ?? 0}</span>{' '}
+                <span className="tab-data">{projectTasks?.length ?? 0}</span>{' '}
                 task{(projectTasks?.length ?? 0) === 1 ? '' : 's'}
               </div>
             </div>
-            <div className="flex items-center justify-between px-4 pt-2 pb-1.5">
-              <span className="text-[12.5px] font-semibold text-ink-faint">
+            <div className="flex items-center justify-between px-[18px] pt-2 pb-1.5">
+              <span className="text-[12px] font-semibold text-ink-faint">
                 Sprints
               </span>
               <button
                 onClick={() => setShowNewSprint(true)}
                 title="New sprint (n)"
-                className="inline-flex items-center text-[15px] leading-none text-ink-muted hover:text-ink hover:bg-black/[0.04] -mr-1 px-1.5 py-1 rounded transition"
+                className="inline-flex items-center text-accent hover:bg-accent-soft -mr-1 p-1 rounded-md transition"
               >
-                ＋
+                <Plus size={16} strokeWidth={2} />
               </button>
             </div>
-            <div className="flex-1 overflow-auto px-2">
+            <div className="flex-1 overflow-auto px-2.5 pb-2">
               {sprints?.map((s) => {
                 const isActive = s.id === currentSprintId
                 const c = sprintTaskCounts.get(s.id)
@@ -363,21 +357,21 @@ function App() {
                   <button
                     key={s.id}
                     onClick={() => setCurrentSprintId(s.id)}
-                    className={`w-full text-left flex items-stretch gap-2.5 px-2.5 py-2 mb-1.5 text-[14.5px] rounded-lg bg-surface font-medium transition hover:-translate-y-px ${
+                    className={`w-full text-left flex items-center gap-2.5 px-2.5 py-2 mb-0.5 text-[14px] rounded-lg transition ${
                       isActive
-                        ? 'text-ink shadow-[0_0_0_2px_var(--color-accent)]'
-                        : 'text-ink-muted shadow-[0_1px_0_rgba(9,30,66,0.08)] hover:shadow-[0_3px_8px_rgba(9,30,66,0.12)] hover:text-ink'
+                        ? 'bg-accent text-white'
+                        : 'text-ink hover:bg-black/[0.045]'
                     }`}
                   >
                     <span
-                      className={`w-1 self-stretch rounded-full shrink-0 ${
-                        allDone ? 'bg-status-done' : 'bg-accent'
+                      className={`w-2 h-2 rounded-full shrink-0 ${
+                        isActive ? 'bg-white/90' : allDone ? 'bg-status-done' : 'bg-ink-faint'
                       }`}
                       aria-hidden
                     />
                     <span className="flex-1 min-w-0">
-                      <span className="block truncate">{s.name}</span>
-                      <span className="block text-[11.5px] font-normal leading-tight mt-0.5 text-ink-faint">
+                      <span className={`block truncate font-medium ${isActive ? '' : ''}`}>{s.name}</span>
+                      <span className={`block text-[11.5px] leading-tight mt-0.5 tab-data ${isActive ? 'text-white/80' : 'text-ink-faint'}`}>
                         {formatSprintRange(s.startDate, s.endDate)}
                         {c && c.total > 0 && ` · ${c.total} tasks`}
                       </span>
@@ -401,7 +395,7 @@ function App() {
 
       {/* Main column: thin header + capacity + sprint view */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        <header className="h-12 shrink-0 border-b border-border-hair bg-surface flex items-center px-5 gap-3">
+        <header className="h-[54px] shrink-0 border-b border-border-hair bg-surface flex items-center px-5 gap-3">
           <div className="flex items-center gap-2.5 text-sm min-w-0">
             {currentSprint ? (
               <>
@@ -416,7 +410,7 @@ function App() {
                 >
                   <Star size={14} />
                 </button>
-                <span className="inline-flex items-center text-xs text-ink-muted shrink-0 font-mono bg-canvas-sunk rounded-full px-2.5 py-1">
+                <span className="inline-flex items-center text-xs text-ink-muted shrink-0 tab-data bg-black/[0.05] rounded-full px-2.5 py-1">
                   {formatSprintRange(
                     currentSprint.startDate,
                     currentSprint.endDate
@@ -429,7 +423,7 @@ function App() {
             {currentSprint && nextSprint && unfinishedCount > 0 && (
               <button
                 onClick={rollover}
-                className="text-xs flex items-center gap-1 text-ink-muted hover:text-ink rounded-md px-2 py-1 hover:bg-surface-hover transition ml-1"
+                className="text-xs flex items-center gap-1 text-accent rounded-md px-2 py-1 hover:bg-accent-soft transition ml-1"
                 title={`Move ${unfinishedCount} unfinished task${
                   unfinishedCount === 1 ? '' : 's'
                 } to "${nextSprint.name}"`}
@@ -453,23 +447,23 @@ function App() {
                 ref={searchRef}
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search tasks…"
-                className="text-sm bg-surface border border-border rounded-full pl-9 pr-9 py-1.5 w-56 shadow-[0_1px_2px_rgba(9,30,66,0.04)] focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent text-ink transition"
+                placeholder="Search"
+                className="text-sm bg-black/[0.05] border border-transparent rounded-full pl-9 pr-9 py-1.5 w-52 focus:outline-none focus:bg-surface focus:ring-2 focus:ring-accent/40 text-ink transition"
               />
-              <kbd className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-ink-faint border border-border-hair rounded px-1 py-0.5 bg-surface pointer-events-none">
+              <kbd className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] text-ink-faint pointer-events-none">
                 /
               </kbd>
             </div>
             <button
               onClick={handleExport}
-              className="text-xs flex items-center gap-1.5 px-2.5 py-1.5 text-ink-muted hover:bg-surface-hover rounded transition"
+              className="text-xs flex items-center gap-1.5 px-2 py-1.5 text-accent hover:bg-accent-soft rounded-md transition"
               title="Export JSON backup"
             >
               <Download size={13} /> Export
             </button>
             <button
               onClick={handleImportClick}
-              className="text-xs flex items-center gap-1.5 px-2.5 py-1.5 text-ink-muted hover:bg-surface-hover rounded transition"
+              className="text-xs flex items-center gap-1.5 px-2 py-1.5 text-accent hover:bg-accent-soft rounded-md transition"
               title="Import JSON backup"
             >
               <Upload size={13} /> Import
@@ -615,12 +609,10 @@ function Stat({
   accent?: boolean
 }) {
   return (
-    <div className="bg-surface border border-border rounded-lg px-4 py-3">
-      <div className="text-[11px] uppercase tracking-wider text-ink-faint font-medium">
-        {label}
-      </div>
+    <div className="bg-surface rounded-[14px] px-4 py-3 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_6px_16px_rgba(0,0,0,0.04)]">
+      <div className="text-[12px] text-ink-faint font-medium">{label}</div>
       <div
-        className={`text-xl font-semibold mt-0.5 ${accent ? 'text-accent' : 'text-ink'}`}
+        className={`text-[22px] font-bold tracking-[-0.018em] mt-0.5 ${accent ? 'text-accent' : 'text-ink'}`}
       >
         {value}
       </div>
@@ -812,9 +804,9 @@ function ViewToggle({
     return (
       <button
         onClick={() => onChange(mode)}
-        className={`flex items-center gap-1.5 px-3.5 py-1 text-xs font-medium rounded-full transition ${
+        className={`flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded-[7px] transition ${
           active
-            ? 'bg-surface text-ink shadow-[0_1px_2px_rgba(9,30,66,0.1)]'
+            ? 'bg-surface text-ink shadow-[0_1px_3px_rgba(0,0,0,0.12),0_0_0_0.5px_rgba(0,0,0,0.04)]'
             : 'text-ink-muted hover:text-ink'
         }`}
         title={`${label} view`}
@@ -826,7 +818,7 @@ function ViewToggle({
     )
   }
   return (
-    <div className="inline-flex items-center gap-0.5 p-0.5 rounded-full bg-canvas-sunk">
+    <div className="inline-flex items-center gap-0.5 p-0.5 rounded-[9px] bg-black/[0.06]">
       {item('list', 'List', List)}
       {item('board', 'Board', LayoutGrid)}
     </div>

@@ -2,383 +2,275 @@
 
 Single source of truth cho UI/UX. Mọi feature mới phải tuân theo file này. Khi chưa rõ, đọc lại đây trước khi code.
 
+> **v2 · Cupertino DNA (2026-06)** — design language đổi từ "Jira/rust" sang **Apple Cupertino**: SF Pro, canvas xám Apple, accent xanh hệ thống, bo góc lớn mềm, vibrancy sidebar, depth thay vì đường kẻ. Phần **brand/typography/layout/component-visual** viết lại theo DNA này; phần **hành vi** (smart defaults, native picker, schema, keyboard, state) giữ nguyên vì vẫn đúng. Bản rust cũ nằm trong git history.
+
+## 0. Aesthetic DNA — "Cupertino"
+
+App là một **precision tool mang cảm giác native macOS app** (Reminders / Things-on-Mac / Notes). Triết lý hình ảnh:
+
+- **Calm & premium** — thoáng, ít chrome, để nội dung thở. Không "wow", không trang trí.
+- **Depth, không phải line** — phân tách bằng **bóng mềm + nền phân tầng** (canvas xám → thẻ trắng), hairline chỉ dùng bên trong thẻ. Hạn chế viền đậm.
+- **Bo góc lớn, liên tục** — mọi bề mặt bo mềm (14px thẻ, full-pill cho control nhỏ).
+- **Một accent xanh hệ thống**, phần còn lại là greyscale Apple. Màu = semantic, không trang trí.
+- **Vibrancy** — sidebar mờ kính (translucent + blur), gợi chiều sâu vật liệu.
+
 ## 1. Sản phẩm DNA (giữ trong đầu mọi lúc)
 
 - **"ClickUp without the seat tax"** — single-user / virtual members / no auth.
-- **Speed > breadth.** ClickUp chậm là pain point. Mỗi action ≤ 1 click hoặc 1 keystroke.
+- **Speed > breadth.** Mỗi action ≤ 1 click hoặc 1 keystroke.
 - **Local-first.** IndexedDB là nhà. Export/Import là backup. Không bao giờ block trên network.
-- **Calm utility.** Đây là tool dùng hàng ngày, không phải sản phẩm cần "wow". Calm > cute.
+- **Calm utility.** Tool dùng hàng ngày, calm > cute.
 
-Bất kỳ feature nào không support 1 trong 4 cái trên → defer hoặc cut.
+Feature không support 1 trong 4 cái trên → defer hoặc cut.
 
 ## 2. Brand spec
 
-### 2.1 Accent · Rust `#C04A1A`
+### 2.1 Accent · System Blue `#0071E3`
 
-Rust là **signature color duy nhất**. Không thêm accent thứ hai. Dùng cho:
+Một accent **duy nhất** (Apple marketing/system blue). Không thêm accent thứ hai. Dùng cho:
 
-| Element | Token | Class |
+| Element | Token (light) | Ghi chú |
 |---|---|---|
-| Logo dot | `--color-accent` | `bg-accent` |
-| Primary button | `--color-accent` + hover `--color-accent-hover` | `bg-accent hover:bg-accent-hover` |
-| Focus ring | `--color-accent` 40% alpha | `ring-2 ring-accent/40` |
-| In-progress status | `--color-status-progress` (= accent) | inline style từ STATUS_META |
-| Overdue date | red-500 (đỏ thật, không phải accent) | `text-red-500` |
-| Empty-state hint background | `--color-accent-soft` | `bg-accent-soft` |
+| Active sidebar row | `--color-accent` (nền đầy, chữ trắng) | highlight bo tròn kiểu macOS sidebar |
+| In-progress status | `--color-status-progress` (= accent) | chip + status icon |
+| Link / toolbar action (Export/Import/Roll over) | `--color-accent` text | ghost, không nền |
+| Focus ring / active border | `--color-accent` | `ring`/`border` |
+| Dependency chip, "Add task" | `--color-accent` trên `--color-accent-soft` | |
+| Selected segment indicator | trắng nổi trên track xám (không phải accent) | segmented control |
 
-**Cấm**: gradient với accent. Accent là **chấm** trong calm canvas. Một gradient = phá hỏng signature.
+**Cấm**: gradient accent toàn khối, dùng accent làm trang trí. Accent là **tín hiệu**, không phải nền.
 
-### 2.2 Neutrals (tone warm)
+### 2.2 Neutrals — Apple system grey
 
-Toàn bộ greyscale **lệch warm**, không phải zinc thuần. CSS variables ở `src/index.css`:
+Greyscale theo **hệ xám Apple** (lệch nhẹ cool, gần neutral). CSS variables ở `src/index.css`:
 
 | Token | Light | Dark | Dùng cho |
 |---|---|---|---|
-| `--color-canvas` | `#fafaf7` | `#0c0c0e` | Background tổng |
-| `--color-surface` | `#ffffff` | `#18181b` | Card, header, dialog |
-| `--color-surface-hover` | `#f5f5f3` | `#232326` | Hover state |
-| `--color-border` | `#e5e5e0` | `#2a2a2d` | Card divider, default border |
-| `--color-border-strong` | `#d4d4cf` | `#3a3a3e` | Dashed empty borders |
-| `--color-ink` | `#18181b` | `#e4e4e7` | Text chính |
-| `--color-ink-muted` | `#71717a` | `#a1a1aa` | Secondary text |
-| `--color-ink-faint` | `#a1a1aa` | `#71717a` | Tertiary (count, icon idle) |
+| `--color-canvas` | `#F5F5F7` | `#1C1C1E` | Background tổng (xám Apple) |
+| `--color-surface` | `#FFFFFF` | `#2C2C2E` | Thẻ, header, dialog |
+| `--color-surface-hover` | `rgba(0,0,0,0.02)` | `rgba(255,255,255,0.04)` | Hover row |
+| `--color-vibrancy` | `rgba(248,248,250,0.72)` | `rgba(30,30,32,0.62)` | Sidebar mờ kính (+ backdrop-blur) |
+| `--color-separator` | `#E5E5EA` | `rgba(255,255,255,0.10)` | Hairline bên trong thẻ |
+| `--color-separator-soft` | `rgba(0,0,0,0.055)` | `rgba(255,255,255,0.06)` | Đường rất nhẹ |
+| `--color-ink` | `#1D1D1F` | `#F5F5F7` | Text chính |
+| `--color-ink-muted` | `#6E6E73` | `#AEAEB2` | Secondary |
+| `--color-ink-faint` | `#A1A1A6` | `#8E8E93` | Tertiary (count, label, icon idle) |
 
-**Quy tắc**: không hardcode hex trong JSX. Đụng đến màu → thêm token.
+**Quy tắc**: không hardcode hex trong JSX. Đụng màu → thêm token.
 
-### 2.3 Status & Priority colors
+### 2.3 Status & Priority — hệ màu Apple
 
-Cố định, không sửa tùy hứng:
+Cố định, không sửa tùy hứng (dùng đúng system colors để cảm giác "native"):
 
 ```
-status-todo      #a1a1aa (= ink-faint)
-status-progress  #c04a1a (= accent — đây là "tâm điểm" của workflow)
-status-done      #16a34a (green-600)
+status-todo      #8E8E93  (system grey)
+status-progress  #0071E3  (= accent — tâm điểm workflow)
+status-done      #34C759  (system green / dark #30D158)
+overdue          #FF3B30  (system red / dark #FF453A)
 
-priority-urgent  #dc2626 (red-600)
-priority-high    #ea580c (orange-600)
-priority-normal  #3b82f6 (blue-500)
-priority-low     #71717a (gray-500)
-priority-none    #d4d4d8 (gray-300)
+priority-urgent  #FF3B30  (system red, soft bg rgba(255,59,48,.12))
+priority-high    #FF9500  (system orange, soft bg rgba(255,149,0,.14))
+priority-normal  —        (không hiển thị tag — silent default)
+priority-low     #8E8E93  (grey, hiển thị tiết chế)
 ```
 
-Done là xanh lá, không phải accent — vì done = "thoát khỏi context", không phải "đang trong context".
+Done là **xanh lá** (Apple green), không phải accent — done = "thoát khỏi context".
+
+### 2.4 Avatar palette — Apple system colors
+
+Màu avatar deterministic theo `colorForName(name)`, palette = **hệ màu Apple** (không random, không user-pick):
+
+```
+#AF52DE purple · #34C759 green · #FF9500 orange · #0071E3 blue
+#FF2D55 pink · #5AC8FA teal · #5856D6 indigo · #FF6482 salmon
+```
+
+Avatar = **vòng tròn đặc** màu trên, chữ trắng first-letter.
 
 ## 3. Typography
 
-- **Một font family duy nhất**: `ui-sans-serif, system-ui` (đã set trong `body`). Không thêm display font nào nữa cho đến khi product đủ trưởng thành để biết mình cần một signature riêng.
+- **Font family: SF Pro (hệ thống Apple).** Stack: `-apple-system, 'SF Pro Text', 'SF Pro Display', system-ui, sans-serif`. **Bỏ DM Sans + Geist Mono.** Trên máy Apple render SF Pro thật; non-Apple fallback system sans.
+- **KHÔNG dùng monospace cho dữ liệu.** Số (ID, ngày, effort, count, capacity) dùng SF với `font-variant-numeric: tabular-nums` (`font-feature-settings: 'tnum'`) để thẳng cột. Đây là cách Apple typeset số — khác hẳn bản mono trước.
 - **Kích thước**:
-  - App title "Plan": `text-2xl` (24px) `font-semibold tracking-tight`
-  - Section heading (dialog title): `text-lg` (18px) `font-semibold`
-  - Body: `text-sm` (14px) default
-  - Metadata, hint: `text-xs` (12px)
-  - Label uppercase (stat banner): `text-[11px] uppercase tracking-wider font-medium`
-- **Weights**: 400 (text), 500 (label/medium), 600 (heading). Không dùng 700+.
-- **Antialias**: bật ở `body` rồi, không override.
+  - Large title (project name): `text-[21px]` (≈21px) `font-bold tracking-[-0.022em]`
+  - Sprint title (header): `text-[18px] font-bold tracking-[-0.018em]`
+  - Group/section heading: `text-[15.5px] font-semibold tracking-[-0.01em]`
+  - Body / task title: `text-[14.5px]` `tracking-[-0.006em]`
+  - Metadata (date, effort, count): `text-[13px]`
+  - Micro label / column header: `text-[11px] font-semibold` (KHÔNG uppercase tracked kiểu mono nữa — Apple dùng label thường, nhỏ, xám)
+- **Weights**: 400 (text), 500 (medium/label), 600 (heading), 700 (large title). Heading lớn → `tracking-tight`.
+- **Antialias**: `-webkit-font-smoothing: antialiased` ở body.
 
 ## 4. Layout principles
 
-### 4.1 Card-per-group, không monolithic list
+### 4.1 Inset-grouped cards trên canvas xám
 
-**Đúng**: mỗi member là 1 card riêng, gap `space-y-3` (12px) giữa các card. Card có border + rounded-lg + surface bg.
+**Đúng**: canvas xám `--color-canvas`; mỗi member là 1 **thẻ trắng bo 14px nổi nhẹ** (soft shadow), gap `space-y-4` (16px). Đây là "inset grouped" của macOS — depth tách group, không phải border.
 
-**Sai**: bọc tất cả trong 1 card lớn rồi `divide-y` giữa các group. Đó là pattern cũ — mọi group trông giống nhau, mắt không scan được nhanh.
+**Sai**: bọc tất cả trong 1 thẻ lớn rồi `divide-y`; hoặc thẻ có viền đậm + không shadow (đó là ledger/flat, không phải Cupertino).
 
-### 4.2 Max-width cho main content
+### 4.2 Depth tokens (shadow)
 
-`max-w-5xl` (64rem ≈ 1024px). Sprint view không cần rộng hơn. Wider = mắt phải sweep xa, đọc chậm.
+| Cấp | Shadow | Dùng cho |
+|---|---|---|
+| Card | `0 1px 2px rgba(0,0,0,0.04), 0 8px 22px rgba(0,0,0,0.05)` | Group card |
+| Floating (popover, segmented pill) | `0 1px 3px rgba(0,0,0,0.12), 0 0 0 0.5px rgba(0,0,0,0.04)` | Selected segment, dropdown |
+| Window | `0 30px 80px rgba(0,0,0,0.34)` | (chỉ demo desktop window) |
 
-### 4.3 Spacing scale
+Dark mode: shadow nhạt hơn nhiều, dựa vào separator + surface contrast.
 
-Stick với Tailwind scale, không freelance:
-- Inside card padding: `px-4 py-2.5` cho row, `px-4 py-3` cho header
-- Between cards: `space-y-3` (12px)
-- Section gap: `py-5` cho banner area, `pb-12` cho main bottom
+### 4.3 Vibrancy sidebar
 
-### 4.4 Sticky header
+Icon rail + sprint panel dùng `background: var(--color-vibrancy)` + `backdrop-filter: blur(24px) saturate(180%)`. Border phải = `--color-separator-soft` (hairline). Đây là điểm "native macOS" — **được phép blur** ở sidebar (khác bản Jira cũ cấm blur header).
 
-Header `sticky top-0 z-10` + `bg-surface` (opaque). Scroll vẫn thấy sprint dropdown + search. **Không** dùng backdrop-blur trong header — đây là tool work, blur làm text khó đọc khi scroll.
+### 4.4 Max-width & spacing
 
-### 4.5 Capacity banner is product, not chrome
+- Main content `max-w-5xl`.
+- Card padding: row `px-[18px] py-[11px]`, header `px-[18px] py-[13px]`.
+- Between cards `space-y-4` (16px). Generous hơn bản cũ — Apple thoáng.
 
-3 stat cards (Backlog / Assigned% / Progress%) là **product feature** — biết capacity ngay khi mở app là core value. Không bao giờ ẩn nó behind toggle. Khi sprint empty → card "Backlog" hiện accent color để gọi action.
+### 4.5 Radius scale (bắt buộc nhất quán)
+
+| Phần tử | Radius |
+|---|---|
+| Group card, dialog | `rounded-[14px]` |
+| Button, input, segmented track/segment, project icon tile | `rounded-[8px]` |
+| Pill (search, status chip, priority tag, date pill, dependency) | `rounded-full` |
+| Avatar, status circle, sidebar dot | `rounded-full` |
+
+### 4.6 Segmented control (List / Board)
+
+Track xám `rgba(0,0,0,0.06)` bo 9px + segment chọn = **nền trắng nổi** (floating shadow). Đây là control chuẩn Apple, thay cho 2 nút toggle rời.
+
+### 4.7 Capacity = thanh tròn + label SF
+
+Thanh `rounded-full` xếp tầng (done xanh / assigned accent / free xám), kèm legend SF tabular ("8 days done", "18 of 30 assigned · 60%"). Vẫn là **product feature**, không ẩn sau toggle. Sprint empty → gọi action.
 
 ## 5. Component rules
 
 ### 5.1 Avatar
+- 1 chữ first-letter. `colorForName` (§2.4). **Không** random/user-pick.
+- Vòng tròn đặc. Sizes: `w-7 h-7` group header, `w-6 h-6` task row.
 
-- 1 chữ first-letter, không phải 2. Lý do: 2 chữ làm circle nặng visual, conflict với task title.
-- Color deterministic theo `colorForName(name)` (hash → palette 8 màu). **Không** random, **không** user-pick.
-- Sizes: `w-7 h-7` cho member header, `w-6 h-6` cho task row.
+### 5.2 Status circle (Reminders-style) + status pill
+- **StatusCircle** (đầu row): vòng tròn click → cycle todo → in_progress → done.
+  - todo: vòng viền xám rỗng `#C7C7CC`
+  - in_progress: viền accent + nửa trong đầy accent (pie 50%)
+  - done: tròn đặc xanh `#34C759` + check trắng
+- **Status pill** (cột Status): `rounded-full` nền soft-tint + dot + label ("To Do" / "In Progress" / "Done"). todo grey-soft, in-progress accent-soft, done green-soft.
+- Hai cái cùng tồn tại: circle = quick toggle 1 click, pill = trạng thái rõ + chọn arbitrary.
 
-### 5.2 Status — 2 forms cho 2 affordance
+### 5.3 Priority — tag pill soft, chỉ urgent/high
+- `rounded-full` soft-tint: Urgent (đỏ-soft) / High (cam-soft). Normal/Low/None **không** hiện tag (silent).
+- Đặt trước task title. Không sticker vuông đậm.
 
-- **StatusDot** (circle border): click → cycle todo → in_progress → done. Quick toggle. Đứng đầu task row.
-- **StatusPicker** (text + dropdown): chọn arbitrary state. Đứng cuối task row.
-
-Hai cái cùng tồn tại có chủ ý: dot cho power user (1 click), text cho clarity. Không gộp.
-
-### 5.3 Priority — flag-only
-
-Chỉ icon flag, màu = priority color. Click mở native select dưới opacity-0. **Không** show text "Normal/High" inline — chật.
-
-### 5.3.1 Smart defaults khi tạo task
-
-Khi user gõ "+ Add task" và Enter, field mặc định phải **hữu ích nhất có thể** — không phải null fest. Hiện tại:
+### 5.3.1 Smart defaults khi tạo task *(giữ nguyên — hành vi)*
 
 | Field | Default | Lý do |
 |---|---|---|
 | `status` | `todo` | Mới = chưa làm |
-| `priority` | `normal` | Trung tính, user dễ điều chỉnh |
-| `startDate` | `sprint.startDate` | **Task thuộc sprint nào thì mặc định bắt đầu cùng sprint đó.** User chỉ override khi task có start trễ. |
-| `dueDate` | `null` | Quá nhiều task không có hạn cụ thể — đừng giả định |
-| `assigneeId` | Member của group đang Add | Inline "+ Add task" trong group nào → assign cho member đó |
-| `estimate` | `null` | Optional field, user fill khi cần planning |
+| `priority` | `normal` | Trung tính |
+| `startDate` | `sprint.startDate` | Task thuộc sprint nào → bắt đầu cùng sprint |
+| `dueDate` | `null` | Đừng giả định hạn |
+| `assigneeId` | Member của group đang Add | Inline Add trong group nào → assign member đó |
+| `estimate` | `null` | Optional |
 
-**Quy tắc**: default nào tốn 1 click để override mỗi lần thì là tax. Nếu 80% trường hợp đúng → set default. Nếu < 50% → để null.
+Prop drilling `App → SprintView → MemberCard → AddTaskRow`. Default tốn 1 click override mỗi lần = tax.
 
-**Cách thread default qua component tree**: prop drilling từ `App.tsx → SprintView → MemberCard → AddTaskRow`. Không dùng context vì context ẩn data flow; prop explicit dễ trace. Nếu tree sâu > 4 levels thì xem xét context.
+### 5.4 Date — Apple-native `MMM d` *(ĐỔI so với bản cũ)*
+- Hiển thị **"MMM d"** (vd `May 19`, `Jun 1`); range `MMM d – MMM d`; có năm khi cần `MMM d, yyyy`. SF tabular-nums.
+- **Lý do đổi từ `dd/mm/yy`**: feel native Apple, tên tháng dễ đọc; vẫn nhất quán (luôn cùng format). Tháng viết tắt locale-independent (en).
+- Overdue (past + not done) → `--color-overdue` đỏ + `font-semibold`. Empty → icon Calendar nhạt thay placeholder.
+- ⚠️ *Đây là decision có thể revert về dd/mm/yy nếu user thích — flag trong commit.*
 
-### 5.4 Due date — luôn `dd/mm/yy`
+### 5.5 Native picker *(giữ nguyên — hành vi)*
+- `<select>` ẩn (assignee/priority/status): label + `<select className="absolute inset-0 opacity-0">`.
+- `<input type=date>` qua button + `showPicker()` (date cells). Whole cell là touch target có hover affordance. Chi tiết pattern + lý do giữ như cũ.
 
-Mọi date hiển thị (task start, task due, sprint range) dùng **duy nhất** format `dd/mm/yy` (zero-padded, locale-independent) qua `formatShortDate()` trong `lib.ts`. Không có relative ("Today", "Fri", "2 days ago") nữa — user feedback: nhất quán giá trị hơn nhân-văn-hoá ngày tháng.
-
-- `formatRelativeDate(null) → ''`
-- `formatRelativeDate('2026-06-05') → '05/06/26'`
-- `formatSprintRange(start, end) → '03/06/26 – 16/06/26'`
-
-**Đừng dùng `toLocaleDateString()` cho format hiển thị** — locale user khác nhau (US: M/D, EU: D/M, JP: Y-M-D) → kết quả không nhất quán giữa máy. Locale chỉ dùng được cho weekday/month name nếu sau này cần.
-
-Overdue (past + not done) → `text-red-500 font-medium`. Empty → Calendar icon nhạt thay placeholder text.
-
-**Lý do bỏ relative format**: tưởng là "thân thiện" nhưng làm cho 2 task cùng tuần khó so sánh (`Fri` vs `Sun` — phải tính trong đầu); và "Today" thay đổi giá trị mỗi ngày (cùng 1 ngày hôm qua là Today, hôm nay là Yesterday) → tracking khó. dd/mm/yy stable + scannable.
-
-### 5.5 Native picker — `<select>` + `<input type=date>` cùng pattern
-
-Khi cần native picker (dropdown / date) nhưng UI muốn custom look (icon-only / chip), có 2 cấu hình theo nhu cầu:
-
-**5.5a · `<select>` ẩn (cho assignee, priority, status):**
-```jsx
-<label className="relative inline-flex">
-  <span>{icon-or-text}</span>
-  <select className="absolute inset-0 opacity-0 cursor-pointer">...</select>
-</label>
-```
-Click vào label → input nhận focus → native dropdown mở. Đơn giản, hoạt động trên cả mobile + a11y free.
-
-**5.5b · `<input type=date>` qua button (cho date cells):**
-
-Date picker khác select ở chỗ user nói "khó tap": `<select>` chỉ cần focus thì mở, nhưng `type=date` cần **explicit user gesture** trên input. Pattern button + `showPicker()` chuẩn hơn:
-
-```jsx
-<button type="button" onClick={open}>
-  <span>{label}</span>
-  <input ref={ref} type="date" className="absolute inset-0 opacity-0 pointer-events-none" tabIndex={-1} aria-hidden />
-</button>
-
-function open(e) {
-  e.preventDefault(); e.stopPropagation()
-  const el = ref.current
-  if (typeof el.showPicker === 'function') { try { el.showPicker(); return } catch {} }
-  el.focus(); el.click()
-}
-```
-
-**Lý do button thay label cho date:**
-1. `showPicker()` (Chrome/Edge/FF/Safari 16+) là API chính thức mở native date picker — gọi explicit reliable hơn `label→input` semantics (Safari iOS bug-prone).
-2. Button = touch target lớn rõ ràng (h-8 px-2 + border hover). User biết tap được.
-3. `pointer-events-none` trên input → click không bị input "ăn" → mọi click qua button onClick → mở picker.
-4. Try/catch fallback `focus + click` cho Safari < 16.
-
-**Affordance bắt buộc cho cell có giá trị:**
-- Whole cell là button (w-full h-8 min) — NOT chỉ span text nhỏ.
-- `border border-transparent hover:border-border-strong hover:bg-canvas` → chip xuất hiện khi hover, user biết đây là field editable.
-- Empty state: icon (Calendar) thay placeholder text → đỡ confused với data.
-
-**Bài học**: span text-xs đứng đơn lẻ trong cell w-20 = touch target ~30×16px. Quá nhỏ cho mobile, quá kín đáo cho desktop. **Cell có thể click PHẢI có visual signal** (border, hover bg, full-width target). Đừng rely vào "user mouse tới đúng text nhỏ".
-
-### 5.6 Hover-reveal delete
-
-Mọi delete button (member, task) dùng `opacity-0 group-hover/<scope>:opacity-100`. Không bao giờ persistent — quá dễ misclick. Luôn có `confirm()` cho member delete (cascade), không cho task (dễ undo bằng tay).
-
-**Quy tắc bắt buộc**: hover-reveal Tailwind cần `group/<scope>` class trên **parent** element. Quên class này → button không bao giờ hiện. Hai scope hiện đang dùng:
-
-| Scope | Parent có class | Button có class |
-|---|---|---|
-| `card` | `Card` div (`group/card`) | Member delete trong `GroupHeader`: `group-hover/card:opacity-100` |
-| `row` | TaskRow div (`group/row`) | Task delete: `group-hover/row:opacity-100` |
-
-Khi thêm scope mới, ghi vào bảng này.
+### 5.6 Hover-reveal delete *(giữ nguyên — hành vi)*
+- `opacity-0 group-hover/<scope>:opacity-100`. Scope `card` (member delete) + `row` (task delete). `confirm()` cho member (cascade), không cho task.
 
 ### 5.7 Inline edit là default
+- Title/assignee/date/priority/status inline. Không modal cho task detail. Cần thêm field → expand row inline.
 
-Title, assignee, date, priority, status — tất cả inline. **Không** mở modal/drawer cho task detail (chưa đến lúc). Khi cần thêm field (description, attachments) → mở row expand inline, không modal.
+### 5.8 Column system — mọi task row align *(widths cập nhật theo Cupertino)*
+Có column header → mọi row dùng cùng `COL` widths trong `SprintView.tsx`. Gap `gap-[13px]`, padding `px-[18px] py-[11px]`. Khi đổi 1 cột → đổi header + mọi consumer cùng commit. Date cells dùng chung `DatePickCell`. Hide column header khi sprint 0 task.
 
-### 5.8 Column system — tất cả task row đều phải align
+### 5.9 Collapse/expand per-group *(giữ nguyên — hành vi)*
+Click cả `GroupHeader` row để collapse; ChevronDown rotate; persist localStorage `plan-tmp:collapsed:{sprintId}`; reset khi đổi sprint; delete dùng `stopPropagation`.
 
-Vì có column header (TaskColumnHeader), mọi row hiện task data PHẢI dùng cùng column widths. Định nghĩa ở `COL` constant trong `SprintView.tsx`:
+### 5.10 Ghost / toolbar actions
+"Add member", "Add task", "Roll over", "Export/Import" → **text xanh ghost** (Apple toolbar). Solid accent fill chỉ cho primary action trong dialog ("Create"/"Save"). "+ " trong sidebar = icon xanh mảnh.
 
-```
-COL.dot       w-4         status dot / + icon
-COL.title     flex-1      task title input
-COL.assignee  w-7         avatar
-COL.start     w-20        start date (relative), right-aligned
-COL.due       w-20        due date (relative), right-aligned
-COL.priority  w-6         flag icon
-COL.status    w-28        status text picker
-COL.trash     w-5         hover-reveal delete
-```
+## 6. Interaction rules *(giữ nguyên)*
 
-Gap giữa columns: `gap-3` (12px). Padding row: `px-4 py-2`.
+### 6.1 Keyboard shortcuts
+`/` focus search · `n` new sprint · `Esc` clear search · `⌘⇧D`/`Ctrl⇧D` toggle dark. Phím đơn chỉ khi không trong input; combo cho global; mỗi shortcut mới phải tránh conflict OS + có hint.
 
-**Quy tắc**: bất kỳ row nào hiện task-shape (TaskRow, AddTaskRow, future bulk-action row...) phải dùng `COL.*` classes. Header và row phải sync — đổi 1 chỗ thì đổi cả 2. Khi thêm column mới (vd: estimate), thêm vào `COL` + `TaskColumnHeader` + tất cả row consumers cùng commit.
-
-**Date cells** (start, due) đều dùng cùng component `DatePickCell` — pass `value`, `onChange`, optional `highlight='overdue'` cho due-only red highlight. Không duplicate code giữa start và due. Khi thêm date-shaped field thứ 3 (vd: completed-at) → vẫn dùng `DatePickCell`.
-
-**Khi nào hide column header**: khi `tasks.length === 0 && unassigned.length === 0` (chưa có task nào trong sprint). Header rỗng treo lơ lửng = visual noise.
-
-### 5.9 Collapse / expand per-group
-
-Group có nhiều task (>5 row) tiêu tốn screen real estate. Pattern collapse:
-
-- **Trigger**: click bất kỳ đâu trên `GroupHeader` row (cursor-pointer, hover bg-surface-hover). KHÔNG dùng riêng chevron — toàn row clickable để hit-target rộng.
-- **Visual**: `ChevronDown` icon đứng đầu row, rotate `-rotate-90` khi collapsed. Animated với `transition-transform`.
-- **Affordance phân biệt**: khi collapsed, bỏ `border-b` của header để header trông "đóng kín" không hint có gì bên dưới.
-- **Delete button trong header**: dùng `e.stopPropagation()` để không trigger collapse khi xóa member.
-- **Persistence**: collapse state lưu localStorage key `plan-tmp:collapsed:{sprintId}`, format là array JSON các memberId. Per-sprint key vì user thường có pattern khác nhau giữa các sprint.
-- **Reset khi đổi sprint**: state load lại từ localStorage trong `useEffect(() => ..., [sprintId])` — tránh state leak giữa sprint.
-
-**Khi nào group KHÔNG collapsible**: Unassigned card không collapse (orphan task cần visibility). Empty members đã ẩn sau toggle riêng (`Show N members with no tasks`), không cần collapse-in-place.
-
-### 5.8 Ghost buttons cho secondary actions
-
-"+ Add member", "+ Add task", "Show N empty members" → dashed border hoặc text-only. Solid bg-accent chỉ dành cho **primary** action trong dialog ("Create", "Save"). Header buttons (Export/Import/Dark toggle) → ghost.
-
-## 6. Interaction rules
-
-### 6.1 Keyboard shortcuts (đã ship)
-
-| Phím | Action | Khi nào |
-|---|---|---|
-| `/` | Focus search | Khi không trong input |
-| `n` | Mở New Sprint dialog | Khi không trong input |
-| `Esc` | Clear search | Khi có search query |
-| `⌘⇧D` / `Ctrl⇧D` | Toggle dark mode | Bất cứ đâu |
-
-**Quy tắc mở rộng**: phím đơn (1 ký tự) chỉ bind khi không trong input. Combo `⌘/Ctrl + key` cho global. Mọi shortcut mới phải:
-1. Tránh conflict với browser/OS (không bind `⌘N`, `⌘T`).
-2. Có visual hint (kbd badge) hoặc list trong dialog "?".
-
-### 6.2 Persistence rules
-
-- IndexedDB: tất cả data (members, sprints, tasks). Schema versioned qua Dexie `version().stores().upgrade()`.
-- localStorage: chỉ UI preference (dark mode flag `plan-tmp:dark`). Không bao giờ data.
-- URL: hiện chưa dùng. Nếu sau này thêm sprint ID vào URL → query param `?sprint=<id>`, không hash.
+### 6.2 Persistence
+IndexedDB: data. localStorage: chỉ UI pref (`plan-tmp:dark`, collapse). URL: chưa dùng.
 
 ### 6.3 Form submit
+Inline input: Enter commit, Escape cancel khi add-mode. Click outside KHÔNG cancel.
 
-Mọi inline input phải accept Enter để commit. Escape để cancel khi đang trong "add mode". Click outside KHÔNG cancel — quá dễ mất việc.
+### 6.4 Confirm trước destructive
+Delete member / delete task / import (replace). Không confirm cho toggle status, change priority, clear date.
 
-### 6.4 Confirm trước destructive action
-
-- Delete member → confirm "tasks become Unassigned".
-- Delete task → confirm "Delete this task?".
-- Import JSON → confirm "REPLACE all current data".
-
-Không confirm khi: toggle status, change priority, clear date — đều dễ undo bằng tay.
-
-## 7. State & data rules
-
-### 7.1 useLiveQuery cho mọi DB read
-
-Không tự subscribe Dexie events. `useLiveQuery` từ `dexie-react-hooks` đã handle re-render khi DB thay đổi (kể cả từ tab khác). Pass empty array sentinel khi chưa sẵn sàng, không trả `undefined` thẳng.
-
-### 7.2 Optimistic updates không cần
-
-Dexie write là local + sync (sub-ms). Không cần optimistic UI. Trực tiếp `db.x.update()` rồi `useLiveQuery` re-render. Nếu sau này thêm sync layer → revisit.
-
-### 7.3 Race & idempotent
-
-Mọi async setup (seed, migration) phải idempotent + race-safe. Pattern: module-level promise lock như `seedIfEmpty()` trong `db.ts`. StrictMode dev sẽ mount useEffect 2 lần — code phải chịu được.
-
-### 7.4 Schema migration
-
-Khi đổi schema, làm theo thứ tự (đã thực hành v1 → v2 cho `Task.startDate`):
-
-1. **Update interface** (vd: thêm `startDate: string | null` vào `Task`).
-2. **Bump version** trong `PlanDB` constructor: `this.version(N+1).upgrade(tx => ...)`. Nếu indexes không đổi (chỉ thêm data field), bỏ qua `.stores({...})` ở version mới — Dexie kế thừa schema cũ.
-3. **Backfill cho data cũ**: `.upgrade(tx => tx.table('tasks').toCollection().modify(t => { if (t.X === undefined) t.X = defaultValue }))`.
-4. **Backfill cho import legacy**: trong `importAll`, dùng spread `{ defaultValue, ...task }` để fill field thiếu từ export cũ.
-5. **Update seedFresh**: include field mới.
-6. **Update tests**:
-   - Test factories (mọi nơi construct Task literal) thêm field mới.
-   - Thêm 1 test "backfills missing X from legacy v1 exports" → đảm bảo import file cũ không break.
-7. **ExportPayload.version**: giữ nguyên (= 1) nếu chỉ thêm field optional. Bump khi field bắt buộc và không có default.
-
-Không bao giờ silently change schema. Migration phải reversible-in-spirit: import file cũ vẫn work.
+## 7. State & data rules *(giữ nguyên)*
+- `useLiveQuery` cho mọi DB read. Không tự subscribe.
+- Không cần optimistic (Dexie local sub-ms).
+- Async setup idempotent + race-safe (StrictMode mount 2 lần).
+- **Schema migration**: update interface → bump `version().upgrade()` → backfill data cũ + import legacy → update seedFresh + tests + ExportPayload.version. Import file cũ luôn phải work.
 
 ## 8. Anti-patterns (cấm tuyệt)
 
 ### 8.1 AI slop
+- ❌ Gradient nền (purple/blue), neon, glassmorphism màu mè. *(Vibrancy sidebar trắng/xám OK — đó là material Apple, không phải gradient slop.)*
+- ❌ Emoji as icon trong UI chính.
+- ❌ Generic Tailwind `bg-blue-500` — dùng `--color-accent` (`#0071E3`).
+- ❌ Stock illustration / decorative image.
+- ❌ **Monospace cho data** — Cupertino dùng SF tabular-nums. Mono = sai DNA.
 
-- ❌ Gradient backgrounds (purple/blue), neon, glassmorphism.
-- ❌ Emoji as icon trong UI chính (welcome string OK).
-- ❌ Generic Tailwind blue `bg-blue-500` cho primary action — đã có `bg-accent`.
-- ❌ Stock illustration / Unsplash decorative image.
-- ❌ Modal backdrop blur trừ khi đã có lý do.
+### 8.2 Sai DNA Cupertino (mới)
+- ❌ Viền đậm + flat không shadow (đó là ledger). Phải có **depth**.
+- ❌ Bo góc nhỏ/vuông cho card. Card luôn ≥ 14px mềm.
+- ❌ Đường kẻ ô dày phân tách group (dùng khoảng trắng + shadow).
+- ❌ Hardcode color trong JSX — luôn token.
 
-### 8.2 Trùng affordance
-
-- ❌ Hai cách làm cùng 1 thing (vd: "+ Sprint" button **và** dropdown option). Chọn 1.
-- ❌ Settings page sớm. Mỗi setting → hỏi "có thể inline không?". Dark toggle là icon trong header, không phải `/settings`.
-
-### 8.3 Premature feature
-
-- ❌ Tags, labels, sub-tasks, dependencies, custom fields — chưa cần. Wedge là sprint + assignee + status.
-- ❌ Multi-tenancy, team collaboration, real-time. Single-user là feature, không phải bug.
-- ❌ Animation transitions > 300ms. Productivity tool không màn show off.
-
-### 8.4 Visual debt
-
-- ❌ Inconsistent spacing (mix `gap-2` vs `gap-3` vô lý).
-- ❌ Mix `rounded` (mặc định) với `rounded-lg`, `rounded-md` không theo rule (dưới đã thiết lập: `rounded-md` cho input/button, `rounded-lg` cho card, `rounded` cho icon button, `rounded-full` cho avatar/dot).
-- ❌ Hardcode color trong JSX (`bg-zinc-100`) — luôn dùng token.
+### 8.3 Trùng affordance / premature
+- ❌ Hai cách làm cùng 1 thing. Settings page sớm.
+- ❌ Tags/sub-tasks/custom fields chưa cần. Multi-tenant/real-time. Animation > 300ms.
 
 ## 9. Decision checklist cho feature mới
+1. **Wedge**: support 1 trong 4 DNA (no-auth/speed/local-first/calm)?
+2. **Affordance density**: chiếm real estate xứng tần suất dùng?
+3. **Keyboard path**: trigger bằng phím được?
+4. **Empty state**: handle 0 records?
+5. **Dark mode**: dùng token, không hardcode?
+6. **Cupertino check**: SF (không mono)? depth (không flat)? radius ≥ rule? accent là tín hiệu (không trang trí)?
+7. **Schema impact**: cần version bump + migration test?
 
-Trước khi code, tự hỏi 7 câu:
-
-1. **Wedge alignment**: feature này có support 1 trong 4 DNA (no-auth / speed / local-first / calm) không?
-2. **Affordance density**: nó có chiếm visual real estate xứng đáng với tần suất dùng không? (Add member dùng 1/tuần — không xứng 1 row hero.)
-3. **Keyboard path**: power user có thể trigger bằng phím được không?
-4. **Empty state**: feature này có handle "0 records" gracefully không?
-5. **Dark mode**: có dùng token, không hardcode color?
-6. **Schema impact**: có cần version bump + migration test không?
-7. **Anti-slop check**: có element nào trong section 8 không?
-
-Nếu trả lời "không" cho ≥ 2 câu → revisit thiết kế.
+≥ 2 câu "không" → revisit.
 
 ## 10. File map
 
 ```
 plan-tmp/
-├── design.md              ← product spec (premises, scope, success criteria)
-├── design-system.md       ← FILE NÀY (UI/UX principles)
-├── CLAUDE.md              ← code layout rule (root vs app/)
-└── app/
-    └── src/
-        ├── index.css      ← @theme tokens + dark mode + welcome-pulse keyframe
-        ├── lib.ts         ← formatRelativeDate, isOverdue, formatSprintRange, useDarkMode
-        ├── db.ts          ← Dexie schema, uid, colorForName, deleteMember, export/import, seed
-        ├── App.tsx        ← Header, capacity banner, search, keyboard handler, NewSprintDialog
-        ├── SprintView.tsx ← Card layout, MemberCard, UnassignedCard, TaskRow + sub-components
-        └── db.test.ts     ← Vitest + fake-indexeddb smoke + race tests
+├── design.md              ← product spec
+├── design-system.md       ← FILE NÀY (UI/UX constitution · Cupertino DNA)
+├── CLAUDE.md              ← code layout rule
+└── app/src/
+    ├── index.css      ← @theme tokens (Cupertino) + dark mode + SF stack
+    ├── lib.ts         ← formatShortDate (MMM d), isOverdue, useDarkMode
+    ├── db.ts          ← Dexie schema, colorForName (Apple palette), export/import, seed
+    ├── App.tsx        ← rail, vibrancy panel, toolbar header, capacity, segmented control
+    ├── SprintView.tsx ← inset-grouped MemberCard, StatusCircle, status pill, TaskRow + COL
+    └── BoardView.tsx  ← board (Cupertino restyle)
 ```
 
 ## 11. Khi nào update file này
+- Đổi accent / 1 trong 4 DNA / aesthetic DNA → update + commit giải thích.
+- Thêm component pattern → section 5. Thêm shortcut → 6.1.
+- Ai code ngược file này → push back, không silent merge.
 
-- Khi accent color hoặc 1 trong 4 DNA principle thay đổi → update + commit message giải thích lý do.
-- Khi thêm component pattern mới (vd: Drawer, Toast) → thêm vào section 5.
-- Khi thêm keyboard shortcut → thêm vào table section 6.1.
-- Khi thấy ai (kể cả bản thân) code đi ngược file này → push back, không silent merge.
-
-File này là **constitution**, không phải README. Nó định nghĩa cái gì là plan-tmp và cái gì không.
+File này là **constitution**. Nó định nghĩa cái gì là plan-tmp và cái gì không.

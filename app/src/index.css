@@ -15,53 +15,74 @@ html.dark input, html.dark select, html.dark textarea, html.dark button {
 }
 
 @theme {
-  --font-sans: 'DM Sans', ui-sans-serif, -apple-system, 'Segoe UI', system-ui,
-    sans-serif;
-  --font-mono: 'Geist Mono', ui-monospace, SFMono-Regular, 'JetBrains Mono',
-    Menlo, monospace;
+  /* Cupertino DNA — SF Pro system stack. No mono family: tabular data uses
+     SF with tabular-nums (see body + .font-mono below). */
+  --font-sans: -apple-system, 'SF Pro Text', 'SF Pro Display', system-ui,
+    'Segoe UI', Roboto, sans-serif;
+  --font-mono: var(--font-sans);
 
-  /* Jira-blue palette (atlassian-inspired) */
-  --color-accent: #1868db;
-  --color-accent-hover: #0e54bf;
-  --color-accent-soft: #f0f5ff;
-  --color-accent-strong: #0747a6;
-  --color-accent-tint: rgba(24, 104, 219, 0.12);
+  /* Apple system blue */
+  --color-accent: #0071e3;
+  --color-accent-hover: #0063c7;
+  --color-accent-soft: #eaf2fe;
+  --color-accent-strong: #0058b0;
+  --color-accent-tint: rgba(0, 113, 227, 0.12);
 
-  --color-canvas: #ffffff;
-  --color-canvas-sunk: #f6f8fb;
+  /* Apple greyscale — grey canvas so white cards pop (inset-grouped) */
+  --color-canvas: #f5f5f7;
+  --color-canvas-sunk: #ececee;
   --color-surface: #ffffff;
-  --color-surface-hover: #f0f5ff;
-  --color-border: #dfe3eb;
-  --color-border-strong: #c2c8d2;
-  --color-border-hair: rgba(15, 23, 42, 0.07);
-  --color-ink: #172b4d;
-  --color-ink-muted: #5b6573;
-  --color-ink-faint: #7b8794;
+  --color-surface-hover: rgba(0, 0, 0, 0.03);
+  --color-border: #e5e5ea;
+  --color-border-strong: #d1d1d6;
+  --color-border-hair: rgba(0, 0, 0, 0.06);
+  --color-ink: #1d1d1f;
+  --color-ink-muted: #6e6e73;
+  --color-ink-faint: #a1a1a6;
 
-  --color-status-todo: #7b8794;
-  --color-status-progress: #1868db;
-  --color-status-done: #2d7a45;
+  /* Vibrancy base for sidebars (paired with backdrop-blur at component level) */
+  --color-vibrancy: rgba(248, 248, 250, 0.72);
 
-  --color-priority-urgent: #de350b;
-  --color-priority-high: #e5493a;
-  --color-priority-normal: #1868db;
-  --color-priority-low: #5b6573;
-  --color-priority-none: #c2c8d2;
+  --color-status-todo: #8e8e93;
+  --color-status-progress: #0071e3;
+  --color-status-done: #34c759;
+
+  --color-priority-urgent: #ff3b30;
+  --color-priority-high: #ff9500;
+  --color-priority-normal: #0071e3;
+  --color-priority-low: #8e8e93;
+  --color-priority-none: #d1d1d6;
 }
 
 .dark {
-  --color-canvas: #1d2125;
-  --color-canvas-sunk: #16191c;
-  --color-surface: #22272b;
-  --color-surface-hover: #2c333a;
-  --color-border: #2f353c;
-  --color-border-strong: #404750;
-  --color-border-hair: rgba(255, 255, 255, 0.06);
-  --color-ink: #c7d1de;
-  --color-ink-muted: #9ba6b5;
-  --color-ink-faint: #7b8794;
-  --color-accent-soft: #0a2547;
-  --color-accent-tint: rgba(24, 104, 219, 0.22);
+  --color-accent: #0a84ff;
+  --color-accent-hover: #409cff;
+  --color-accent-soft: #0a2a4d;
+  --color-accent-strong: #5aa9ff;
+  --color-accent-tint: rgba(10, 132, 255, 0.24);
+
+  --color-canvas: #1c1c1e;
+  --color-canvas-sunk: #161618;
+  --color-surface: #2c2c2e;
+  --color-surface-hover: rgba(255, 255, 255, 0.05);
+  --color-border: #38383a;
+  --color-border-strong: #48484a;
+  --color-border-hair: rgba(255, 255, 255, 0.07);
+  --color-ink: #f5f5f7;
+  --color-ink-muted: #aeaeb2;
+  --color-ink-faint: #8e8e93;
+
+  --color-vibrancy: rgba(30, 30, 32, 0.62);
+
+  --color-status-todo: #8e8e93;
+  --color-status-progress: #0a84ff;
+  --color-status-done: #30d158;
+
+  --color-priority-urgent: #ff453a;
+  --color-priority-high: #ff9f0a;
+  --color-priority-normal: #0a84ff;
+  --color-priority-low: #8e8e93;
+  --color-priority-none: #48484a;
 }
 
 body {
@@ -70,8 +91,7 @@ body {
   background: var(--color-canvas);
   color: var(--color-ink);
   -webkit-font-smoothing: antialiased;
-  font-variant-numeric: tabular-nums;
-  /* DM Sans: keep default features */
+  font-variant-numeric: tabular-nums; /* SF Pro tabular figures everywhere */
 }
 
 /* Geist Display tracking on headings (works for any sans) */
@@ -79,11 +99,15 @@ h1, h2, h3, .display-tight {
   letter-spacing: -0.022em;
 }
 
-/* Tabular data — sequence numbers, dates, counts — use Geist Mono */
+/* Tabular data — sequence numbers, dates, counts. Cupertino: SF with tabular
+   figures, NOT a monospace family. `.font-mono` is kept as an alias so existing
+   markup keeps aligning numbers without a sweep; new code should prefer the
+   body default (tabular-nums) + .tab-data. */
 .font-mono,
 .tab-data {
-  font-family: var(--font-mono);
-  font-feature-settings: normal;
+  font-family: var(--font-sans);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum';
 }
 
 /* Inline edit fields — Jira-style focus halo.
@@ -103,12 +127,8 @@ h1, h2, h3, .display-tight {
   border-color: var(--color-accent);
 }
 
-/* Zebra view — every other task row gets a faint accent tint.
- * Uses `nth-child of selector` so only .task-row siblings count (skips
- * AddTaskRow / column-header / etc). */
-.task-row:nth-child(even of .task-row) {
-  background: color-mix(in srgb, var(--color-accent) 3.5%, transparent);
-}
+/* Cupertino: no zebra striping — rows separate via hairline + plenty of
+ * whitespace, like a native macOS list. (Zebra removed in v2 redesign.) */
 
 @keyframes welcome-pulse {
   0%, 100% { opacity: 1; }

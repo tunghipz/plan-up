@@ -308,26 +308,36 @@ function MemberCard({
         }}
       />
       {!collapsed && (
-        <>
-          {tasks.length > 0 && <TaskColumnHeader sort={sort} setSort={setSort} />}
-          <div className="divide-y divide-border">
-            {tasks.map((t) => (
-              <TaskRow
-                key={t.id}
-                task={t}
-                members={members}
-                allTasks={allTasks}
-                tasksById={tasksById}
+        // Horizontal scroll on narrow screens: fixed-width columns keep their
+        // size and the table scrolls instead of crushing the title column.
+        // Assignee column is omitted — every row in a member group is the same
+        // person (shown in the group header avatar).
+        <div className="overflow-x-auto">
+          <div className="min-w-[860px]">
+            {tasks.length > 0 && (
+              <TaskColumnHeader sort={sort} setSort={setSort} showAssignee={false} />
+            )}
+            <div className="divide-y divide-border">
+              {tasks.map((t) => (
+                <TaskRow
+                  key={t.id}
+                  task={t}
+                  members={members}
+                  allTasks={allTasks}
+                  tasksById={tasksById}
+                  showAssignee={false}
+                />
+              ))}
+              <AddTaskRow
+                projectId={projectId}
+                sprintId={sprintId}
+                sprintStartDate={sprintStartDate}
+                assigneeId={member.id}
+                showAssignee={false}
               />
-            ))}
-            <AddTaskRow
-              projectId={projectId}
-              sprintId={sprintId}
-              sprintStartDate={sprintStartDate}
-              assigneeId={member.id}
-            />
+            </div>
           </div>
-        </>
+        </div>
       )}
     </Card>
   )
@@ -362,17 +372,21 @@ function UnassignedCard({
         count={tasks.length}
         muted
       />
-      {tasks.length > 0 && <TaskColumnHeader sort={sort} setSort={setSort} />}
-      <div className="divide-y divide-border">
-        {tasks.map((t) => (
-          <TaskRow
-            key={t.id}
-            task={t}
-            members={members}
-            allTasks={allTasks}
-            tasksById={tasksById}
-          />
-        ))}
+      <div className="overflow-x-auto">
+        <div className="min-w-[920px]">
+          {tasks.length > 0 && <TaskColumnHeader sort={sort} setSort={setSort} />}
+          <div className="divide-y divide-border">
+            {tasks.map((t) => (
+              <TaskRow
+                key={t.id}
+                task={t}
+                members={members}
+                allTasks={allTasks}
+                tasksById={tasksById}
+              />
+            ))}
+          </div>
+        </div>
       </div>
     </Card>
   )
@@ -830,11 +844,13 @@ function AddTaskRow({
   sprintId,
   sprintStartDate,
   assigneeId,
+  showAssignee = true,
 }: {
   projectId: string
   sprintId: string
   sprintStartDate: string
   assigneeId: string | null
+  showAssignee?: boolean
 }) {
   const [title, setTitle] = useState('')
   const add = async () => {
@@ -872,7 +888,7 @@ function AddTaskRow({
         placeholder="Add task"
         className={`${COL.title} editable placeholder:text-ink-faint bg-transparent`}
       />
-      <div className={COL.assignee} />
+      {showAssignee && <div className={COL.assignee} />}
       <div className={COL.effort} />
       <div className={COL.start} />
       <div className={COL.due} />
@@ -888,7 +904,7 @@ function AddTaskRow({
 const COL = {
   dot: 'w-4 shrink-0',
   seq: 'w-9 text-sm text-ink-faint tabular-nums text-center shrink-0 font-mono',
-  title: 'flex-1 min-w-0',
+  title: 'flex-1 min-w-[150px]',
   assignee: 'w-16 flex justify-center shrink-0',
   effort: 'w-24 flex justify-center shrink-0',
   start: 'w-36 flex justify-end shrink-0',
@@ -970,11 +986,13 @@ function TaskRow({
   members,
   allTasks,
   tasksById,
+  showAssignee = true,
 }: {
   task: Task
   members: Member[]
   allTasks: Task[]
   tasksById: Map<string, Task>
+  showAssignee?: boolean
 }) {
   const update = (patch: Partial<Task>) => db.tasks.update(task.id, patch)
   const assignee = members.find((m) => m.id === task.assigneeId) ?? null
@@ -1024,9 +1042,11 @@ function TaskRow({
         priority={task.priority}
       />
 
-      <div className={COL.assignee}>
-        <AssigneePicker task={task} members={members} assignee={assignee} update={update} />
-      </div>
+      {showAssignee && (
+        <div className={COL.assignee}>
+          <AssigneePicker task={task} members={members} assignee={assignee} update={update} />
+        </div>
+      )}
 
       <div className={COL.effort}>
         <EffortCell
@@ -1139,11 +1159,13 @@ function RowActionsMenu({ onDelete }: { onDelete: () => void }) {
 function TaskColumnHeader({
   sort,
   setSort,
+  showAssignee = true,
 }: {
   sort: { field: SortField; dir: 'asc' | 'desc' }
   setSort: React.Dispatch<
     React.SetStateAction<{ field: SortField; dir: 'asc' | 'desc' }>
   >
+  showAssignee?: boolean
 }) {
   const onSort = (field: SortField) => {
     setSort((prev) =>
@@ -1164,15 +1186,17 @@ function TaskColumnHeader({
         align="center"
       />
       <SortHeader
-        className="flex-1 min-w-0"
+        className="flex-1 min-w-[150px]"
         field="title"
         label="Task"
         sort={sort}
         onSort={onSort}
       />
-      <div className={`${COL.assignee} text-[11px] tracking-normal text-ink-faint font-medium text-center`}>
-        Assignee
-      </div>
+      {showAssignee && (
+        <div className={`${COL.assignee} text-[11px] tracking-normal text-ink-faint font-medium text-center`}>
+          Assignee
+        </div>
+      )}
       <SortHeader
         className={COL.effort}
         field="effort"

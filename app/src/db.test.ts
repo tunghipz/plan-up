@@ -8,8 +8,11 @@ import {
   deleteTask,
   addDependency,
   removeDependency,
+  setDependencies,
   wouldCreateCycle,
   isTaskBlocked,
+  computeStartEnd,
+  addDays,
   dedupeSprints,
   exportAll,
   importAll,
@@ -73,6 +76,7 @@ describe('deleteMember', () => {
     const sprint = (await db.sprints.toArray())[0]
     await db.tasks.add({
       id: uid(),
+      sequence: 2,
       title: 'orphan candidate',
       assigneeId: member.id,
       sprintId: sprint.id,
@@ -108,8 +112,9 @@ describe('dedupeSprints', () => {
     const s3 = { id: uid(), name: 'Sprint 2', startDate: '2026-06-15', endDate: '2026-06-28' }
     await db.sprints.bulkAdd([s1, s2, s3])
     // Give s2 more tasks → s2 should win
+    let _seq = 100
     const mk = (sid: string, title: string) => ({
-      id: uid(), title, assigneeId: null, sprintId: sid,
+      id: uid(), sequence: _seq++, title, assigneeId: null, sprintId: sid,
       status: 'todo' as const, priority: 'normal' as const,
       startDate: null, dueDate: null, estimate: null, createdAt: Date.now(),
       dependsOn: [] as string[],
@@ -140,8 +145,9 @@ describe('dedupeSprints', () => {
 })
 
 describe('task dependencies', () => {
+  let _seq = 1
   const mkTask = (id: string, deps: string[] = [], status: Task['status'] = 'todo'): Task => ({
-    id, title: id, assigneeId: null, sprintId: 's',
+    id, sequence: _seq++, title: id, assigneeId: null, sprintId: 's',
     status, priority: 'normal',
     startDate: null, dueDate: null, estimate: null, createdAt: 0,
     dependsOn: deps,
@@ -214,6 +220,113 @@ describe('task dependencies', () => {
     const b = mkTask('b', [], 'todo')
     const byId = new Map([[a.id, a], [b.id, b]])
     expect(isTaskBlocked(a, byId)).toBe(false)
+  })
+})
+
+describe('date computation', () => {
+  it('addDays handles month rollover', () => {
+    expect(addDays('2026-05-30', 3)).toBe('2026-06-02')
+  })
+
+  it('computeStartEnd: no prereqs → returns existing dates', () => {
+    const t: Task = {
+      id: 'a', sequence: 1, title: 'a', assigneeId: null, sprintId: 's',
+      status: 'todo', priority: 'normal',
+      startDate: '2026-06-01', dueDate: '2026-06-05',
+      estimate: 5, createdAt: 0, dependsOn: [],
+    }
+    expect(computeStartEnd(t, new Map([[t.id, t]]))).toEqual({
+      startDate: '2026-06-01', dueDate: '2026-06-05',
+    })
+  })
+
+  it('computeStartEnd: start = latest prereq end + 1, end = start + (effort-1)', () => {
+    const p1: Task = {
+      id: 'p1', sequence: 1, title: 'p1', assigneeId: null, sprintId: 's',
+      status: 'todo', priority: 'normal',
+      startDate: '2026-06-01', dueDate: '2026-06-01',
+      estimate: 1, createdAt: 0, dependsOn: [],
+    }
+    const p2: Task = { ...p1, id: 'p2', sequence: 2, dueDate: '2026-06-03' }
+    const a: Task = {
+      id: 'a', sequence: 3, title: 'a', assigneeId: null, sprintId: 's',
+      status: 'todo', priority: 'normal',
+      startDate: null, dueDate: null, estimate: 2,
+      createdAt: 0, dependsOn: ['p1', 'p2'],
+    }
+    const byId = new Map([[p1.id, p1], [p2.id, p2], [a.id, a]])
+    // latest end is p2 (06-03) → start 06-04, effort 2 → end 06-05
+    expect(computeStartEnd(a, byId)).toEqual({
+      startDate: '2026-06-04', dueDate: '2026-06-05',
+    })
+  })
+
+  it('computeStartEnd: missing effort defaults to 1 day (start = end)', () => {
+    const p: Task = {
+      id: 'p', sequence: 1, title: 'p', assigneeId: null, sprintId: 's',
+      status: 'todo', priority: 'normal',
+      startDate: '2026-06-01', dueDate: '2026-06-01',
+      estimate: null, createdAt: 0, dependsOn: [],
+    }
+    const a: Task = { ...p, id: 'a', sequence: 2, estimate: null, dependsOn: ['p'] }
+    const byId = new Map([[p.id, p], [a.id, a]])
+    expect(computeStartEnd(a, byId)).toEqual({
+      startDate: '2026-06-02', dueDate: '2026-06-02',
+    })
+  })
+
+  it('setDependencies recomputes dates and cascades forward', async () => {
+    // Three tasks: a (1d, due 2026-06-01), b (2d, no deps), c (1d, depends on b)
+    await db.tasks.bulkAdd([
+      {
+        id: 'a', sequence: 1, title: 'a', assigneeId: null, sprintId: 's',
+        status: 'todo', priority: 'normal',
+        startDate: '2026-06-01', dueDate: '2026-06-01',
+        estimate: 1, createdAt: 0, dependsOn: [],
+      },
+      {
+        id: 'b', sequence: 2, title: 'b', assigneeId: null, sprintId: 's',
+        status: 'todo', priority: 'normal',
+        startDate: null, dueDate: null,
+        estimate: 2, createdAt: 1, dependsOn: [],
+      },
+      {
+        id: 'c', sequence: 3, title: 'c', assigneeId: null, sprintId: 's',
+        status: 'todo', priority: 'normal',
+        startDate: null, dueDate: null,
+        estimate: 1, createdAt: 2, dependsOn: ['b'],
+      },
+    ])
+    // Make b depend on a → b's dates should compute, then c's should follow.
+    await setDependencies('b', ['a'])
+    const b = await db.tasks.get('b')
+    const c = await db.tasks.get('c')
+    // a ends 06-01 → b starts 06-02, effort 2 → b ends 06-03
+    expect(b?.startDate).toBe('2026-06-02')
+    expect(b?.dueDate).toBe('2026-06-03')
+    // b ends 06-03 → c starts 06-04, effort 1 → c ends 06-04
+    expect(c?.startDate).toBe('2026-06-04')
+    expect(c?.dueDate).toBe('2026-06-04')
+  })
+
+  it('setDependencies drops cycles silently', async () => {
+    await db.tasks.bulkAdd([
+      {
+        id: 'a', sequence: 1, title: 'a', assigneeId: null, sprintId: 's',
+        status: 'todo', priority: 'normal',
+        startDate: null, dueDate: null, estimate: 1, createdAt: 0,
+        dependsOn: ['b'],
+      },
+      {
+        id: 'b', sequence: 2, title: 'b', assigneeId: null, sprintId: 's',
+        status: 'todo', priority: 'normal',
+        startDate: null, dueDate: null, estimate: 1, createdAt: 1,
+        dependsOn: [],
+      },
+    ])
+    // Cycle attempt: b depends on a, but a already depends on b.
+    const saved = await setDependencies('b', ['a'])
+    expect(saved).toEqual([])
   })
 })
 

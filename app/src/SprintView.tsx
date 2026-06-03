@@ -7,8 +7,6 @@ import {
   ChevronDown,
   Calendar,
   UserPlus,
-  Link2,
-  X,
 } from 'lucide-react'
 import {
   db,
@@ -16,9 +14,10 @@ import {
   colorForName,
   deleteMember,
   deleteTask,
-  addDependency,
-  removeDependency,
+  setDependencies,
+  recomputeDates,
   isTaskBlocked,
+  nextSequence,
   type Member,
   type Task,
   type Status,
@@ -525,8 +524,10 @@ function AddTaskRow({
   const add = async () => {
     const t = title.trim()
     if (!t) return
+    const seq = await nextSequence()
     await db.tasks.add({
       id: uid(),
+      sequence: seq,
       title: t,
       assigneeId,
       sprintId,
@@ -546,6 +547,7 @@ function AddTaskRow({
       <div className={COL.dot}>
         <Plus size={14} className="text-ink-faint" />
       </div>
+      <div className={COL.seq} />
       <input
         value={title}
         onChange={(e) => setTitle(e.target.value)}
@@ -554,27 +556,30 @@ function AddTaskRow({
         className={`${COL.title} outline-none placeholder:text-ink-faint bg-transparent`}
       />
       <div className={COL.assignee} />
+      <div className={COL.effort} />
       <div className={COL.start} />
       <div className={COL.due} />
       <div className={COL.priority} />
       <div className={COL.status} />
-      <div className={COL.deps} />
+      <div className={COL.prereq} />
       <div className={COL.trash} />
     </div>
   )
 }
 
 // Column widths — kept in sync with TaskColumnHeader. If you change one,
-// change the other. Order: status-dot · title · assignee · start · due · priority · status · deps · delete
+// change the other. Order: status-dot · seq · title · assignee · effort · start · due · priority · status · prereq · delete
 const COL = {
   dot: 'w-4 shrink-0',
+  seq: 'w-7 text-xs text-ink-faint tabular-nums text-right shrink-0',
   title: 'flex-1 min-w-0',
   assignee: 'w-7 flex justify-center shrink-0',
+  effort: 'w-12 flex justify-end shrink-0',
   start: 'w-20 flex justify-end shrink-0',
   due: 'w-20 flex justify-end shrink-0',
   priority: 'w-6 flex justify-center shrink-0',
   status: 'w-28 flex justify-start shrink-0',
-  deps: 'w-7 flex justify-center shrink-0',
+  prereq: 'w-14 flex justify-end shrink-0',
   trash: 'w-5 flex justify-end shrink-0',
 }
 
@@ -617,6 +622,8 @@ function TaskRow({
         />
       </div>
 
+      <div className={COL.seq} title="Task number">{task.sequence})</div>
+
       <input
         value={task.title}
         onChange={(e) => update({ title: e.target.value })}
@@ -629,9 +636,21 @@ function TaskRow({
         <AssigneePicker task={task} members={members} assignee={assignee} update={update} />
       </div>
 
+      <div className={COL.effort}>
+        <EffortCell
+          value={task.estimate}
+          onChange={async (v) => {
+            await update({ estimate: v })
+            // Recompute if prereqs exist — effort affects end date.
+            if (task.dependsOn.length > 0) await recomputeDates(task.id)
+          }}
+        />
+      </div>
+
       <div className={COL.start}>
         <DatePickCell
           value={task.startDate}
+          locked={task.dependsOn.length > 0}
           onChange={(v) => update({ startDate: v })}
           ariaLabel="Start date"
         />
@@ -640,6 +659,7 @@ function TaskRow({
       <div className={COL.due}>
         <DatePickCell
           value={task.dueDate}
+          locked={task.dependsOn.length > 0}
           highlight={overdue ? 'overdue' : null}
           onChange={(v) => update({ dueDate: v })}
           ariaLabel="Due date"
@@ -657,8 +677,8 @@ function TaskRow({
         <StatusPicker status={task.status} onChange={(s) => update({ status: s })} />
       </div>
 
-      <div className={COL.deps}>
-        <DependencyCell task={task} allTasks={allTasks} tasksById={tasksById} />
+      <div className={COL.prereq}>
+        <PrereqInput task={task} allTasks={allTasks} tasksById={tasksById} />
       </div>
 
       <div className={COL.trash}>
@@ -684,13 +704,15 @@ function TaskColumnHeader() {
       aria-hidden
     >
       <div className={COL.dot} />
+      <div className={`${COL.seq} ${labelCls}`}>#</div>
       <div className={`${labelCls} flex-1 min-w-0`}>Task</div>
       <div className={`${COL.assignee} ${labelCls}`}>Who</div>
+      <div className={`${COL.effort} ${labelCls} justify-end`}>Eff</div>
       <div className={`${COL.start} ${labelCls} justify-end`}>Start</div>
-      <div className={`${COL.due} ${labelCls} justify-end`}>Due</div>
+      <div className={`${COL.due} ${labelCls} justify-end`}>End</div>
       <div className={`${COL.priority} ${labelCls}`}>Pri</div>
       <div className={`${COL.status} ${labelCls}`}>Status</div>
-      <div className={`${COL.deps} ${labelCls}`}>Dep</div>
+      <div className={`${COL.prereq} ${labelCls} justify-end`}>Pre</div>
       <div className={COL.trash} />
     </div>
   )
@@ -794,22 +816,23 @@ function AssigneePicker({
 function DatePickCell({
   value,
   highlight = null,
+  locked = false,
   onChange,
   ariaLabel,
 }: {
   value: string | null
   highlight?: 'overdue' | null
+  locked?: boolean
   onChange: (v: string | null) => void
   ariaLabel: string
 }) {
   const ref = useRef<HTMLInputElement>(null)
   const label = formatRelativeDate(value)
 
-  // Open the picker explicitly — `showPicker()` is supported in modern
-  // Chrome/Edge/Firefox/Safari 16+. Fallback to focus+click for older WebKit.
   const open = (e: React.MouseEvent) => {
     e.preventDefault()
     e.stopPropagation()
+    if (locked) return
     const el = ref.current
     if (!el) return
     if (typeof el.showPicker === 'function') {
@@ -834,8 +857,18 @@ function DatePickCell({
     <button
       type="button"
       onClick={open}
+      disabled={locked}
       aria-label={ariaLabel}
-      className={`relative inline-flex items-center justify-end w-full h-8 px-2 rounded-md cursor-pointer border border-transparent hover:border-border-strong hover:bg-canvas transition ${valueCls}`}
+      title={
+        locked
+          ? 'Computed from prerequisites. Clear Pre to edit manually.'
+          : undefined
+      }
+      className={`relative inline-flex items-center justify-end w-full h-8 px-2 rounded-md border border-transparent transition ${valueCls} ${
+        locked
+          ? 'cursor-not-allowed italic'
+          : 'cursor-pointer hover:border-border-strong hover:bg-canvas'
+      }`}
     >
       {value ? (
         <span className="text-xs whitespace-nowrap">{label}</span>
@@ -889,7 +922,61 @@ function PriorityCell({
   )
 }
 
-function DependencyCell({
+/**
+ * Compact effort input — number of days. Empty = unset (treated as 1 day
+ * when prereqs trigger date computation).
+ */
+function EffortCell({
+  value,
+  onChange,
+}: {
+  value: number | null
+  onChange: (v: number | null) => void
+}) {
+  const [draft, setDraft] = useState(value == null ? '' : String(value))
+  useEffect(() => {
+    setDraft(value == null ? '' : String(value))
+  }, [value])
+  const commit = () => {
+    const trimmed = draft.trim()
+    if (trimmed === '') {
+      if (value !== null) onChange(null)
+      return
+    }
+    const n = Number(trimmed)
+    if (!Number.isFinite(n) || n < 0) {
+      setDraft(value == null ? '' : String(value))
+      return
+    }
+    if (n !== value) onChange(n)
+  }
+  return (
+    <input
+      value={draft}
+      onChange={(e) => setDraft(e.target.value.replace(/[^0-9.]/g, ''))}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+        if (e.key === 'Escape') {
+          setDraft(value == null ? '' : String(value))
+          ;(e.target as HTMLInputElement).blur()
+        }
+      }}
+      placeholder="—"
+      title="Effort in days"
+      aria-label="Effort in days"
+      className="w-full text-xs text-right tabular-nums bg-transparent outline-none focus:bg-canvas rounded px-1 h-7 placeholder:text-ink-faint"
+    />
+  )
+}
+
+/**
+ * Text input for prerequisites. User types a comma-separated list of task
+ * sequence numbers (e.g. "2, 3"). On blur/Enter, we resolve sequences to
+ * task IDs and call setDependencies(). Invalid numbers / self-link / cycles
+ * are dropped silently — the input snaps back to the saved state.
+ */
+function PrereqInput({
   task,
   allTasks,
   tasksById,
@@ -898,143 +985,63 @@ function DependencyCell({
   allTasks: Task[]
   tasksById: Map<string, Task>
 }) {
-  const [open, setOpen] = useState(false)
-  const [query, setQuery] = useState('')
-  const popRef = useRef<HTMLDivElement>(null)
+  const currentLabel = task.dependsOn
+    .map((id) => tasksById.get(id)?.sequence)
+    .filter((n): n is number => typeof n === 'number')
+    .sort((a, b) => a - b)
+    .join(', ')
 
+  const [draft, setDraft] = useState(currentLabel)
+  const [focused, setFocused] = useState(false)
   useEffect(() => {
-    if (!open) return
-    const onClick = (e: MouseEvent) => {
-      if (popRef.current && !popRef.current.contains(e.target as Node)) {
-        setOpen(false)
-      }
+    if (!focused) setDraft(currentLabel)
+  }, [currentLabel, focused])
+
+  const seqToId = useMemo(() => {
+    const m = new Map<number, string>()
+    for (const t of allTasks) m.set(t.sequence, t.id)
+    return m
+  }, [allTasks])
+
+  const commit = async () => {
+    const nums = draft
+      .split(/[,\s]+/)
+      .map((s) => parseInt(s, 10))
+      .filter((n) => Number.isInteger(n) && n > 0)
+    const ids: string[] = []
+    for (const n of nums) {
+      const id = seqToId.get(n)
+      if (id) ids.push(id)
     }
-    document.addEventListener('mousedown', onClick)
-    return () => document.removeEventListener('mousedown', onClick)
-  }, [open])
-
-  const deps = task.dependsOn
-    .map((id) => tasksById.get(id))
-    .filter((t): t is Task => Boolean(t))
-  const count = deps.length
-
-  const candidates = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    return allTasks.filter((t) => {
-      if (t.id === task.id) return false
-      if (task.dependsOn.includes(t.id)) return false
-      if (!q) return true
-      return t.title.toLowerCase().includes(q)
-    })
-  }, [allTasks, task.id, task.dependsOn, query])
+    const saved = await setDependencies(task.id, ids)
+    const final = saved
+      .map((id) => tasksById.get(id)?.sequence)
+      .filter((n): n is number => typeof n === 'number')
+      .sort((a, b) => a - b)
+      .join(', ')
+    setDraft(final)
+  }
 
   return (
-    <div className="relative">
-      <button
-        type="button"
-        onClick={(e) => {
-          e.stopPropagation()
-          setOpen((v) => !v)
-        }}
-        className={`inline-flex items-center gap-0.5 px-1 h-6 rounded hover:bg-surface-hover transition ${
-          count > 0 ? 'text-ink' : 'text-ink-faint'
-        }`}
-        title={
-          count > 0
-            ? `${count} prerequisite${count === 1 ? '' : 's'}`
-            : 'Set prerequisites'
-        }
-        aria-label="Prerequisites"
-      >
-        <Link2 size={14} />
-        {count > 0 && <span className="text-[10px] font-medium">{count}</span>}
-      </button>
-      {open && (
-        <div
-          ref={popRef}
-          onClick={(e) => e.stopPropagation()}
-          className="absolute right-0 top-full mt-1 z-20 w-72 bg-surface border border-border rounded-lg shadow-lg p-2"
-        >
-          <div className="text-[10px] uppercase tracking-wider text-ink-faint px-1 pb-1">
-            Prerequisites
-          </div>
-          {deps.length === 0 && (
-            <div className="text-xs text-ink-faint px-1 pb-2">None yet.</div>
-          )}
-          {deps.map((d) => (
-            <div
-              key={d.id}
-              className="flex items-center gap-2 px-1.5 py-1 rounded hover:bg-surface-hover group/dep"
-            >
-              <StatusDotIndicator status={d.status} />
-              <span
-                className={`flex-1 text-xs truncate ${
-                  d.status === 'done' ? 'line-through text-ink-faint' : 'text-ink'
-                }`}
-                title={d.title}
-              >
-                {d.title}
-              </span>
-              <button
-                onClick={() => removeDependency(task.id, d.id)}
-                className="text-ink-faint hover:text-red-500 opacity-0 group-hover/dep:opacity-100 transition"
-                aria-label={`Remove ${d.title} as prerequisite`}
-              >
-                <X size={12} />
-              </button>
-            </div>
-          ))}
-          <div className="border-t border-border mt-1 pt-2">
-            <input
-              autoFocus
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Add prerequisite…"
-              className="w-full text-xs bg-canvas border border-border rounded px-2 py-1 outline-none focus:border-accent"
-            />
-            {candidates.length === 0 ? (
-              <div className="text-[11px] text-ink-faint px-1 pt-2">
-                {query ? 'No matching tasks.' : 'No other tasks.'}
-              </div>
-            ) : (
-              <div className="max-h-40 overflow-y-auto mt-1">
-                {candidates.slice(0, 20).map((c) => (
-                  <button
-                    key={c.id}
-                    onClick={async () => {
-                      const ok = await addDependency(task.id, c.id)
-                      if (!ok) {
-                        alert(
-                          'Cannot add — that would create a circular dependency.'
-                        )
-                        return
-                      }
-                      setQuery('')
-                    }}
-                    className="w-full text-left flex items-center gap-2 px-1.5 py-1 rounded hover:bg-surface-hover text-xs"
-                  >
-                    <StatusDotIndicator status={c.status} />
-                    <span className="truncate">{c.title}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
-function StatusDotIndicator({ status }: { status: Status }) {
-  const meta = STATUS_META[status]
-  return (
-    <span
-      className="w-2.5 h-2.5 rounded-full border-2 shrink-0"
-      style={{
-        borderColor: meta.varName,
-        background: status === 'done' ? meta.varName : 'transparent',
+    <input
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onFocus={() => setFocused(true)}
+      onBlur={() => {
+        setFocused(false)
+        commit()
       }}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+        if (e.key === 'Escape') {
+          setDraft(currentLabel)
+          ;(e.target as HTMLInputElement).blur()
+        }
+      }}
+      placeholder="—"
+      title="Prerequisite task numbers, comma-separated (e.g. 2, 3)"
+      aria-label="Prerequisite task numbers"
+      className="w-full text-xs text-right tabular-nums bg-transparent outline-none focus:bg-canvas rounded px-1 h-7 placeholder:text-ink-faint"
     />
   )
 }

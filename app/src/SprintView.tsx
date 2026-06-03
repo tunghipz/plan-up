@@ -291,8 +291,19 @@ function MemberCard({
   const total = tasks.length
   const done = tasks.filter((t) => t.status === 'done').length
   const pct = total ? Math.round((done / total) * 100) : 0
-  const overdue = tasks.filter((t) => isOverdue(t.dueDate, t.status === 'done')).length
-  const remaining = remainingEffort(tasks)
+  const memberById = useMemo(() => new Map(members.map((m) => [m.id, m])), [members])
+  // Use each task's COMPUTED end (same plan the End column shows) so the header
+  // never disagrees with the rows. overdue = past-due unfinished; nextDue =
+  // earliest unfinished end that is today-or-later (the next upcoming deadline).
+  let overdue = 0
+  let nextDue: string | null = null
+  for (const t of tasks) {
+    if (t.status === 'done') continue
+    const due = computeWorkingPlan(t, tasksById, memberById).dueDate
+    if (!due) continue
+    if (isOverdue(due, false)) overdue++
+    else if (!nextDue || due < nextDue) nextDue = due
+  }
   return (
     <Card>
       <GroupHeader
@@ -300,7 +311,7 @@ function MemberCard({
         name={member.name}
         count={total}
         countText={`${done}/${total}`}
-        stats={<MemberStatsBar overdue={overdue} remaining={remaining} />}
+        stats={<MemberStatsBar overdue={overdue} nextDue={nextDue} />}
         collapsed={collapsed}
         onToggleCollapse={onToggleCollapse}
         onRename={(n) => db.members.update(member.id, { name: n })}
@@ -627,11 +638,6 @@ function Avatar({ member }: { member: Member }) {
   )
 }
 
-/** Sum of effort (days) across a member's not-yet-done tasks. */
-function remainingEffort(tasks: Task[]): number {
-  return tasks.reduce((s, t) => (t.status !== 'done' ? s + (t.estimate ?? 0) : s), 0)
-}
-
 /** Days off as effective days — a half-day counts 0.5 (matches scheduler). */
 function effectiveDaysOff(days: { half?: 'am' | 'pm' }[]): number {
   return days.reduce((s, d) => s + (d.half ? 0.5 : 1), 0)
@@ -668,10 +674,10 @@ function AvatarRing({ member, pct }: { member: Member; pct: number }) {
 
 /**
  * Right-aligned member stats for the group header (Option 5 hybrid):
- * overdue alert (only when > 0) + remaining workload. Progress lives in the
- * AvatarRing; days-off lives in MemberScheduleButton.
+ * overdue alert (only when > 0) + the next upcoming deadline. Progress lives in
+ * the AvatarRing; days-off lives in MemberScheduleButton.
  */
-function MemberStatsBar({ overdue, remaining }: { overdue: number; remaining: number }) {
+function MemberStatsBar({ overdue, nextDue }: { overdue: number; nextDue: string | null }) {
   return (
     <>
       {overdue > 0 && (
@@ -686,12 +692,12 @@ function MemberStatsBar({ overdue, remaining }: { overdue: number; remaining: nu
           {overdue} overdue
         </span>
       )}
-      {remaining > 0 && (
+      {nextDue && (
         <span
           className="text-[11px] font-medium text-ink-faint select-none whitespace-nowrap"
-          title="Remaining effort — sum of estimates of unfinished tasks"
+          title="Next upcoming deadline"
         >
-          {fmtDays(remaining)}d left
+          due {formatShortDate(nextDue)}
         </span>
       )}
     </>

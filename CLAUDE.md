@@ -8,6 +8,16 @@
 **Rule:** Khi tạo file mới:
 - Nếu là code / app config → đặt trong `app/` (ví dụ `app/src/...`, `app/vite.config.ts`).
 - Nếu là tài liệu thiết kế / spec / note → đặt trong root (ví dụ `design.md`, `notes-*.md`).
+- Design doc theo từng tính năng → đặt trong `design-docs/` (mỗi tính năng 1 file).
+
+## Design docs — doc-first (BẮT BUỘC)
+
+`design-docs/` chứa spec theo từng tính năng (1 file / tính năng); xem `design-docs/README.md` (index + template).
+
+**Quy tắc: mọi thay đổi tính năng phải có doc TRƯỚC khi implement.**
+- Tính năng mới → tạo `design-docs/<feature>.md` trước, rồi mới code.
+- Sửa tính năng có sẵn → cập nhật file doc tương ứng (bump *Last updated*) trước, rồi mới code.
+- Code là nguồn sự thật cho *how*; doc là nguồn sự thật cho *what & why*. Giữ doc đồng bộ khi thực tế lệch.
 
 ## Stack
 
@@ -31,10 +41,9 @@ npm run dev   # http://localhost:5173
 
 ## Data model
 
-3 IndexedDB tables in `app/src/db.ts`:
-- `members` — labels (no auth, no login). User tự tạo.
-- `sprints` — biweekly sprint với startDate/endDate.
-- `tasks` — title, assigneeId, sprintId, status, priority, dueDate.
+4 IndexedDB tables in `app/src/db.ts`: `projects`, `members`, `sprints`, `tasks`.
+Chi tiết đầy đủ (fields, schema versioning v1..v8, indexes) ở
+[`design-docs/data-model.md`](design-docs/data-model.md).
 
 Schema versioning qua Dexie's `version().stores()` — bump version + thêm upgrade callback khi đổi schema.
 

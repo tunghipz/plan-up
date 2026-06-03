@@ -288,12 +288,19 @@ function MemberCard({
     React.SetStateAction<{ field: SortField; dir: 'asc' | 'desc' }>
   >
 }) {
+  const total = tasks.length
+  const done = tasks.filter((t) => t.status === 'done').length
+  const pct = total ? Math.round((done / total) * 100) : 0
+  const overdue = tasks.filter((t) => isOverdue(t.dueDate, t.status === 'done')).length
+  const remaining = remainingEffort(tasks)
   return (
     <Card>
       <GroupHeader
-        avatar={<Avatar member={member} />}
+        avatar={<AvatarRing member={member} pct={pct} />}
         name={member.name}
-        count={tasks.length}
+        count={total}
+        countText={`${done}/${total}`}
+        stats={<MemberStatsBar overdue={overdue} remaining={remaining} />}
         collapsed={collapsed}
         onToggleCollapse={onToggleCollapse}
         onRename={(n) => db.members.update(member.id, { name: n })}
@@ -464,6 +471,8 @@ function GroupHeader({
   avatar,
   name,
   count,
+  countText,
+  stats,
   onDelete,
   onRename,
   muted,
@@ -474,6 +483,10 @@ function GroupHeader({
   avatar: React.ReactNode
   name: string
   count: number
+  /** Overrides the bare count display (e.g. "3/7" done-of-total). */
+  countText?: string
+  /** Right-aligned stats (overdue/workload) rendered before extras. */
+  stats?: React.ReactNode
   onDelete?: () => void
   onRename?: (newName: string) => unknown
   muted?: boolean
@@ -565,8 +578,11 @@ function GroupHeader({
           {name}
         </span>
       )}
-      <span className="text-xs text-ink-faint select-none font-mono">{count}</span>
-      <div className="ml-auto flex items-center gap-2">
+      <span className="text-xs text-ink-faint select-none font-mono">
+        {countText ?? count}
+      </span>
+      <div className="ml-auto flex items-center gap-2.5">
+        {stats}
         {extras}
         {onRename && !editing && (
           <button
@@ -608,6 +624,77 @@ function Avatar({ member }: { member: Member }) {
     >
       {member.name.slice(0, 1).toUpperCase()}
     </span>
+  )
+}
+
+/** Sum of effort (days) across a member's not-yet-done tasks. */
+function remainingEffort(tasks: Task[]): number {
+  return tasks.reduce((s, t) => (t.status !== 'done' ? s + (t.estimate ?? 0) : s), 0)
+}
+
+/** Days off as effective days — a half-day counts 0.5 (matches scheduler). */
+function effectiveDaysOff(days: { half?: 'am' | 'pm' }[]): number {
+  return days.reduce((s, d) => s + (d.half ? 0.5 : 1), 0)
+}
+
+/** Trim a day count for display: 2 → "2", 1.5 → "1.5". */
+function fmtDays(n: number): string {
+  return Number.isInteger(n) ? String(n) : n.toFixed(1)
+}
+
+/**
+ * Avatar wrapped in a Cupertino progress ring — the green arc = share of the
+ * member's tasks that are done. A hairline surface gap separates the arc from
+ * the avatar (Activity-ring look). Track + gap use tokens so it's dark-safe.
+ */
+function AvatarRing({ member, pct }: { member: Member; pct: number }) {
+  return (
+    <span
+      className="relative flex items-center justify-center shrink-0 rounded-full p-[2.5px]"
+      style={{
+        background: `conic-gradient(var(--color-status-done) ${pct}%, var(--color-border) 0)`,
+      }}
+      title={`${pct}% done`}
+    >
+      <span
+        className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold text-white ring-[1.5px] ring-surface"
+        style={{ background: member.color }}
+      >
+        {member.name.slice(0, 1).toUpperCase()}
+      </span>
+    </span>
+  )
+}
+
+/**
+ * Right-aligned member stats for the group header (Option 5 hybrid):
+ * overdue alert (only when > 0) + remaining workload. Progress lives in the
+ * AvatarRing; days-off lives in MemberScheduleButton.
+ */
+function MemberStatsBar({ overdue, remaining }: { overdue: number; remaining: number }) {
+  return (
+    <>
+      {overdue > 0 && (
+        <span
+          className="inline-flex items-center text-[11px] font-semibold px-2 py-0.5 rounded-full select-none"
+          style={{
+            background: 'color-mix(in srgb, var(--color-priority-urgent) 14%, transparent)',
+            color: 'color-mix(in srgb, var(--color-priority-urgent) 78%, var(--color-ink) 22%)',
+          }}
+          title={`${overdue} task${overdue === 1 ? '' : 's'} overdue`}
+        >
+          {overdue} overdue
+        </span>
+      )}
+      {remaining > 0 && (
+        <span
+          className="text-[11px] font-medium text-ink-faint select-none whitespace-nowrap"
+          title="Remaining effort — sum of estimates of unfinished tasks"
+        >
+          {fmtDays(remaining)}d left
+        </span>
+      )}
+    </>
   )
 }
 
@@ -716,6 +803,7 @@ function MemberScheduleButton({ member }: { member: Member }) {
 
   const days = member.daysOff ?? []
   const count = days.length
+  const effDays = effectiveDaysOff(days)
 
   const updateOne = async (date: string, half: 'all' | 'am' | 'pm') => {
     const next = days.filter((d) => d.date !== date)
@@ -751,13 +839,17 @@ function MemberScheduleButton({ member }: { member: Member }) {
         } hover:text-ink`}
         title={
           count > 0
-            ? `${count} day${count === 1 ? '' : 's'} off`
+            ? `${fmtDays(effDays)} day${effDays === 1 ? '' : 's'} off — click to edit`
             : 'Set days off'
         }
         aria-label="Days off"
       >
         <Calendar size={14} />
-        {count > 0 && <span className="text-[10px] font-medium">{count}</span>}
+        {count > 0 && (
+          <span className="text-[11px] font-medium whitespace-nowrap">
+            {fmtDays(effDays)}d off
+          </span>
+        )}
       </button>
       {open && createPortal(
         <div
@@ -1384,7 +1476,7 @@ function StatusPicker({
       <select
         value={status}
         onChange={(e) => onChange(e.target.value as Status)}
-        className="text-[11.5px] font-semibold px-0 m-0 border-0 bg-transparent appearance-none cursor-pointer outline-none leading-none h-auto"
+        className="text-[11.5px] font-semibold px-0 m-0 border-0 bg-transparent appearance-none cursor-pointer outline-none leading-[1.35] h-auto"
         style={{ color: fg, width: 'auto', minWidth: 'max-content' }}
         aria-label="Status"
       >

@@ -650,14 +650,14 @@ function fmtDays(n: number): string {
 function AvatarRing({ member, pct }: { member: Member; pct: number }) {
   return (
     <span
-      className="relative flex items-center justify-center shrink-0 rounded-full p-[2.5px]"
+      className="relative flex items-center justify-center shrink-0 rounded-full p-[3px]"
       style={{
         background: `conic-gradient(var(--color-status-done) ${pct}%, var(--color-border) 0)`,
       }}
       title={`${pct}% done`}
     >
       <span
-        className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold text-white ring-[1.5px] ring-surface"
+        className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold text-white"
         style={{ background: member.color }}
       >
         {member.name.slice(0, 1).toUpperCase()}

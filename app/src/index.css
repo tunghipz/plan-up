@@ -1,0 +1,55 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --color-accent: #c04a1a;
+  --color-accent-hover: #a03e16;
+  --color-accent-soft: #fbeee5;
+  --color-accent-strong: #8a3411;
+
+  --color-canvas: #fafaf7;
+  --color-surface: #ffffff;
+  --color-surface-hover: #f5f5f3;
+  --color-border: #e5e5e0;
+  --color-border-strong: #d4d4cf;
+  --color-ink: #18181b;
+  --color-ink-muted: #71717a;
+  --color-ink-faint: #a1a1aa;
+
+  --color-status-todo: #a1a1aa;
+  --color-status-progress: #c04a1a;
+  --color-status-done: #16a34a;
+
+  --color-priority-urgent: #dc2626;
+  --color-priority-high: #ea580c;
+  --color-priority-normal: #3b82f6;
+  --color-priority-low: #71717a;
+  --color-priority-none: #d4d4d8;
+}
+
+.dark {
+  --color-canvas: #0c0c0e;
+  --color-surface: #18181b;
+  --color-surface-hover: #232326;
+  --color-border: #2a2a2d;
+  --color-border-strong: #3a3a3e;
+  --color-ink: #e4e4e7;
+  --color-ink-muted: #a1a1aa;
+  --color-ink-faint: #71717a;
+  --color-accent-soft: #2a1810;
+}
+
+body {
+  margin: 0;
+  font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  -webkit-font-smoothing: antialiased;
+}
+
+@keyframes welcome-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+.welcome-hint { animation: welcome-pulse 2.2s ease-in-out infinite; }

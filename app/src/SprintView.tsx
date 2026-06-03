@@ -7,6 +7,7 @@ import {
   ChevronDown,
   Calendar,
   UserPlus,
+  MoreVertical,
 } from 'lucide-react'
 import {
   db,
@@ -73,9 +74,9 @@ function compareTasks(a: Task, b: Task, field: SortField, dir: 'asc' | 'desc'): 
 }
 
 export const STATUS_META: Record<Status, { label: string; varName: string }> = {
-  todo: { label: 'TO DO', varName: 'var(--color-status-todo)' },
-  in_progress: { label: 'IN PROGRESS', varName: 'var(--color-status-progress)' },
-  done: { label: 'DONE', varName: 'var(--color-status-done)' },
+  todo: { label: 'To do', varName: 'var(--color-status-todo)' },
+  in_progress: { label: 'In progress', varName: 'var(--color-status-progress)' },
+  done: { label: 'Done', varName: 'var(--color-status-done)' },
 }
 
 export const STATUS_ORDER: Status[] = ['todo', 'in_progress', 'done']
@@ -293,6 +294,7 @@ function MemberCard({
         avatar={<Avatar member={member} />}
         name={member.name}
         count={tasks.length}
+        tint={member.color}
         collapsed={collapsed}
         onToggleCollapse={onToggleCollapse}
         onRename={(n) => db.members.update(member.id, { name: n })}
@@ -439,7 +441,7 @@ function CollapsedMembers({
 function Card({ children }: { children: React.ReactNode }) {
   // `group/card` enables hover-reveal of delete button inside GroupHeader.
   return (
-    <div className="group/card bg-surface border border-border rounded-lg overflow-hidden">
+    <div className="group/card bg-surface border border-border rounded-xl overflow-hidden shadow-[0_1px_2px_rgba(9,30,66,0.06)]">
       {children}
     </div>
   )
@@ -455,6 +457,7 @@ function GroupHeader({
   collapsed,
   onToggleCollapse,
   extras,
+  tint,
 }: {
   avatar: React.ReactNode
   name: string
@@ -466,6 +469,8 @@ function GroupHeader({
   onToggleCollapse?: () => void
   /** Extra action buttons rendered before rename/delete in the action group. */
   extras?: React.ReactNode
+  /** Member color — when set, tints the header background (V2 pattern). */
+  tint?: string
 }) {
   const collapsible = onToggleCollapse !== undefined
   const [editing, setEditing] = useState(false)
@@ -497,7 +502,23 @@ function GroupHeader({
     <div
       className={`flex items-center gap-2.5 px-4 py-3 ${
         collapsed ? '' : 'border-b border-border'
-      } ${collapsible && !editing ? 'cursor-pointer hover:bg-surface-hover transition' : ''}`}
+      } ${
+        collapsible && !editing
+          ? `cursor-pointer transition ${tint ? '' : 'hover:bg-surface-hover'}`
+          : ''
+      }`}
+      style={
+        tint
+          ? {
+              background: `color-mix(in srgb, ${tint} 12%, var(--color-surface))`,
+              ...(collapsed
+                ? {}
+                : {
+                    borderBottomColor: `color-mix(in srgb, ${tint} 16%, transparent)`,
+                  }),
+            }
+          : undefined
+      }
       onClick={collapsible && !editing ? onToggleCollapse : undefined}
       role={collapsible ? 'button' : undefined}
       aria-expanded={collapsible ? !collapsed : undefined}
@@ -585,7 +606,7 @@ function GroupHeader({
 function Avatar({ member }: { member: Member }) {
   return (
     <span
-      className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold text-white shrink-0"
+      className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold text-white shrink-0 ring-2 ring-canvas shadow-[0_0_0_1px_rgba(9,30,66,0.13)]"
       style={{ background: member.color }}
       title={member.name}
     >
@@ -875,6 +896,7 @@ function AddTaskRow({
       <div className={COL.due} />
       <div className={COL.status} />
       <div className={COL.prereq} />
+      <div className={COL.actions} />
     </div>
   )
 }
@@ -891,7 +913,31 @@ const COL = {
   due: 'w-36 flex justify-end shrink-0',
   status: 'w-36 flex justify-start shrink-0 pl-2',
   prereq: 'w-14 flex justify-end shrink-0',
-  trash: 'w-5 flex justify-end shrink-0',
+  actions: 'w-4 flex justify-center shrink-0',
+}
+
+/**
+ * Trello-style colorful priority sticker. Only renders for urgent/high/low —
+ * 'normal' and 'none' are the silent default. Saturated label palette echoes
+ * Trello's signature sticker labels.
+ */
+const PRIORITY_STICKER: Record<string, { label: string; bg: string; fg: string }> = {
+  urgent: { label: 'Urgent', bg: '#EB5A46', fg: '#fff' },
+  high: { label: 'High', bg: '#FF9F1A', fg: 'rgba(0,0,0,0.78)' },
+  low: { label: 'Low', bg: '#61BD4F', fg: '#fff' },
+}
+function PriorityChip({ priority }: { priority: string }) {
+  const meta = PRIORITY_STICKER[priority]
+  if (!meta) return null
+  return (
+    <span
+      className="inline-flex items-center text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded shrink-0 mt-[3px]"
+      style={{ background: meta.bg, color: meta.fg, letterSpacing: '0.04em' }}
+      title={`Priority: ${meta.label}`}
+    >
+      {meta.label}
+    </span>
+  )
 }
 
 function TitleTextarea({
@@ -899,11 +945,13 @@ function TitleTextarea({
   onChange,
   done,
   welcomeHint,
+  priority,
 }: {
   value: string
   onChange: (v: string) => void
   done: boolean
   welcomeHint: boolean
+  priority: string
 }) {
   const ref = useRef<HTMLTextAreaElement>(null)
   const resize = () => {
@@ -916,21 +964,24 @@ function TitleTextarea({
   // so users never see the "1-line then snap to N lines" flicker.
   useLayoutEffect(resize, [value])
   return (
-    <textarea
-      ref={ref}
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      rows={1}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' && !e.shiftKey) {
-          e.preventDefault()
-          ;(e.target as HTMLTextAreaElement).blur()
-        }
-      }}
-      className={`${COL.title} editable bg-transparent resize-none overflow-hidden leading-snug whitespace-pre-wrap break-words ${
-        done ? 'line-through text-ink-faint' : ''
-      } ${welcomeHint ? 'welcome-hint' : ''}`}
-    />
+    <div className={`${COL.title} flex items-start gap-1.5`}>
+      <PriorityChip priority={priority} />
+      <textarea
+        ref={ref}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        rows={1}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault()
+            ;(e.target as HTMLTextAreaElement).blur()
+          }
+        }}
+        className={`flex-1 min-w-0 editable bg-transparent resize-none overflow-hidden leading-snug whitespace-pre-wrap break-words ${
+          done ? 'line-through text-ink-faint' : ''
+        } ${welcomeHint ? 'welcome-hint' : ''}`}
+      />
+    </div>
   )
 }
 
@@ -958,7 +1009,7 @@ function TaskRow({
 
   return (
     <div
-      className="task-row group/row relative flex items-center gap-3 px-4 py-2 text-sm hover:bg-surface-hover transition divide-x divide-border-hair"
+      className="task-row group/row relative flex items-center gap-3 px-4 py-2 text-sm hover:bg-surface-hover transition"
       title={blocked ? 'Blocked — waiting on a prerequisite task' : undefined}
     >
       <div className={COL.dot}>
@@ -983,6 +1034,7 @@ function TaskRow({
         onChange={(v) => update({ title: v })}
         done={task.status === 'done'}
         welcomeHint={isWelcome}
+        priority={task.priority}
       />
 
       <div className={COL.assignee}>
@@ -1035,15 +1087,59 @@ function TaskRow({
         <PrereqInput task={task} allTasks={allTasks} tasksById={tasksById} />
       </div>
 
+      <div className={COL.actions}>
+        <RowActionsMenu
+          onDelete={() => {
+            if (confirm('Delete this task?')) deleteTask(task.id)
+          }}
+        />
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Kebab (⋯) menu rendered at the end of each task row. Always visible —
+ * touch-friendly, no hover bias. Currently surfaces just Delete; room to add
+ * Duplicate / Move-to-sprint / Archive later without changing the row layout.
+ */
+function RowActionsMenu({ onDelete }: { onDelete: () => void }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const onDoc = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onDoc)
+    return () => document.removeEventListener('mousedown', onDoc)
+  }, [open])
+  return (
+    <div ref={ref} className="relative">
       <button
-        onClick={() => {
-          if (confirm('Delete this task?')) deleteTask(task.id)
+        onClick={(e) => {
+          e.stopPropagation()
+          setOpen((v) => !v)
         }}
-        className="absolute right-2 top-1/2 -translate-y-1/2 text-ink-faint hover:text-red-500 opacity-0 group-hover/row:opacity-100 transition p-1 rounded bg-surface/80 backdrop-blur-sm"
-        aria-label="Delete task"
+        className="w-4 h-4 inline-flex items-center justify-center rounded text-ink-faint opacity-50 group-hover/row:opacity-100 hover:!opacity-100 hover:text-ink hover:bg-canvas-sunk transition"
+        aria-label="Row actions"
       >
-        <Trash2 size={14} />
+        <MoreVertical size={12} />
       </button>
+      {open && (
+        <div className="absolute right-0 top-7 z-20 min-w-[160px] rounded-md border border-border bg-surface shadow-lg p-1 text-sm">
+          <button
+            onClick={() => {
+              setOpen(false)
+              onDelete()
+            }}
+            className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded text-left text-red-600 hover:bg-red-50"
+          >
+            <Trash2 size={13} />
+            Delete task
+          </button>
+        </div>
+      )}
     </div>
   )
 }
@@ -1070,7 +1166,7 @@ function TaskColumnHeader({
     )
   }
   return (
-    <div className="flex items-center gap-3 px-4 py-1.5 border-b border-border-hair bg-canvas-sunk/40 divide-x divide-border-hair">
+    <div className="flex items-center gap-3 px-4 py-1.5 border-b border-border-hair bg-canvas-sunk/40">
       <div className={COL.dot} />
       <SortHeader
         className={COL.seq}
@@ -1129,6 +1225,7 @@ function TaskColumnHeader({
         onSort={onSort}
         align="end"
       />
+      <div className={COL.actions} />
     </div>
   )
 }
@@ -1260,29 +1357,23 @@ function StatusPicker({
   onChange: (s: Status) => void
 }) {
   const meta = STATUS_META[status]
-  // Jira-style lozenge: solid filled for in_progress/done, outline for todo
-  const solid = status !== 'todo'
-  const bg = solid
-    ? meta.varName
-    : `color-mix(in srgb, ${meta.varName} 14%, transparent)`
-  const fg = solid ? '#ffffff' : meta.varName
-  const border = solid ? meta.varName : `color-mix(in srgb, ${meta.varName} 50%, transparent)`
+  // Trello-style chip: 4px square radius, soft tinted bg, colored dot + label.
+  const bg = `color-mix(in srgb, ${meta.varName} 18%, transparent)`
+  const fg = `color-mix(in srgb, ${meta.varName} 100%, #000 25%)`
   return (
     <div
-      className="relative inline-flex items-center rounded-full pl-2 pr-1 py-1 cursor-pointer transition hover:opacity-90 leading-none"
-      style={{ background: bg, border: `1px solid ${border}` }}
+      className="relative inline-flex items-center gap-1.5 rounded px-2 py-1 cursor-pointer transition hover:opacity-90 leading-none"
+      style={{ background: bg }}
     >
       <span
-        className="w-3 h-3 shrink-0 mr-1.5 inline-flex items-center justify-center"
-        style={{ color: fg }}
+        className="w-1.5 h-1.5 rounded-full shrink-0"
+        style={{ background: meta.varName }}
         aria-hidden
-      >
-        <StatusIcon status={status} />
-      </span>
+      />
       <select
         value={status}
         onChange={(e) => onChange(e.target.value as Status)}
-        className="text-[10.5px] font-bold tracking-wider uppercase pr-4 pl-0 m-0 border-0 bg-transparent appearance-none cursor-pointer outline-none leading-none h-auto"
+        className="text-[11.5px] font-semibold px-0 m-0 border-0 bg-transparent appearance-none cursor-pointer outline-none leading-none h-auto"
         style={{ color: fg, width: 'auto', minWidth: 'max-content' }}
         aria-label="Status"
       >
@@ -1296,13 +1387,6 @@ function StatusPicker({
           </option>
         ))}
       </select>
-      <span
-        className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-[8px] leading-none"
-        style={{ color: fg, opacity: 0.7 }}
-        aria-hidden
-      >
-        ▾
-      </span>
     </div>
   )
 }
@@ -1427,7 +1511,7 @@ function DatePickCell({
       {value ? (
         <span className="text-sm whitespace-nowrap">{label}</span>
       ) : (
-        <Calendar size={14} />
+        <span className="text-sm text-ink-faint">—</span>
       )}
       <input
         ref={ref}
@@ -1610,7 +1694,7 @@ function AddMemberRow({
     return (
       <button
         onClick={onActivate}
-        className="w-full text-sm text-ink-muted hover:text-accent hover:bg-accent-soft border border-dashed border-border-strong hover:border-accent rounded-lg py-2.5 flex items-center justify-center gap-1.5 transition"
+        className="w-full text-sm text-ink-faint hover:text-ink hover:bg-canvas-sunk rounded-lg py-2.5 flex items-center justify-center gap-1.5 transition"
       >
         <UserPlus size={14} /> Add member
       </button>

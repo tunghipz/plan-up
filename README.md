@@ -4,7 +4,7 @@ ClickUp without the seat tax — a single-user, local-first task & sprint planne
 
 ## Stack
 
-React 19 · TypeScript · Vite · Tailwind v4 · Dexie (IndexedDB) · Geist + Geist Mono · lucide-react
+React 19 · TypeScript · Vite · Tailwind v4 · Dexie (IndexedDB) · DM Sans + Geist Mono · lucide-react
 
 ## Run
 
@@ -27,14 +27,14 @@ npm run lint       # eslint .
 - **Multi-project** — Slack/Discord-style icon rail (left), sprint panel (middle), task view (right)
 - **Sprint folder** (biweekly) with start/end dates + per-sprint task sequence (resets to 1..N)
 - **Two views**:
-  - **List** — grouped by assignee · sortable column headers · column dividers · zebra striping · auto-wrap titles
-  - **Board** — Kanban 3 columns (Todo / In Progress / Done), each column tinted by its status color, click status icon to cycle
+  - **List** — grouped by assignee · per-member tinted group header · sortable column headers · column dividers · zebra striping · auto-wrap titles
+  - **Board** — Trello-style kanban: blue gradient canvas, translucent column containers, white cards with a colored status strip on top · click status icon to cycle
 - **Task fields**: title, assignee, sprint, status, priority, start/end date, estimate, dependencies
 - **Status lozenges** (Jira-style) — solid pills for In Progress / Done, outline for To Do
 - **Auto-scheduling** — set effort + prereqs, dates compute automatically (skips weekends + per-member off-days, supports half-day off)
 - **Sprint rollover** — move unfinished tasks to next sprint in one click
 - **Inline rename** — double-click sprint name or member name to edit
-- **Jira-blue UI** — `#1868DB` accent · cool-paper chrome (no solid black) · hairline borders · Geist + Geist Mono typography
+- **Jira-blue UI** — `#1868DB` accent · cool-paper chrome (no solid black) · hairline borders · DM Sans + Geist Mono typography
 - **Keyboard-first**: `/` focus search · `n` new sprint · `⌘⇧D` toggle dark mode
 - **Export / Import JSON** — local-first backup, no sync
 - **Dark mode** — Atlassian-style dark canvas `#1D2125`

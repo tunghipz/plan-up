@@ -9,6 +9,7 @@ import {
   ArrowRightCircle,
   List,
   LayoutGrid,
+  Star,
 } from 'lucide-react'
 import {
   db,
@@ -350,38 +351,25 @@ function App() {
                   <button
                     key={s.id}
                     onClick={() => setCurrentSprintId(s.id)}
-                    className={`w-full text-left flex items-start gap-3 px-3 py-2 my-px text-[15px] rounded-lg transition ${
+                    className={`w-full text-left flex items-stretch gap-2.5 px-2.5 py-2 mb-1.5 text-[14.5px] rounded-lg bg-surface font-medium transition hover:-translate-y-px ${
                       isActive
-                        ? 'bg-accent-tint text-accent-strong font-semibold'
-                        : 'text-ink-muted font-medium hover:bg-black/[0.04] hover:text-ink'
+                        ? 'text-ink shadow-[0_0_0_2px_var(--color-accent)]'
+                        : 'text-ink-muted shadow-[0_1px_0_rgba(9,30,66,0.08)] hover:shadow-[0_3px_8px_rgba(9,30,66,0.12)] hover:text-ink'
                     }`}
                   >
                     <span
-                      className={`w-2 h-2 rounded-full shrink-0 mt-2 ${
-                        isActive
-                          ? 'bg-accent'
-                          : allDone
-                            ? 'bg-status-done'
-                            : 'bg-ink-faint'
+                      className={`w-1 self-stretch rounded-full shrink-0 ${
+                        allDone ? 'bg-status-done' : 'bg-accent'
                       }`}
+                      aria-hidden
                     />
                     <span className="flex-1 min-w-0">
                       <span className="block truncate">{s.name}</span>
-                      <span
-                        className={`block text-[12.5px] font-mono font-normal leading-tight mt-1 ${
-                          isActive ? 'text-accent/80' : 'text-ink-faint'
-                        }`}
-                      >
+                      <span className="block text-[11.5px] font-normal leading-tight mt-0.5 text-ink-faint">
                         {formatSprintRange(s.startDate, s.endDate)}
+                        {c && c.total > 0 && ` · ${c.total} tasks`}
                       </span>
                     </span>
-                    {c && c.total > 0 && (
-                      <span
-                        className={`text-[12.5px] font-mono mt-0.5 ${isActive ? 'text-accent' : 'text-ink-faint'}`}
-                      >
-                        {c.total}
-                      </span>
-                    )}
                   </button>
                 )
               })}
@@ -409,10 +397,14 @@ function App() {
                   key={currentSprint.id}
                   sprint={currentSprint}
                 />
-                <span className="text-ink-faint shrink-0" aria-hidden>
-                  ·
-                </span>
-                <span className="text-xs text-ink-muted shrink-0 font-mono">
+                <button
+                  className="inline-flex items-center justify-center w-6 h-6 rounded-md text-ink-faint hover:text-yellow-500 hover:bg-yellow-50 transition shrink-0"
+                  title="Star this sprint"
+                  aria-label="Star sprint"
+                >
+                  <Star size={14} />
+                </button>
+                <span className="inline-flex items-center text-xs text-ink-muted shrink-0 font-mono bg-canvas-sunk rounded-full px-2.5 py-1">
                   {formatSprintRange(
                     currentSprint.startDate,
                     currentSprint.endDate
@@ -443,14 +435,14 @@ function App() {
               <Search
                 size={14}
                 strokeWidth={1.75}
-                className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-faint pointer-events-none"
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-faint pointer-events-none"
               />
               <input
                 ref={searchRef}
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search tasks…"
-                className="text-sm bg-canvas-sunk border border-border-hair rounded-lg pl-8 pr-8 py-1.5 w-52 focus:outline-none focus:ring-2 focus:ring-accent/40 focus:bg-surface text-ink transition"
+                className="text-sm bg-surface border border-border rounded-full pl-9 pr-9 py-1.5 w-56 shadow-[0_1px_2px_rgba(9,30,66,0.04)] focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent text-ink transition"
               />
               <kbd className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-ink-faint border border-border-hair rounded px-1 py-0.5 bg-surface pointer-events-none">
                 /
@@ -808,9 +800,9 @@ function ViewToggle({
     return (
       <button
         onClick={() => onChange(mode)}
-        className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-md transition ${
+        className={`flex items-center gap-1.5 px-3.5 py-1 text-xs font-medium rounded-full transition ${
           active
-            ? 'bg-surface text-ink shadow-[0_1px_2px_rgba(0,0,0,0.06)]'
+            ? 'bg-surface text-ink shadow-[0_1px_2px_rgba(9,30,66,0.1)]'
             : 'text-ink-muted hover:text-ink'
         }`}
         title={`${label} view`}
@@ -822,7 +814,7 @@ function ViewToggle({
     )
   }
   return (
-    <div className="inline-flex items-center gap-0.5 p-0.5 rounded-lg bg-canvas-sunk border border-border-hair">
+    <div className="inline-flex items-center gap-0.5 p-0.5 rounded-full bg-canvas-sunk">
       {item('list', 'List', List)}
       {item('board', 'Board', LayoutGrid)}
     </div>

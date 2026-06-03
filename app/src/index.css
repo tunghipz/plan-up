@@ -15,7 +15,7 @@ html.dark input, html.dark select, html.dark textarea, html.dark button {
 }
 
 @theme {
-  --font-sans: 'Geist', ui-sans-serif, -apple-system, 'Segoe UI', system-ui,
+  --font-sans: 'DM Sans', ui-sans-serif, -apple-system, 'Segoe UI', system-ui,
     sans-serif;
   --font-mono: 'Geist Mono', ui-monospace, SFMono-Regular, 'JetBrains Mono',
     Menlo, monospace;
@@ -71,7 +71,7 @@ body {
   color: var(--color-ink);
   -webkit-font-smoothing: antialiased;
   font-variant-numeric: tabular-nums;
-  font-feature-settings: 'ss01', 'cv11'; /* Geist stylistic set + alt 4 */
+  /* DM Sans: keep default features */
 }
 
 /* Geist Display tracking on headings (works for any sans) */

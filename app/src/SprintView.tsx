@@ -313,7 +313,7 @@ function MemberCard({
         // Assignee column is omitted — every row in a member group is the same
         // person (shown in the group header avatar).
         <div className="overflow-x-auto">
-          <div className="min-w-[860px]">
+          <div className="min-w-[940px]">
             {tasks.length > 0 && (
               <TaskColumnHeader sort={sort} setSort={setSort} showAssignee={false} />
             )}
@@ -373,7 +373,7 @@ function UnassignedCard({
         muted
       />
       <div className="overflow-x-auto">
-        <div className="min-w-[920px]">
+        <div className="min-w-[1020px]">
           {tasks.length > 0 && <TaskColumnHeader sort={sort} setSort={setSort} />}
           <div className="divide-y divide-border">
             {tasks.map((t) => (

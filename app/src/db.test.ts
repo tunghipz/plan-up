@@ -5,11 +5,17 @@ import {
   uid,
   colorForName,
   deleteMember,
+  deleteTask,
+  addDependency,
+  removeDependency,
+  wouldCreateCycle,
+  isTaskBlocked,
   dedupeSprints,
   exportAll,
   importAll,
   seedIfEmpty,
   __resetSeedLockForTests,
+  type Task,
 } from './db'
 
 beforeEach(async () => {
@@ -76,6 +82,7 @@ describe('deleteMember', () => {
       dueDate: null,
       estimate: null,
       createdAt: Date.now(),
+      dependsOn: [],
     })
 
     const before = await db.tasks.count()
@@ -105,6 +112,7 @@ describe('dedupeSprints', () => {
       id: uid(), title, assigneeId: null, sprintId: sid,
       status: 'todo' as const, priority: 'normal' as const,
       startDate: null, dueDate: null, estimate: null, createdAt: Date.now(),
+      dependsOn: [] as string[],
     })
     await db.tasks.bulkAdd([mk(s1.id, 'a'), mk(s2.id, 'b'), mk(s2.id, 'c'), mk(s3.id, 'd')])
 
@@ -128,6 +136,84 @@ describe('dedupeSprints', () => {
     await db.sprints.bulkAdd([s1, s2])
     expect(await dedupeSprints()).toBe(1)
     expect(await dedupeSprints()).toBe(0)
+  })
+})
+
+describe('task dependencies', () => {
+  const mkTask = (id: string, deps: string[] = [], status: Task['status'] = 'todo'): Task => ({
+    id, title: id, assigneeId: null, sprintId: 's',
+    status, priority: 'normal',
+    startDate: null, dueDate: null, estimate: null, createdAt: 0,
+    dependsOn: deps,
+  })
+
+  it('wouldCreateCycle detects self-link', () => {
+    expect(wouldCreateCycle('a', 'a', [])).toBe(true)
+  })
+
+  it('wouldCreateCycle detects A→B→A', () => {
+    // existing: A depends on B; trying to make B depend on A → cycle
+    const tasks = [mkTask('a', ['b']), mkTask('b')]
+    expect(wouldCreateCycle('b', 'a', tasks)).toBe(true)
+  })
+
+  it('wouldCreateCycle allows independent chains', () => {
+    const tasks = [mkTask('a'), mkTask('b'), mkTask('c')]
+    expect(wouldCreateCycle('a', 'b', tasks)).toBe(false)
+  })
+
+  it('addDependency refuses cycles', async () => {
+    await db.tasks.bulkAdd([mkTask('a', ['b']), mkTask('b')])
+    const ok = await addDependency('b', 'a')
+    expect(ok).toBe(false)
+    const b = await db.tasks.get('b')
+    expect(b?.dependsOn).toEqual([])
+  })
+
+  it('addDependency is idempotent', async () => {
+    await db.tasks.bulkAdd([mkTask('a'), mkTask('b')])
+    await addDependency('a', 'b')
+    await addDependency('a', 'b')
+    const a = await db.tasks.get('a')
+    expect(a?.dependsOn).toEqual(['b'])
+  })
+
+  it('removeDependency strips one id', async () => {
+    await db.tasks.bulkAdd([mkTask('a', ['b', 'c']), mkTask('b'), mkTask('c')])
+    await removeDependency('a', 'b')
+    const a = await db.tasks.get('a')
+    expect(a?.dependsOn).toEqual(['c'])
+  })
+
+  it('deleteTask cascades — removes id from other tasks dependsOn', async () => {
+    await db.tasks.bulkAdd([mkTask('a', ['b']), mkTask('b'), mkTask('c', ['b'])])
+    await deleteTask('b')
+    expect(await db.tasks.get('b')).toBeUndefined()
+    const a = await db.tasks.get('a')
+    const c = await db.tasks.get('c')
+    expect(a?.dependsOn).toEqual([])
+    expect(c?.dependsOn).toEqual([])
+  })
+
+  it('isTaskBlocked is true when a prereq is not done', () => {
+    const a = mkTask('a', ['b'])
+    const b = mkTask('b', [], 'in_progress')
+    const byId = new Map([[a.id, a], [b.id, b]])
+    expect(isTaskBlocked(a, byId)).toBe(true)
+  })
+
+  it('isTaskBlocked is false when all prereqs are done', () => {
+    const a = mkTask('a', ['b'])
+    const b = mkTask('b', [], 'done')
+    const byId = new Map([[a.id, a], [b.id, b]])
+    expect(isTaskBlocked(a, byId)).toBe(false)
+  })
+
+  it('done tasks are never blocked', () => {
+    const a = mkTask('a', ['b'], 'done')
+    const b = mkTask('b', [], 'todo')
+    const byId = new Map([[a.id, a], [b.id, b]])
+    expect(isTaskBlocked(a, byId)).toBe(false)
   })
 })
 

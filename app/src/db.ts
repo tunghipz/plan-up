@@ -27,6 +27,8 @@ export interface Task {
   dueDate: string | null
   estimate: number | null
   createdAt: number
+  /** IDs of tasks that must be `done` before this one can start. */
+  dependsOn: string[]
 }
 
 class PlanDB extends Dexie {
@@ -50,6 +52,15 @@ class PlanDB extends Dexie {
           if (t.startDate === undefined) t.startDate = null
         })
     )
+    // v3 (2026-06-03): add Task.dependsOn (array of task IDs). Backfill [].
+    this.version(3).upgrade((tx) =>
+      tx
+        .table('tasks')
+        .toCollection()
+        .modify((t: Task) => {
+          if (!Array.isArray(t.dependsOn)) t.dependsOn = []
+        })
+    )
   }
 }
 
@@ -68,6 +79,90 @@ export function colorForName(name: string): string {
   let h = 0
   for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) | 0
   return PALETTE[Math.abs(h) % PALETTE.length]
+}
+
+/**
+ * Cascade-safe task delete: also strips the task ID from any other task's
+ * `dependsOn` array so we don't leave dangling references.
+ */
+export async function deleteTask(taskId: string) {
+  await db.transaction('rw', db.tasks, async () => {
+    await db.tasks.delete(taskId)
+    // Walk all tasks that reference this one and patch them.
+    const dependents = await db.tasks
+      .filter((t) => t.dependsOn?.includes(taskId))
+      .toArray()
+    for (const d of dependents) {
+      await db.tasks.update(d.id, {
+        dependsOn: d.dependsOn.filter((id) => id !== taskId),
+      })
+    }
+  })
+}
+
+/**
+ * Returns true if adding `newDepId` to `taskId`'s dependsOn would form a cycle.
+ * A cycle exists if `taskId` is reachable from `newDepId` via existing edges.
+ */
+export function wouldCreateCycle(
+  taskId: string,
+  newDepId: string,
+  tasks: Task[]
+): boolean {
+  if (taskId === newDepId) return true
+  const byId = new Map(tasks.map((t) => [t.id, t]))
+  const stack = [newDepId]
+  const seen = new Set<string>()
+  while (stack.length) {
+    const cur = stack.pop()!
+    if (cur === taskId) return true
+    if (seen.has(cur)) continue
+    seen.add(cur)
+    const t = byId.get(cur)
+    if (t) stack.push(...t.dependsOn)
+  }
+  return false
+}
+
+/**
+ * Add `depId` as a prerequisite of `taskId`. Refuses cycles silently
+ * (returns false). Returns true on success.
+ */
+export async function addDependency(
+  taskId: string,
+  depId: string
+): Promise<boolean> {
+  if (taskId === depId) return false
+  const tasks = await db.tasks.toArray()
+  if (wouldCreateCycle(taskId, depId, tasks)) return false
+  const task = tasks.find((t) => t.id === taskId)
+  if (!task) return false
+  if (task.dependsOn.includes(depId)) return true // already there
+  await db.tasks.update(taskId, {
+    dependsOn: [...task.dependsOn, depId],
+  })
+  return true
+}
+
+export async function removeDependency(taskId: string, depId: string) {
+  const task = await db.tasks.get(taskId)
+  if (!task) return
+  await db.tasks.update(taskId, {
+    dependsOn: task.dependsOn.filter((id) => id !== depId),
+  })
+}
+
+/**
+ * A task is "blocked" if any of its prerequisites is not yet `done`.
+ * Done tasks themselves are never blocked (visual nicety).
+ */
+export function isTaskBlocked(task: Task, byId: Map<string, Task>): boolean {
+  if (task.status === 'done') return false
+  if (!task.dependsOn || task.dependsOn.length === 0) return false
+  return task.dependsOn.some((id) => {
+    const dep = byId.get(id)
+    return dep && dep.status !== 'done'
+  })
 }
 
 // Cascade-safe member delete: orphaned tasks become Unassigned (assigneeId=null)
@@ -119,6 +214,7 @@ export async function importAll(data: ExportPayload) {
     const tasks: Task[] = data.tasks.map((t) => ({
       ...t,
       startDate: t.startDate ?? null,
+      dependsOn: Array.isArray(t.dependsOn) ? t.dependsOn : [],
     }))
     await db.tasks.bulkAdd(tasks)
   })
@@ -218,5 +314,6 @@ async function seedFresh() {
     dueDate: null,
     estimate: null,
     createdAt: Date.now(),
+    dependsOn: [],
   })
 }

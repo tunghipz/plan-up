@@ -1,11 +1,24 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { Plus, Trash2, Flag, ChevronDown, Calendar, UserPlus } from 'lucide-react'
+import {
+  Plus,
+  Trash2,
+  Flag,
+  ChevronDown,
+  Calendar,
+  UserPlus,
+  Link2,
+  X,
+} from 'lucide-react'
 import {
   db,
   uid,
   colorForName,
   deleteMember,
+  deleteTask,
+  addDependency,
+  removeDependency,
+  isTaskBlocked,
   type Member,
   type Task,
   type Status,
@@ -87,6 +100,10 @@ export function SprintView({
     return tasks.filter((t) => t.title.toLowerCase().includes(q))
   }, [tasks, search])
 
+  // Dependency picker + blocked check need an unfiltered lookup so a task's
+  // prereq is still resolvable even when the user filters the view.
+  const tasksById = useMemo(() => new Map(tasks.map((t) => [t.id, t])), [tasks])
+
   const { groups, emptyMembers, unassigned } = useMemo(() => {
     const ms = members ?? []
     const byMember = new Map<string, Task[]>()
@@ -133,13 +150,20 @@ export function SprintView({
           sprintId={sprintId}
           sprintStartDate={sprintStartDate}
           members={members}
+          allTasks={tasks}
+          tasksById={tasksById}
           collapsed={collapsed.has(member.id)}
           onToggleCollapse={() => toggleCollapse(member.id)}
         />
       ))}
 
       {unassigned.length > 0 && (
-        <UnassignedCard tasks={unassigned} members={members} />
+        <UnassignedCard
+          tasks={unassigned}
+          members={members}
+          allTasks={tasks}
+          tasksById={tasksById}
+        />
       )}
 
       {emptyMembers.length > 0 && (
@@ -186,6 +210,8 @@ function MemberCard({
   sprintId,
   sprintStartDate,
   members,
+  allTasks,
+  tasksById,
   collapsed,
   onToggleCollapse,
 }: {
@@ -194,6 +220,8 @@ function MemberCard({
   sprintId: string
   sprintStartDate: string
   members: Member[]
+  allTasks: Task[]
+  tasksById: Map<string, Task>
   collapsed: boolean
   onToggleCollapse: () => void
 }) {
@@ -218,7 +246,13 @@ function MemberCard({
       {!collapsed && (
         <div className="divide-y divide-border">
           {tasks.map((t) => (
-            <TaskRow key={t.id} task={t} members={members} />
+            <TaskRow
+              key={t.id}
+              task={t}
+              members={members}
+              allTasks={allTasks}
+              tasksById={tasksById}
+            />
           ))}
           <AddTaskRow
             sprintId={sprintId}
@@ -234,9 +268,13 @@ function MemberCard({
 function UnassignedCard({
   tasks,
   members,
+  allTasks,
+  tasksById,
 }: {
   tasks: Task[]
   members: Member[]
+  allTasks: Task[]
+  tasksById: Map<string, Task>
 }) {
   return (
     <Card>
@@ -252,7 +290,13 @@ function UnassignedCard({
       />
       <div className="divide-y divide-border">
         {tasks.map((t) => (
-          <TaskRow key={t.id} task={t} members={members} />
+          <TaskRow
+            key={t.id}
+            task={t}
+            members={members}
+            allTasks={allTasks}
+            tasksById={tasksById}
+          />
         ))}
       </div>
     </Card>
@@ -493,6 +537,7 @@ function AddTaskRow({
       dueDate: null,
       estimate: null,
       createdAt: Date.now(),
+      dependsOn: [],
     })
     setTitle('')
   }
@@ -513,13 +558,14 @@ function AddTaskRow({
       <div className={COL.due} />
       <div className={COL.priority} />
       <div className={COL.status} />
+      <div className={COL.deps} />
       <div className={COL.trash} />
     </div>
   )
 }
 
 // Column widths — kept in sync with TaskColumnHeader. If you change one,
-// change the other. Order: status-dot · title · assignee · start · due · priority · status · delete
+// change the other. Order: status-dot · title · assignee · start · due · priority · status · deps · delete
 const COL = {
   dot: 'w-4 shrink-0',
   title: 'flex-1 min-w-0',
@@ -528,17 +574,34 @@ const COL = {
   due: 'w-20 flex justify-end shrink-0',
   priority: 'w-6 flex justify-center shrink-0',
   status: 'w-28 flex justify-start shrink-0',
+  deps: 'w-7 flex justify-center shrink-0',
   trash: 'w-5 flex justify-end shrink-0',
 }
 
-function TaskRow({ task, members }: { task: Task; members: Member[] }) {
+function TaskRow({
+  task,
+  members,
+  allTasks,
+  tasksById,
+}: {
+  task: Task
+  members: Member[]
+  allTasks: Task[]
+  tasksById: Map<string, Task>
+}) {
   const update = (patch: Partial<Task>) => db.tasks.update(task.id, patch)
   const assignee = members.find((m) => m.id === task.assigneeId) ?? null
   const overdue = isOverdue(task.dueDate, task.status === 'done')
+  const blocked = isTaskBlocked(task, tasksById)
   const isWelcome = task.title.startsWith(WELCOME_PREFIX)
 
   return (
-    <div className="group/row flex items-center gap-3 px-4 py-2 text-sm hover:bg-surface-hover transition">
+    <div
+      className={`group/row flex items-center gap-3 px-4 py-2 text-sm hover:bg-surface-hover transition ${
+        blocked ? 'opacity-60' : ''
+      }`}
+      title={blocked ? 'Blocked — waiting on a prerequisite task' : undefined}
+    >
       <div className={COL.dot}>
         <StatusDot
           status={task.status}
@@ -594,10 +657,14 @@ function TaskRow({ task, members }: { task: Task; members: Member[] }) {
         <StatusPicker status={task.status} onChange={(s) => update({ status: s })} />
       </div>
 
+      <div className={COL.deps}>
+        <DependencyCell task={task} allTasks={allTasks} tasksById={tasksById} />
+      </div>
+
       <div className={COL.trash}>
         <button
           onClick={() => {
-            if (confirm('Delete this task?')) db.tasks.delete(task.id)
+            if (confirm('Delete this task?')) deleteTask(task.id)
           }}
           className="text-ink-faint hover:text-red-500 opacity-0 group-hover/row:opacity-100 transition"
           aria-label="Delete task"
@@ -623,6 +690,7 @@ function TaskColumnHeader() {
       <div className={`${COL.due} ${labelCls} justify-end`}>Due</div>
       <div className={`${COL.priority} ${labelCls}`}>Pri</div>
       <div className={`${COL.status} ${labelCls}`}>Status</div>
+      <div className={`${COL.deps} ${labelCls}`}>Dep</div>
       <div className={COL.trash} />
     </div>
   )
@@ -818,6 +886,156 @@ function PriorityCell({
         ))}
       </select>
     </label>
+  )
+}
+
+function DependencyCell({
+  task,
+  allTasks,
+  tasksById,
+}: {
+  task: Task
+  allTasks: Task[]
+  tasksById: Map<string, Task>
+}) {
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const popRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const onClick = (e: MouseEvent) => {
+      if (popRef.current && !popRef.current.contains(e.target as Node)) {
+        setOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', onClick)
+    return () => document.removeEventListener('mousedown', onClick)
+  }, [open])
+
+  const deps = task.dependsOn
+    .map((id) => tasksById.get(id))
+    .filter((t): t is Task => Boolean(t))
+  const count = deps.length
+
+  const candidates = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    return allTasks.filter((t) => {
+      if (t.id === task.id) return false
+      if (task.dependsOn.includes(t.id)) return false
+      if (!q) return true
+      return t.title.toLowerCase().includes(q)
+    })
+  }, [allTasks, task.id, task.dependsOn, query])
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation()
+          setOpen((v) => !v)
+        }}
+        className={`inline-flex items-center gap-0.5 px-1 h-6 rounded hover:bg-surface-hover transition ${
+          count > 0 ? 'text-ink' : 'text-ink-faint'
+        }`}
+        title={
+          count > 0
+            ? `${count} prerequisite${count === 1 ? '' : 's'}`
+            : 'Set prerequisites'
+        }
+        aria-label="Prerequisites"
+      >
+        <Link2 size={14} />
+        {count > 0 && <span className="text-[10px] font-medium">{count}</span>}
+      </button>
+      {open && (
+        <div
+          ref={popRef}
+          onClick={(e) => e.stopPropagation()}
+          className="absolute right-0 top-full mt-1 z-20 w-72 bg-surface border border-border rounded-lg shadow-lg p-2"
+        >
+          <div className="text-[10px] uppercase tracking-wider text-ink-faint px-1 pb-1">
+            Prerequisites
+          </div>
+          {deps.length === 0 && (
+            <div className="text-xs text-ink-faint px-1 pb-2">None yet.</div>
+          )}
+          {deps.map((d) => (
+            <div
+              key={d.id}
+              className="flex items-center gap-2 px-1.5 py-1 rounded hover:bg-surface-hover group/dep"
+            >
+              <StatusDotIndicator status={d.status} />
+              <span
+                className={`flex-1 text-xs truncate ${
+                  d.status === 'done' ? 'line-through text-ink-faint' : 'text-ink'
+                }`}
+                title={d.title}
+              >
+                {d.title}
+              </span>
+              <button
+                onClick={() => removeDependency(task.id, d.id)}
+                className="text-ink-faint hover:text-red-500 opacity-0 group-hover/dep:opacity-100 transition"
+                aria-label={`Remove ${d.title} as prerequisite`}
+              >
+                <X size={12} />
+              </button>
+            </div>
+          ))}
+          <div className="border-t border-border mt-1 pt-2">
+            <input
+              autoFocus
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Add prerequisite…"
+              className="w-full text-xs bg-canvas border border-border rounded px-2 py-1 outline-none focus:border-accent"
+            />
+            {candidates.length === 0 ? (
+              <div className="text-[11px] text-ink-faint px-1 pt-2">
+                {query ? 'No matching tasks.' : 'No other tasks.'}
+              </div>
+            ) : (
+              <div className="max-h-40 overflow-y-auto mt-1">
+                {candidates.slice(0, 20).map((c) => (
+                  <button
+                    key={c.id}
+                    onClick={async () => {
+                      const ok = await addDependency(task.id, c.id)
+                      if (!ok) {
+                        alert(
+                          'Cannot add — that would create a circular dependency.'
+                        )
+                        return
+                      }
+                      setQuery('')
+                    }}
+                    className="w-full text-left flex items-center gap-2 px-1.5 py-1 rounded hover:bg-surface-hover text-xs"
+                  >
+                    <StatusDotIndicator status={c.status} />
+                    <span className="truncate">{c.title}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function StatusDotIndicator({ status }: { status: Status }) {
+  const meta = STATUS_META[status]
+  return (
+    <span
+      className="w-2.5 h-2.5 rounded-full border-2 shrink-0"
+      style={{
+        borderColor: meta.varName,
+        background: status === 'done' ? meta.varName : 'transparent',
+      }}
+    />
   )
 }
 

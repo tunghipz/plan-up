@@ -481,6 +481,30 @@ function planFor(
 }
 
 /**
+ * The live display plan for a task: start/due DATES plus their wall-clock
+ * TIMES, all from a single `planFor` pass. Use this for rendering so the
+ * date and time always share one source and can never drift apart (e.g. a
+ * stored `dueDate` going stale against a freshly-computed time). For tasks
+ * with no effort/prereqs this returns the manual stored dates unchanged.
+ *
+ * Time mapping: fractions → {08:00, 12:00, 13:00, 17:00}. Sub-half-day usage
+ * rounds to lunch (12:00) or 17:00.
+ */
+export function computeWorkingPlan(
+  task: Task,
+  byId: Map<string, Task>,
+  memberById?: Map<string, Member>
+): { startDate: string | null; dueDate: string | null; startTime: string; endTime: string } {
+  const plan = planFor(task, byId, memberById, new Map())
+  return {
+    startDate: plan.startDate,
+    dueDate: plan.dueDate,
+    startTime: plan.startOffset >= 0.5 - EPS ? '13:00' : '08:00',
+    endTime: plan.dueFraction > 0.5 + EPS ? '17:00' : '12:00',
+  }
+}
+
+/**
  * Wall-clock display times. Maps the plan's fractions to {08:00, 12:00,
  * 13:00, 17:00}. Sub-half-day usage is rounded to lunch (12:00) or 17:00.
  */
@@ -489,9 +513,7 @@ export function computeWorkingTimes(
   byId: Map<string, Task>,
   memberById?: Map<string, Member>
 ): { startTime: string; endTime: string } {
-  const plan = planFor(task, byId, memberById, new Map())
-  const startTime = plan.startOffset >= 0.5 - EPS ? '13:00' : '08:00'
-  const endTime = plan.dueFraction > 0.5 + EPS ? '17:00' : '12:00'
+  const { startTime, endTime } = computeWorkingPlan(task, byId, memberById)
   return { startTime, endTime }
 }
 
@@ -554,6 +576,36 @@ export async function recomputeDates(taskId: string): Promise<void> {
         }
       }
     }
+  })
+}
+
+/**
+ * Recompute and persist start/due for EVERY task in the DB, healing stored
+ * dates that drifted out of sync — e.g. a dueDate computed under an older
+ * off-day state whose recompute was never re-triggered. `planFor` derives
+ * computed tasks from scratch (it never trusts the stored dueDate), so the
+ * pass is order-independent and only writes rows whose result actually
+ * changed. Idempotent and cheap; safe to run once on app load. Returns the
+ * number of tasks updated.
+ */
+export async function recomputeAllDates(): Promise<number> {
+  return db.transaction('rw', db.tasks, db.members, async () => {
+    const members = await db.members.toArray()
+    const memberById = new Map(members.map((m) => [m.id, m]))
+    const all = await db.tasks.toArray()
+    const byId = new Map(all.map((t) => [t.id, t]))
+    let changed = 0
+    for (const task of all) {
+      const next = computeStartEnd(task, byId, memberById)
+      if (next.startDate !== task.startDate || next.dueDate !== task.dueDate) {
+        await db.tasks.update(task.id, {
+          startDate: next.startDate,
+          dueDate: next.dueDate,
+        })
+        changed++
+      }
+    }
+    return changed
   })
 }
 

@@ -12,6 +12,9 @@ import {
   wouldCreateCycle,
   isTaskBlocked,
   computeStartEnd,
+  computeWorkingPlan,
+  recomputeDates,
+  recomputeAllDates,
   addDays,
   addBusinessDays,
   nextBusinessDay,
@@ -411,6 +414,102 @@ describe('date computation', () => {
     expect(computeStartEnd(a, byId)).toEqual({
       startDate: '2026-06-08', dueDate: '2026-06-09',
     })
+  })
+
+  it('standalone task, start Thu 06-04, effort 2.5, half-off Fri 06-05 → end Mon 06-08', () => {
+    // 2.5d effort, start Thu 2026-06-04, member half-day off on Fri 2026-06-05:
+    // Thu(1.0)+Fri(0.5)+[Sat/Sun skip]+Mon(1.0) = end Mon 06-08, not Tue 06-09.
+    const member: Member = {
+      id: 'm', projectId: P, name: 'T', color: '#000',
+      daysOff: [{ date: '2026-06-05', half: 'am' }],
+    }
+    const t: Task = {
+      id: 'a', projectId: P, sequence: 3, title: 'phân tích bida', assigneeId: 'm', sprintId: 's',
+      status: 'todo', priority: 'normal',
+      startDate: '2026-06-04', dueDate: null,
+      estimate: 2.5, createdAt: 0, dependsOn: [],
+    }
+    const byId = new Map([[t.id, t]])
+    const memberById = new Map([[member.id, member]])
+    expect(computeStartEnd(t, byId, memberById)).toEqual({
+      startDate: '2026-06-04', dueDate: '2026-06-08',
+    })
+    expect(computeWorkingTimes(t, byId, memberById).endTime).toBe('17:00')
+  })
+
+  it('computeWorkingPlan ignores a STALE stored dueDate — date + time come from one live plan', () => {
+    // The reported bug: task's stored dueDate drifted to 06-09 (computed under
+    // an older off-day state), but the member now has only a half-day off on
+    // Fri 06-05. The live plan must say 06-08 17:00 — not the stale 06-09.
+    const member: Member = {
+      id: 'm', projectId: P, name: 'T', color: '#000',
+      daysOff: [{ date: '2026-06-05', half: 'am' }],
+    }
+    const task: Task = {
+      id: 'a', projectId: P, sequence: 3, title: 'phân tích bida', assigneeId: 'm', sprintId: 's',
+      status: 'todo', priority: 'normal',
+      startDate: '2026-06-04', dueDate: '2026-06-09', // <-- STALE stored value
+      estimate: 2.5, createdAt: 0, dependsOn: [],
+    }
+    const byId = new Map([[task.id, task]])
+    const memberById = new Map([[member.id, member]])
+    const plan = computeWorkingPlan(task, byId, memberById)
+    expect(plan.startDate).toBe('2026-06-04')
+    expect(plan.startTime).toBe('08:00')
+    expect(plan.dueDate).toBe('2026-06-08') // not the stale 06-09
+    expect(plan.endTime).toBe('17:00')
+  })
+
+  it('effort-change flow: half-off Fri 06-05, recompute stores 06-08 / 06-09 / 06-08 for effort 2 / 3 / 2.5', async () => {
+    await db.members.add({
+      id: 'm', projectId: P, name: 'T', color: '#000',
+      daysOff: [{ date: '2026-06-05', half: 'am' }],
+    })
+    await db.tasks.add({
+      id: 'a', projectId: P, sequence: 3, title: 'x', assigneeId: 'm', sprintId: 's',
+      status: 'todo', priority: 'normal',
+      startDate: '2026-06-04', dueDate: null, estimate: null, createdAt: 0, dependsOn: [],
+    })
+    await db.tasks.update('a', { estimate: 2 }); await recomputeDates('a')
+    expect((await db.tasks.get('a'))?.dueDate).toBe('2026-06-08') // effort 2 → 12:00 (user: correct)
+    await db.tasks.update('a', { estimate: 3 }); await recomputeDates('a')
+    expect((await db.tasks.get('a'))?.dueDate).toBe('2026-06-09') // effort 3 → 12:00 (user: correct)
+    await db.tasks.update('a', { estimate: 2.5 }); await recomputeDates('a')
+    // The reported-wrong case: with effort 2.5 it must store 06-08 (17:00), NOT 06-09.
+    expect((await db.tasks.get('a'))?.dueDate).toBe('2026-06-08')
+  })
+
+  it('recomputeAllDates heals a stale stored dueDate and returns the count', async () => {
+    await db.members.add({
+      id: 'm', projectId: P, name: 'T', color: '#000',
+      daysOff: [{ date: '2026-06-05', half: 'am' }],
+    })
+    // Stored dueDate is stale at 06-09; correct value for half-off 06-05 is 06-08.
+    await db.tasks.add({
+      id: 'a', projectId: P, sequence: 3, title: 'phân tích bida', assigneeId: 'm', sprintId: 's',
+      status: 'todo', priority: 'normal',
+      startDate: '2026-06-04', dueDate: '2026-06-09', estimate: 2.5, createdAt: 0, dependsOn: [],
+    })
+    const healed = await recomputeAllDates()
+    expect(healed).toBe(1)
+    expect((await db.tasks.get('a'))?.dueDate).toBe('2026-06-08')
+    // Idempotent: a second pass changes nothing.
+    expect(await recomputeAllDates()).toBe(0)
+  })
+
+  it('STORED-PATH REPRO: set half-off via setMemberDaysOff → stored dueDate updates to 06-08', async () => {
+    await db.members.add({ id: 'm', projectId: P, name: 'T', color: '#000', daysOff: [] })
+    await db.tasks.add({
+      id: 'a', projectId: P, sequence: 3, title: 'phân tích bida', assigneeId: 'm', sprintId: 's',
+      status: 'todo', priority: 'normal',
+      startDate: '2026-06-04', dueDate: null, estimate: 2.5, createdAt: 0, dependsOn: [],
+    })
+    // Simulate the real edit sequence: first a FULL-day off (stores 06-09)...
+    await setMemberDaysOff('m', [{ date: '2026-06-05' }])
+    expect((await db.tasks.get('a'))?.dueDate).toBe('2026-06-09')
+    // ...then change it to a half-day off. Stored dueDate MUST move to 06-08.
+    await setMemberDaysOff('m', [{ date: '2026-06-05', half: 'am' }])
+    expect((await db.tasks.get('a'))?.dueDate).toBe('2026-06-08')
   })
 
   it('computeStartEnd: effort spans weekend → end pushed past Sat/Sun', () => {

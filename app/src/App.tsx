@@ -19,6 +19,7 @@ import {
   importAll,
   seedIfEmpty,
   dedupeSprints,
+  recomputeAllDates,
   moveUnfinishedToNextSprint,
   createProject,
   type Project,
@@ -71,6 +72,17 @@ function App() {
           )
         }
         setSeeded(true)
+      })
+      // Heal any stored task dates that drifted out of sync (e.g. computed
+      // under an older off-day state). Runs in the background after seeding;
+      // liveQuery picks up the corrected rows.
+      .then(() => recomputeAllDates())
+      .then((healed) => {
+        if (healed > 0) {
+          console.info(
+            `[plan-tmp] healed ${healed} task date${healed === 1 ? '' : 's'} that were out of sync`
+          )
+        }
       })
       .catch((e: unknown) =>
         setSeedError(e instanceof Error ? e.message : String(e))

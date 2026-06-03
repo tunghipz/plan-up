@@ -18,7 +18,7 @@ import {
   setDependencies,
   setMemberDaysOff,
   recomputeDates,
-  computeWorkingTimes,
+  computeWorkingPlan,
   isTaskBlocked,
   nextSequence,
   type Member,
@@ -998,14 +998,21 @@ function TaskRow({
 }) {
   const update = (patch: Partial<Task>) => db.tasks.update(task.id, patch)
   const assignee = members.find((m) => m.id === task.assigneeId) ?? null
-  const overdue = isOverdue(task.dueDate, task.status === 'done')
   const blocked = isTaskBlocked(task, tasksById)
   const isWelcome = task.title.startsWith(WELCOME_PREFIX)
   const memberById = useMemo(
     () => new Map(members.map((m) => [m.id, m])),
     [members]
   )
-  const { startTime, endTime } = computeWorkingTimes(task, tasksById, memberById)
+  // Date + time from one live plan so they always agree and reflect current
+  // data — never a stale stored dueDate paired with a freshly-computed time.
+  const {
+    startDate: liveStart,
+    dueDate: liveDue,
+    startTime,
+    endTime,
+  } = computeWorkingPlan(task, tasksById, memberById)
+  const overdue = isOverdue(liveDue, task.status === 'done')
 
   return (
     <div
@@ -1053,7 +1060,7 @@ function TaskRow({
 
       <div className={COL.start}>
         <DatePickCell
-          value={task.startDate}
+          value={liveStart}
           time={startTime}
           locked={task.dependsOn.length > 0}
           onChange={async (v) => {
@@ -1067,7 +1074,7 @@ function TaskRow({
 
       <div className={COL.due}>
         <DatePickCell
-          value={task.dueDate}
+          value={liveDue}
           time={endTime}
           locked={
             task.dependsOn.length > 0 ||

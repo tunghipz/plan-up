@@ -1054,6 +1054,23 @@ function TitleTextarea({
   // Resize on mount + every value change. useLayoutEffect runs sync before paint
   // so users never see the "1-line then snap to N lines" flicker.
   useLayoutEffect(resize, [value])
+  // Re-fit height whenever the textarea's WIDTH changes (window resize, sidebar
+  // drag, column changes) — otherwise wrapped lines reflow but the box keeps its
+  // old taller height. Track last width so our own height writes don't re-trigger.
+  useEffect(() => {
+    const el = ref.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    let lastW = el.clientWidth
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0].contentRect.width
+      if (w !== lastW) {
+        lastW = w
+        resize()
+      }
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
   return (
     <div className={`${COL.title} flex items-start gap-1.5`}>
       <PriorityChip priority={priority} />

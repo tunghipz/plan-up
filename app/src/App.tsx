@@ -404,7 +404,7 @@ function App() {
                   sprint={currentSprint}
                 />
                 <button
-                  className="inline-flex items-center justify-center w-6 h-6 rounded-md text-ink-faint hover:text-yellow-500 hover:bg-yellow-50 transition shrink-0"
+                  className="inline-flex items-center justify-center w-6 h-6 rounded-md text-ink-faint hover:text-yellow-500 hover:bg-yellow-500/10 transition shrink-0"
                   title="Star this sprint"
                   aria-label="Star sprint"
                 >
@@ -500,7 +500,7 @@ function App() {
                 </p>
                 <button
                   onClick={() => setShowNewSprint(true)}
-                  className="text-sm bg-accent hover:bg-accent-hover text-white rounded-md px-4 py-2 transition"
+                  className="text-sm font-medium bg-accent hover:bg-accent-hover text-white rounded-[8px] px-4 py-2 transition"
                 >
                   Create the first sprint
                 </button>
@@ -681,14 +681,14 @@ function NewSprintDialog({
 
   return (
     <div
-      className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4 z-50"
+      className="fixed inset-0 bg-black/25 backdrop-blur-md flex items-center justify-center p-4 z-50"
       onClick={onClose}
     >
       <div
-        className="bg-surface text-ink rounded-xl shadow-2xl w-full max-w-md p-6 space-y-4 border border-border"
+        className="bg-surface text-ink rounded-[16px] shadow-[0_20px_60px_rgba(0,0,0,0.28)] w-full max-w-md p-6 space-y-4 border border-border-hair"
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 className="text-lg font-semibold">New Sprint</h2>
+        <h2 className="text-[19px] font-bold tracking-[-0.014em]">New Sprint</h2>
         <label className="block">
           <span className="text-xs text-ink-muted">Name</span>
           <input
@@ -697,7 +697,7 @@ function NewSprintDialog({
             onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && submit()}
             placeholder="Sprint 44 (15/6 - 28/6)"
-            className="mt-1 w-full px-3 py-2 border border-border bg-surface rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-accent/40"
+            className="mt-1 w-full px-3 py-2 border border-border bg-surface rounded-[8px] text-sm focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent transition"
           />
         </label>
         <div className="grid grid-cols-2 gap-3">
@@ -713,14 +713,14 @@ function NewSprintDialog({
         <div className="flex justify-end gap-2 pt-2">
           <button
             onClick={onClose}
-            className="px-3 py-1.5 text-sm text-ink-muted hover:bg-surface-hover rounded"
+            className="px-3.5 py-1.5 text-sm font-medium text-ink-muted hover:bg-surface-hover rounded-[8px] transition"
           >
             Cancel
           </button>
           <button
             onClick={submit}
             disabled={!name.trim()}
-            className="px-4 py-1.5 text-sm bg-accent hover:bg-accent-hover text-white rounded disabled:opacity-50 transition"
+            className="px-4 py-1.5 text-sm font-medium bg-accent hover:bg-accent-hover text-white rounded-[8px] disabled:opacity-50 transition"
           >
             Create
           </button>
@@ -746,14 +746,14 @@ function NewProjectDialog({
   }
   return (
     <div
-      className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4 z-50"
+      className="fixed inset-0 bg-black/25 backdrop-blur-md flex items-center justify-center p-4 z-50"
       onClick={onClose}
     >
       <div
-        className="bg-surface text-ink rounded-xl shadow-2xl w-full max-w-md p-6 space-y-4 border border-border"
+        className="bg-surface text-ink rounded-[16px] shadow-[0_20px_60px_rgba(0,0,0,0.28)] w-full max-w-md p-6 space-y-4 border border-border-hair"
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 className="text-lg font-semibold">New Project</h2>
+        <h2 className="text-[19px] font-bold tracking-[-0.014em]">New Project</h2>
         <label className="block">
           <span className="text-xs text-ink-muted">Name</span>
           <input
@@ -762,7 +762,7 @@ function NewProjectDialog({
             onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && submit()}
             placeholder="My Side Project"
-            className="mt-1 w-full px-3 py-2 border border-border bg-surface rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-accent/40"
+            className="mt-1 w-full px-3 py-2 border border-border bg-surface rounded-[8px] text-sm focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent transition"
           />
         </label>
         <div className="text-xs text-ink-muted">
@@ -772,14 +772,14 @@ function NewProjectDialog({
         <div className="flex justify-end gap-2 pt-2">
           <button
             onClick={onClose}
-            className="px-3 py-1.5 text-sm text-ink-muted hover:bg-surface-hover rounded"
+            className="px-3.5 py-1.5 text-sm font-medium text-ink-muted hover:bg-surface-hover rounded-[8px] transition"
           >
             Cancel
           </button>
           <button
             onClick={submit}
             disabled={!name.trim()}
-            className="px-4 py-1.5 text-sm bg-accent hover:bg-accent-hover text-white rounded disabled:opacity-50 transition"
+            className="px-4 py-1.5 text-sm font-medium bg-accent hover:bg-accent-hover text-white rounded-[8px] disabled:opacity-50 transition"
           >
             Create
           </button>
@@ -900,7 +900,7 @@ function SprintNameEditor({ sprint }: { sprint: Sprint }) {
 function DateField({
   value,
   onChange,
-  placeholder = 'dd/mm/yy',
+  placeholder = 'Pick a date',
 }: {
   value: string
   onChange: (v: string) => void
@@ -927,7 +927,7 @@ function DateField({
     <button
       type="button"
       onClick={open}
-      className="relative mt-1 w-full text-sm bg-surface border border-border rounded-md px-3 py-2 text-left focus:outline-none focus:ring-2 focus:ring-accent/40"
+      className="relative mt-1 w-full text-sm bg-surface border border-border rounded-[8px] px-3 py-2 text-left focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent transition"
     >
       {value ? (
         <span className="text-ink tabular-nums">{formatShortDate(value)}</span>

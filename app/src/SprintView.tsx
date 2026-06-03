@@ -750,7 +750,7 @@ function MemberScheduleButton({ member }: { member: Member }) {
           ref={popRef}
           onClick={(e) => e.stopPropagation()}
           style={{ position: 'fixed', top: pos.top, right: pos.right }}
-          className="z-50 w-72 bg-surface border border-border rounded-lg shadow-lg p-2"
+          className="z-50 w-72 bg-surface border border-border-hair rounded-[14px] shadow-[0_10px_36px_rgba(0,0,0,0.18)] p-2"
         >
           <div className="text-[11px] tracking-normal text-ink-faint px-1 pb-1.5">
             Days off — {member.name}
@@ -1114,13 +1114,13 @@ function RowActionsMenu({ onDelete }: { onDelete: () => void }) {
         <MoreVertical size={12} />
       </button>
       {open && (
-        <div className="absolute right-0 top-7 z-20 min-w-[160px] rounded-md border border-border bg-surface shadow-lg p-1 text-sm">
+        <div className="absolute right-0 top-7 z-20 min-w-[160px] rounded-[12px] border border-border-hair bg-surface shadow-[0_10px_30px_rgba(0,0,0,0.16)] p-1 text-sm">
           <button
             onClick={() => {
               setOpen(false)
               onDelete()
             }}
-            className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded text-left text-red-600 hover:bg-red-50"
+            className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-[7px] text-left text-red-500 hover:bg-red-500/10 transition"
           >
             <Trash2 size={13} />
             Delete task

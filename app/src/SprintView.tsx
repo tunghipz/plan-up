@@ -2032,17 +2032,17 @@ function PrereqInput({
       const backSeq =
         idPath && idPath.length >= 2 ? seqOf(idPath[idPath.length - 2]) : undefined
       items.push({
-        head: `Đã bỏ #${k.seq} — tạo vòng lặp`,
+        head: `Dropped #${k.seq} — creates a cycle`,
         pathSeqs: seqs && seqs.length > 1 ? seqs : undefined,
         hint:
           backSeq !== undefined
-            ? `Gỡ #${task.sequence} ở #${backSeq} để phá vòng`
+            ? `Remove #${task.sequence} from #${backSeq} to break it`
             : undefined,
       })
     }
     if (unknown.length)
       items.push({
-        head: `Đã bỏ ${unknown.map((n) => `#${n}`).join(', ')} — không có trong sprint`,
+        head: `Dropped ${unknown.map((n) => `#${n}`).join(', ')} — not in this sprint`,
       })
     setNotice(items.length ? items : null)
   }

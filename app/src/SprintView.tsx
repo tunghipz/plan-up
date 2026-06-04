@@ -306,6 +306,7 @@ function MemberCard({
       <GroupHeader
         avatar={<AvatarRing member={member} pct={pct} />}
         name={member.name}
+        title={member.title}
         count={total}
         countText={`${done}/${total}`}
         stats={<MemberStatsBar overdue={overdue} nextDue={nextDue} />}
@@ -433,6 +434,7 @@ function CollapsedMembers({
             <GroupHeader
               avatar={<Avatar member={m} />}
               name={m.name}
+              title={m.title}
               count={0}
               extras={<MemberDaysOffButton member={m} />}
             />
@@ -465,6 +467,7 @@ function Card({ children }: { children: React.ReactNode }) {
 function GroupHeader({
   avatar,
   name,
+  title,
   count,
   countText,
   stats,
@@ -475,6 +478,8 @@ function GroupHeader({
 }: {
   avatar: React.ReactNode
   name: string
+  /** Optional member role label, shown faint inline after the name. */
+  title?: string
   count: number
   /** Overrides the bare count display (e.g. "3/7" done-of-total). */
   countText?: string
@@ -508,11 +513,19 @@ function GroupHeader({
       )}
       {avatar}
       <span
-        className={`font-medium text-sm select-none ${muted ? 'text-ink-muted' : 'text-ink'}`}
+        className={`font-medium text-sm select-none shrink-0 ${muted ? 'text-ink-muted' : 'text-ink'}`}
       >
         {name}
       </span>
-      <span className="text-xs text-ink-faint select-none font-mono">
+      {title && title.trim() && (
+        <span
+          className="text-sm text-ink-faint select-none truncate min-w-0"
+          title={title}
+        >
+          · {title}
+        </span>
+      )}
+      <span className="text-xs text-ink-faint select-none font-mono shrink-0">
         {countText ?? count}
       </span>
       <div className="ml-auto flex items-center gap-2.5">

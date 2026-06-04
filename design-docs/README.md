@@ -55,6 +55,7 @@ Non-obvious behaviors, defaults, persistence keys.
 | [sprints.md](./sprints.md) | Sprint CRUD, biweekly defaults, per-sprint sequence |
 | [sprint-rollover.md](./sprint-rollover.md) | Move unfinished tasks to next sprint |
 | [members-and-days-off.md](./members-and-days-off.md) | Member labels, colors, off-days |
+| [member-title.md](./member-title.md) | Optional per-member role label (free-text), shown in settings + sprint header |
 | [tasks.md](./tasks.md) | Task CRUD, fields, inline editing |
 | [scheduling.md](./scheduling.md) | Auto-scheduling engine (effort, prereqs, workdays) |
 | [dependencies.md](./dependencies.md) | Prerequisites, cycle prevention, blocked state |

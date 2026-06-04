@@ -188,6 +188,9 @@ function MemberRow({ member }: { member: Member }) {
   const [name, setName] = useState(member.name)
   useEffect(() => setName(member.name), [member.id, member.name])
 
+  const [title, setTitle] = useState(member.title ?? '')
+  useEffect(() => setTitle(member.title ?? ''), [member.id, member.title])
+
   const commit = () => {
     const n = name.trim()
     if (!n || n === member.name) {
@@ -195,6 +198,13 @@ function MemberRow({ member }: { member: Member }) {
       return
     }
     void db.members.update(member.id, { name: n })
+  }
+  // Title is optional free-text; empty string means "no title" (display sites
+  // treat falsy as absent). See design-docs/member-title.md.
+  const commitTitle = () => {
+    const t = title.trim()
+    if (t === (member.title ?? '')) return
+    void db.members.update(member.id, { title: t })
   }
   const remove = () => {
     if (
@@ -225,6 +235,23 @@ function MemberRow({ member }: { member: Member }) {
           }}
           className="editable text-sm font-medium text-ink min-w-0 bg-transparent self-start max-w-full"
           aria-label="Member name"
+        />
+        <input
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          onBlur={commitTitle}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              ;(e.target as HTMLInputElement).blur()
+            } else if (e.key === 'Escape') {
+              setTitle(member.title ?? '')
+              ;(e.target as HTMLInputElement).blur()
+            }
+          }}
+          placeholder="Add a title"
+          className="editable text-[12px] text-ink-muted min-w-0 bg-transparent self-start max-w-full mt-0.5"
+          aria-label="Member title"
         />
         <div className="mt-0.5">
           <MemberDaysOffButton member={member} variant="metric" />

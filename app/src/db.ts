@@ -39,6 +39,13 @@ export interface Member {
    * Pushes tasks forward when their start/end is computed from prereqs.
    */
   daysOff: DayOff[]
+  /**
+   * Optional free-text role label ("Backend Engineer", "Designer", "PM").
+   * Pure display metadata — never affects scheduling/capacity/assignment.
+   * Non-indexed, so it needs no Dexie version bump (same as Project.description).
+   * See design-docs/member-title.md.
+   */
+  title?: string
 }
 
 export interface Sprint {

@@ -45,6 +45,15 @@ npm run dev   # http://localhost:5173
 - `git commit` được phép tự chạy sau mỗi feature done.
 - Force push / reset --hard / delete branch → luôn phải hỏi.
 
+### Quy trình khi user nói "push git" (BẮT BUỘC, theo đúng thứ tự)
+
+Khi user nói **"push git"** / "push" / "đẩy lên", chạy lần lượt:
+
+1. **Update README** — đồng bộ `README.md` với các tính năng/đổi mới chưa phản ánh.
+2. **Init dự án (sanity gate)** — từ `app/`: `npx tsc --noEmit && npm run build && npx vitest run`. Phải pass hết mới đi tiếp; fail thì dừng, báo user, không push.
+3. **Commit** — commit mọi thay đổi đang chờ (README + code) với message rõ ràng + trailer.
+4. **Push git** — `git push` lên remote (branch hiện tại).
+
 ## Data model
 
 4 IndexedDB tables in `app/src/db.ts`: `projects`, `members`, `sprints`, `tasks`.

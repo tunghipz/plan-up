@@ -814,6 +814,7 @@ function TitleTextarea({
   welcomeHint,
   priority,
   indent = false,
+  bold = false,
 }: {
   value: string
   onChange: (v: string) => void
@@ -821,6 +822,7 @@ function TitleTextarea({
   welcomeHint: boolean
   priority: string
   indent?: boolean
+  bold?: boolean
 }) {
   const ref = useRef<HTMLTextAreaElement>(null)
   const resize = () => {
@@ -874,7 +876,7 @@ function TitleTextarea({
         }}
         className={`flex-1 min-w-0 editable bg-transparent resize-none overflow-hidden leading-snug whitespace-pre-wrap break-words ${
           done ? 'line-through text-ink-faint' : ''
-        } ${welcomeHint ? 'welcome-hint' : ''}`}
+        } ${welcomeHint ? 'welcome-hint' : ''} ${bold ? 'font-semibold' : ''}`}
       />
     </div>
   )
@@ -973,6 +975,7 @@ function TaskGroupRow({
           done={false}
           welcomeHint={false}
           priority={task.priority}
+          bold
         />
         <span className="shrink-0 text-[11px] font-medium text-ink-faint tabular-nums">
           {done}/{total}

@@ -18,7 +18,7 @@ computed dates respect real availability.
   (those moved to settings to avoid two ways to do the same thing).
 - **Days off:** calendar button on the group header opens a popover to add/remove off-days,
   each optionally a half-day (AM/PM). With off-days it shows a plain chip `1.5d off`; at
-  rest (none in this sprint) it is an **always-visible quiet dashed "Ngày nghỉ" pill**
+  rest (none in this sprint) it is an **always-visible quiet dashed "Days off" pill**
   (calendar + label, dashed border, accent on hover) — previously hover-revealed, now
   persistent so the affordance is always discoverable while staying calm.
   (Same control also lives in the settings page, `variant="metric"`.)

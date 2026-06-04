@@ -331,7 +331,7 @@ export function MemberDaysOffButton({
               {fmtDays(effDays)}d off
             </span>
           ) : (
-            <span className="whitespace-nowrap">Ngày nghỉ</span>
+            <span className="whitespace-nowrap">Days off</span>
           )}
         </button>
       )}

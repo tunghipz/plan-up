@@ -33,6 +33,10 @@ Sáng/Chiều), reinterpreted in plan-up's calm Cupertino language.
 - **Member load roll-up:** the member header band carries a slim accent **load bar** =
   the union of that member's task spans across the sprint, so team load reads at the group
   level (discontinuous load shows as multiple segments). Pure derived; no new data.
+- **Member day-off marks:** the band also shows the member's **off-days** (within the
+  window) as full-height hatched-pink blocks — because off-days are member-level, this makes
+  them visible even when **no task spans them** (a task-row off cell only paints inside a
+  bar). Full off-day = whole column; half off-day = its AM or PM half.
 - **Cell fill (flat single color — matches the reference sheet):**
   - **Active** (the task occupies that half-day) → a single green fill (dark-safe) with a
     subtle top inset highlight. **No per-status encoding** — deliberately flat. Contiguous
@@ -105,8 +109,13 @@ that already exists:
   Sat/Sun). A task spanning a weekend simply shows no cells on those (absent) days.
 - **Manual-date tasks** (no effort, no prereqs) still render — their span is whatever
   `computeWorkingPlan` returns from the manual `startDate`/`dueDate`.
-- **Tasks partly outside the sprint range** clip to the visible columns (only in-range
-  half-days render).
+- **Tasks scheduled outside the sprint window** are never blank rows: a task whose span is
+  entirely **after** the window shows a right-pinned chip `→ <start date>`; entirely
+  **before** shows a left-pinned `<due date> ←`. A bar that's partly visible but **continues
+  past an edge** gets a `›` (right) / `‹` (left) continuation caret. (The window stays the
+  sprint's own dates — the scheduler routinely pushes tasks weeks past the sprint end.)
+- **Tasks partly inside the sprint range** clip to the visible columns (only in-range
+  half-days render) plus the continuation caret above.
 - **Parent/group tasks**: a parent is a container (excluded from member counts per
   [task-groups.md](./task-groups.md)); render it as a group sub-header and show each child
   task's bar, rather than a synthetic rolled-up bar.

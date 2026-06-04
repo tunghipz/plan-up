@@ -2,7 +2,7 @@ import { useMemo } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, computeWorkingPlan, type Task, type Member } from './db'
 import { Avatar } from './members'
-import { sprintWorkdays, halfDayCells, type CellKind } from './lib'
+import { sprintWorkdays, halfDayCells, formatShortDate, type CellKind } from './lib'
 
 /**
  * Read-only half-day (AM/PM) timeline for the current sprint, grouped by member.
@@ -187,7 +187,7 @@ export function GanttView({
           const cells = halfDayCells(plan, workdays, m.daysOff)
           const flat: CellKind[] = cells.flatMap((c) => [c.am, c.pm])
           const scheduled = !!plan.startDate && !!plan.dueDate
-          return { ...r, flat, scheduled }
+          return { ...r, flat, scheduled, startDate: plan.startDate, dueDate: plan.dueDate }
         })
         // Member load roll-up = union of every task's occupied half-days.
         const union = Array(workdays.length * 2).fill(false)
@@ -196,7 +196,29 @@ export function GanttView({
             if (s !== 'empty') union[i] = true
           })
         }
-        return { member: m, rows, loadSegs: segmentsOf(union) }
+        // Member day-off marks (within the window) — surfaced in the band so an
+        // off day is visible even when no task spans it (off-days are member-level).
+        const offByDate = new Map<string, 'full' | 'am' | 'pm'>()
+        for (const o of m.daysOff) {
+          if (!o.half) offByDate.set(o.date, 'full')
+          else {
+            const prev = offByDate.get(o.date)
+            if (prev === undefined) offByDate.set(o.date, o.half)
+            else if (prev !== o.half) offByDate.set(o.date, 'full')
+          }
+        }
+        const offHalves: boolean[] = []
+        workdays.forEach((date, d) => {
+          const off = offByDate.get(date)
+          offHalves[d * 2] = off === 'full' || off === 'am'
+          offHalves[d * 2 + 1] = off === 'full' || off === 'pm'
+        })
+        return {
+          member: m,
+          rows,
+          loadSegs: segmentsOf(union),
+          offSegs: segmentsOf(offHalves),
+        }
       })
   }, [members, filteredTasks, workdays, tasksById, memberById])
 
@@ -223,6 +245,8 @@ export function GanttView({
   const totalW = TV_W + TASK_W + workdays.length * DAY_W
   const today = todayISO()
   const todayIdx = workdays.indexOf(today)
+  const firstDay = workdays[0]
+  const lastDay = workdays[workdays.length - 1]
 
   return (
     <div className="pt-4 pb-2 max-w-full">
@@ -279,7 +303,7 @@ export function GanttView({
           </div>
 
           {/* Body: member groups. */}
-          {groups.map(({ member, rows, loadSegs }) => (
+          {groups.map(({ member, rows, loadSegs, offSegs }) => (
             <div key={member.id}>
               {/* Member group header row + load roll-up */}
               <div
@@ -304,6 +328,16 @@ export function GanttView({
                   )}
                 </div>
                 <div className="relative" style={{ gridColumn: '3 / -1' }}>
+                  {/* Day-off marks (member-level) — full-height hatched pink. */}
+                  {offSegs.map((s, k) => (
+                    <div
+                      key={`off-${k}`}
+                      className={`absolute inset-y-0 ${OFF_FILL} opacity-80`}
+                      style={{ left: s.a * HALF_W, width: (s.b - s.a + 1) * HALF_W }}
+                      title="Day off"
+                      aria-hidden
+                    />
+                  ))}
                   {loadSegs.map((s, k) => (
                     <div
                       key={k}
@@ -319,10 +353,18 @@ export function GanttView({
               </div>
 
               {/* Task rows */}
-              {rows.map(({ task, depth, isParent, flat, scheduled }) => (
+              {rows.map(({ task, depth, isParent, flat, scheduled, startDate, dueDate }) => {
+                const hasVisible = flat.some((s) => s !== 'empty')
+                // Scheduled but no cells in the window → it lands before/after the sprint.
+                const offAfter = scheduled && !hasVisible && !!startDate && startDate > lastDay
+                const offBefore = scheduled && !hasVisible && !!dueDate && dueDate < firstDay
+                // Partially-clipped bars that continue past an edge.
+                const contRight = hasVisible && !!dueDate && dueDate > lastDay
+                const contLeft = hasVisible && !!startDate && startDate < firstDay
+                return (
                 <div
                   key={task.id}
-                  className="grid border-b border-border-hair/55 hover:bg-surface-hover/40 group"
+                  className="relative grid border-b border-border-hair/55 hover:bg-surface-hover/40 group"
                   style={{ gridTemplateColumns: gridCols }}
                 >
                   <div
@@ -340,7 +382,7 @@ export function GanttView({
                   >
                     {task.title}
                   </div>
-                  {scheduled ? (
+                  {scheduled && hasVisible ? (
                     workdays.flatMap((_, i) => [
                       <Cell
                         key={`am-${i}`}
@@ -361,6 +403,23 @@ export function GanttView({
                         segEnd={flat[i * 2 + 1] === 'active' && flat[i * 2 + 2] !== 'active'}
                       />,
                     ])
+                  ) : offAfter || offBefore ? (
+                    <div
+                      className={`relative h-7 flex items-center ${offAfter ? 'justify-end pr-2' : 'pl-2'}`}
+                      style={{ gridColumn: '3 / -1' }}
+                    >
+                      <div className="absolute left-2 right-2 top-1/2 border-t border-dotted border-border-strong/40" />
+                      <span
+                        title={
+                          offAfter
+                            ? `Scheduled ${formatShortDate(startDate!)} — starts after this sprint`
+                            : `Ended ${formatShortDate(dueDate!)} — before this sprint`
+                        }
+                        className="relative text-[9.5px] font-semibold text-ink-faint bg-surface group-hover:bg-surface-hover border border-dotted border-border-strong rounded-[5px] px-1.5 py-px whitespace-nowrap"
+                      >
+                        {offAfter ? `→ ${formatShortDate(startDate!)}` : `${formatShortDate(dueDate!)} ←`}
+                      </span>
+                    </div>
                   ) : (
                     <div className="relative h-7 flex items-center" style={{ gridColumn: '3 / -1' }}>
                       <div className="absolute left-2 right-2 top-1/2 border-t border-dashed border-border-strong/60" />
@@ -369,8 +428,28 @@ export function GanttView({
                       </span>
                     </div>
                   )}
+                  {contRight && (
+                    <span
+                      className="absolute top-1/2 -translate-y-1/2 right-1 text-ink-faint text-[12px] leading-none z-[6] pointer-events-none"
+                      title="Continues after this sprint"
+                      aria-hidden
+                    >
+                      ›
+                    </span>
+                  )}
+                  {contLeft && (
+                    <span
+                      className="absolute top-1/2 -translate-y-1/2 text-ink-faint text-[12px] leading-none z-[6] pointer-events-none"
+                      style={{ left: TV_W + TASK_W + 1 }}
+                      title="Started before this sprint"
+                      aria-hidden
+                    >
+                      ‹
+                    </span>
+                  )}
                 </div>
-              ))}
+                )
+              })}
             </div>
           ))}
         </div>

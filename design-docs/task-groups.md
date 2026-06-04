@@ -15,11 +15,20 @@ separate epic/tag system. Approach **B** chosen 2026-06-04 (see
 `demo/task-group-options.html`): nested render **plus** parent roll-up + collapse.
 
 ## User-facing behavior
-- **Nest:** a task's row kebab (⋯) → **"Group under…"** picks a sibling task (same
-  member + same sprint) as its parent. The chosen parent becomes a group; the task
-  renders indented beneath it (left padding, no connector tick). **"Remove from group"** clears it.
-  (Alt entry: a sequence-number input, deferred — kebab is less confusable with the
-  prereq sequence input.)
+- **Create a group (multi-select):** hover a task row → a **checkbox** appears in the
+  left gutter; check several tasks **of the same member**. A **floating action bar**
+  slides up at the bottom: *"N đã chọn · [Gom nhóm] · [Bỏ nhóm] · [Huỷ]"*.
+  - **Gom nhóm** creates a **new parent task** titled `New group` (rename inline) and
+    nests the selected tasks under it. Enabled only when ≥2 are selected, all share the
+    same assignee, and none is already a group head (one level).
+  - **Bỏ nhóm** ungroups any selected children (clears their `parentId`); shown when the
+    selection contains ≥1 grouped task.
+  - **Huỷ** clears the selection. Selection also clears on sprint change.
+  - Checkboxes are hover-revealed (hidden at rest, kept visible while selected) so the
+    resting list stays calm; they share the left gutter with the conflict triangle.
+  - **The old per-row kebab "Group under…/Remove from group" is removed** — grouping is
+    now select-driven. (The kebab keeps **Delete task**.)
+  - Children render indented beneath the parent (left padding, no connector tick).
 - **One level only.** A child cannot itself be a parent, and a task that already has
   children cannot become someone's child. Enforced when setting `parentId`.
 - **Roll-up on the parent row (Approach B):** the parent shows

@@ -743,6 +743,52 @@ export async function setTaskParent(
   await db.tasks.update(childId, { parentId })
 }
 
+/**
+ * Create a new "New group" parent task and nest the given tasks under it. The
+ * tasks must all share one member + sprint, and any that are already group heads
+ * (have children) are skipped (one level only). Returns the new parent's id, or
+ * null if nothing eligible. See design-docs/task-groups.md.
+ */
+export async function createGroupFromSelection(
+  taskIds: string[]
+): Promise<string | null> {
+  if (taskIds.length === 0) return null
+  return db.transaction('rw', db.tasks, db.sprints, async () => {
+    const loaded = (await Promise.all(taskIds.map((id) => db.tasks.get(id)))).filter(
+      (t): t is Task => !!t
+    )
+    const eligible: Task[] = []
+    for (const t of loaded) {
+      const kids = await db.tasks.filter((x) => x.parentId === t.id).count()
+      if (kids === 0 && !t.parentId) eligible.push(t)
+    }
+    if (eligible.length < 2) return null
+    const { assigneeId, sprintId, projectId } = eligible[0]
+    if (eligible.some((t) => t.assigneeId !== assigneeId || t.sprintId !== sprintId))
+      return null
+    const sprint = await db.sprints.get(sprintId)
+    const parentId = uid()
+    await db.tasks.add({
+      id: parentId,
+      projectId,
+      sequence: await nextSequence(sprintId),
+      title: 'New group',
+      assigneeId,
+      sprintId,
+      status: 'todo',
+      priority: 'normal',
+      startDate: sprint?.startDate ?? null,
+      dueDate: null,
+      estimate: null,
+      createdAt: Date.now(),
+      dependsOn: [],
+      parentId: null,
+    })
+    for (const t of eligible) await db.tasks.update(t.id, { parentId })
+    return parentId
+  })
+}
+
 export async function deleteTask(taskId: string) {
   const touched: string[] = []
   await db.transaction('rw', db.tasks, async () => {

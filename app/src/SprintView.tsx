@@ -14,9 +14,10 @@ import {
   ChevronDown,
   UserPlus,
   MoreVertical,
-  CornerDownRight,
-  CornerUpLeft,
   AlertTriangle,
+  Check,
+  FolderPlus,
+  Ungroup,
 } from 'lucide-react'
 import {
   db,
@@ -24,6 +25,7 @@ import {
   colorForName,
   deleteTask,
   setTaskParent,
+  createGroupFromSelection,
   setDependencies,
   recomputeDates,
   computeWorkingPlan,
@@ -217,9 +219,20 @@ export function SprintView({
     field: 'seq',
     dir: 'asc',
   })
+  // Multi-select for the group-via-selection flow. Clears on sprint change.
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const toggleSelect = (id: string) =>
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  const clearSelection = () => setSelectedIds(new Set())
 
   useEffect(() => {
     setCollapsed(loadCollapsed(sprintId))
+    setSelectedIds(new Set())
   }, [sprintId])
 
   const toggleCollapse = (memberId: string) => {
@@ -295,6 +308,8 @@ export function SprintView({
           onToggleCollapse={() => toggleCollapse(member.id)}
           sort={sort}
           setSort={setSort}
+          selectedIds={selectedIds}
+          onToggleSelect={toggleSelect}
         />
       ))}
 
@@ -306,6 +321,8 @@ export function SprintView({
           tasksById={tasksById}
           sort={sort}
           setSort={setSort}
+          selectedIds={selectedIds}
+          onToggleSelect={toggleSelect}
         />
       )}
 
@@ -327,6 +344,102 @@ export function SprintView({
         onActivate={() => setShowAddMember(true)}
         onDeactivate={() => setShowAddMember(false)}
       />
+
+      <SelectionBar
+        selectedIds={selectedIds}
+        tasksById={tasksById}
+        allTasks={tasks}
+        onClear={clearSelection}
+      />
+    </div>
+  )
+}
+
+/**
+ * Floating action bar shown while ≥1 task is selected (group-via-selection flow).
+ * "Gom nhóm" creates a new group parent from the selection (same member, ≥2, none a
+ * group head); "Bỏ nhóm" ungroups any selected children. See design-docs/task-groups.md.
+ */
+function SelectionBar({
+  selectedIds,
+  tasksById,
+  allTasks,
+  onClear,
+}: {
+  selectedIds: Set<string>
+  tasksById: Map<string, Task>
+  allTasks: Task[]
+  onClear: () => void
+}) {
+  const n = selectedIds.size
+  const parentIds = useMemo(() => {
+    const s = new Set<string>()
+    for (const t of allTasks) if (t.parentId) s.add(t.parentId)
+    return s
+  }, [allTasks])
+  const selected = [...selectedIds]
+    .map((id) => tasksById.get(id))
+    .filter((t): t is Task => !!t)
+  // Group is valid when ≥2 are selected, all share one assignee, and none is a
+  // group head (parents can't be nested — one level).
+  const sameMember =
+    selected.length >= 2 &&
+    selected.every((t) => t.assigneeId === selected[0].assigneeId)
+  const noneParent = selected.every((t) => !parentIds.has(t.id))
+  const canGroup = sameMember && noneParent
+  const anyChild = selected.some((t) => !!t.parentId)
+
+  const doGroup = async () => {
+    if (!canGroup) return
+    await createGroupFromSelection(selected.map((t) => t.id))
+    onClear()
+  }
+  const doUngroup = async () => {
+    await Promise.all(
+      selected.filter((t) => t.parentId).map((t) => setTaskParent(t.id, null))
+    )
+    onClear()
+  }
+
+  return (
+    <div
+      className={`fixed left-1/2 bottom-6 z-40 -translate-x-1/2 flex items-center gap-3 rounded-[14px] bg-ink text-white pl-4 pr-2 py-2 shadow-[0_8px_30px_rgba(0,0,0,0.22),0_0_0_0.5px_rgba(0,0,0,0.06)] transition-all duration-200 ${
+        n > 0
+          ? 'opacity-100 translate-y-0'
+          : 'opacity-0 translate-y-3 pointer-events-none'
+      }`}
+      role="toolbar"
+      aria-label="Selected tasks"
+    >
+      <span className="text-[13.5px]">
+        <b className="font-semibold tabular-nums">{n}</b> đã chọn
+      </span>
+      {anyChild && (
+        <button
+          onClick={doUngroup}
+          className="inline-flex items-center gap-1.5 text-[13px] text-white/80 hover:text-white px-2.5 py-1.5 rounded-[9px] hover:bg-white/10 transition"
+        >
+          <Ungroup size={14} /> Bỏ nhóm
+        </button>
+      )}
+      <button
+        onClick={doGroup}
+        disabled={!canGroup}
+        title={
+          canGroup
+            ? undefined
+            : 'Chọn ≥2 task cùng một người (không phải nhóm) để gom'
+        }
+        className="inline-flex items-center gap-1.5 text-[13px] font-semibold rounded-[9px] px-3 py-1.5 transition disabled:opacity-40 disabled:cursor-not-allowed bg-white text-ink hover:bg-white/90"
+      >
+        <FolderPlus size={14} /> Gom nhóm
+      </button>
+      <button
+        onClick={onClear}
+        className="text-[13px] text-white/70 hover:text-white px-2 py-1.5"
+      >
+        Huỷ
+      </button>
     </div>
   )
 }
@@ -362,6 +475,8 @@ function MemberCard({
   onToggleCollapse,
   sort,
   setSort,
+  selectedIds,
+  onToggleSelect,
 }: {
   projectId: string
   member: Member
@@ -377,6 +492,8 @@ function MemberCard({
   setSort: React.Dispatch<
     React.SetStateAction<{ field: SortField; dir: 'asc' | 'desc' }>
   >
+  selectedIds: Set<string>
+  onToggleSelect: (id: string) => void
 }) {
   // Leaf-based counting: a parent (a task with children in this list) is a
   // container, excluded from done/total/overdue so its work isn't double-counted
@@ -438,6 +555,8 @@ function MemberCard({
                 tasksById={tasksById}
                 showAssignee={false}
                 conflictTips={conflictTips}
+                selectedIds={selectedIds}
+                onToggleSelect={onToggleSelect}
               />
               <AddTaskRow
                 projectId={projectId}
@@ -461,6 +580,8 @@ function UnassignedCard({
   tasksById,
   sort,
   setSort,
+  selectedIds,
+  onToggleSelect,
 }: {
   tasks: Task[]
   members: Member[]
@@ -470,6 +591,8 @@ function UnassignedCard({
   setSort: React.Dispatch<
     React.SetStateAction<{ field: SortField; dir: 'asc' | 'desc' }>
   >
+  selectedIds: Set<string>
+  onToggleSelect: (id: string) => void
 }) {
   return (
     <Card>
@@ -492,6 +615,8 @@ function UnassignedCard({
               members={members}
               allTasks={allTasks}
               tasksById={tasksById}
+              selectedIds={selectedIds}
+              onToggleSelect={onToggleSelect}
             />
           </div>
         </div>
@@ -743,7 +868,7 @@ function AddTaskRow({
   }
   return (
     <div className="flex items-center gap-3 px-4 py-2 text-sm">
-      <div className={COL.warn} />
+      <div className={COL.lead} />
       <div className={COL.dot}>
         <Plus size={14} className="text-ink-faint" />
       </div>
@@ -772,7 +897,7 @@ function AddTaskRow({
 //   seq "123"≈24 · "Effort (day)" hdr 73 · date "Jun 30, 17:00"≈99 · "In progress"
 //   pill 97 (+ pl-2). Title takes the slack via flex-1.
 const COL = {
-  warn: 'w-4 shrink-0 flex justify-center items-center',
+  lead: 'w-5 shrink-0 flex justify-center items-center',
   dot: 'w-4 shrink-0',
   seq: 'w-8 text-sm text-ink-faint tabular-nums text-center shrink-0 font-mono',
   title: 'flex-1 min-w-[150px]',
@@ -940,7 +1065,7 @@ function TaskGroupRow({
   }
   return (
     <div className="task-row group/row relative flex items-center gap-3 px-4 py-2 text-sm hover:bg-surface-hover transition bg-accent/[0.025]">
-      <div className={COL.warn} />
+      <div className={COL.lead} />
       <div className={COL.dot}>
         <span
           className="block w-2 h-2 rounded-full"
@@ -1022,6 +1147,8 @@ function TaskRows({
   tasksById,
   showAssignee = true,
   conflictTips,
+  selectedIds,
+  onToggleSelect,
 }: {
   tasks: Task[]
   members: Member[]
@@ -1030,6 +1157,9 @@ function TaskRows({
   showAssignee?: boolean
   /** taskId → conflict tooltip (member double-booking); absent map = no warnings. */
   conflictTips?: Map<string, string>
+  /** Multi-select state for the group-via-selection flow. */
+  selectedIds?: Set<string>
+  onToggleSelect?: (id: string) => void
 }) {
   const { topLevel, childrenByParent } = useMemo(() => {
     const idSet = new Set(tasks.map((t) => t.id))
@@ -1097,15 +1227,16 @@ function TaskRows({
                     tasksById={tasksById}
                     showAssignee={showAssignee}
                     isChild
-                    onUngroup={() => setTaskParent(c.id, null)}
                     warn={conflictTips?.get(c.id)}
+                    selected={selectedIds?.has(c.id)}
+                    onToggleSelect={
+                      onToggleSelect ? () => onToggleSelect(c.id) : undefined
+                    }
                   />
                 ))}
             </Fragment>
           )
         }
-        // Top-level leaf: can be grouped under any other top-level task.
-        const candidates = topLevel.filter((x) => x.id !== t.id)
         return (
           <TaskRow
             key={t.id}
@@ -1114,9 +1245,11 @@ function TaskRows({
             allTasks={allTasks}
             tasksById={tasksById}
             showAssignee={showAssignee}
-            groupCandidates={candidates}
-            onGroupUnder={(pid) => setTaskParent(t.id, pid)}
             warn={conflictTips?.get(t.id)}
+            selected={selectedIds?.has(t.id)}
+            onToggleSelect={
+              onToggleSelect ? () => onToggleSelect(t.id) : undefined
+            }
           />
         )
       })}
@@ -1131,10 +1264,9 @@ function TaskRow({
   tasksById,
   showAssignee = true,
   isChild = false,
-  groupCandidates,
-  onGroupUnder,
-  onUngroup,
   warn,
+  selected = false,
+  onToggleSelect,
 }: {
   task: Task
   members: Member[]
@@ -1142,11 +1274,10 @@ function TaskRow({
   tasksById: Map<string, Task>
   showAssignee?: boolean
   isChild?: boolean
-  groupCandidates?: Task[]
-  onGroupUnder?: (parentId: string) => void
-  onUngroup?: () => void
-  /** Conflict tooltip — renders an amber warning triangle after the title. */
+  /** Conflict tooltip — renders an amber warning triangle in the lead gutter. */
   warn?: string
+  selected?: boolean
+  onToggleSelect?: () => void
 }) {
   const update = (patch: Partial<Task>) => db.tasks.update(task.id, patch)
   const assignee = members.find((m) => m.id === task.assigneeId) ?? null
@@ -1168,14 +1299,49 @@ function TaskRow({
 
   return (
     <div
-      className="task-row group/row relative flex items-center gap-3 px-4 py-2 text-sm hover:bg-surface-hover transition"
+      className={`task-row group/row relative flex items-center gap-3 px-4 py-2 text-sm transition ${
+        selected ? 'bg-accent-soft' : 'hover:bg-surface-hover'
+      }`}
       title={blocked ? 'Blocked — waiting on a prerequisite task' : undefined}
     >
-      <div className={COL.warn}>
+      <div className={`${COL.lead} relative`}>
+        {/* Conflict triangle at rest; hidden while hovering the row or when selected. */}
         {warn && (
-          <span className="text-priority-high" title={warn} aria-label={warn}>
+          <span
+            className={`absolute inset-0 grid place-items-center text-priority-high pointer-events-none transition-opacity group-hover/row:opacity-0 ${
+              selected ? 'opacity-0' : ''
+            }`}
+            title={warn}
+            aria-label={warn}
+          >
             <AlertTriangle size={14} />
           </span>
+        )}
+        {/* Select checkbox: hover-revealed, stays visible while selected. */}
+        {onToggleSelect && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              onToggleSelect()
+            }}
+            aria-label={selected ? 'Deselect task' : 'Select task'}
+            aria-pressed={selected}
+            className={`absolute inset-0 grid place-items-center transition-opacity ${
+              selected
+                ? 'opacity-100'
+                : 'opacity-0 pointer-events-none group-hover/row:opacity-100 group-hover/row:pointer-events-auto'
+            }`}
+          >
+            <span
+              className={`w-[17px] h-[17px] rounded-[5px] border flex items-center justify-center transition ${
+                selected
+                  ? 'bg-accent border-accent text-white'
+                  : 'border-border-strong bg-surface text-transparent'
+              }`}
+            >
+              <Check size={11} strokeWidth={3.5} />
+            </span>
+          </button>
         )}
       </div>
       <div className={COL.dot}>
@@ -1261,9 +1427,6 @@ function TaskRow({
           onDelete={() => {
             if (confirm('Delete this task?')) deleteTask(task.id)
           }}
-          groupCandidates={groupCandidates}
-          onGroupUnder={onGroupUnder}
-          onUngroup={onUngroup}
         />
       </div>
     </div>
@@ -1275,19 +1438,8 @@ function TaskRow({
  * touch-friendly, no hover bias. Currently surfaces just Delete; room to add
  * Duplicate / Move-to-sprint / Archive later without changing the row layout.
  */
-function RowActionsMenu({
-  onDelete,
-  groupCandidates,
-  onGroupUnder,
-  onUngroup,
-}: {
-  onDelete: () => void
-  groupCandidates?: Task[]
-  onGroupUnder?: (parentId: string) => void
-  onUngroup?: () => void
-}) {
+function RowActionsMenu({ onDelete }: { onDelete: () => void }) {
   const [open, setOpen] = useState(false)
-  const [sub, setSub] = useState(false)
   // Menu is rendered in a portal (fixed, anchored to the trigger) so it is never
   // clipped by the member card's overflow-x-auto scroll container. Flips upward
   // when the trigger sits near the viewport bottom.
@@ -1304,13 +1456,9 @@ function RowActionsMenu({
       const t = e.target as Node
       if (!menuRef.current?.contains(t) && !btnRef.current?.contains(t)) {
         setOpen(false)
-        setSub(false)
       }
     }
-    const onScroll = () => {
-      setOpen(false)
-      setSub(false)
-    }
+    const onScroll = () => setOpen(false)
     document.addEventListener('mousedown', onDoc)
     window.addEventListener('scroll', onScroll, true)
     return () => {
@@ -1321,23 +1469,20 @@ function RowActionsMenu({
   const toggle = () => {
     if (open) {
       setOpen(false)
-      setSub(false)
       return
     }
     const r = btnRef.current?.getBoundingClientRect()
     if (r) {
       const right = window.innerWidth - r.right
-      const openUp = window.innerHeight - r.bottom < 180
+      const openUp = window.innerHeight - r.bottom < 120
       setPos(
         openUp
           ? { bottom: window.innerHeight - r.top + 6, right }
           : { top: r.bottom + 6, right }
       )
     }
-    setSub(false)
     setOpen(true)
   }
-  const canGroup = !!(onGroupUnder && groupCandidates && groupCandidates.length > 0)
   const item =
     'w-full flex items-center gap-2 px-2.5 py-1.5 rounded-[7px] text-left transition'
   return (
@@ -1364,53 +1509,8 @@ function RowActionsMenu({
               bottom: pos.bottom,
               right: pos.right,
             }}
-            className="z-50 min-w-[190px] rounded-[12px] border border-border-hair bg-surface shadow-[0_10px_30px_rgba(0,0,0,0.16)] p-1 text-sm"
+            className="z-50 min-w-[160px] rounded-[12px] border border-border-hair bg-surface shadow-[0_10px_30px_rgba(0,0,0,0.16)] p-1 text-sm"
           >
-            {!sub && onUngroup && (
-            <button
-              onClick={() => {
-                setOpen(false)
-                onUngroup()
-              }}
-              className={`${item} text-ink hover:bg-surface-hover`}
-            >
-              <CornerUpLeft size={13} className="text-ink-faint" />
-              Remove from group
-            </button>
-          )}
-          {!sub && canGroup && (
-            <button
-              onClick={() => setSub(true)}
-              className={`${item} text-ink hover:bg-surface-hover`}
-            >
-              <CornerDownRight size={13} className="text-ink-faint" />
-              Group under…
-            </button>
-          )}
-          {sub && canGroup && (
-            <div className="max-h-56 overflow-auto">
-              <div className="px-2.5 py-1 text-[11px] font-semibold text-ink-faint">
-                Group under…
-              </div>
-              {groupCandidates!.map((c) => (
-                <button
-                  key={c.id}
-                  onClick={() => {
-                    setOpen(false)
-                    setSub(false)
-                    onGroupUnder!(c.id)
-                  }}
-                  className={`${item} text-ink hover:bg-surface-hover`}
-                >
-                  <span className="font-mono text-ink-faint text-[12px] shrink-0">
-                    {c.sequence}
-                  </span>
-                  <span className="truncate">{c.title || 'Untitled'}</span>
-                </button>
-              ))}
-            </div>
-          )}
-          {!sub && (
             <button
               onClick={() => {
                 setOpen(false)
@@ -1421,7 +1521,6 @@ function RowActionsMenu({
               <Trash2 size={13} />
               Delete task
             </button>
-          )}
           </div>,
           document.body
         )}
@@ -1454,7 +1553,7 @@ function TaskColumnHeader({
   }
   return (
     <div className="flex items-center gap-3 px-4 py-1.5 border-b border-border-hair bg-canvas-sunk/40">
-      <div className={COL.warn} />
+      <div className={COL.lead} />
       <div className={COL.dot} />
       <SortHeader
         className={COL.seq}

@@ -40,6 +40,7 @@ npm run lint       # eslint .
 - **Keyboard-first**: `/` focus search · `n` new sprint · `⌘⇧D` toggle dark mode
 - **Export / Import JSON** — local-first backup, no sync
 - **Dark mode** — Apple dark (canvas `#1C1C1E`, accent `#0A84FF`)
+- **Brand mark** — a progress-ring-on-squircle favicon in System Blue, dark-aware (swaps to `#0A84FF` via `prefers-color-scheme`) — the same ring as the member progress indicator
 
 ## Layout
 
@@ -52,7 +53,7 @@ npm run lint       # eslint .
 
 - [`design.md`](./design.md) — product spec: premises, scope, success criteria
 - [`design-system.md`](./design-system.md) — UI/UX constitution: brand, typography, layout, component rules, anti-patterns
-- [`design-docs/`](./design-docs/) — one spec per feature (data model, scheduling, list/board, settings, …). **Doc-first: any feature change updates its doc before code.**
+- [`design-docs/`](./design-docs/) — one spec per feature (data model, scheduling, list/board, settings, favicon, …). **Doc-first: any feature change updates its doc before code.**
 
 Read `design-system.md` **before** building any new component.
 

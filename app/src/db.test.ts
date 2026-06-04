@@ -10,6 +10,7 @@ import {
   removeDependency,
   setDependencies,
   wouldCreateCycle,
+  findCyclePath,
   isTaskBlocked,
   computeStartEnd,
   computeWorkingPlan,
@@ -212,6 +213,24 @@ describe('task dependencies', () => {
   it('wouldCreateCycle allows independent chains', () => {
     const tasks = [mkTask('a'), mkTask('b'), mkTask('c')]
     expect(wouldCreateCycle('a', 'b', tasks)).toBe(false)
+  })
+
+  it('findCyclePath returns the loop path when a cycle would form', () => {
+    // existing: d→c, c→a (a depends on c, c depends on d... wait set up chain)
+    // chain: 9→8, 8→6, 6→7 ; adding 7→9 closes the loop.
+    const tasks = [
+      mkTask('t7'),
+      mkTask('t6', ['t7']),
+      mkTask('t8', ['t6']),
+      mkTask('t9', ['t8']),
+    ]
+    // path from t9 back to t7 (existing edges): t9→t8→t6→t7
+    expect(findCyclePath('t7', 't9', tasks)).toEqual(['t9', 't8', 't6', 't7'])
+  })
+
+  it('findCyclePath returns null when no cycle', () => {
+    const tasks = [mkTask('t7'), mkTask('t10')]
+    expect(findCyclePath('t7', 't10', tasks)).toBeNull()
   })
 
   it('addDependency refuses cycles', async () => {

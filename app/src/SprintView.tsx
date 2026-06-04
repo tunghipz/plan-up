@@ -26,6 +26,7 @@ import {
   setTaskParent,
   createGroupFromSelection,
   setDependencies,
+  findCyclePath,
   recomputeDates,
   computeWorkingPlan,
   isTaskBlocked,
@@ -1949,8 +1950,9 @@ function PrereqInput({
   const [draft, setDraft] = useState(currentLabel)
   const [focused, setFocused] = useState(false)
   // Why some typed numbers didn't apply (cycle / not found). Shown in a small
-  // popover instead of the old silent snap-back. Null = nothing to report.
-  const [notice, setNotice] = useState<string | null>(null)
+  // popover instead of the old silent snap-back. Each cycle line carries the
+  // loop path so it's checkable at a glance. Null = nothing to report.
+  const [notice, setNotice] = useState<{ head: string; path?: string }[] | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const [pos, setPos] = useState<{ top: number; right: number }>({ top: 0, right: 0 })
 
@@ -2008,18 +2010,31 @@ function PrereqInput({
     )
     const savedSet = new Set(saved)
     // Known numbers that setDependencies refused = cycles (would loop back).
-    const cyclic = known.filter((k) => !savedSet.has(k.id)).map((k) => k.seq)
+    const cyclic = known.filter((k) => !savedSet.has(k.id))
     setDraft(
       formatSeqRanges(
         saved.map(seqOf).filter((n): n is number => typeof n === 'number')
       )
     )
-    const parts: string[] = []
-    if (cyclic.length)
-      parts.push(`${cyclic.map((n) => `#${n}`).join(', ')} tạo vòng lặp`)
+    const items: { head: string; path?: string }[] = []
+    for (const k of cyclic) {
+      // Build the loop as sequence numbers: this task → dep → …existing path… → this task.
+      const idPath = findCyclePath(task.id, k.id, allTasks)
+      const seqs = idPath
+        ? [task.sequence, ...idPath.map(seqOf)].filter(
+            (n): n is number => typeof n === 'number'
+          )
+        : null
+      items.push({
+        head: `Đã bỏ #${k.seq} — tạo vòng lặp`,
+        path: seqs && seqs.length > 1 ? seqs.join(' → ') : undefined,
+      })
+    }
     if (unknown.length)
-      parts.push(`${unknown.map((n) => `#${n}`).join(', ')} không có trong sprint`)
-    setNotice(parts.length ? `Đã bỏ: ${parts.join(' · ')}` : null)
+      items.push({
+        head: `Đã bỏ ${unknown.map((n) => `#${n}`).join(', ')} — không có trong sprint`,
+      })
+    setNotice(items.length ? items : null)
   }
 
   return (
@@ -2054,10 +2069,19 @@ function PrereqInput({
         createPortal(
           <div
             style={{ position: 'fixed', top: pos.top, right: pos.right }}
-            className="z-50 max-w-[260px] rounded-[10px] border border-priority-high/30 bg-surface px-2.5 py-1.5 text-[12px] leading-snug text-priority-high shadow-[0_8px_24px_rgba(0,0,0,0.16)]"
+            className="z-50 max-w-[280px] rounded-[10px] border border-priority-high/30 bg-surface px-2.5 py-1.5 text-[12px] leading-snug text-priority-high shadow-[0_8px_24px_rgba(0,0,0,0.16)]"
             role="status"
           >
-            {notice}
+            {notice.map((it, i) => (
+              <div key={i} className={i ? 'mt-1.5' : ''}>
+                <div>{it.head}</div>
+                {it.path && (
+                  <div className="tabular-nums font-medium tracking-wide">
+                    {it.path}
+                  </div>
+                )}
+              </div>
+            ))}
           </div>,
           document.body
         )}

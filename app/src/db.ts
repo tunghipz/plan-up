@@ -836,6 +836,46 @@ export function wouldCreateCycle(
 }
 
 /**
+ * If adding `newDepId` as a prerequisite of `taskId` would create a cycle,
+ * return the existing path of task IDs from `newDepId` back to `taskId`
+ * (shortest, via BFS over `dependsOn`). The full loop is then
+ * `taskId → newDepId → …returned… (ends at taskId)`. Returns null when no such
+ * path exists (i.e. no cycle). Companion to `wouldCreateCycle` that also yields
+ * the path so the UI can show *where* the loop runs.
+ */
+export function findCyclePath(
+  taskId: string,
+  newDepId: string,
+  tasks: Task[]
+): string[] | null {
+  if (taskId === newDepId) return [newDepId]
+  const byId = new Map(tasks.map((t) => [t.id, t]))
+  const parent = new Map<string, string | null>([[newDepId, null]])
+  const queue = [newDepId]
+  while (queue.length) {
+    const cur = queue.shift()!
+    if (cur === taskId) {
+      const path: string[] = []
+      let n: string | null = cur
+      while (n != null) {
+        path.unshift(n)
+        n = parent.get(n) ?? null
+      }
+      return path
+    }
+    const t = byId.get(cur)
+    if (!t) continue
+    for (const d of t.dependsOn) {
+      if (!parent.has(d)) {
+        parent.set(d, cur)
+        queue.push(d)
+      }
+    }
+  }
+  return null
+}
+
+/**
  * Add `depId` as a prerequisite of `taskId`. Refuses cycles silently
  * (returns false). Returns true on success.
  */

@@ -25,6 +25,23 @@
 - Demo đặt trong `demo/` (đã gitignore). HTML để user hover/click/so sánh trực tiếp, không phải ảnh tĩnh.
 - PNG chỉ được dùng nội bộ để mình tự verify (screenshot kiểm tra), không phải là sản phẩm demo giao cho user.
 
+### Verify UI — TIẾT KIỆM TOKEN (BẮT BUỘC)
+
+Mỗi ảnh đọc vào hội thoại biến thành block base64 nằm trong context và **bị gửi lại làm
+input token ở MỌI lượt kế tiếp** cho tới khi compaction. Chụp hàng loạt screenshot full-res
+để "nhìn cho chắc" là nguyên nhân chính đốt usage (một session từng nhảy +24% chỉ vì ~250 ảnh
+re-bill trên Opus). Quy tắc:
+
+1. **Mặc định KHÔNG đọc ảnh — verify bằng text.** Dùng Playwright `page.evaluate` để dump DOM
+   (vị trí/kích thước element, text, computed style, số lượng node, lỗi console) rồi assert
+   bằng số. Text rẻ hơn ảnh nhiều bậc và kiểm tra được chính xác hơn "nhìn bằng mắt".
+2. **Screenshot ghi ra đĩa, KHÔNG nhất thiết đọc lại.** Lưu vào `demo/` (hoặc `/tmp` nếu là
+   ảnh vứt đi) làm artifact để *user* mở xem — bản thân mình không cần đọc file ảnh đó vào model.
+3. **Khi buộc phải nhìn:** `deviceScaleFactor: 1` + viewport nhỏ nhất đủ thấy (đừng 2x), và
+   **chỉ đọc 1–2 ảnh** chốt hạ — không đọc cả loạt before/after/light/dark cùng lúc.
+4. **Đừng feed full-res PNG vào model.** Nếu cần so sánh nhiều phương án → để trong 1 file HTML
+   (`demo/*.html`) cho user tự xem, không phải N ảnh đọc vào hội thoại.
+
 ## Stack
 
 React 19 + TypeScript + Vite + Tailwind v4 + Dexie (IndexedDB) + TanStack Table + lucide-react.

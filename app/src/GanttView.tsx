@@ -35,6 +35,12 @@ function gapBefore(prev: string, cur: string): boolean {
 }
 const softBg = (v: string) => `color-mix(in srgb, ${v} 15%, transparent)`
 const softFg = (v: string) => `color-mix(in srgb, ${v} 100%, #000 22%)`
+// Faint diagonal hatch — the universal "non-working time" texture for day-offs.
+const HATCH_OFF =
+  'repeating-linear-gradient(45deg, color-mix(in srgb, var(--color-ink) 13%, transparent) 0 3px, transparent 3px 7px)'
+// In-bar "pause": same-status stripes over a dim scrim, clipped inside the task block.
+const pauseBg = (v: string) =>
+  `repeating-linear-gradient(45deg, color-mix(in srgb, ${v} 55%, transparent) 0 3px, transparent 3px 7px), color-mix(in srgb, var(--color-surface) 55%, transparent)`
 
 type Ev = {
   task: Task
@@ -309,7 +315,10 @@ export function GanttView({
         <LegendDot varName="var(--color-status-progress)" label="In progress" />
         <LegendDot varName="var(--color-status-todo)" label="To do" />
         <span className="inline-flex items-center gap-1.5">
-          <span className="inline-block w-3.5 h-3.5 rounded-[4px] bg-fill" />
+          <span
+            className="inline-block w-3.5 h-3.5 rounded-[4px]"
+            style={{ background: HATCH_OFF }}
+          />
           Day off
         </span>
       </div>
@@ -411,12 +420,12 @@ export function GanttView({
                         />
                       )
                     )}
-                    {/* day-off bands */}
+                    {/* day-off bands — faint diagonal hatch */}
                     {offBands.map((o, k) => (
                       <div
                         key={k}
-                        className="absolute top-0 bottom-0 bg-fill"
-                        style={{ left: o.left, width: o.width }}
+                        className="absolute top-0 bottom-0"
+                        style={{ left: o.left, width: o.width, background: HATCH_OFF }}
                         title="Day off"
                         aria-hidden
                       />
@@ -489,6 +498,20 @@ export function GanttView({
                           >
                             #{e.task.sequence} {e.task.title}
                           </span>
+                          {/* pause: hatch+dim where the bar overlaps a day-off */}
+                          {offBands.map((o, k) => {
+                            const l = Math.max(box.left, o.left)
+                            const r = Math.min(box.left + box.width, o.left + o.width)
+                            if (r - l <= 0.5) return null
+                            return (
+                              <span
+                                key={`p${k}`}
+                                className="absolute top-0 bottom-0"
+                                style={{ left: l - box.left, width: r - l, background: pauseBg(v) }}
+                                aria-hidden
+                              />
+                            )
+                          })}
                           {e.contRight && (
                             <span className="text-ink-faint text-[11px] pr-1.5" aria-hidden>
                               ›

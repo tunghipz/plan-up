@@ -46,9 +46,13 @@ thing List and Board can't show. Read-only: a pure projection of the auto-schedu
   - **Lane-packed** — non-overlapping tasks for one member share a row; overlapping ones
     stack. Member height grows only as needed.
   - A block whose task **continues past the window's right edge** shows a `›` caret.
-- **Day-off** renders as soft-grey vertical bands in the member's lane (full day = whole
-  column, half = its AM or PM half), from `member.daysOff` — **member-level**, so it shows
-  even when no task spans it.
+- **Day-off** renders as a faint **diagonal-hatch** band in the member's lane (full day =
+  whole column, half = its AM or PM half), from `member.daysOff` — **member-level**, so it
+  shows even when no task spans it. Where a **task bar crosses a day-off**, the bar stays one
+  continuous block but the overlapping slice is overlaid with a same-status **hatch + dim
+  "pause"** — connecting the off-day to the task it interrupts (the bar visibly pauses there,
+  rather than the off-day being a disconnected grey band behind it). Parent summary rails are
+  exempt (they only show the lane's hatch behind them).
 - **Off-window & unscheduled tasks** never vanish, and off-window is split by **direction**:
   a task wholly **after** the window is `later` (`↗`, shows its start), one wholly **before**
   is `earlier` (`↙`, shows its end — when it finished). Tasks with no computed dates are
@@ -89,7 +93,9 @@ thing List and Board can't show. Read-only: a pure projection of the auto-schedu
     lanes, then every other block packs into the lanes below them — so a group's rail always
     sits *above* its children (Gantt convention). Within each pass, events sort by `left` and
     join the first lane whose last block ends at/before they start, else a new lane.
-  - Day-off half-columns → soft-grey bands.
+  - Day-off half-columns → faint diagonal-hatch bands; each in-window task block also paints
+    a same-status hatch+dim "pause" over any slice that overlaps a day-off (clipped inside the
+    block's rounded bounds), so the bar reads as pausing on the off-day.
   - Soft tints reuse the app pattern: `color-mix(in srgb, var(--color-status-X) 15%,
     transparent)` bg + `color-mix(…100%, #000 22%)` text + the raw token as the accent edge.
 - **`App.tsx`** — `ViewMode` includes `'timeline'`; `Timeline` segment (lucide

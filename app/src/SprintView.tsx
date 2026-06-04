@@ -1304,7 +1304,7 @@ function TaskRow({
       }`}
       title={blocked ? 'Blocked — waiting on a prerequisite task' : undefined}
     >
-      <div className={`${COL.lead} relative`}>
+      <div className={`${COL.lead} relative self-stretch`}>
         {/* Conflict triangle at rest; hidden while hovering the row or when selected. */}
         {warn && (
           <span

@@ -145,7 +145,7 @@ export function GanttView({
         <Swatch className="ring-1 ring-inset ring-border-hair" label="No work" />
       </div>
 
-      <div className="overflow-auto rounded-[12px] border border-border-hair bg-surface shadow-[0_1px_2px_rgba(0,0,0,0.04),0_6px_16px_rgba(0,0,0,0.04)]">
+      <div className="overflow-auto w-fit max-w-full rounded-[12px] border border-border-hair bg-surface shadow-[0_1px_2px_rgba(0,0,0,0.04),0_6px_16px_rgba(0,0,0,0.04)]">
         <div className="relative" style={{ width: totalW }}>
           {/* Today marker — continuous accent line spanning all rows. */}
           {todayIdx >= 0 && (
@@ -226,7 +226,7 @@ export function GanttView({
                       </span>
                     </div>
                     <div
-                      className={`sticky z-[5] bg-surface group-hover:bg-surface-hover flex items-center text-[12.5px] truncate pr-3 ${
+                      className={`sticky z-[5] bg-surface group-hover:bg-surface-hover flex items-center text-[12.5px] whitespace-normal break-words leading-tight py-1 pr-3 ${
                         isParent ? 'font-semibold text-ink' : 'text-ink'
                       }`}
                       style={{ left: TV_W, width: TASK_W, paddingLeft: 10 + depth * 14 }}
@@ -283,13 +283,13 @@ function SCHead({ date, col, today }: { date: string; col: number; today: string
   return (
     <>
       <div className={cls} style={{ gridColumn: `${col}`, gridRow: '2' }}>
-        S
+        AM
       </div>
       <div
         className="flex items-center justify-center text-[9px] font-medium py-0.5 text-ink-faint"
         style={{ gridColumn: `${col + 1}`, gridRow: '2' }}
       >
-        C
+        PM
       </div>
     </>
   )

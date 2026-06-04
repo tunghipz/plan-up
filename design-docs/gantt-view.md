@@ -1,6 +1,6 @@
 # Gantt / Timeline view
 
-**Status:** Planned
+**Status:** Implemented
 **Last updated:** 2026-06-04
 **Code:** `app/src/GanttView.tsx` (new), `app/src/App.tsx` (view toggle),
 `app/src/lib.ts` (`sprintWorkdays`, `halfDayCells` — new pure helpers),
@@ -17,10 +17,10 @@ Sáng/Chiều), reinterpreted in plan-up's calm Cupertino language.
 - **Third view in the segmented toggle** — `List · Board · Timeline`. Persisted at
   `localStorage['plan-up:view']` alongside the other two; scoped to the selected sprint.
 - **Columns = the sprint's workdays only** (weekends skipped, matching the scheduler),
-  each day split into two half-day sub-columns: **S** (Sáng / AM) and **C** (Chiều / PM).
+  each day split into two half-day sub-columns: **AM** (Sáng) and **PM** (Chiều).
   A 2-week sprint ≈ 10 workdays × 2 = 20 columns — fits on screen, no horizontal scroll.
 - **Two-row sticky header:** top row = date (`dd/MM`, spanning its two halves), bottom
-  row = `S` / `C`. The `TV` (member) and `Task` columns are **sticky on the left**; the
+  row = `AM` / `PM`. The `TV` (member) and `Task` columns are **sticky on the left**; the
   header is **sticky on top**, so labels stay visible while scrolling a long member list.
 - **Rows grouped by member (TV)**, same grouping/order as the List view. Each group is a
   member header row (avatar + name) followed by one row per task. Group/parent tasks (see

@@ -25,6 +25,9 @@ pair (A, B) **conflicts** if **any** of:
 - Only **leaf** tasks participate (parents/group containers are excluded, matching
   leaf-based counting — see [task-groups.md](./task-groups.md)). A grouped child
   still warns if it conflicts with any other leaf task of the member, across groups.
+- **Tasks with no effort estimate (`estimate === null`) are excluded** — an unsized
+  task isn't really scheduled, so comparing its start/end (or prereqs) for
+  double-booking is meaningless. Added 2026-06-04.
 - A task is "in conflict" if it forms a conflicting pair with ≥1 other task.
 
 ## User-facing behavior (chosen: A + C)

@@ -106,8 +106,11 @@ function computeMemberConflicts(
   memberById: Map<string, Member>
 ): Map<string, string> {
   type Hit = { seq: number; kind: 'start' | 'end' | 'prereq' }
+  // Unsized tasks (no effort) aren't really scheduled — exclude them from
+  // double-booking detection. See design-docs/conflict-warning.md.
+  const sized = tasks.filter((t) => t.estimate !== null)
   const plans = new Map(
-    tasks.map((t) => [t.id, computeWorkingPlan(t, tasksById, memberById)])
+    sized.map((t) => [t.id, computeWorkingPlan(t, tasksById, memberById)])
   )
   const startKey = (t: Task) => {
     const p = plans.get(t.id)!
@@ -123,10 +126,10 @@ function computeMemberConflicts(
     a.push(h)
     hits.set(id, a)
   }
-  for (let i = 0; i < tasks.length; i++) {
-    for (let j = i + 1; j < tasks.length; j++) {
-      const a = tasks[i]
-      const b = tasks[j]
+  for (let i = 0; i < sized.length; i++) {
+    for (let j = i + 1; j < sized.length; j++) {
+      const a = sized[i]
+      const b = sized[j]
       const sa = startKey(a)
       const ea = endKey(a)
       if (sa && sa === startKey(b)) {

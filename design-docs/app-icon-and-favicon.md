@@ -1,8 +1,8 @@
-# App icon & favicon
+# App icon, favicon & link preview
 
 **Status:** Implemented
 **Last updated:** 2026-06-04
-**Code:** `app/public/favicon.svg`, linked from `app/index.html`
+**Code:** `app/public/favicon.svg`, `app/public/og-image.png`, meta in `app/index.html`
 
 ## Purpose
 The browser-tab favicon (and any future app-icon export) is the smallest piece of
@@ -50,6 +50,27 @@ white tile dissolves on light backgrounds.
 - Fill amount (75%) is decorative, not data-bound — the favicon does not reflect
   real sprint progress.
 
+## Link preview (og:image)
+The card shown when the plan-up link is shared (Telegram / Slack / X).
+
+- **Asset:** `app/public/og-image.png`, **1200×630 PNG** — must be raster, not SVG
+  (Telegram and most scrapers don't render SVG og:images).
+- **Design (direction D · "ring motif"):** brand-blue `#0071E3` field, white wordmark
+  `plan-up` + eyebrow "LOCAL-FIRST PLANNER" + tagline, and the 75% progress ring blown
+  up and bled off the right edge — the same ring as the favicon, used as a graphic
+  device. Blue treatment chosen over the white/Cupertino-canvas alt because a shared
+  link competes in a busy chat feed; the blue card has the highest contrast and reads
+  as a product in both light and dark chats.
+- **Source/regeneration:** `demo/og-D-render.html` (board at exact 1200×630, `?blue`
+  toggles treatment) → Playwright `screenshot --viewport-size=1200,630`. Telegram
+  context proof: `demo/og-D-telegram.html`. (Both gitignored under `demo/`.)
+- **Meta tags** in `index.html`: `og:title` / `og:description` / `og:image`
+  (+`:width`/`:height`/`:type`) / `og:type` / `og:site_name`, plus `twitter:card =
+  summary_large_image` and `twitter:*` mirrors, and a plain `<meta name="description">`.
+- ⚠️ **Absolute URL caveat:** `og:image` is currently the relative `/og-image.png`.
+  Some scrapers (Telegram especially) need an **absolute** `https://<domain>/og-image.png`
+  — switch it once the app has a real domain.
+
 ## Future / open questions
-- No PNG/ICO export shipped (SVG-only). Add `apple-touch-icon` / maskable PNGs only
-  if the app is ever installed as a PWA.
+- No `apple-touch-icon` / maskable PNGs shipped (SVG favicon only). Add them if the
+  app is ever installed as a PWA.

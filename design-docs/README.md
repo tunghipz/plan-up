@@ -64,7 +64,7 @@ Non-obvious behaviors, defaults, persistence keys.
 | [board-view.md](./board-view.md) | Cupertino kanban |
 | [search-and-keyboard.md](./search-and-keyboard.md) | Search filter, keyboard shortcuts |
 | [dark-mode.md](./dark-mode.md) | Theme toggle |
-| [app-icon-and-favicon.md](./app-icon-and-favicon.md) | Favicon: ring-on-squircle mark, dark-aware SVG |
+| [app-icon-and-favicon.md](./app-icon-and-favicon.md) | Favicon (ring-on-squircle, dark-aware SVG) + link-preview og:image |
 
 ## Cross-cutting docs (kept in repo root)
 

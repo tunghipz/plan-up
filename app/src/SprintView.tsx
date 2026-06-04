@@ -853,15 +853,8 @@ function TitleTextarea({
   }, [])
   return (
     <div
-      className={`${COL.title} flex items-start gap-1.5 ${indent ? 'relative pl-5' : ''}`}
+      className={`${COL.title} flex items-start gap-1.5 ${indent ? 'pl-5' : ''}`}
     >
-      {indent && (
-        <span
-          className="absolute left-1.5 top-[0.7em] w-2.5 h-px"
-          style={{ background: 'var(--color-ink-faint)' }}
-          aria-hidden
-        />
-      )}
       <PriorityChip priority={priority} />
       <textarea
         ref={ref}

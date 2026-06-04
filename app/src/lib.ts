@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react'
-import type { DayOff } from './db'
 
 const MS = 86400_000
 
@@ -90,15 +89,6 @@ export function formatSprintRange(start: string, end: string): string {
 // Gantt / Timeline view helpers (pure — see design-docs/gantt-view.md)
 // ──────────────────────────────────────────────────────────────────────────
 
-/** State of one half-day cell in the timeline grid. */
-export type CellKind = 'active' | 'off' | 'empty'
-
-/** A single workday column: its AM (Sáng) and PM (Chiều) cell states. */
-export interface HalfDayState {
-  am: CellKind
-  pm: CellKind
-}
-
 /**
  * Ordered list of working dates (yyyy-mm-dd) in `[start, end]` inclusive,
  * with weekends (Sat/Sun) excluded — matching the scheduler, which
@@ -117,60 +107,6 @@ export function sprintWorkdays(start: string, end: string): string[] {
     d = nd.toISOString().slice(0, 10)
   }
   return out
-}
-
-/**
- * Project a task's computed span onto the workday columns as half-day cells.
- * For each workday returns `{ am, pm }` where each is:
- *   - `'off'`    — the member is off that half AND it's inside the task's span
- *                  (a full off-day covers both halves; a half off-day one).
- *   - `'active'` — inside the span and a working half.
- *   - `'empty'`  — outside the span (incl. halves trimmed by a PM-start /
- *                  noon-end boundary).
- *
- * `plan` is the resolved output of `computeWorkingPlan` (date + wall-time);
- * `startTime === '13:00'` means the start day's AM is not worked, and
- * `endTime === '12:00'` means the due day's PM is not worked. Pure and
- * unit-tested independently of React.
- */
-export function halfDayCells(
-  plan: {
-    startDate: string | null
-    dueDate: string | null
-    startTime: string
-    endTime: string
-  },
-  workdays: string[],
-  daysOff: DayOff[]
-): HalfDayState[] {
-  // Collapse a member's off-days to one entry per date: 'full' | 'am' | 'pm'.
-  const offByDate = new Map<string, 'full' | 'am' | 'pm'>()
-  for (const o of daysOff) {
-    if (!o.half) {
-      offByDate.set(o.date, 'full')
-      continue
-    }
-    const prev = offByDate.get(o.date)
-    if (prev === undefined) offByDate.set(o.date, o.half)
-    else if (prev !== o.half) offByDate.set(o.date, 'full') // am + pm = full
-  }
-
-  const { startDate, dueDate, startTime, endTime } = plan
-  const startsPM = startTime === '13:00'
-  const endsAM = endTime === '12:00'
-
-  return workdays.map((date) => {
-    const inSpan = !!startDate && !!dueDate && date >= startDate && date <= dueDate
-    const off = offByDate.get(date)
-    const cell = (half: 'am' | 'pm'): CellKind => {
-      if (!inSpan) return 'empty'
-      if (date === startDate && startsPM && half === 'am') return 'empty'
-      if (date === dueDate && endsAM && half === 'pm') return 'empty'
-      if (off === 'full' || off === half) return 'off'
-      return 'active'
-    }
-    return { am: cell('am'), pm: cell('pm') }
-  })
 }
 
 export function useDarkMode() {

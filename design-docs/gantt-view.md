@@ -1,133 +1,97 @@
-# Gantt / Timeline view
+# Timeline view (calendar swimlanes)
 
 **Status:** Implemented
 **Last updated:** 2026-06-04
-**Code:** `app/src/GanttView.tsx` (new), `app/src/App.tsx` (view toggle),
-`app/src/lib.ts` (`sprintWorkdays`, `halfDayCells` — new pure helpers),
-reads `computeWorkingPlan` from `app/src/db.ts`
+**Code:** `app/src/GanttView.tsx`, `app/src/App.tsx` (view toggle),
+`app/src/lib.ts` (`sprintWorkdays`), reads `computeWorkingPlan` from `app/src/db.ts`,
+reuses `STATUS_META` from `app/src/SprintView.tsx` and `Avatar` from `app/src/members.tsx`
+
+> **Redesign note (2026-06-04):** the first implementation was a dense half-day **cell
+> grid** (AM/PM columns, hairline borders, zebra). That read as a spreadsheet/ledger and
+> violated the Cupertino DNA (`design-system.md`: *depth not lines*, *calm*, *no heavy
+> cell-grid separators*). It was torn down and rebuilt as an **Apple-Calendar-style
+> swimlane** view. The old grid + its `halfDayCells` helper live in git history.
 
 ## Purpose
-A read-only, member-grouped timeline of the current sprint — "who is doing what,
-on which half-days" at a glance. Answers scheduling questions the List and Board
-can't: overlap, idle gaps, day-off impact, how the auto-scheduler laid the sprint out.
-Modeled on a classic team Gantt sheet (rows = member tasks, columns = days split into
-Sáng/Chiều), reinterpreted in plan-up's calm Cupertino language.
+A calm, glanceable answer to **"when does each person's work happen this sprint?"** — the
+thing List and Board can't show. Read-only: a pure projection of the auto-scheduler.
 
 ## User-facing behavior
 - **Third view in the segmented toggle** — `List · Board · Timeline`. Persisted at
-  `localStorage['plan-up:view']` alongside the other two; scoped to the selected sprint.
-- **Columns = the sprint's workdays only** (weekends skipped, matching the scheduler),
-  each day split into two half-day sub-columns: **AM** (Sáng) and **PM** (Chiều).
-  A 2-week sprint ≈ 10 workdays × 2 = 20 columns — fits on screen, no horizontal scroll.
-- **Two-row sticky header:** top row = date (`dd/MM`) **with the weekday under it**
-  (`Mon`…`Fri`) so the axis is orientable; bottom row = `AM` / `PM`. The `TV` (member)
-  and `Task` columns are **sticky on the left**; the header is **sticky on top**, so
-  labels stay visible while scrolling a long member list.
-- **Weekend seam:** wherever a weekend was skipped between two adjacent columns
-  (Fri → Mon), the later column gets a **stronger 2px separator** so the discontinuity is
-  legible (a Fri/Mon jump doesn't read as two consecutive days).
-- **Rows grouped by member (TV)**, same grouping/order as the List view. Each group is a
-  member header row (avatar + name + role) followed by one row per task. Group/parent tasks
-  (see [task-groups.md](./task-groups.md)) render as a sub-header; their child tasks each
-  get their own bar row beneath (indented).
-- **Member load roll-up:** the member header band carries a slim accent **load bar** =
-  the union of that member's task spans across the sprint, so team load reads at the group
-  level (discontinuous load shows as multiple segments). Pure derived; no new data.
-- **Member day-off marks:** the band also shows the member's **off-days** (within the
-  window) as full-height hatched-pink blocks — because off-days are member-level, this makes
-  them visible even when **no task spans them** (a task-row off cell only paints inside a
-  bar). Full off-day = whole column; half off-day = its AM or PM half.
-- **Cell fill (flat single color — matches the reference sheet):**
-  - **Active** (the task occupies that half-day) → a single green fill (dark-safe) with a
-    subtle top inset highlight. **No per-status encoding** — deliberately flat. Contiguous
-    runs get **rounded ends** (left cap on the first active half, right cap on the last) so
-    a task reads as one segment, not loose cells.
-  - **Day-off** → a **diagonal-hatched pink** fill (reads as "off", not as another status).
-    A full off-day fills both AM and PM; a half off-day fills only its half, straight from
-    `member.daysOff`.
-  - **No work** (task not active, not a day-off) → empty cell, with a very faint **per-day
-    zebra** tint to aid horizontal scanning; the interior AM/PM hairline is lighter than the
-    day separator so bars pop.
-- **Unscheduled tasks** (no computed dates — no effort and no prereqs) render a muted title
-  plus a dashed **"no dates"** tag on a dotted baseline instead of a blank row, so an empty
-  row reads as "set effort in List to schedule," not as a broken view.
-- **Legend** above the grid: `Active · Day off · No work · Member load`.
-- **Today marker** — a thin accent vertical line on the current day's column (only when
-  today falls inside the sprint range); that day's header tints accent.
-- **Long titles** are clipped to the sticky Task column (`overflow:hidden` + wrap) so they
-  never bleed into the grid.
-- **Read-only.** No drag-to-reschedule. Bars are a pure projection of the auto-scheduler;
-  all editing (effort, dates, prereqs, status) stays in the List view. Clicking a task
-  row may highlight/scroll it (nice-to-have, not required for v1).
-- **Search** dims/filters task rows by title, consistent with the other views
-  (see [search-and-keyboard.md](./search-and-keyboard.md)).
+  `localStorage['plan-up:view']`; scoped to the selected sprint.
+- **One calm calendar surface** (a single white rounded-14 card with soft shadow on the
+  grey canvas — depth, not a bordered table). Inside:
+  - **Sticky date header** — one column per **workday** (weekends skipped, matching the
+    scheduler), each showing `MMM d` + the weekday (`Mon`…`Fri`). A skipped weekend gets a
+    slightly stronger separator. Today's column tints accent.
+  - **A swimlane per member** — sticky-left label (avatar + name + role), separated by
+    soft hairlines + whitespace (not heavy rules).
+- **Tasks are soft-tinted event blocks** (Apple-Calendar style), placed on the day axis:
+  - Colored by **status** via the app's system palette (todo grey / in-progress blue /
+    done green) using the same `color-mix(… 15%, transparent)` soft-tint as the List
+    status pill — a soft fill + a saturated status **accent edge** + the `#id title` inside.
+  - **Half-day precision** by position: a PM start offsets the block half a column; a noon
+    finish ends it mid-column. No cell grid.
+  - **Lane-packed** — non-overlapping tasks for one member share a row; overlapping ones
+    stack. Member height grows only as needed.
+  - A block whose task **continues past the window's right edge** shows a `›` caret.
+- **Day-off** renders as soft-grey vertical bands in the member's lane (full day = whole
+  column, half = its AM or PM half), from `member.daysOff` — **member-level**, so it shows
+  even when no task spans it.
+- **Off-window & unscheduled tasks** never vanish: tasks scheduled outside the sprint
+  window (the scheduler routinely pushes work weeks past the sprint end) and tasks with no
+  computed dates are **summarised as a count in the member label** — `↗ N later · ○ K no
+  dates`. Clicking expands a chip list (each: `#id title → MMM d`, or `no dates`).
+- **Today marker** — a thin continuous accent line across all lanes (only when today is in
+  range).
+- **Search** filters task blocks by title, consistent with the other views.
 
 ## Data
-**No schema change. No new fields. Reads only.** The view derives everything from data
-that already exists:
+**No schema change. No new fields. Reads only.** Everything derives from existing data:
 - Each task's span comes from `computeWorkingPlan(task, …)` →
   `{ startDate, dueDate, startTime, endTime }` at half-day precision
-  (`0` = 08:00, `0.5` = noon, `1` = 17:00 — see [scheduling.md](./scheduling.md)).
-- Day-off cells come from `member.daysOff` (`{ date, half? }[]` — see
+  (`startTime '13:00'` = PM start; `endTime '12:00'` = noon finish — see
+  [scheduling.md](./scheduling.md)).
+- Day-off bands from `member.daysOff` (`{ date, half? }[]` — see
   [members-and-days-off.md](./members-and-days-off.md)).
 - Sprint `startDate` / `endDate` define the column range.
 
 ## Implementation
-- **`sprintWorkdays(startDate, endDate)`** (new, `lib.ts`, pure) — returns the ordered
-  list of working dates in `[start, end]`, weekends excluded. Drives the columns.
-- **`halfDayCells(task, workdays, daysOff)`** (new, `lib.ts`, pure) — returns, for each
-  `(date, half)` pair, one of `'active' | 'off' | 'empty'`:
-  - `off` if `daysOff` covers that date+half (full off-day → both halves).
-  - `active` if the half falls within `[startDate+startFrac, dueDate+endFrac]`.
-  - `empty` otherwise.
-  Unit-tested independently of React, like `parsePrereqSeqs` /
-  `daysOffInRange` ([dependencies.md](./dependencies.md), members doc).
-- **`GanttView.tsx`** (new) — **Approach A:** every visual row is its own CSS grid sharing
-  one fixed column template (`[TV] [Task] repeat(2 × workdays, ${HALF_W}px)`), so columns
-  align without one giant grid. Sticky left panes + sticky header via `position: sticky`
-  (z-index layering for the top-left corner); the outer card is `w-fit` so it hugs the
-  columns. Colors via existing CSS-var tokens so dark mode is automatic. Local helpers:
-  - `weekday(date)` + a `seamSet` (built from `gapBefore`, true when a weekend was skipped)
-    drive the weekday labels and the 2px seam separators.
-  - Per group: each task's `computeWorkingPlan` → `halfDayCells` is flattened to a `2N`
-    `CellKind[]`; `scheduled = !!startDate && !!dueDate` decides bar-cells vs the "no dates"
-    affordance. Run boundaries on the flat array give the rounded segment caps.
-  - `segmentsOf(union)` turns the union of a member's occupied half-days into the load
-    roll-up bars rendered absolutely in the member band.
-  - The `Cell` component encodes per-half border (day separator vs lighter AM/PM hairline
-    vs seam), zebra tint, active fill + rounded caps, and the hatched day-off fill.
-- **`App.tsx`** — extend `ViewMode` to `'list' | 'board' | 'timeline'`, add the
-  `Timeline` segment (lucide icon, e.g. `GanttChartSquare`) to `ViewToggle`, and render
-  `<GanttView … />` in the main switch. Pass the current sprint's `startDate`/`endDate`,
-  `tasks`, `projectId`, and `search` (same props shape as the other views).
+- **`sprintWorkdays(startDate, endDate)`** (`lib.ts`, pure, unit-tested) — ordered working
+  dates in range, weekends excluded. Drives the columns.
+- **`GanttView.tsx`** — one horizontally-scrollable surface (`overflow-x-auto`); the inner
+  width is `MGUT + workdays·DAY`. Sticky date header (`top`) + sticky member labels
+  (`left`). Per member, in a `useMemo`:
+  - Each task → `computeWorkingPlan`, then classified: **in-window** (start within
+    `[firstDay,lastDay]`) → an event block; **later** (start after the window, or whole
+    span before it) and **no-dates** (no computed start/due) → the count buckets.
+  - Block geometry: `left = startIdx·DAY (+½ if PM start)`, `right = endIdx·DAY (+½ if noon
+    finish, or clamped to the window edge with a `contRight` caret)`.
+  - **Greedy lane-packing**: events sorted by `left`; each joins the first lane whose last
+    block ends at/before it starts, else a new lane. `rows` = lane count.
+  - Day-off half-columns → soft-grey bands.
+  - Soft tints reuse the app pattern: `color-mix(in srgb, var(--color-status-X) 15%,
+    transparent)` bg + `color-mix(…100%, #000 22%)` text + the raw token as the accent edge.
+- **`App.tsx`** — `ViewMode` includes `'timeline'`; `Timeline` segment (lucide
+  `GanttChartSquare`) in `ViewToggle`; renders `<GanttView … />`.
 
 ## Rules & edge cases
-- **Read-only by design** — the timeline never mutates tasks; it's a projection of the
-  scheduler, so it can't drift from List/Board. (Drag-to-reschedule is explicitly
-  deferred; it would fight the "set effort → dates compute" model.)
-- **Weekends excluded** from columns to match the scheduler (which contributes 0 on
-  Sat/Sun). A task spanning a weekend simply shows no cells on those (absent) days.
-- **Manual-date tasks** (no effort, no prereqs) still render — their span is whatever
-  `computeWorkingPlan` returns from the manual `startDate`/`dueDate`.
-- **Tasks scheduled outside the sprint window** are never blank rows: a task whose span is
-  entirely **after** the window shows a right-pinned chip `→ <start date>`; entirely
-  **before** shows a left-pinned `<due date> ←`. A bar that's partly visible but **continues
-  past an edge** gets a `›` (right) / `‹` (left) continuation caret. (The window stays the
-  sprint's own dates — the scheduler routinely pushes tasks weeks past the sprint end.)
-- **Tasks partly inside the sprint range** clip to the visible columns (only in-range
-  half-days render) plus the continuation caret above.
-- **Parent/group tasks**: a parent is a container (excluded from member counts per
-  [task-groups.md](./task-groups.md)); render it as a group sub-header and show each child
-  task's bar, rather than a synthetic rolled-up bar.
-- Active view persisted at `localStorage['plan-up:view']` (now accepts `'timeline'`).
+- **Read-only by design** — never mutates tasks; a projection of the scheduler, so it can't
+  drift from List/Board. Editing (effort/dates/prereqs/status) stays in List.
+- **Weekends excluded** from columns (scheduler contributes 0 there).
+- **Nothing is hidden** — every assigned task is either a block, a `later` chip, or a
+  `no dates` chip. Off-window/unscheduled counts sit in the member label, expandable.
+- **Parent/group tasks**: a parent is a container; it appears like any task (its own
+  computed dates, usually none → `no dates`), children appear as their own blocks.
+- Active view persisted at `localStorage['plan-up:view']` (accepts `'timeline'`).
+
+## DNA check (`design-system.md`)
+Depth not lines (one card + soft hairlines, no cell grid) ✓ · system status colors ✓ ·
+SF tabular-nums for dates ✓ · radius ≥ 14 card / soft blocks ✓ · accent as signal (today
+line, off-window chips) ✓ · calm, content breathes ✓ · dark-mode via tokens ✓.
 
 ## Future / open questions
-- **Status-colored cells** — the flat single fill was chosen for v1; encoding status
-  (todo grey / in-progress blue / done green) is a later opt-in.
-- **Project-wide / scrollable range** — v1 is per-sprint; an all-sprints horizontally
-  scrollable timeline is the natural expansion.
-- **Drag-to-reschedule** — deferred; would require converting a drag into a manual
-  `startDate` + clearing the effort-lock, then recomputing dependents.
-- **Click a bar → jump to / highlight the task** in List view (nice-to-have).
-- **Conflict surfacing** — overlapping bars for a double-booked member could reuse the
-  amber `⚠` from [conflict-warning.md](./conflict-warning.md).
+- **Drag-to-reschedule** — deferred; would fight the "set effort → dates compute" model.
+- **Click a block → open/scroll to the task** in List (nice-to-have).
+- **Project-wide / scrollable range** beyond the sprint window.
+- **Conflict surfacing** — a double-booked member could tint overlapping blocks.

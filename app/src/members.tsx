@@ -27,6 +27,20 @@ export function effectiveDaysOff(days: { half?: 'am' | 'pm' }[]): number {
   return days.reduce((s, d) => s + (d.half ? 0.5 : 1), 0)
 }
 
+/**
+ * Off-days falling within an inclusive [start, end] date range (yyyy-mm-dd
+ * lexical compare). Used to scope the sprint-view days-off control to the
+ * sprint being viewed; settings passes no range and sees the full list.
+ * See design-docs/members-and-days-off.md.
+ */
+export function daysOffInRange<T extends { date: string }>(
+  days: T[],
+  start: string,
+  end: string
+): T[] {
+  return days.filter((d) => d.date >= start && d.date <= end)
+}
+
 /** Trim a day count for display: 2 → "2", 1.5 → "1.5". */
 export function fmtDays(n: number): string {
   return Number.isInteger(n) ? String(n) : n.toFixed(1)
@@ -117,10 +131,15 @@ function DateField({
   value,
   onChange,
   placeholder = 'dd/mm/yy',
+  min,
+  max,
 }: {
   value: string
   onChange: (v: string) => void
   placeholder?: string
+  /** Optional inclusive bounds for the native date picker (sprint-scoped entry). */
+  min?: string
+  max?: string
 }) {
   const ref = useRef<HTMLInputElement>(null)
   const open = (e: React.MouseEvent) => {
@@ -156,6 +175,8 @@ function DateField({
         ref={ref}
         type="date"
         value={value}
+        min={min}
+        max={max}
         onChange={(e) => onChange(e.target.value)}
         className="absolute inset-0 opacity-0 pointer-events-none"
         tabIndex={-1}
@@ -174,10 +195,17 @@ function DateField({
 export function MemberDaysOffButton({
   member,
   variant = 'header',
+  range,
 }: {
   member: Member
   /** 'header' = Sprint group-header chip; 'metric' = always-visible settings line. */
   variant?: 'header' | 'metric'
+  /**
+   * When set (sprint view), scope the list + chip + entry to this sprint's
+   * inclusive date range. Settings passes no range and sees the full aggregate.
+   * See design-docs/members-and-days-off.md.
+   */
+  range?: { start: string; end: string }
 }) {
   const [open, setOpen] = useState(false)
   const [draftDate, setDraftDate] = useState('')
@@ -219,9 +247,14 @@ export function MemberDaysOffButton({
     }
   }, [open])
 
+  // Full list drives mutations (date-keyed); the sprint view only displays and
+  // counts the subset within its range. Out-of-range days stay untouched.
   const days = member.daysOff ?? []
-  const count = days.length
-  const effDays = effectiveDaysOff(days)
+  const visibleDays = range
+    ? daysOffInRange(days, range.start, range.end)
+    : days
+  const count = visibleDays.length
+  const effDays = effectiveDaysOff(visibleDays)
   const offLabel = effDays === 1 ? '1 day off' : `${fmtDays(effDays)} days off`
 
   const updateOne = async (date: string, half: 'all' | 'am' | 'pm') => {
@@ -237,6 +270,9 @@ export function MemberDaysOffButton({
   }
   const addDraft = async () => {
     if (!draftDate) return
+    // Defensive: the picker is range-clamped, but never let a scoped view add
+    // an off-day outside its sprint.
+    if (range && (draftDate < range.start || draftDate > range.end)) return
     await updateOne(draftDate, draftHalf)
     setDraftDate('')
     setDraftHalf('all')
@@ -260,7 +296,11 @@ export function MemberDaysOffButton({
         >
           <Calendar size={13} />
           <span className="whitespace-nowrap">
-            {count > 0 ? offLabel : 'No days off this sprint'}
+            {count > 0
+              ? offLabel
+              : range
+                ? 'No days off this sprint'
+                : 'No days off'}
           </span>
         </button>
       ) : (
@@ -301,12 +341,12 @@ export function MemberDaysOffButton({
           <div className="text-[11px] tracking-normal text-ink-faint px-1 pb-1.5">
             Days off — {member.name}
           </div>
-          {days.length === 0 && (
+          {visibleDays.length === 0 && (
             <div className="text-sm text-ink-faint px-1 pb-1.5">
-              None. Weekends are already off.
+              {range ? 'None this sprint. ' : 'None. '}Weekends are already off.
             </div>
           )}
-          {days.map((d) => (
+          {visibleDays.map((d) => (
             <div
               key={d.date}
               className="flex items-center gap-2 px-1.5 py-1 rounded hover:bg-surface-hover group/day"
@@ -340,6 +380,8 @@ export function MemberDaysOffButton({
                 value={draftDate}
                 onChange={setDraftDate}
                 placeholder="dd/mm/yy"
+                min={range?.start}
+                max={range?.end}
               />
               <select
                 value={draftHalf}

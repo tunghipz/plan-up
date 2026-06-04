@@ -197,12 +197,14 @@ export function SprintView({
   projectId,
   sprintId,
   sprintStartDate,
+  sprintEndDate,
   tasks,
   search,
 }: {
   projectId: string
   sprintId: string
   sprintStartDate: string
+  sprintEndDate: string
   tasks: Task[]
   search: string
 }) {
@@ -301,6 +303,7 @@ export function SprintView({
           tasks={t}
           sprintId={sprintId}
           sprintStartDate={sprintStartDate}
+          sprintEndDate={sprintEndDate}
           members={members}
           allTasks={tasks}
           tasksById={tasksById}
@@ -332,6 +335,7 @@ export function SprintView({
           members={emptyMembers}
           sprintId={sprintId}
           sprintStartDate={sprintStartDate}
+          sprintEndDate={sprintEndDate}
           allMembers={members}
           expanded={showEmpty}
           onToggle={() => setShowEmpty((x) => !x)}
@@ -468,6 +472,7 @@ function MemberCard({
   tasks,
   sprintId,
   sprintStartDate,
+  sprintEndDate,
   members,
   allTasks,
   tasksById,
@@ -483,6 +488,7 @@ function MemberCard({
   tasks: Task[]
   sprintId: string
   sprintStartDate: string
+  sprintEndDate: string
   members: Member[]
   allTasks: Task[]
   tasksById: Map<string, Task>
@@ -535,7 +541,12 @@ function MemberCard({
         conflictCount={conflictTips.size}
         collapsed={collapsed}
         onToggleCollapse={onToggleCollapse}
-        extras={<MemberDaysOffButton member={member} />}
+        extras={
+          <MemberDaysOffButton
+            member={member}
+            range={{ start: sprintStartDate, end: sprintEndDate }}
+          />
+        }
       />
       {!collapsed && (
         // Horizontal scroll on narrow screens: fixed-width columns keep their
@@ -630,6 +641,7 @@ function CollapsedMembers({
   members,
   sprintId,
   sprintStartDate,
+  sprintEndDate,
   allMembers,
   expanded,
   onToggle,
@@ -638,6 +650,7 @@ function CollapsedMembers({
   members: Member[]
   sprintId: string
   sprintStartDate: string
+  sprintEndDate: string
   allMembers: Member[]
   expanded: boolean
   onToggle: () => void
@@ -662,7 +675,12 @@ function CollapsedMembers({
               name={m.name}
               title={m.title}
               count={0}
-              extras={<MemberDaysOffButton member={m} />}
+              extras={
+                <MemberDaysOffButton
+                  member={m}
+                  range={{ start: sprintStartDate, end: sprintEndDate }}
+                />
+              }
             />
             <div className="divide-y divide-border">
               <AddTaskRow

@@ -606,6 +606,7 @@ function App() {
                   projectId={currentProjectId}
                   sprintId={currentSprint.id}
                   sprintStartDate={currentSprint.startDate}
+                  sprintEndDate={currentSprint.endDate}
                   tasks={tasks}
                   search={search}
                 />

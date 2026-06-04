@@ -311,11 +311,13 @@ export function MemberDaysOffButton({
             e.stopPropagation()
             setOpen((v) => !v)
           }}
-          className={`inline-flex items-center gap-0.5 transition text-sm ${
+          className={
             count > 0
-              ? 'text-ink opacity-100'
-              : 'text-ink-faint opacity-0 group-hover/card:opacity-100'
-          } hover:text-ink`}
+              ? 'inline-flex items-center gap-1 text-sm text-ink hover:text-ink transition'
+              : // Resting (no off-days in this sprint): always-visible quiet
+                // dashed "add" pill — calm at rest, accent on hover.
+                'inline-flex items-center gap-1.5 text-[12px] font-medium rounded-full px-2.5 py-1 border border-dashed border-border-strong text-ink-muted hover:text-accent hover:border-accent hover:bg-accent-soft transition'
+          }
           title={
             count > 0
               ? `${fmtDays(effDays)} day${effDays === 1 ? '' : 's'} off — click to edit`
@@ -323,11 +325,13 @@ export function MemberDaysOffButton({
           }
           aria-label="Days off"
         >
-          <Calendar size={14} />
-          {count > 0 && (
+          <Calendar size={count > 0 ? 14 : 13} />
+          {count > 0 ? (
             <span className="text-[11px] font-medium whitespace-nowrap">
               {fmtDays(effDays)}d off
             </span>
+          ) : (
+            <span className="whitespace-nowrap">Ngày nghỉ</span>
           )}
         </button>
       )}

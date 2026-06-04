@@ -1056,12 +1056,32 @@ function TaskGroupRow({
   const derived = derivedGroupStatus(childrenTasks)
   const hasEffort = childrenTasks.some((c) => c.estimate !== null)
   const effortSum = childrenTasks.reduce((s, c) => s + (c.estimate ?? 0), 0)
-  let minStart: string | null = null
-  let maxDue: string | null = null
+  // Span = earliest child start … latest child end, shown with the same
+  // date+time format/size as a normal task row (see design-docs/task-groups.md).
+  let startLabel: string | null = null
+  let endLabel: string | null = null
+  let minKey: string | null = null
+  let maxKey: string | null = null
   for (const c of childrenTasks) {
-    const { startDate, dueDate } = computeWorkingPlan(c, tasksById, memberById)
-    if (startDate && (!minStart || startDate < minStart)) minStart = startDate
-    if (dueDate && (!maxDue || dueDate > maxDue)) maxDue = dueDate
+    const plan = computeWorkingPlan(c, tasksById, memberById)
+    if (plan.startDate) {
+      const k = `${plan.startDate}T${plan.startTime ?? ''}`
+      if (!minKey || k < minKey) {
+        minKey = k
+        startLabel = plan.startTime
+          ? `${formatRelativeDate(plan.startDate)}, ${plan.startTime}`
+          : formatRelativeDate(plan.startDate)
+      }
+    }
+    if (plan.dueDate) {
+      const k = `${plan.dueDate}T${plan.endTime ?? ''}`
+      if (!maxKey || k > maxKey) {
+        maxKey = k
+        endLabel = plan.endTime
+          ? `${formatRelativeDate(plan.dueDate)}, ${plan.endTime}`
+          : formatRelativeDate(plan.dueDate)
+      }
+    }
   }
   return (
     <div className="task-row group/row relative flex items-center gap-3 px-4 py-2 text-sm hover:bg-surface-hover transition bg-accent/[0.025]">
@@ -1100,18 +1120,18 @@ function TaskGroupRow({
         </span>
       </div>
       <div className={COL.effort}>
-        <span className="text-[13px] text-ink-muted tabular-nums">
+        <span className="text-sm text-ink-muted tabular-nums">
           {hasEffort ? effortSum : '—'}
         </span>
       </div>
       <div className={COL.start}>
-        <span className="text-[13px] text-ink-faint tabular-nums">
-          {minStart ? formatShortDate(minStart) : '—'}
+        <span className="inline-flex items-center justify-end w-full h-8 px-2 text-sm text-ink-muted whitespace-nowrap">
+          {startLabel ?? '—'}
         </span>
       </div>
       <div className={COL.due}>
-        <span className="text-[13px] text-ink-faint tabular-nums">
-          {maxDue ? formatShortDate(maxDue) : '—'}
+        <span className="inline-flex items-center justify-end w-full h-8 px-2 text-sm text-ink-muted whitespace-nowrap">
+          {endLabel ?? '—'}
         </span>
       </div>
       <div className={COL.status}>

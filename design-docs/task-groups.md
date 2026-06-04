@@ -39,7 +39,8 @@ separate epic/tag system. Approach **B** chosen 2026-06-04 (see
     render, not written to the parent's stored `status`,
   - a **summed effort** (sum of children `estimate`) in the Effort cell,
   - **dates** = the span of children (earliest child start → latest child end),
-    read-only.
+    read-only, shown with the **same date+time format and size as a normal row**
+    (e.g. `Jun 8, 17:00`).
 - **Collapse/expand:** the parent row has a chevron; collapsing hides its children.
   Persisted per parent in `localStorage` (`plan-up:taskgroup-collapsed:{parentId}`),
   mirroring the member-group collapse pattern (design-system §5.9 / §6.2).

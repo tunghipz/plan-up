@@ -17,7 +17,7 @@ separate epic/tag system. Approach **B** chosen 2026-06-04 (see
 ## User-facing behavior
 - **Nest:** a task's row kebab (⋯) → **"Group under…"** picks a sibling task (same
   member + same sprint) as its parent. The chosen parent becomes a group; the task
-  renders indented beneath it with a connector tick. **"Remove from group"** clears it.
+  renders indented beneath it (left padding, no connector tick). **"Remove from group"** clears it.
   (Alt entry: a sequence-number input, deferred — kebab is less confusable with the
   prereq sequence input.)
 - **One level only.** A child cannot itself be a parent, and a task that already has
@@ -83,7 +83,7 @@ computes `total`, `done`, overdue, and capacity, it must skip tasks that have ch
      need to intercept every assignee/sprint update to clear `parentId`.
 2. **`SprintView.tsx` → `MemberCard`** — build a render tree from the flat task list:
    top-level tasks (sorted) each followed by their children (sorted), indent children.
-   - `TaskRow` gains a `depth`/`isChild` style (left padding + connector) and, for a
+   - `TaskRow` gains a `depth`/`isChild` style (left padding only, no connector) and, for a
      parent, a chevron + roll-up cluster (progress count, mini bar, derived status,
      summed effort).
    - Counting: compute `leafTasks = tasks.filter(t => !hasChildren(t))`; use those for
@@ -103,7 +103,7 @@ computes `total`, `done`, overdue, and capacity, it must skip tasks that have ch
   out clears `parentId`.
 - **Board view**: out of scope this round — `parentId` is ignored in BoardView (tasks
   show flat). Flag if grouping is wanted there later.
-- **Dark mode**: all via tokens (connector = `ink-faint`, bar = `status-done` green).
+- **Dark mode**: all via tokens (derived status dot via `STATUS_META` varName).
 
 ## Approaches considered
 - **A · parentId + nested render (no roll-up).** Children indented under parent, each

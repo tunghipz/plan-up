@@ -1952,7 +1952,9 @@ function PrereqInput({
   // Why some typed numbers didn't apply (cycle / not found). Shown in a small
   // popover instead of the old silent snap-back. Each cycle line carries the
   // loop path so it's checkable at a glance. Null = nothing to report.
-  const [notice, setNotice] = useState<{ head: string; path?: string }[] | null>(null)
+  const [notice, setNotice] = useState<
+    { head: string; pathSeqs?: number[]; hint?: string }[] | null
+  >(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const [pos, setPos] = useState<{ top: number; right: number }>({ top: 0, right: 0 })
 
@@ -2016,7 +2018,7 @@ function PrereqInput({
         saved.map(seqOf).filter((n): n is number => typeof n === 'number')
       )
     )
-    const items: { head: string; path?: string }[] = []
+    const items: { head: string; pathSeqs?: number[]; hint?: string }[] = []
     for (const k of cyclic) {
       // Build the loop as sequence numbers: this task → dep → …existing path… → this task.
       const idPath = findCyclePath(task.id, k.id, allTasks)
@@ -2025,9 +2027,17 @@ function PrereqInput({
             (n): n is number => typeof n === 'number'
           )
         : null
+      // The back-edge that closes the loop is `backNode → this task`; removing
+      // this task from backNode's prereqs breaks it.
+      const backSeq =
+        idPath && idPath.length >= 2 ? seqOf(idPath[idPath.length - 2]) : undefined
       items.push({
         head: `Đã bỏ #${k.seq} — tạo vòng lặp`,
-        path: seqs && seqs.length > 1 ? seqs.join(' → ') : undefined,
+        pathSeqs: seqs && seqs.length > 1 ? seqs : undefined,
+        hint:
+          backSeq !== undefined
+            ? `Gỡ #${task.sequence} ở #${backSeq} để phá vòng`
+            : undefined,
       })
     }
     if (unknown.length)
@@ -2073,12 +2083,36 @@ function PrereqInput({
             role="status"
           >
             {notice.map((it, i) => (
-              <div key={i} className={i ? 'mt-1.5' : ''}>
+              <div key={i} className={i ? 'mt-2' : ''}>
                 <div>{it.head}</div>
-                {it.path && (
-                  <div className="tabular-nums font-medium tracking-wide">
-                    {it.path}
+                {it.pathSeqs && (
+                  <div className="mt-1.5 flex items-center gap-1 flex-wrap">
+                    {it.pathSeqs.map((n, j) => (
+                      <Fragment key={j}>
+                        {j > 0 && (
+                          <span
+                            className="prereq-arrow"
+                            style={
+                              { '--d': `${Math.max(0, j * 0.1 - 0.05)}s` } as React.CSSProperties
+                            }
+                          >
+                            →
+                          </span>
+                        )}
+                        <span
+                          className={`prereq-chip${j === 0 ? ' prereq-chip--head' : ''}${
+                            j === it.pathSeqs!.length - 1 ? ' prereq-chip--close' : ''
+                          }`}
+                          style={{ '--d': `${j * 0.1}s` } as React.CSSProperties}
+                        >
+                          {n}
+                        </span>
+                      </Fragment>
+                    ))}
                   </div>
+                )}
+                {it.hint && (
+                  <div className="mt-1.5 text-[11px] text-ink-muted">{it.hint}</div>
                 )}
               </div>
             ))}

@@ -4,7 +4,8 @@
 **Last updated:** 2026-06-04
 **Code:** `app/src/db.ts` (`addDependency`, `removeDependency`, `setDependencies`,
 `wouldCreateCycle`, `findCyclePath`, `isTaskBlocked`), `app/src/SprintView.tsx`
-(`PrereqInput`), `app/src/lib.ts` (`parsePrereqSeqs`, `formatSeqRanges`)
+(`PrereqInput`), `app/src/lib.ts` (`parsePrereqSeqs`, `formatSeqRanges`),
+`app/src/index.css` (`.prereq-chip*` path-trace animation)
 
 ## Purpose
 Express "this can't start until those are done" so the scheduler can chain dates and the
@@ -18,10 +19,14 @@ UI can flag blocked work.
   2,3,4,5,8 renders as `2-5, 8`, so even a long chain stays readable in the narrow column.
 - **Rejections are no longer silent.** If a typed number can't apply, a small popover under
   the field says why and which numbers were dropped, then auto-dismisses (~4.5s):
-  - `Đã bỏ #9 — tạo vòng lặp` **plus the loop path** as sequence numbers, e.g.
-    `7 → 9 → 8 → 6 → 7`, so you can see exactly which chain closes the loop and which
-    back-edge to cut. The path comes from `findCyclePath` (BFS over `dependsOn`, shortest
-    loop). Self-links are skipped quietly (not a "cycle").
+  - `Đã bỏ #9 — tạo vòng lặp` **plus the loop drawn as a path-trace**: the sequence
+    numbers render as chips with arrows that pop in left→right (`7 → 9 → 8 → 6 → 7`); the
+    head node (the edited task) rings amber and the closing node — where the loop returns
+    to it — rings red and pulses once. Below it, an actionable hint names the back-edge to
+    cut: `Gỡ #7 ở #6 để phá vòng`. The path comes from `findCyclePath` (BFS over
+    `dependsOn`, shortest loop); the back-edge is its second-to-last node. Pure CSS
+    animation (`.prereq-chip` / `prereq-close-pulse` in `index.css`, staggered via an
+    inline `--d` delay). Self-links are skipped quietly (not a "cycle").
   - `Đã bỏ: #12 không có trong sprint` — no task with that sequence in this sprint.
   The valid entries still save; only the rejected ones are dropped, and the field snaps to
   the saved (range-collapsed) set.

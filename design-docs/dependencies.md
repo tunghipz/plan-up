@@ -1,20 +1,36 @@
 # Dependencies (prerequisites)
 
 **Status:** Implemented
-**Last updated:** 2026-06-03
+**Last updated:** 2026-06-04
 **Code:** `app/src/db.ts` (`addDependency`, `removeDependency`, `setDependencies`,
-`wouldCreateCycle`, `isTaskBlocked`), `app/src/SprintView.tsx` (`PrereqInput`)
+`wouldCreateCycle`, `isTaskBlocked`), `app/src/SprintView.tsx` (`PrereqInput`),
+`app/src/lib.ts` (`parsePrereqSeqs`, `formatSeqRanges`)
 
 ## Purpose
 Express "this can't start until those are done" so the scheduler can chain dates and the
 UI can flag blocked work.
 
 ## User-facing behavior
-- The **Prereq** column input takes comma-separated **sequence numbers** (e.g. `2, 3`).
-  On blur/Enter they resolve to task IDs and save; invalid/self/cyclic entries are dropped
-  silently and the field snaps back to the saved set.
+- The **Prereq** column input takes **sequence numbers** — a list and/or inclusive
+  **ranges**: `2, 3`, `2-5`, or mixed `2-5, 8` (parsed by `parsePrereqSeqs`; `5-2` is
+  tolerated and normalised to `2..5`). On blur/Enter they resolve to task IDs and save.
+- The saved set is shown **collapsed into ranges** (`formatSeqRanges`): dependsOn on
+  2,3,4,5,8 renders as `2-5, 8`, so even a long chain stays readable in the narrow column.
+- **Rejections are no longer silent.** If a typed number can't apply, a small popover under
+  the field says why and which numbers were dropped, then auto-dismisses (~4.5s):
+  - `Đã bỏ: #9 tạo vòng lặp` — would create a cycle (the dep, directly or transitively,
+    leads back to this task). Self-links are skipped quietly (not a "cycle").
+  - `Đã bỏ: #12 không có trong sprint` — no task with that sequence in this sprint.
+  The valid entries still save; only the rejected ones are dropped, and the field snaps to
+  the saved (range-collapsed) set.
 - A task waiting on an unfinished prereq is **blocked** (row tooltip: "Blocked — waiting on
   a prerequisite task").
+
+### Why a cycle gets rejected (the common confusion)
+Dependencies form a DAG. If task 6 already depends on 7, you cannot also make 7 depend on
+9 when 9 → 8 → 6, because that closes the loop 7 → 9 → 8 → 6 → 7. `setDependencies` drops
+exactly the offending edge (keeping the rest) and `PrereqInput` now names it. To actually
+chain them, remove the back-edge first (here: clear 6's dependency on 7).
 
 ## Data
 `Task.dependsOn: string[]` — task **IDs** of prerequisites.
@@ -28,8 +44,11 @@ UI can flag blocked work.
 - `addDependency` / `removeDependency` — single-edge helpers, each recomputes.
 - `isTaskBlocked(task, tasksById)` (`db.ts:796`) — `true` if not done AND any prereq isn't
   done. Done tasks never report blocked.
-- `PrereqInput` resolves sequence→ID **within the same sprint only** (sequences are
-  per-sprint); cross-sprint deps survive but can't be typed by number.
+- `PrereqInput` parses input via `parsePrereqSeqs` (list + ranges), resolves sequence→ID
+  **within the same sprint only** (sequences are per-sprint; cross-sprint deps survive but
+  can't be typed by number), then diffs the requested set against what `setDependencies`
+  returned to report cyclic vs unknown numbers in a portal popover. Display uses
+  `formatSeqRanges`.
 
 ## Rules & edge cases
 - Because links are by ID, sprint renumbering and rollover never break them.

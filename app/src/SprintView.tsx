@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
 } from 'react'
+import { createPortal } from 'react-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
   Plus,
@@ -34,7 +35,13 @@ import {
   type Status,
 } from './db'
 import { Avatar, MemberDaysOffButton } from './members'
-import { formatRelativeDate, formatShortDate, isOverdue } from './lib'
+import {
+  formatRelativeDate,
+  formatShortDate,
+  isOverdue,
+  parsePrereqSeqs,
+  formatSeqRanges,
+} from './lib'
 
 const WELCOME_PREFIX = 'Welcome —'
 
@@ -944,7 +951,7 @@ const COL = {
   start: 'w-28 flex justify-end shrink-0',
   due: 'w-28 flex justify-end shrink-0',
   status: 'w-28 flex justify-start shrink-0 pl-2',
-  prereq: 'w-14 flex justify-end shrink-0',
+  prereq: 'w-20 flex justify-end shrink-0',
 }
 
 /**
@@ -1931,17 +1938,48 @@ function PrereqInput({
   allTasks: Task[]
   tasksById: Map<string, Task>
 }) {
-  const currentLabel = task.dependsOn
-    .map((id) => tasksById.get(id)?.sequence)
-    .filter((n): n is number => typeof n === 'number')
-    .sort((a, b) => a - b)
-    .join(', ')
+  const seqOf = (id: string): number | undefined => tasksById.get(id)?.sequence
+  // Display dependsOn as a compact range label (e.g. "2-5, 8").
+  const currentLabel = formatSeqRanges(
+    task.dependsOn
+      .map(seqOf)
+      .filter((n): n is number => typeof n === 'number')
+  )
 
   const [draft, setDraft] = useState(currentLabel)
   const [focused, setFocused] = useState(false)
+  // Why some typed numbers didn't apply (cycle / not found). Shown in a small
+  // popover instead of the old silent snap-back. Null = nothing to report.
+  const [notice, setNotice] = useState<string | null>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const [pos, setPos] = useState<{ top: number; right: number }>({ top: 0, right: 0 })
+
   useEffect(() => {
     if (!focused) setDraft(currentLabel)
   }, [currentLabel, focused])
+
+  // Auto-dismiss the rejection notice so it never lingers.
+  useEffect(() => {
+    if (!notice) return
+    const t = setTimeout(() => setNotice(null), 4500)
+    return () => clearTimeout(t)
+  }, [notice])
+
+  // Pin the notice popover to the input (portal escapes the card's overflow).
+  useEffect(() => {
+    if (!notice) return
+    const pin = () => {
+      const r = inputRef.current?.getBoundingClientRect()
+      if (r) setPos({ top: r.bottom + 4, right: Math.max(8, window.innerWidth - r.right) })
+    }
+    pin()
+    window.addEventListener('scroll', pin, true)
+    window.addEventListener('resize', pin)
+    return () => {
+      window.removeEventListener('scroll', pin, true)
+      window.removeEventListener('resize', pin)
+    }
+  }, [notice])
 
   // Sequence numbers are per-sprint now, so resolve only within the same
   // sprint as this task. Cross-sprint dependencies (rare) can't be set by
@@ -1955,45 +1993,75 @@ function PrereqInput({
   }, [allTasks, task.sprintId])
 
   const commit = async () => {
-    const nums = draft
-      .split(/[,\s]+/)
-      .map((s) => parseInt(s, 10))
-      .filter((n) => Number.isInteger(n) && n > 0)
-    const ids: string[] = []
-    for (const n of nums) {
+    const seqs = parsePrereqSeqs(draft)
+    const known: { seq: number; id: string }[] = []
+    const unknown: number[] = []
+    for (const n of seqs) {
+      if (n === task.sequence) continue // self-link: not "unknown", just skip
       const id = seqToId.get(n)
-      if (id) ids.push(id)
+      if (id) known.push({ seq: n, id })
+      else unknown.push(n)
     }
-    const saved = await setDependencies(task.id, ids)
-    const final = saved
-      .map((id) => tasksById.get(id)?.sequence)
-      .filter((n): n is number => typeof n === 'number')
-      .sort((a, b) => a - b)
-      .join(', ')
-    setDraft(final)
+    const saved = await setDependencies(
+      task.id,
+      known.map((k) => k.id)
+    )
+    const savedSet = new Set(saved)
+    // Known numbers that setDependencies refused = cycles (would loop back).
+    const cyclic = known.filter((k) => !savedSet.has(k.id)).map((k) => k.seq)
+    setDraft(
+      formatSeqRanges(
+        saved.map(seqOf).filter((n): n is number => typeof n === 'number')
+      )
+    )
+    const parts: string[] = []
+    if (cyclic.length)
+      parts.push(`${cyclic.map((n) => `#${n}`).join(', ')} tạo vòng lặp`)
+    if (unknown.length)
+      parts.push(`${unknown.map((n) => `#${n}`).join(', ')} không có trong sprint`)
+    setNotice(parts.length ? `Đã bỏ: ${parts.join(' · ')}` : null)
   }
 
   return (
-    <input
-      value={draft}
-      onChange={(e) => setDraft(e.target.value)}
-      onFocus={() => setFocused(true)}
-      onBlur={() => {
-        setFocused(false)
-        commit()
-      }}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
-        if (e.key === 'Escape') {
-          setDraft(currentLabel)
-          ;(e.target as HTMLInputElement).blur()
-        }
-      }}
-      placeholder="—"
-      title="Prerequisite task numbers, comma-separated (e.g. 2, 3)"
-      aria-label="Prerequisite task numbers"
-      className="editable w-full text-sm text-right tabular-nums bg-transparent placeholder:text-ink-faint"
-    />
+    <>
+      <input
+        ref={inputRef}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onFocus={() => {
+          setFocused(true)
+          setNotice(null)
+        }}
+        onBlur={() => {
+          setFocused(false)
+          commit()
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+          if (e.key === 'Escape') {
+            setDraft(currentLabel)
+            ;(e.target as HTMLInputElement).blur()
+          }
+        }}
+        placeholder="—"
+        title="Prereq task numbers — list or ranges, e.g. 2-5, 8"
+        aria-label="Prerequisite task numbers"
+        className={`editable w-full text-sm text-right tabular-nums bg-transparent placeholder:text-ink-faint ${
+          notice ? 'text-priority-high' : ''
+        }`}
+      />
+      {notice &&
+        createPortal(
+          <div
+            style={{ position: 'fixed', top: pos.top, right: pos.right }}
+            className="z-50 max-w-[260px] rounded-[10px] border border-priority-high/30 bg-surface px-2.5 py-1.5 text-[12px] leading-snug text-priority-high shadow-[0_8px_24px_rgba(0,0,0,0.16)]"
+            role="status"
+          >
+            {notice}
+          </div>,
+          document.body
+        )}
+    </>
   )
 }
 

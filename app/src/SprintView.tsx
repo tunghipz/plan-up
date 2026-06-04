@@ -101,6 +101,9 @@ export const STATUS_ORDER: Status[] = ['todo', 'in_progress', 'done']
 const COLLAPSE_KEY = (sprintId: string) => `plan-up:collapsed:${sprintId}`
 const GROUP_COLLAPSE_KEY = (parentId: string) =>
   `plan-up:taskgroup-collapsed:${parentId}`
+// One global sort preference (shared across all member cards, not per-sprint), so it
+// survives switching view/sprint/project and a page reload. See list-view.md.
+const SORT_KEY = 'plan-up:sort'
 
 /**
  * Detect schedule conflicts among one member's leaf tasks. A pair conflicts if
@@ -219,6 +222,44 @@ function saveCollapsed(sprintId: string, set: Set<string>) {
   }
 }
 
+type Sort = { field: SortField; dir: 'asc' | 'desc' }
+const DEFAULT_SORT: Sort = { field: 'seq', dir: 'asc' }
+const SORT_FIELDS: SortField[] = [
+  'seq',
+  'title',
+  'effort',
+  'startDate',
+  'dueDate',
+  'status',
+  'dependsOn',
+]
+
+function loadSort(): Sort {
+  try {
+    const raw = localStorage.getItem(SORT_KEY)
+    if (!raw) return DEFAULT_SORT
+    const parsed = JSON.parse(raw) as Partial<Sort>
+    if (
+      parsed &&
+      SORT_FIELDS.includes(parsed.field as SortField) &&
+      (parsed.dir === 'asc' || parsed.dir === 'desc')
+    ) {
+      return { field: parsed.field as SortField, dir: parsed.dir }
+    }
+    return DEFAULT_SORT
+  } catch {
+    return DEFAULT_SORT
+  }
+}
+
+function saveSort(sort: Sort) {
+  try {
+    localStorage.setItem(SORT_KEY, JSON.stringify(sort))
+  } catch {
+    // localStorage unavailable, swallow
+  }
+}
+
 export function SprintView({
   projectId,
   sprintId,
@@ -243,10 +284,7 @@ export function SprintView({
   const [collapsed, setCollapsed] = useState<Set<string>>(() =>
     loadCollapsed(sprintId)
   )
-  const [sort, setSort] = useState<{ field: SortField; dir: 'asc' | 'desc' }>({
-    field: 'seq',
-    dir: 'asc',
-  })
+  const [sort, setSort] = useState<Sort>(loadSort)
   // Multi-select for the group-via-selection flow. Clears on sprint change.
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const toggleSelect = (id: string) =>
@@ -262,6 +300,12 @@ export function SprintView({
     setCollapsed(loadCollapsed(sprintId))
     setSelectedIds(new Set())
   }, [sprintId])
+
+  // Persist the (shared) sort on every change so it survives remounts — switching
+  // view/sprint/project — and a page reload.
+  useEffect(() => {
+    saveSort(sort)
+  }, [sort])
 
   const toggleCollapse = (memberId: string) => {
     setCollapsed((prev) => {

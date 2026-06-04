@@ -1,7 +1,7 @@
 # List view
 
 **Status:** Implemented
-**Last updated:** 2026-06-03
+**Last updated:** 2026-06-05
 **Code:** `app/src/SprintView.tsx` (`MemberCard`, `UnassignedCard`, `GroupHeader`,
 `TaskColumnHeader`, `SortHeader`, `COL`)
 
@@ -15,7 +15,9 @@ inset-grouped cards, fully editable inline.
   + an "Add task" row.
 - **Collapse** a member card by clicking its header (persisted per sprint).
 - **Sort** by any column via its header (`ID, Task, Effort, Start, End, Status, Prereq`);
-  click toggles asc/desc, active column shows an arrow.
+  click toggles asc/desc, active column shows an arrow. Sort is **shared across all
+  member cards** (one preference, not per-member) and **persisted** so it survives
+  switching view/sprint/project and a page reload (defaults to `seq asc` first run).
 - Member cards omit the **Assignee** column (everyone in the group is the same person);
   the Unassigned card keeps it.
 
@@ -35,5 +37,8 @@ full content width (no fall-short on scroll).
 ## Rules & edge cases
 - Changing a `COL` width means re-checking the `min-w` floors (must stay ≥ summed content).
 - Collapse state key: `localStorage['plan-up:collapsed:<sprintId>']`.
+- Sort state key: `localStorage['plan-up:sort']` — a single global `{field, dir}` (not
+  per-sprint, since the sort is one shared preference). Seeded into state on mount and
+  re-written on every change; a missing/corrupt value falls back to `seq asc`.
 - Group header right side surfaces the member summary — see
   [member-header-summary.md](./member-header-summary.md).

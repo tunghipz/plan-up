@@ -9,6 +9,7 @@ import {
   ArrowRightCircle,
   List,
   LayoutGrid,
+  GanttChartSquare,
   Star,
   Plus,
   Settings,
@@ -31,12 +32,13 @@ import {
 } from './db'
 import { SprintView } from './SprintView'
 import { BoardView } from './BoardView'
+import { GanttView } from './GanttView'
 import { ProjectSettingsView } from './ProjectSettingsView'
 import { formatShortDate, formatSprintRange, useDarkMode } from './lib'
 
 const CURRENT_PROJECT_KEY = 'plan-up:currentProjectId'
 const VIEW_KEY = 'plan-up:view'
-type ViewMode = 'list' | 'board'
+type ViewMode = 'list' | 'board' | 'timeline'
 
 function App() {
   const [seedError, setSeedError] = useState<string | null>(null)
@@ -52,7 +54,7 @@ function App() {
   const [currentSprintId, setCurrentSprintId] = useState<string | null>(null)
   const [view, setViewState] = useState<ViewMode>(() => {
     const v = localStorage.getItem(VIEW_KEY)
-    return v === 'board' ? 'board' : 'list'
+    return v === 'board' ? 'board' : v === 'timeline' ? 'timeline' : 'list'
   })
   const setView = (v: ViewMode) => {
     setViewState(v)
@@ -601,6 +603,14 @@ function App() {
                   tasks={tasks}
                   search={search}
                 />
+              ) : view === 'timeline' ? (
+                <GanttView
+                  projectId={currentProjectId}
+                  sprintStartDate={currentSprint.startDate}
+                  sprintEndDate={currentSprint.endDate}
+                  tasks={tasks}
+                  search={search}
+                />
               ) : (
                 <SprintView
                   projectId={currentProjectId}
@@ -938,6 +948,7 @@ function ViewToggle({
     <div className="inline-flex items-center gap-0.5 p-0.5 rounded-[9px] bg-fill">
       {item('list', 'List', List)}
       {item('board', 'Board', LayoutGrid)}
+      {item('timeline', 'Timeline', GanttChartSquare)}
     </div>
   )
 }

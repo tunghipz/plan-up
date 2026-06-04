@@ -600,6 +600,8 @@ function App() {
               view === 'board' ? (
                 <BoardView
                   projectId={currentProjectId}
+                  sprintId={currentSprint.id}
+                  sprintStartDate={currentSprint.startDate}
                   tasks={tasks}
                   search={search}
                 />

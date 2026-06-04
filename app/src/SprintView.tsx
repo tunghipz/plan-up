@@ -103,17 +103,19 @@ const GROUP_COLLAPSE_KEY = (parentId: string) =>
   `plan-up:taskgroup-collapsed:${parentId}`
 
 /**
- * Detect schedule conflicts among one member's leaf tasks: a pair conflicts if
- * they share a computed start datetime, a computed end datetime, or any
- * prerequisite. Returns a per-task tooltip string (absent = no conflict). O(n²)
- * over a member's tasks (small). See design-docs/conflict-warning.md.
+ * Detect schedule conflicts among one member's leaf tasks. A pair conflicts if
+ * their computed [start … end] intervals OVERLAP (one person can't run two tasks
+ * at once), or they share a prerequisite. Same-start / same-end are kept only as a
+ * fallback for zero-duration tasks (where a strict overlap is empty). Returns a
+ * per-task tooltip string (absent = no conflict). O(n²) over a member's tasks
+ * (small). See design-docs/conflict-warning.md.
  */
-function computeMemberConflicts(
+export function computeMemberConflicts(
   tasks: Task[],
   tasksById: Map<string, Task>,
   memberById: Map<string, Member>
 ): Map<string, string> {
-  type Hit = { seq: number; kind: 'start' | 'end' | 'prereq' }
+  type Hit = { seq: number; kind: 'overlap' | 'start' | 'end' | 'prereq' }
   // Unsized tasks (no effort) aren't really scheduled — exclude them from
   // double-booking detection. See design-docs/conflict-warning.md.
   const sized = tasks.filter((t) => t.estimate !== null)
@@ -140,13 +142,25 @@ function computeMemberConflicts(
       const b = sized[j]
       const sa = startKey(a)
       const ea = endKey(a)
-      if (sa && sa === startKey(b)) {
-        push(a.id, { seq: b.sequence, kind: 'start' })
-        push(b.id, { seq: a.sequence, kind: 'start' })
-      }
-      if (ea && ea === endKey(b)) {
-        push(a.id, { seq: b.sequence, kind: 'end' })
-        push(b.id, { seq: a.sequence, kind: 'end' })
+      const sb = startKey(b)
+      const eb = endKey(b)
+      // Time-range overlap: both tasks have a full [start..end] range and the
+      // intervals strictly intersect (touching endpoints, e.g. back-to-back, don't
+      // count). Keys are sortable ISO datetimes, so string `<` compares chronology.
+      const overlap = sa && ea && sb && eb && sa < eb && sb < ea
+      if (overlap) {
+        push(a.id, { seq: b.sequence, kind: 'overlap' })
+        push(b.id, { seq: a.sequence, kind: 'overlap' })
+      } else {
+        // Fallback for zero-duration tasks (strict overlap is empty): exact endpoint match.
+        if (sa && sa === sb) {
+          push(a.id, { seq: b.sequence, kind: 'start' })
+          push(b.id, { seq: a.sequence, kind: 'start' })
+        }
+        if (ea && ea === eb) {
+          push(a.id, { seq: b.sequence, kind: 'end' })
+          push(b.id, { seq: a.sequence, kind: 'end' })
+        }
       }
       if (a.dependsOn.some((d) => b.dependsOn.includes(d))) {
         push(a.id, { seq: b.sequence, kind: 'prereq' })
@@ -155,7 +169,13 @@ function computeMemberConflicts(
     }
   }
   const label = (k: Hit['kind']) =>
-    k === 'start' ? 'giờ bắt đầu' : k === 'end' ? 'giờ kết thúc' : 'chung prereq'
+    k === 'overlap'
+      ? 'chồng thời gian'
+      : k === 'start'
+        ? 'giờ bắt đầu'
+        : k === 'end'
+          ? 'giờ kết thúc'
+          : 'chung prereq'
   const tips = new Map<string, string>()
   for (const [id, list] of hits) {
     const byOther = new Map<number, Set<string>>()
@@ -807,7 +827,7 @@ function GroupHeader({
         {conflictCount !== undefined && conflictCount > 0 && (
           <span
             className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold tabular-nums bg-priority-high/15 text-priority-high"
-            title="Task trùng lịch: cùng giờ bắt đầu/kết thúc, hoặc chung prereq"
+            title="Task trùng lịch: chồng thời gian, cùng giờ bắt đầu/kết thúc, hoặc chung prereq"
           >
             <AlertTriangle size={12} />
             {conflictCount} trùng lịch

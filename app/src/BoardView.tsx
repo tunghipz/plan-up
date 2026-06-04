@@ -1,7 +1,9 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
   db,
+  uid,
+  nextSequence,
   computeWorkingPlan,
   recomputeDates,
   type Member,
@@ -25,10 +27,14 @@ import {
  */
 export function BoardView({
   projectId,
+  sprintId,
+  sprintStartDate,
   tasks,
   search,
 }: {
   projectId: string
+  sprintId: string
+  sprintStartDate: string
   tasks: Task[]
   search: string
 }) {
@@ -71,7 +77,6 @@ export function BoardView({
     return m
   }, [tasks, tasksById, membersById])
 
-  const groupOf = (t: Task) => childrenByParent.get(t.id) ?? null
   const effectiveStatus = (t: Task): Status => {
     const kids = childrenByParent.get(t.id)
     return kids && kids.length ? derivedGroupStatus(kids) : t.status
@@ -111,22 +116,55 @@ export function BoardView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filtered, childrenByParent])
 
-  const cycleStatus = (t: Task) => {
-    if (childrenByParent.get(t.id)?.length) return // parent status is derived
-    const idx = STATUS_ORDER.indexOf(t.status)
-    const next = STATUS_ORDER[(idx + 1) % STATUS_ORDER.length]
-    void db.tasks.update(t.id, { status: next })
-  }
+  // Per-card display data (status / group roll-up / parent title), precomputed once
+  // per data change. Crucial for drag perf: the `group` object keeps a STABLE ref
+  // across the many re-renders a drag triggers, so memo(BoardCard) can skip cards
+  // whose data didn't change (a fresh inline `{done,total,range}` would bust memo).
+  const metaById = useMemo(() => {
+    const m = new Map<
+      string,
+      { displayStatus: Status; group: { done: number; total: number; range: string | null } | null; parentTitle: string | null }
+    >()
+    for (const t of tasks) {
+      const kids = childrenByParent.get(t.id)
+      const group =
+        kids && kids.length
+          ? { done: kids.filter((c) => c.status === 'done').length, total: kids.length, range: groupRange(kids) }
+          : null
+      const displayStatus: Status = group ? derivedGroupStatus(kids!) : t.status
+      const parentTitle = t.parentId ? tasksById.get(t.parentId)?.title ?? null : null
+      m.set(t.id, { displayStatus, group, parentTitle })
+    }
+    return m
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tasks, childrenByParent, planById, tasksById])
+
+  // Cycle status by id — stable callback (no closure over the rendered index/task),
+  // so it doesn't change identity on a drag re-render and memo(BoardCard) holds.
+  const onCycleStatusId = useCallback(
+    (id: string) => {
+      const t = tasksById.get(id)
+      if (!t || childrenByParent.get(id)?.length) return // parent status is derived
+      const idx = STATUS_ORDER.indexOf(t.status)
+      const next = STATUS_ORDER[(idx + 1) % STATUS_ORDER.length]
+      void db.tasks.update(id, { status: next })
+    },
+    [tasksById, childrenByParent]
+  )
 
   // Drag (native HTML5 DnD). Leaf cards only. Dropping sets status AND a manual
   // `boardOrder` so the card lands — and stays — exactly where the placeholder was.
   const [dragId, setDragId] = useState<string | null>(null)
   const [over, setOver] = useState<{ status: Status; index: number } | null>(null)
   const dragged = dragId ? tasksById.get(dragId) ?? null : null
-  const clearDrag = () => {
+  // Ref mirror of dragId so the (stable) card handlers can early-return without
+  // closing over the dragId state — keeps their identity stable for memo.
+  const dragIdRef = useRef<string | null>(null)
+  const clearDrag = useCallback(() => {
+    dragIdRef.current = null
     setDragId(null)
     setOver(null)
-  }
+  }, [])
   // Fractional index between the slot's display neighbours (skipping the dragged
   // card). null → column has no other tasks, leave order untouched.
   const orderForDrop = (status: Status, index: number, id: string): number | null => {
@@ -148,6 +186,44 @@ export function BoardView({
     if (order != null && order !== t.boardOrder) patch.boardOrder = order
     if (Object.keys(patch).length) void db.tasks.update(id, patch)
   }
+
+  // Stable card drag handlers — they read the card's id/status/index from `data-*`
+  // attributes on the DOM node instead of closing over the rendered values, so their
+  // identity never changes. Combined with memo(BoardCard), a dragover only re-renders
+  // the lightweight placeholder (DropSlot) — the cards themselves are NOT re-rendered
+  // while moving. The DB is written only once, on drop (dropTo).
+  const onCardDragStart = useCallback((e: React.DragEvent) => {
+    // never start a card drag from an interactive control
+    if ((e.target as HTMLElement).closest('button, select, input, a, label, [data-no-drag]')) {
+      e.preventDefault()
+      return
+    }
+    const el = e.currentTarget as HTMLElement
+    const id = el.dataset.id
+    if (!id) return
+    const status = el.dataset.status as Status
+    const index = Number(el.dataset.index)
+    e.dataTransfer.setData('text/plain', id)
+    e.dataTransfer.effectAllowed = 'move'
+    if (BLANK_DRAG_IMG) e.dataTransfer.setDragImage(BLANK_DRAG_IMG, 0, 0)
+    dragIdRef.current = id
+    setDragId(id)
+    setOver({ status, index }) // seed the slot at the origin (instant 1:1 swap)
+  }, [])
+  const onCardDragOver = useCallback((e: React.DragEvent) => {
+    if (!dragIdRef.current) return
+    e.preventDefault()
+    e.stopPropagation() // beat the column-level append
+    e.dataTransfer.dropEffect = 'move'
+    const el = e.currentTarget as HTMLElement
+    const status = el.dataset.status as Status
+    const base = Number(el.dataset.index)
+    const r = el.getBoundingClientRect()
+    const index = base + (e.clientY - r.top > r.height / 2 ? 1 : 0)
+    setOver((prev) =>
+      prev && prev.status === status && prev.index === index ? prev : { status, index }
+    )
+  }, [])
 
   // Edge auto-scroll: dragging near the top/bottom edge scrolls the board's
   // scroll container (or the window) so long boards stay reachable even when the
@@ -237,8 +313,7 @@ export function BoardView({
                 </div>
               )}
               {list.map((t, i) => {
-                const kids = groupOf(t)
-                const parent = t.parentId ? tasksById.get(t.parentId) : null
+                const m = metaById.get(t.id)
                 return (
                   <Fragment key={t.id}>
                     {isOver && over!.index === i && <DropSlot />}
@@ -251,53 +326,157 @@ export function BoardView({
                       tasksById={tasksById}
                       membersById={membersById}
                       plan={planById.get(t.id) ?? null}
-                      displayStatus={effectiveStatus(t)}
-                      group={
-                        kids
-                          ? {
-                              done: kids.filter((c) => c.status === 'done').length,
-                              total: kids.length,
-                              range: groupRange(kids),
-                            }
-                          : null
-                      }
-                      parentTitle={parent?.title ?? null}
-                      draggable={!kids}
+                      displayStatus={m?.displayStatus ?? t.status}
+                      group={m?.group ?? null}
+                      parentTitle={m?.parentTitle ?? null}
+                      index={i}
+                      draggable={!m?.group}
                       dragging={dragId === t.id}
-                      onDragStart={(e) => {
-                        // don't start a card drag from an interactive control
-                        if ((e.target as HTMLElement).closest('button, select, input, a, label, [data-no-drag]')) {
-                          e.preventDefault()
-                          return
-                        }
-                        e.dataTransfer.setData('text/plain', t.id)
-                        e.dataTransfer.effectAllowed = 'move'
-                        if (BLANK_DRAG_IMG) e.dataTransfer.setDragImage(BLANK_DRAG_IMG, 0, 0)
-                        setDragId(t.id)
-                        setOver({ status, index: i }) // seed the slot at the origin
-                      }}
+                      onDragStart={onCardDragStart}
                       onDragEnd={clearDrag}
-                      onDragOver={(e) => {
-                        if (!dragId) return
-                        e.preventDefault()
-                        e.stopPropagation() // beat the column-level append
-                        e.dataTransfer.dropEffect = 'move'
-                        const r = e.currentTarget.getBoundingClientRect()
-                        const idx = i + (e.clientY - r.top > r.height / 2 ? 1 : 0)
-                        if (over?.status !== status || over?.index !== idx)
-                          setOver({ status, index: idx })
-                      }}
-                      onCycleStatus={() => cycleStatus(t)}
+                      onDragOver={onCardDragOver}
+                      onCycleStatus={onCycleStatusId}
                     />
                   </Fragment>
                 )
               })}
               {isOver && over!.index >= list.length && <DropSlot />}
+              <AddTaskComposer
+                projectId={projectId}
+                sprintId={sprintId}
+                sprintStartDate={sprintStartDate}
+                status={status}
+              />
             </div>
           </section>
         )
       })}
       {dragged && <DragGhost task={dragged} innerRef={ghostRef} />}
+    </div>
+  )
+}
+
+/**
+ * Bottom-of-column "Add task" affordance (Variant A). Toggles between a blue ghost
+ * button and an inline composer. Creates a leaf task via the SAME path as the List's
+ * AddTaskRow (`uid()` + `nextSequence` + §5.3.1 defaults), but with `status` set to
+ * this column's status. Enter creates + stays open (rapid entry); Esc / empty-blur close.
+ */
+function AddTaskComposer({
+  projectId,
+  sprintId,
+  sprintStartDate,
+  status,
+}: {
+  projectId: string
+  sprintId: string
+  sprintStartDate: string
+  status: Status
+}) {
+  const [open, setOpen] = useState(false)
+  const [title, setTitle] = useState('')
+  const taRef = useRef<HTMLTextAreaElement>(null)
+
+  const grow = () => {
+    const ta = taRef.current
+    if (!ta) return
+    ta.style.height = 'auto'
+    ta.style.height = `${ta.scrollHeight}px`
+  }
+  const add = async () => {
+    const t = title.trim()
+    if (!t) return
+    const seq = await nextSequence(sprintId)
+    await db.tasks.add({
+      id: uid(),
+      projectId,
+      sequence: seq,
+      title: t,
+      assigneeId: null,
+      sprintId,
+      status, // inherit the column's status
+      priority: 'normal',
+      startDate: sprintStartDate,
+      dueDate: null,
+      estimate: null,
+      createdAt: Date.now(),
+      dependsOn: [],
+    })
+    setTitle('') // keep the composer open + refocus for rapid entry
+    requestAnimationFrame(() => {
+      grow()
+      taRef.current?.focus()
+    })
+  }
+  const close = () => {
+    setOpen(false)
+    setTitle('')
+  }
+
+  if (!open) {
+    return (
+      <button
+        onClick={() => setOpen(true)}
+        className="mt-0.5 flex w-full items-center gap-1.5 rounded-[10px] px-2.5 py-2 text-left text-[13.5px] font-medium text-accent transition hover:bg-accent/[0.08]"
+      >
+        <span className="text-[16px] leading-none">+</span> Add task
+      </button>
+    )
+  }
+  return (
+    <div className="mt-0.5 rounded-[12px] bg-surface p-3 shadow-[0_1px_2px_rgba(0,0,0,0.05),0_3px_10px_rgba(0,0,0,0.05)] ring-1 ring-accent">
+      <textarea
+        ref={taRef}
+        autoFocus
+        rows={1}
+        value={title}
+        placeholder="Task name…"
+        onChange={(e) => {
+          setTitle(e.target.value)
+          grow()
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault()
+            void add()
+          } else if (e.key === 'Escape') {
+            e.preventDefault()
+            close()
+          }
+        }}
+        // Blur closes only when empty (matches List: click-outside doesn't cancel a draft).
+        // Cancel/Add use onMouseDown+preventDefault, so they never blur the textarea.
+        onBlur={() => {
+          if (!title.trim()) close()
+        }}
+        className="w-full resize-none break-words bg-transparent text-[14px] leading-snug text-ink outline-none placeholder:text-ink-faint"
+      />
+      <div className="mt-2 flex items-center gap-1.5 text-[11px] text-ink-faint">
+        <kbd className="rounded-[5px] bg-fill px-1.5 py-px font-semibold text-ink-muted">↵</kbd>
+        <span>add</span>
+        <kbd className="rounded-[5px] bg-fill px-1.5 py-px font-semibold text-ink-muted">esc</kbd>
+        <span>cancel</span>
+        <span className="flex-1" />
+        <button
+          onMouseDown={(e) => {
+            e.preventDefault()
+            close()
+          }}
+          className="rounded-[7px] px-2.5 py-1 text-[12px] font-semibold text-ink-muted transition hover:bg-fill"
+        >
+          Cancel
+        </button>
+        <button
+          onMouseDown={(e) => {
+            e.preventDefault()
+            void add()
+          }}
+          disabled={!title.trim()}
+          className="rounded-[7px] bg-accent px-3 py-1 text-[12px] font-semibold text-white transition disabled:opacity-40"
+        >
+          Add
+        </button>
+      </div>
     </div>
   )
 }
@@ -504,7 +683,11 @@ const PRIO_TAG: Record<string, { label: string; bg: string; fg: string }> = {
   high: { label: 'High', bg: 'rgba(255,149,0,0.15)', fg: '#b25e00' },
 }
 
-function BoardCard({
+// Wrapped in memo so the per-dragover re-renders of BoardView don't re-render every
+// card. All props are passed with stable identity (callbacks via useCallback; `group`
+// via the memoized metaById), so a card whose data is unchanged skips rendering during
+// a drag — only the dragged card (its `dragging` flips) and the placeholder move.
+const BoardCard = memo(function BoardCard({
   task,
   member,
   members,
@@ -514,6 +697,7 @@ function BoardCard({
   displayStatus,
   group,
   parentTitle,
+  index,
   draggable,
   dragging,
   onDragStart,
@@ -530,12 +714,13 @@ function BoardCard({
   displayStatus: Status
   group: { done: number; total: number; range: string | null } | null
   parentTitle: string | null
+  index: number
   draggable: boolean
   dragging: boolean
   onDragStart: (e: React.DragEvent) => void
   onDragEnd: (e: React.DragEvent) => void
   onDragOver: (e: React.DragEvent) => void
-  onCycleStatus: () => void
+  onCycleStatus: (id: string) => void
 }) {
   const meta = STATUS_META[displayStatus]
   const prio = PRIO_TAG[task.priority ?? 'none']
@@ -566,6 +751,9 @@ function BoardCard({
 
   return (
     <article
+      data-id={task.id}
+      data-status={displayStatus}
+      data-index={index}
       draggable={draggable}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
@@ -623,7 +811,7 @@ function BoardCard({
           </span>
         ) : (
           <button
-            onClick={onCycleStatus}
+            onClick={() => onCycleStatus(task.id)}
             className="w-[18px] h-[18px] shrink-0 mt-0.5 transition hover:scale-110 flex items-center justify-center"
             style={{ color: meta.varName }}
             title={`${meta.label} — click to cycle`}
@@ -720,4 +908,4 @@ function BoardCard({
       </div>
     </article>
   )
-}
+})

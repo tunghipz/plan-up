@@ -1,7 +1,7 @@
 # Board view
 
 **Status:** Implemented
-**Last updated:** 2026-06-04
+**Last updated:** 2026-06-05
 **Code:** `app/src/BoardView.tsx`
 
 ## Purpose
@@ -48,15 +48,33 @@ Read-mostly; deep editing stays in the list view.
   circle / toolbar / date popover), so quick-edit keeps working. **Group (parent) cards
   aren't draggable** (status derived); the status circle's click-to-cycle is the
   pointer/keyboard alternative.
+- **Add task — bottom ghost composer (per column)** — every column carries a quiet blue
+  **`+ Add task`** affordance at its **bottom** (Apple toolbar ghost, §5.10 of the design
+  system). Click → it becomes a card-shaped inline composer in place (autofocused textarea):
+  - **Enter** creates the task and **keeps the composer open** (cleared + refocused) for rapid
+    multi-entry — adding three tasks is three titles + three Enters, no re-click.
+  - **Esc**, or **blur while empty**, closes it (Shift+Enter inserts a newline rather than
+    submitting). Blur with text pending does *not* close (mirrors the List's "click-outside
+    doesn't cancel" rule, §6.3) — only the Cancel button / Esc / empty-blur close.
+  - The new task inherits that **column's status** (add under *In progress* → starts
+    in_progress), and the List's create defaults (§5.3.1): `sprintId` = current sprint,
+    `startDate` = sprint start, **unassigned**, priority `normal`, no due/effort, `dependsOn []`.
+    `sequence` comes from `nextSequence(sprintId)` — the **same creation path as the List**, so
+    Board-created tasks are indistinguishable from List-created ones.
+  - It appends to the column bottom; manual `boardOrder` is left unset (sorts after existing
+    cards by sequence), so a freshly added card sits at the end until dragged.
+  - **Groups can't be created from the Board** (grouping stays a List action); the composer
+    only makes leaf tasks.
 - **Limitation:** native HTML5 DnD is pointer-only — **touch screens can't drag** (use the
   status circle to cycle). A Pointer-Events touch path is a possible later addition.
 - Search filters cards by title (see [search-and-keyboard.md](./search-and-keyboard.md)).
 
 ## Data
 Reads the current sprint's `tasks` (passed in) + the project's `members` (for avatars and
-the assign menu). Mutations: status (cycle), `assigneeId` (quick-edit, + `recomputeDates`),
-and `estimate` / `startDate` / `dueDate` (quick-edit, respecting the same lock rules and
-recompute as the List).
+the assign menu). Takes `sprintId` + `sprintStartDate` props (for the add-task defaults).
+Mutations: status (cycle), `assigneeId` (quick-edit, + `recomputeDates`), `estimate` /
+`startDate` / `dueDate` (quick-edit, respecting the same lock rules and recompute as the
+List), and **task creation** via `db.tasks.add` + `nextSequence` (bottom composer).
 
 ## Implementation
 - `byStatus` buckets filtered tasks by their **effective status** — `derivedGroupStatus`
@@ -86,13 +104,30 @@ recompute as the List).
   - `scrollableAncestor(gridRef)` finds the board's scroll container; a rAF loop edge-scrolls
     it while dragging. A document `dragend` listener is a backstop that always clears
     `dragId` (so a hidden source can never get stuck).
-  - **Perf:** each task's `computeWorkingPlan` is precomputed once into `planById` (useMemo
-    keyed on tasks), so the per-index-change re-renders during a drag don't re-run the
-    scheduler for every card's due chip — that recompute was the drag-jank source.
+  - **Perf — cards don't re-render while dragging.** A drag fires `onDragOver` constantly,
+    each call bumping the `over` placeholder index → BoardView re-renders. To keep that from
+    re-rendering every card on every move:
+    - `BoardCard` is wrapped in **`React.memo`**, and every prop is passed with a **stable
+      identity**: the drag handlers are `useCallback`s that read the card's id/status/index
+      from `data-*` attributes on the DOM node (not closures over the rendered index), and the
+      `group` roll-up / `displayStatus` / `parentTitle` come from a memoized **`metaById`** map
+      (a fresh inline `{done,total,range}` object each render would otherwise bust memo).
+    - Result: a dragover only re-renders the lightweight `<DropSlot>` placeholder; the dragged
+      card re-renders once (its `dragging` flag flips it to `hidden`); **all other cards skip
+      rendering entirely**. Measured: 0 card renders across 60 dragovers on a 17-card column.
+    - Each task's `computeWorkingPlan` is still precomputed once into `planById` (useMemo keyed
+      on tasks), so even when a card *does* render its due chip never re-runs the scheduler.
+    - The board is written to the DB **only on drop** (`dropTo`), never mid-move.
 - Reuses `STATUS_META` / `STATUS_ORDER` / `StatusIcon` / `derivedGroupStatus` / `DatePickCell`
   / `EffortCell` from `SprintView.tsx`, and `recomputeDates` / `computeWorkingPlan` from
   `db.ts` — so the quick-edit lock rules and recompute behavior stay identical to the List,
   single-sourced.
+- **`AddTaskComposer`** (one per column) toggles between the ghost `+ Add task` button and an
+  inline textarea. It builds the task exactly like the List's `AddTaskRow` (`uid()` +
+  `nextSequence(sprintId)` + the §5.3.1 defaults) but with `status` set to the **column's**
+  status instead of always `todo`. On submit it stays open and refocuses; Esc / empty-blur
+  closes. Dragging is suppressed inside it (the article isn't draggable; the composer isn't a
+  card).
 
 ## Rules & edge cases
 - Board is intentionally minimal — no inline date/effort/prereq editing (that's the list).

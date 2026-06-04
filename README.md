@@ -1,4 +1,4 @@
-# plan-tmp
+# plan-up
 
 ClickUp without the seat tax — a single-user, local-first task & sprint planner. Multi-project, no auth, no backend, no team plan. Members are just labels you create. Data lives in your browser (IndexedDB); export/import JSON for backup.
 

@@ -13,7 +13,7 @@ A first-class Apple-style dark theme, toggleable and remembered.
 - Defaults to the OS preference on first run, then remembers the explicit choice.
 
 ## Implementation
-- `useDarkMode()` (`lib.ts:46`) — reads `localStorage['plan-tmp:dark']` (`'1'`/`'0'`);
+- `useDarkMode()` (`lib.ts:46`) — reads `localStorage['plan-up:dark']` (`'1'`/`'0'`);
   falls back to `matchMedia('(prefers-color-scheme: dark)')`. Toggles the `dark` class on
   `<html>`.
 - All theming is **token-driven**: `index.css` `@theme` defines light values; the `.dark`

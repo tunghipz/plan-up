@@ -9,7 +9,7 @@ Local-first storage with no backend. Data lives in the browser's IndexedDB;
 JSON export/import is the backup & transfer mechanism (not sync).
 
 ## User-facing behavior
-- **Export** (header toolbar): downloads `plan-tmp-YYYY-MM-DD.json` containing the whole
+- **Export** (header toolbar): downloads `plan-up-YYYY-MM-DD.json` containing the whole
   database.
 - **Import** (header toolbar): pick a `.json` file → confirm
   *"Import will REPLACE all current data. Continue?"* → all current data is wiped and

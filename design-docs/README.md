@@ -1,4 +1,4 @@
-# Design docs — plan-tmp
+# Design docs — plan-up
 
 Per-feature design specs for the app. **One file per feature.** This folder is the
 source of truth for *what each feature does and why*; the code is the source of

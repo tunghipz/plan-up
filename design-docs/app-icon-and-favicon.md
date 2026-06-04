@@ -8,7 +8,7 @@
 The browser-tab favicon (and any future app-icon export) is the smallest piece of
 brand. The previous `favicon.svg` was a stock purple→blue gradient zigzag — which
 directly violates the design-system constitution (§8.1 "không gradient purple/blue",
-"một accent duy nhất"). It carried zero plan-tmp identity. This replaces it with a
+"một accent duy nhất"). It carried zero plan-up identity. This replaces it with a
 mark grown from the app's own visual language.
 
 ## The mark

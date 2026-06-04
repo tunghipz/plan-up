@@ -34,8 +34,8 @@ import { BoardView } from './BoardView'
 import { ProjectSettingsView } from './ProjectSettingsView'
 import { formatShortDate, formatSprintRange, useDarkMode } from './lib'
 
-const CURRENT_PROJECT_KEY = 'plan-tmp:currentProjectId'
-const VIEW_KEY = 'plan-tmp:view'
+const CURRENT_PROJECT_KEY = 'plan-up:currentProjectId'
+const VIEW_KEY = 'plan-up:view'
 type ViewMode = 'list' | 'board'
 
 function App() {
@@ -72,11 +72,11 @@ function App() {
   const SIDEBAR_MAX = 460
   const RAIL_W = 58
   const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
-    const s = Number(localStorage.getItem('plan-tmp:sidebarWidth'))
+    const s = Number(localStorage.getItem('plan-up:sidebarWidth'))
     return s >= SIDEBAR_MIN && s <= SIDEBAR_MAX ? s : 248
   })
   useEffect(() => {
-    localStorage.setItem('plan-tmp:sidebarWidth', String(sidebarWidth))
+    localStorage.setItem('plan-up:sidebarWidth', String(sidebarWidth))
   }, [sidebarWidth])
   const startSidebarResize = (e: React.MouseEvent) => {
     e.preventDefault()
@@ -102,7 +102,7 @@ function App() {
       .then((removed) => {
         if (removed > 0) {
           console.info(
-            `[plan-tmp] cleaned up ${removed} duplicate sprint${removed === 1 ? '' : 's'} (legacy seed-race artifact)`
+            `[plan-up] cleaned up ${removed} duplicate sprint${removed === 1 ? '' : 's'} (legacy seed-race artifact)`
           )
         }
         setSeeded(true)
@@ -114,7 +114,7 @@ function App() {
       .then((healed) => {
         if (healed > 0) {
           console.info(
-            `[plan-tmp] healed ${healed} task date${healed === 1 ? '' : 's'} that were out of sync`
+            `[plan-up] healed ${healed} task date${healed === 1 ? '' : 's'} that were out of sync`
           )
         }
       })
@@ -260,7 +260,7 @@ function App() {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `plan-tmp-${data.exportedAt.slice(0, 10)}.json`
+    a.download = `plan-up-${data.exportedAt.slice(0, 10)}.json`
     a.click()
     URL.revokeObjectURL(url)
   }

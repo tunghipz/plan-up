@@ -1,4 +1,4 @@
-# plan-tmp · Design System
+# plan-up · Design System
 
 Single source of truth cho UI/UX. Mọi feature mới phải tuân theo file này. Khi chưa rõ, đọc lại đây trước khi code.
 
@@ -197,7 +197,7 @@ Prop drilling `App → SprintView → MemberCard → AddTaskRow`. Default tốn 
 Có column header → mọi row dùng cùng `COL` widths trong `SprintView.tsx`. Gap `gap-[13px]`, padding `px-[18px] py-[11px]`. Khi đổi 1 cột → đổi header + mọi consumer cùng commit. Date cells dùng chung `DatePickCell`. Hide column header khi sprint 0 task.
 
 ### 5.9 Collapse/expand per-group *(giữ nguyên — hành vi)*
-Click cả `GroupHeader` row để collapse; ChevronDown rotate; persist localStorage `plan-tmp:collapsed:{sprintId}`; reset khi đổi sprint; delete dùng `stopPropagation`.
+Click cả `GroupHeader` row để collapse; ChevronDown rotate; persist localStorage `plan-up:collapsed:{sprintId}`; reset khi đổi sprint; delete dùng `stopPropagation`.
 
 ### 5.10 Ghost / toolbar actions
 "Add member", "Add task", "Roll over", "Export/Import" → **text xanh ghost** (Apple toolbar). Solid accent fill chỉ cho primary action trong dialog ("Create"/"Save"). "+ " trong sidebar = icon xanh mảnh.
@@ -208,9 +208,9 @@ Click cả `GroupHeader` row để collapse; ChevronDown rotate; persist localSt
 `/` focus search · `n` new sprint · `Esc` clear search · `⌘⇧D`/`Ctrl⇧D` toggle dark. Phím đơn chỉ khi không trong input; combo cho global; mỗi shortcut mới phải tránh conflict OS + có hint.
 
 ### 6.2 Persistence
-IndexedDB: data. localStorage: chỉ UI pref (`plan-tmp:dark`, collapse, `plan-tmp:sidebarWidth`, `plan-tmp:view`, `plan-tmp:currentProjectId`). URL: chưa dùng.
+IndexedDB: data. localStorage: chỉ UI pref (`plan-up:dark`, collapse, `plan-up:sidebarWidth`, `plan-up:view`, `plan-up:currentProjectId`). URL: chưa dùng.
 
-**Sidebar resize**: panel sprint kéo được (drag handle mép phải, clamp 200–460px, lưu `plan-tmp:sidebarWidth`). Icon rail giữ cố định (dải icon). Drag dùng document-level mousemove/up + khoá `userSelect`/`cursor` khi kéo.
+**Sidebar resize**: panel sprint kéo được (drag handle mép phải, clamp 200–460px, lưu `plan-up:sidebarWidth`). Icon rail giữ cố định (dải icon). Drag dùng document-level mousemove/up + khoá `userSelect`/`cursor` khi kéo.
 
 ### 6.3 Form submit
 Inline input: Enter commit, Escape cancel khi add-mode. Click outside KHÔNG cancel.
@@ -257,7 +257,7 @@ Delete member / delete task / import (replace). Không confirm cho toggle status
 ## 10. File map
 
 ```
-plan-tmp/
+plan-up/
 ├── design.md              ← product spec
 ├── design-system.md       ← FILE NÀY (UI/UX constitution · Cupertino DNA)
 ├── CLAUDE.md              ← code layout rule
@@ -275,4 +275,4 @@ plan-tmp/
 - Thêm component pattern → section 5. Thêm shortcut → 6.1.
 - Ai code ngược file này → push back, không silent merge.
 
-File này là **constitution**. Nó định nghĩa cái gì là plan-tmp và cái gì không.
+File này là **constitution**. Nó định nghĩa cái gì là plan-up và cái gì không.

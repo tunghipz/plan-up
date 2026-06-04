@@ -1,4 +1,4 @@
-# plan-tmp — Project Conventions
+# plan-up — Project Conventions
 
 ## File layout
 

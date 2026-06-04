@@ -29,4 +29,4 @@ The only mutation is status (`db.tasks.update` on cycle).
 
 ## Rules & edge cases
 - Board is intentionally minimal — no inline date/effort/prereq editing (that's the list).
-- Active view persisted at `localStorage['plan-tmp:view']`.
+- Active view persisted at `localStorage['plan-up:view']`.

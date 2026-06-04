@@ -75,7 +75,7 @@ class PlanDB extends Dexie {
   tasks!: Table<Task, string>
 
   constructor() {
-    super('plan-tmp')
+    super('plan-up')
     this.version(1).stores({
       members: 'id, name',
       sprints: 'id, startDate',

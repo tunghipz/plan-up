@@ -27,7 +27,7 @@ each with its own members, sprints, and tasks.
   `dependsOn` (cross-project links).
 - Tile color: `colorForName()` (`db.ts:199`) hashes the name → one of an 8-color palette
   (deterministic, so a name always maps to the same color).
-- Current project persisted at `localStorage['plan-tmp:currentProjectId']`; defaults to
+- Current project persisted at `localStorage['plan-up:currentProjectId']`; defaults to
   the first project by `createdAt`.
 
 ## Rules & edge cases

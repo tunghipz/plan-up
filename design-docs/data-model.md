@@ -10,7 +10,7 @@ discipline that lets the schema evolve without losing local data.
 
 ## Entities
 
-Four IndexedDB tables (Dexie database name **`plan-tmp`**):
+Four IndexedDB tables (Dexie database name **`plan-up`**):
 
 ### `Project` (`db.ts:19`)
 `id` · `name` · `createdAt` (number) · `description?` (string) · `color?` (hex)

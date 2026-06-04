@@ -34,6 +34,6 @@ full content width (no fall-short on scroll).
 
 ## Rules & edge cases
 - Changing a `COL` width means re-checking the `min-w` floors (must stay ≥ summed content).
-- Collapse state key: `localStorage['plan-tmp:collapsed:<sprintId>']`.
+- Collapse state key: `localStorage['plan-up:collapsed:<sprintId>']`.
 - Group header right side surfaces the member summary — see
   [member-header-summary.md](./member-header-summary.md).

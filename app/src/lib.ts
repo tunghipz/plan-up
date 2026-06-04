@@ -45,14 +45,14 @@ export function formatSprintRange(start: string, end: string): string {
 
 export function useDarkMode() {
   const [dark, setDark] = useState<boolean>(() => {
-    const stored = localStorage.getItem('plan-tmp:dark')
+    const stored = localStorage.getItem('plan-up:dark')
     if (stored !== null) return stored === '1'
     return window.matchMedia('(prefers-color-scheme: dark)').matches
   })
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', dark)
-    localStorage.setItem('plan-tmp:dark', dark ? '1' : '0')
+    localStorage.setItem('plan-up:dark', dark ? '1' : '0')
   }, [dark])
 
   return [dark, setDark] as const

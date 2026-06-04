@@ -78,7 +78,7 @@ export const STATUS_META: Record<Status, { label: string; varName: string }> = {
 
 export const STATUS_ORDER: Status[] = ['todo', 'in_progress', 'done']
 
-const COLLAPSE_KEY = (sprintId: string) => `plan-tmp:collapsed:${sprintId}`
+const COLLAPSE_KEY = (sprintId: string) => `plan-up:collapsed:${sprintId}`
 
 function loadCollapsed(sprintId: string): Set<string> {
   try {

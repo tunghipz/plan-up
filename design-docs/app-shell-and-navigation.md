@@ -32,8 +32,8 @@ Three cards, shown when a sprint is selected, computed from the current sprint's
   tasks (for sprint counts).
 
 ## Rules & edge cases
-- **localStorage keys:** `plan-tmp:currentProjectId`, `plan-tmp:view`,
-  `plan-tmp:sidebarWidth`, `plan-tmp:dark`, `plan-tmp:collapsed:<sprintId>`.
+- **localStorage keys:** `plan-up:currentProjectId`, `plan-up:view`,
+  `plan-up:sidebarWidth`, `plan-up:dark`, `plan-up:collapsed:<sprintId>`.
 - Current **sprint** is *not* persisted across sessions — on load it defaults to the
   latest sprint (by `startDate`) in the current project; resets when the project changes.
 - The header **star** button is a visual placeholder (no handler yet).

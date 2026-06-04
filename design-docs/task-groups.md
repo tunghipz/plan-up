@@ -23,7 +23,8 @@ separate epic/tag system. Approach **B** chosen 2026-06-04 (see
 - **One level only.** A child cannot itself be a parent, and a task that already has
   children cannot become someone's child. Enforced when setting `parentId`.
 - **Roll-up on the parent row (Approach B):** the parent shows
-  - a **progress count** `done/total` of its **children** + a small progress bar,
+  - a **progress count** `done/total` of its **children** (text only — no progress
+    bar; the empty grey track read as noise at 0%, removed 2026-06-04),
   - a **derived status** badge (done if all children done; in-progress if any child
     is in-progress/done but not all done; else to-do) — display-only, computed on
     render, not written to the parent's stored `status`,

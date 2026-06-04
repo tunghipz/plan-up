@@ -933,7 +933,6 @@ function TaskGroupRow({
   )
   const total = childrenTasks.length
   const done = childrenTasks.filter((c) => c.status === 'done').length
-  const pct = total ? Math.round((done / total) * 100) : 0
   const derived = derivedGroupStatus(childrenTasks)
   const hasEffort = childrenTasks.some((c) => c.estimate !== null)
   const effortSum = childrenTasks.reduce((s, c) => s + (c.estimate ?? 0), 0)
@@ -977,12 +976,6 @@ function TaskGroupRow({
         />
         <span className="shrink-0 text-[11px] font-medium text-ink-faint tabular-nums">
           {done}/{total}
-        </span>
-        <span className="shrink-0 w-10 h-1.5 rounded-full bg-canvas-sunk overflow-hidden">
-          <span
-            className="block h-full rounded-full bg-status-done"
-            style={{ width: `${pct}%` }}
-          />
         </span>
       </div>
       <div className={COL.effort}>

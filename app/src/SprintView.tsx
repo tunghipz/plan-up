@@ -173,7 +173,7 @@ function computeMemberConflicts(
 }
 
 /** Roll-up status of a parent task derived from its children (display only). */
-function derivedGroupStatus(children: Task[]): Status {
+export function derivedGroupStatus(children: Task[]): Status {
   if (children.length === 0) return 'todo'
   if (children.every((c) => c.status === 'done')) return 'done'
   if (children.some((c) => c.status === 'in_progress' || c.status === 'done'))

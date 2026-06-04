@@ -24,8 +24,19 @@ thing List and Board can't show. Read-only: a pure projection of the auto-schedu
   - **Sticky date header** — one column per **workday** (weekends skipped, matching the
     scheduler), each showing `MMM d` + the weekday (`Mon`…`Fri`). A skipped weekend gets a
     slightly stronger separator. Today's column tints accent.
+  - **Fluid columns** — day columns stretch to **fill the surface's full width** so a short
+    sprint never leaves dead white space on the right. The column width is measured at
+    runtime (`(availableWidth − labelGutter) / workdays`), clamped to a minimum so a long
+    sprint still scrolls horizontally instead of squashing. The date text is sized for
+    glance-readability (date `MMM d` larger than the weekday line).
   - **A swimlane per member** — sticky-left label (avatar + name + role), separated by
     soft hairlines + whitespace (not heavy rules).
+- **Parent (group) tasks render as a summary rail** — a slim status-colored bar with end
+  caps spanning **earliest child start … latest child end** (the same roll-up the List group
+  row shows; parents have no own dates), tinted by the children's *derived* status. Its
+  children still appear as their own event blocks (in their assignees' lanes), lane-packed
+  below the rail. A parent only falls to the `no dates` bucket when **none** of its children
+  have computed dates.
 - **Tasks are soft-tinted event blocks** (Apple-Calendar style), placed on the day axis:
   - Colored by **status** via the app's system palette (todo grey / in-progress blue /
     done green) using the same `color-mix(… 15%, transparent)` soft-tint as the List
@@ -38,10 +49,14 @@ thing List and Board can't show. Read-only: a pure projection of the auto-schedu
 - **Day-off** renders as soft-grey vertical bands in the member's lane (full day = whole
   column, half = its AM or PM half), from `member.daysOff` — **member-level**, so it shows
   even when no task spans it.
-- **Off-window & unscheduled tasks** never vanish: tasks scheduled outside the sprint
-  window (the scheduler routinely pushes work weeks past the sprint end) and tasks with no
-  computed dates are **summarised as a count in the member label** — `↗ N later · ○ K no
-  dates`. Clicking expands a chip list (each: `#id title → MMM d`, or `no dates`).
+- **Off-window & unscheduled tasks** never vanish, and off-window is split by **direction**:
+  a task wholly **after** the window is `later` (`↗`, shows its start), one wholly **before**
+  is `earlier` (`↙`, shows its end — when it finished). Tasks with no computed dates are
+  `no dates`. All three are **summarised as counts in the member label** — `↙ N earlier ·
+  ↗ M later · ○ K no dates`. Clicking expands a chip list (earlier chips first), each `#id
+  title ← MMM d` / `→ MMM d` / `no dates`. The off-window chips are **soft-tinted by the
+  task's status** (same palette as the in-window blocks), so a Done task off-window still
+  reads green — never a generic accent.
 - **Today marker** — a thin continuous accent line across all lanes (only when today is in
   range).
 - **Search** filters task blocks by title, consistent with the other views.
@@ -60,15 +75,20 @@ thing List and Board can't show. Read-only: a pure projection of the auto-schedu
 - **`sprintWorkdays(startDate, endDate)`** (`lib.ts`, pure, unit-tested) — ordered working
   dates in range, weekends excluded. Drives the columns.
 - **`GanttView.tsx`** — one horizontally-scrollable surface (`overflow-x-auto`); the inner
-  width is `MGUT + workdays·DAY`. Sticky date header (`top`) + sticky member labels
-  (`left`). Per member, in a `useMemo`:
+  width is `MGUT + workdays·dayW`, where **`dayW` is computed at runtime** from the measured
+  surface width (`ResizeObserver` on the scroll container): `dayW = max(MIN_DAY,
+  (measuredWidth − MGUT) / N)`. Few workdays → columns widen to fill; many → falls back to
+  `MIN_DAY` and the surface scrolls. Sticky date header (`top`) + sticky member labels
+  (`left`). Per member, in a `useMemo` (keyed on `dayW`):
   - Each task → `computeWorkingPlan`, then classified: **in-window** (start within
     `[firstDay,lastDay]`) → an event block; **later** (start after the window, or whole
     span before it) and **no-dates** (no computed start/due) → the count buckets.
   - Block geometry: `left = startIdx·DAY (+½ if PM start)`, `right = endIdx·DAY (+½ if noon
     finish, or clamped to the window edge with a `contRight` caret)`.
-  - **Greedy lane-packing**: events sorted by `left`; each joins the first lane whose last
-    block ends at/before it starts, else a new lane. `rows` = lane count.
+  - **Greedy lane-packing, parents first**: parent summary rails are packed into the top
+    lanes, then every other block packs into the lanes below them — so a group's rail always
+    sits *above* its children (Gantt convention). Within each pass, events sort by `left` and
+    join the first lane whose last block ends at/before they start, else a new lane.
   - Day-off half-columns → soft-grey bands.
   - Soft tints reuse the app pattern: `color-mix(in srgb, var(--color-status-X) 15%,
     transparent)` bg + `color-mix(…100%, #000 22%)` text + the raw token as the accent edge.
@@ -81,8 +101,11 @@ thing List and Board can't show. Read-only: a pure projection of the auto-schedu
 - **Weekends excluded** from columns (scheduler contributes 0 there).
 - **Nothing is hidden** — every assigned task is either a block, a `later` chip, or a
   `no dates` chip. Off-window/unscheduled counts sit in the member label, expandable.
-- **Parent/group tasks**: a parent is a container; it appears like any task (its own
-  computed dates, usually none → `no dates`), children appear as their own blocks.
+- **Parent/group tasks**: a parent is a container with no own dates; it renders as a
+  **summary rail** spanning its children's roll-up span (earliest start … latest end),
+  while each child also appears as its own block. Only when *no* child has dates does the
+  parent fall to the `no dates` bucket. A block that starts before the window's left edge is
+  clamped to the edge with a `‹` caret (mirrors the `›` right-edge caret).
 - Active view persisted at `localStorage['plan-up:view']` (accepts `'timeline'`).
 
 ## DNA check (`design-system.md`)

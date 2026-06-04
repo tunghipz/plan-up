@@ -26,9 +26,10 @@ npm run lint       # eslint .
 
 - **Multi-project** — macOS-style icon rail (left), vibrancy sprint panel (middle, drag the edge to resize), task view (right)
 - **Sprint folder** (biweekly) with start/end dates + per-sprint task sequence (resets to 1..N)
-- **Two views**:
+- **Three views**:
   - **List** — grouped by assignee in inset-grouped cards · Reminders-style status circles · sortable column headers · width-aware auto-wrap titles
   - **Board** — Cupertino kanban: three columns on the grey canvas, white soft-shadowed cards · click the status circle to cycle
+  - **Timeline** — Apple-Calendar swimlanes (one lane per member, one soft-tinted event block per task, status-colored, half-day precision, lane-packed). Read-only projection of the auto-scheduler; off-window/unscheduled tasks roll up as `↗ N later · ○ K no dates` counts in the member label, day-offs show as soft bands, today is a thin accent line
 - **Task fields**: title, assignee, sprint, status, priority, start/end date, estimate, dependencies (prereq accepts lists **and ranges** like `2-5, 8`; rejected entries are explained inline instead of dropped silently — a cycle is drawn as its loop path, e.g. `7 → 8 → 6 → 7`, with the back-edge to cut named)
 - **Member header at a glance** — each assignee group shows a progress ring (% done) around the avatar, done/total, an overdue alert (only when > 0), the next upcoming deadline (`due Jun 10`), and days off as effective days (`1.5d off`, half-days count 0.5) — all derived from tasks, no extra fields. **Days off are scoped to the sprint you're viewing** (the chip counts and the picker only allow dates inside the sprint's range); the settings page shows each member's full aggregate across all sprints. The control is always visible — a quiet dashed `Days off` pill when none are set yet
 - **Project & member settings** — gear next to the project name slides in a right-side **inspector drawer** (over a dimmed backdrop, list/board stay visible behind) to edit the project (name, description, tile color), manage members (rename, **role title**, color, days off, add/remove), and delete the project

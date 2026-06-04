@@ -31,7 +31,9 @@ npm run lint       # eslint .
   - **Board** — Cupertino kanban: three columns on the grey canvas, white soft-shadowed cards · click the status circle to cycle
 - **Task fields**: title, assignee, sprint, status, priority, start/end date, estimate, dependencies
 - **Member header at a glance** — each assignee group shows a progress ring (% done) around the avatar, done/total, an overdue alert (only when > 0), the next upcoming deadline (`due Jun 10`), and days off as effective days (`1.5d off`, half-days count 0.5) — all derived from tasks, no extra fields
-- **Project & member settings** — gear next to the project name opens a settings page to edit the project (name, description, tile color), manage members (rename, color, days off, add/remove) with days-off shown as each member's primary metric, and delete the project
+- **Project & member settings** — gear next to the project name slides in a right-side **inspector drawer** (over a dimmed backdrop, list/board stay visible behind) to edit the project (name, description, tile color), manage members (rename, **role title**, color, days off, add/remove), and delete the project
+- **Task groups** — gather related tasks under a parent task: hover a row → a checkbox appears, select several of one member → a floating bar's **Gom nhóm** creates a group head (children nest under it, collapse + roll-up `done/total`). Parents are containers, excluded from member counts
+- **Schedule conflict warning** — when one member is double-booked (two sized tasks share a start time, end time, or a prerequisite) each row gets an amber ⚠ + the member header shows an `N trùng lịch` badge
 - **Status** — Reminders-style circle (todo / in-progress / done) + soft-tint pill
 - **Auto-scheduling** — set effort + prereqs, dates compute automatically (skips weekends + per-member off-days, supports half-day off)
 - **Sprint rollover** — move unfinished tasks to next sprint in one click
@@ -64,9 +66,9 @@ Four IndexedDB tables in `app/src/db.ts`:
 | Table      | Fields                                                                            |
 | ---------- | --------------------------------------------------------------------------------- |
 | `projects` | id, name, createdAt, description?, color?                                          |
-| `members`  | id, projectId, name, color, daysOff (`{date, half?}[]`)                           |
+| `members`  | id, projectId, name, color, daysOff (`{date, half?}[]`), title?                   |
 | `sprints`  | id, projectId, name, startDate, endDate                                           |
-| `tasks`    | id, projectId, sequence, title, assigneeId, sprintId, status, priority, dependsOn, startDate, dueDate, estimate, … |
+| `tasks`    | id, projectId, sequence, title, assigneeId, sprintId, status, priority, dependsOn, startDate, dueDate, estimate, parentId?, … |
 
 Schema version bumps via Dexie's `version().stores()` + upgrade callback (currently v8).
 

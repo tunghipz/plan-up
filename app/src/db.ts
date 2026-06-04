@@ -80,6 +80,13 @@ export interface Task {
    * are grouped in memory. See design-docs/task-groups.md.
    */
   parentId?: string | null
+  /**
+   * Manual board ordering within a status column (fractional index). Set when a
+   * card is dropped at a position on the Board; absent tasks fall back to
+   * `sequence`. Board-only, non-indexed → no Dexie bump, no effect on List order.
+   * See design-docs/board-view.md.
+   */
+  boardOrder?: number
 }
 
 class PlanDB extends Dexie {

@@ -1793,7 +1793,7 @@ function AssigneePicker({
   )
 }
 
-function DatePickCell({
+export function DatePickCell({
   value,
   highlight = null,
   locked = false,
@@ -1880,7 +1880,7 @@ function DatePickCell({
  * Compact effort input — number of days. Empty = unset (treated as 1 day
  * when prereqs trigger date computation).
  */
-function EffortCell({
+export function EffortCell({
   value,
   onChange,
 }: {

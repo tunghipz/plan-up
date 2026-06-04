@@ -20,6 +20,13 @@ export interface Project {
   id: string
   name: string
   createdAt: number
+  /** Optional free-text description, edited from the settings page. */
+  description?: string
+  /**
+   * Optional hand-picked tile color (a hex from PALETTE). When unset, the UI
+   * falls back to `colorForName(name)`. Non-indexed → no Dexie version bump.
+   */
+  color?: string
 }
 
 export interface Member {
@@ -192,7 +199,7 @@ export const uid = () =>
     ? crypto.randomUUID()
     : Math.random().toString(36).slice(2, 10)
 
-const PALETTE = [
+export const PALETTE = [
   '#a855f7', '#f97316', '#3b82f6', '#10b981',
   '#ef4444', '#eab308', '#ec4899', '#14b8a6',
 ]
@@ -219,6 +226,17 @@ export async function createProject(name: string): Promise<Project> {
   const project: Project = { id: uid(), name: trimmed, createdAt: Date.now() }
   await db.projects.add(project)
   return project
+}
+
+/**
+ * Patch a project's editable fields (name / description / color). Name is
+ * never emptied — callers should pass a trimmed, non-empty name.
+ */
+export async function updateProject(
+  id: string,
+  patch: Partial<Pick<Project, 'name' | 'description' | 'color'>>
+): Promise<void> {
+  await db.projects.update(id, patch)
 }
 
 /**

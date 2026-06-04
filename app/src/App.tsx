@@ -11,6 +11,7 @@ import {
   LayoutGrid,
   Star,
   Plus,
+  Settings,
 } from 'lucide-react'
 import {
   db,
@@ -30,6 +31,7 @@ import {
 } from './db'
 import { SprintView } from './SprintView'
 import { BoardView } from './BoardView'
+import { ProjectSettingsView } from './ProjectSettingsView'
 import { formatShortDate, formatSprintRange, useDarkMode } from './lib'
 
 const CURRENT_PROJECT_KEY = 'plan-tmp:currentProjectId'
@@ -58,6 +60,7 @@ function App() {
   }
   const [showNewSprint, setShowNewSprint] = useState(false)
   const [showNewProject, setShowNewProject] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [search, setSearch] = useState('')
   const [dark, setDark] = useDarkMode()
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -129,8 +132,14 @@ function App() {
   )
 
   // Resolve current project: stored choice if still valid, else the first.
+  // When the last project is deleted, clear the selection so the UI shows a
+  // proper zero-project empty state instead of a stale (deleted) project.
   useEffect(() => {
-    if (!projects || projects.length === 0) return
+    if (!projects) return
+    if (projects.length === 0) {
+      if (currentProjectId) setCurrentProjectId(null)
+      return
+    }
     if (!currentProjectId || !projects.some((p) => p.id === currentProjectId)) {
       setCurrentProjectId(projects[0].id)
     }
@@ -196,6 +205,11 @@ function App() {
         (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)
 
       if (e.key === 'Escape') {
+        // Settings takes priority over clearing search.
+        if (settingsOpen) {
+          setSettingsOpen(false)
+          return
+        }
         if (search) {
           setSearch('')
           ;(t as HTMLInputElement)?.blur?.()
@@ -204,9 +218,11 @@ function App() {
       }
       if (inField) return
       if (e.key === '/') {
+        if (settingsOpen) return // search box is hidden while in settings
         e.preventDefault()
         searchRef.current?.focus()
       } else if (e.key === 'n' && !e.metaKey && !e.ctrlKey) {
+        if (settingsOpen) return // don't stack a dialog over settings
         e.preventDefault()
         setShowNewSprint(true)
       } else if (e.key === 'd' && (e.metaKey || e.ctrlKey) && e.shiftKey) {
@@ -216,7 +232,7 @@ function App() {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [search, dark, setDark])
+  }, [search, dark, setDark, settingsOpen])
 
   if (seedError) {
     return (
@@ -326,7 +342,7 @@ function App() {
                   : 'opacity-80 hover:opacity-100'
               }`}
               style={{
-                background: colorForName(p.name),
+                background: p.color ?? colorForName(p.name),
                 letterSpacing: '-0.01em',
               }}
             >
@@ -359,8 +375,23 @@ function App() {
         {currentProject ? (
           <>
             <div className="px-[18px] pt-[18px] pb-3">
-              <div className="text-[21px] font-bold text-ink truncate tracking-[-0.022em]">
-                {currentProject.name}
+              <div className="flex items-center gap-2">
+                <div className="text-[21px] font-bold text-ink truncate tracking-[-0.022em] flex-1 min-w-0">
+                  {currentProject.name}
+                </div>
+                <button
+                  onClick={() => setSettingsOpen((v) => !v)}
+                  title="Project settings"
+                  aria-label="Project settings"
+                  aria-pressed={settingsOpen}
+                  className={`shrink-0 inline-flex items-center justify-center w-7 h-7 rounded-md transition ${
+                    settingsOpen
+                      ? 'text-accent bg-accent-soft'
+                      : 'text-ink-faint hover:text-ink hover:bg-surface-hover'
+                  }`}
+                >
+                  <Settings size={16} />
+                </button>
               </div>
               <div className="text-[12.5px] text-ink-faint mt-1">
                 <span className="tab-data">{sprints?.length ?? 0}</span> sprint
@@ -436,7 +467,13 @@ function App() {
         </div>
       </aside>
 
-      {/* Main column: thin header + capacity + sprint view */}
+      {/* Main column: settings page, or thin header + capacity + sprint view */}
+      {settingsOpen && currentProject ? (
+        <ProjectSettingsView
+          project={currentProject}
+          onClose={() => setSettingsOpen(false)}
+        />
+      ) : (
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         <header className="h-[54px] shrink-0 border-b border-border-hair bg-surface flex items-center px-5 gap-3">
           <div className="flex items-center gap-2.5 text-sm min-w-0">
@@ -536,6 +573,16 @@ function App() {
           <main className="px-6 pb-12">
             {!projects || !sprints ? (
               <p className="text-ink-muted py-12 text-center">Loading…</p>
+            ) : projects.length === 0 ? (
+              <div className="py-20 text-center space-y-4">
+                <p className="text-ink-muted">No projects yet.</p>
+                <button
+                  onClick={() => setShowNewProject(true)}
+                  className="text-sm font-medium bg-accent hover:bg-accent-hover text-white rounded-[8px] px-4 py-2 transition"
+                >
+                  Create your first project
+                </button>
+              </div>
             ) : sprints.length === 0 ? (
               <div className="py-20 text-center space-y-4">
                 <p className="text-ink-muted">
@@ -570,6 +617,7 @@ function App() {
           </main>
         </div>
       </div>
+      )}
 
       {showNewProject && (
         <NewProjectDialog

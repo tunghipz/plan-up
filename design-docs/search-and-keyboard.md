@@ -23,6 +23,11 @@ Fast, keyboard-first navigation — speed > breadth (≤ 1 keystroke per action)
 
 Shortcuts are ignored while typing in an `input`/`textarea`/contentEditable.
 
+### While the settings page is open
+See [project-member-settings.md](./project-member-settings.md):
+- `Escape` closes the settings page **first** (priority over clearing search).
+- `n` and `/` are **disabled** (the search box is hidden; no sprint dialog over settings).
+
 ## Rules & edge cases
 - Search is per-current-sprint (it filters the already-scoped task list), not global.
 - Board search and list search use the same title-substring rule.

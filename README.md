@@ -30,11 +30,12 @@ npm run lint       # eslint .
   - **List** — grouped by assignee in inset-grouped cards · Reminders-style status circles · sortable column headers · width-aware auto-wrap titles
   - **Board** — Cupertino kanban: three columns on the grey canvas, white soft-shadowed cards · click the status circle to cycle
 - **Task fields**: title, assignee, sprint, status, priority, start/end date, estimate, dependencies
-- **Member header at a glance** — each assignee group shows a progress ring (% done) around the avatar, done/total, an overdue alert (only when > 0), remaining workload (`Nd left`), and days off as effective days (`1.5d off`, half-days count 0.5) — all derived from tasks, no extra fields
+- **Member header at a glance** — each assignee group shows a progress ring (% done) around the avatar, done/total, an overdue alert (only when > 0), the next upcoming deadline (`due Jun 10`), and days off as effective days (`1.5d off`, half-days count 0.5) — all derived from tasks, no extra fields
+- **Project & member settings** — gear next to the project name opens a settings page to edit the project (name, description, tile color), manage members (rename, color, days off, add/remove) with days-off shown as each member's primary metric, and delete the project
 - **Status** — Reminders-style circle (todo / in-progress / done) + soft-tint pill
 - **Auto-scheduling** — set effort + prereqs, dates compute automatically (skips weekends + per-member off-days, supports half-day off)
 - **Sprint rollover** — move unfinished tasks to next sprint in one click
-- **Inline rename** — double-click sprint name or member name to edit
+- **Inline rename** — double-click a sprint name to edit (member rename/delete live in the settings page)
 - **Cupertino UI** — Apple "design language": SF Pro + tabular figures · system blue `#0071E3` accent · grey canvas + white cards · large soft-rounded corners · vibrancy sidebars · depth over borders
 - **Keyboard-first**: `/` focus search · `n` new sprint · `⌘⇧D` toggle dark mode
 - **Export / Import JSON** — local-first backup, no sync
@@ -51,6 +52,7 @@ npm run lint       # eslint .
 
 - [`design.md`](./design.md) — product spec: premises, scope, success criteria
 - [`design-system.md`](./design-system.md) — UI/UX constitution: brand, typography, layout, component rules, anti-patterns
+- [`design-docs/`](./design-docs/) — one spec per feature (data model, scheduling, list/board, settings, …). **Doc-first: any feature change updates its doc before code.**
 
 Read `design-system.md` **before** building any new component.
 
@@ -60,7 +62,7 @@ Four IndexedDB tables in `app/src/db.ts`:
 
 | Table      | Fields                                                                            |
 | ---------- | --------------------------------------------------------------------------------- |
-| `projects` | id, name, createdAt                                                               |
+| `projects` | id, name, createdAt, description?, color?                                          |
 | `members`  | id, projectId, name, color, daysOff (`{date, half?}[]`)                           |
 | `sprints`  | id, projectId, name, startDate, endDate                                           |
 | `tasks`    | id, projectId, sequence, title, assigneeId, sprintId, status, priority, dependsOn, startDate, dueDate, estimate, … |

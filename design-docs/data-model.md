@@ -13,7 +13,11 @@ discipline that lets the schema evolve without losing local data.
 Four IndexedDB tables (Dexie database name **`plan-tmp`**):
 
 ### `Project` (`db.ts:19`)
-`id` · `name` · `createdAt` (number)
+`id` · `name` · `createdAt` (number) · `description?` (string) · `color?` (hex)
+- `description` and `color` are **optional, non-indexed** fields edited from the settings
+  page (see [project-member-settings.md](./project-member-settings.md)). Because they are
+  not indexed, adding them needed **no Dexie version bump**; rows without them fall back to
+  `colorForName(name)` and an empty description.
 
 ### `Member` (`db.ts:25`)
 `id` · `projectId` · `name` · `color` (hex) · `daysOff: DayOff[]`

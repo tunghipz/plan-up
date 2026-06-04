@@ -24,6 +24,7 @@ import {
   moveUnfinishedToNextSprint,
   createProject,
   deleteProject,
+  updateProject,
   nextSequence,
   dedupeSprints,
   exportAll,
@@ -772,6 +773,25 @@ describe('projects', () => {
     await mk('b1', 's2', 1)
     expect(await nextSequence('s1')).toBe(3)
     expect(await nextSequence('s2')).toBe(2)
+  })
+
+  it('updateProject patches name, description, and color', async () => {
+    const p = await createProject('Before')
+    await updateProject(p.id, {
+      name: 'After',
+      description: 'A side thing',
+      color: '#3b82f6',
+    })
+    const row = await db.projects.get(p.id)
+    expect(row?.name).toBe('After')
+    expect(row?.description).toBe('A side thing')
+    expect(row?.color).toBe('#3b82f6')
+    // Partial patches leave other fields intact.
+    await updateProject(p.id, { color: '#ef4444' })
+    const row2 = await db.projects.get(p.id)
+    expect(row2?.name).toBe('After')
+    expect(row2?.description).toBe('A side thing')
+    expect(row2?.color).toBe('#ef4444')
   })
 
   it('deleteProject cascades members + sprints + tasks', async () => {

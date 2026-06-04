@@ -51,6 +51,7 @@ Non-obvious behaviors, defaults, persistence keys.
 | [persistence-and-backup.md](./persistence-and-backup.md) | Local-first storage, export/import JSON, seeding |
 | [app-shell-and-navigation.md](./app-shell-and-navigation.md) | Layout, icon rail, resizable sprint panel, capacity stats |
 | [projects.md](./projects.md) | Multi-project create/switch/delete |
+| [project-member-settings.md](./project-member-settings.md) | Gear → settings page: edit project info (name/description/color) + members + delete |
 | [sprints.md](./sprints.md) | Sprint CRUD, biweekly defaults, per-sprint sequence |
 | [sprint-rollover.md](./sprint-rollover.md) | Move unfinished tasks to next sprint |
 | [members-and-days-off.md](./members-and-days-off.md) | Member labels, colors, off-days |

@@ -1,7 +1,7 @@
 # Members & days off
 
 **Status:** Implemented
-**Last updated:** 2026-06-03
+**Last updated:** 2026-06-04
 **Code:** `app/src/SprintView.tsx` (`Avatar`, `AddMemberRow`, `MemberScheduleButton`),
 `app/src/db.ts` (`setMemberDaysOff`, `deleteMember`, `colorForName`)
 
@@ -11,11 +11,13 @@ computed dates respect real availability.
 
 ## User-facing behavior
 - **Add:** "Add member" row → type a name → Enter (keeps focus for rapid entry).
-- **Rename:** double-click a member's name in its group header.
-- **Delete:** trash icon on the group header → their tasks become **Unassigned** (not
-  deleted).
+- **Rename & delete:** done from the **project settings page** (gear → see
+  [project-member-settings.md](./project-member-settings.md)), *not* the list view. The list
+  view group header is read-mostly — it no longer carries a rename or delete affordance
+  (those moved to settings to avoid two ways to do the same thing).
 - **Days off:** calendar button on the group header opens a popover to add/remove off-days,
   each optionally a half-day (AM/PM). The header chip shows effective days, e.g. `1.5d off`.
+  (Same control also lives in the settings page.)
 
 ## Data
 `Member { id, projectId, name, color, daysOff: DayOff[] }`. `DayOff = { date, half? }`;

@@ -32,13 +32,16 @@ pair (A, B) **conflicts** if **any** of:
 
 ## User-facing behavior (chosen: A + C)
 - **Per-row icon + tooltip (from option A):** each conflicting row shows a small
-  **amber warning triangle** (`AlertTriangle`, `--color-priority-high`) trailing the
-  title. Hover/tap → tooltip naming the other task(s) and which dimension clashes,
-  e.g. *"Overlaps with #34 (start time, end time); #35 (shared prerequisite)"*.
+  **amber warning triangle** (`AlertTriangle`, `--color-priority-high`) in a dedicated
+  **left warn gutter** (`COL.warn`, before the status dot / ID — present but empty on
+  non-conflicting rows so columns stay aligned). Hover/tap → tooltip naming the other
+  task(s) and which dimension clashes, e.g. *"Trùng lịch với #34 (giờ bắt đầu, giờ
+  kết thúc); #35 (chung prereq)"*.
 - **Header total badge (from option C):** the **member group header** shows an amber
-  chip `△ N` (count of that member's conflicting tasks) when N > 0, next to the
-  existing overdue/next-due stats. Gives at-a-glance awareness; the per-row icons
-  show exactly which rows.
+  chip `△ N trùng lịch` (spelled-out count) when N > 0, next to the existing
+  overdue/next-due stats. Gives at-a-glance awareness; the per-row icons show which rows.
+- Warning copy is **Vietnamese** (matches the user's demo); the rest of the row UI is
+  unchanged.
 - **Not** chosen: cell tinting (option B) and the left amber bar (option C's bar —
   it would clash with the group parent's accent bar).
 

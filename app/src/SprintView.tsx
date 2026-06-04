@@ -147,7 +147,7 @@ function computeMemberConflicts(
     }
   }
   const label = (k: Hit['kind']) =>
-    k === 'start' ? 'start time' : k === 'end' ? 'end time' : 'shared prerequisite'
+    k === 'start' ? 'giờ bắt đầu' : k === 'end' ? 'giờ kết thúc' : 'chung prereq'
   const tips = new Map<string, string>()
   for (const [id, list] of hits) {
     const byOther = new Map<number, Set<string>>()
@@ -159,7 +159,7 @@ function computeMemberConflicts(
     const parts = [...byOther.entries()].map(
       ([seq, kinds]) => `#${seq} (${[...kinds].join(', ')})`
     )
-    tips.set(id, `Overlaps with ${parts.join('; ')}`)
+    tips.set(id, `Trùng lịch với ${parts.join('; ')}`)
   }
   return tips
 }
@@ -636,10 +636,10 @@ function GroupHeader({
         {conflictCount !== undefined && conflictCount > 0 && (
           <span
             className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold tabular-nums bg-priority-high/15 text-priority-high"
-            title={`${conflictCount} task${conflictCount === 1 ? '' : 's'} double-booked (same start/end time or shared prerequisite)`}
+            title="Task trùng lịch: cùng giờ bắt đầu/kết thúc, hoặc chung prereq"
           >
             <AlertTriangle size={12} />
-            {conflictCount}
+            {conflictCount} trùng lịch
           </span>
         )}
         {stats}
@@ -743,6 +743,7 @@ function AddTaskRow({
   }
   return (
     <div className="flex items-center gap-3 px-4 py-2 text-sm">
+      <div className={COL.warn} />
       <div className={COL.dot}>
         <Plus size={14} className="text-ink-faint" />
       </div>
@@ -771,6 +772,7 @@ function AddTaskRow({
 //   seq "123"≈24 · "Effort (day)" hdr 73 · date "Jun 30, 17:00"≈99 · "In progress"
 //   pill 97 (+ pl-2). Title takes the slack via flex-1.
 const COL = {
+  warn: 'w-4 shrink-0 flex justify-center items-center',
   dot: 'w-4 shrink-0',
   seq: 'w-8 text-sm text-ink-faint tabular-nums text-center shrink-0 font-mono',
   title: 'flex-1 min-w-[150px]',
@@ -812,7 +814,6 @@ function TitleTextarea({
   welcomeHint,
   priority,
   indent = false,
-  warn,
 }: {
   value: string
   onChange: (v: string) => void
@@ -820,7 +821,6 @@ function TitleTextarea({
   welcomeHint: boolean
   priority: string
   indent?: boolean
-  warn?: string
 }) {
   const ref = useRef<HTMLTextAreaElement>(null)
   const resize = () => {
@@ -876,15 +876,6 @@ function TitleTextarea({
           done ? 'line-through text-ink-faint' : ''
         } ${welcomeHint ? 'welcome-hint' : ''}`}
       />
-      {warn && (
-        <span
-          className="shrink-0 mt-0.5 text-priority-high"
-          title={warn}
-          aria-label={warn}
-        >
-          <AlertTriangle size={13} />
-        </span>
-      )}
     </div>
   )
 }
@@ -955,6 +946,7 @@ function TaskGroupRow({
   }
   return (
     <div className="task-row group/row relative flex items-center gap-3 px-4 py-2 text-sm hover:bg-surface-hover transition bg-accent/[0.025]">
+      <div className={COL.warn} />
       <div className={COL.dot}>
         <span
           className="block w-2 h-2 rounded-full"
@@ -1190,6 +1182,13 @@ function TaskRow({
       className="task-row group/row relative flex items-center gap-3 px-4 py-2 text-sm hover:bg-surface-hover transition"
       title={blocked ? 'Blocked — waiting on a prerequisite task' : undefined}
     >
+      <div className={COL.warn}>
+        {warn && (
+          <span className="text-priority-high" title={warn} aria-label={warn}>
+            <AlertTriangle size={14} />
+          </span>
+        )}
+      </div>
       <div className={COL.dot}>
         <StatusDot
           status={task.status}
@@ -1214,7 +1213,6 @@ function TaskRow({
         welcomeHint={isWelcome}
         priority={task.priority}
         indent={isChild}
-        warn={warn}
       />
 
       {showAssignee && (
@@ -1467,6 +1465,7 @@ function TaskColumnHeader({
   }
   return (
     <div className="flex items-center gap-3 px-4 py-1.5 border-b border-border-hair bg-canvas-sunk/40">
+      <div className={COL.warn} />
       <div className={COL.dot} />
       <SortHeader
         className={COL.seq}

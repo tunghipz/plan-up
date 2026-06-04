@@ -16,6 +16,7 @@ import {
   MoreVertical,
   CornerDownRight,
   CornerUpLeft,
+  AlertTriangle,
 } from 'lucide-react'
 import {
   db,
@@ -92,6 +93,73 @@ export const STATUS_ORDER: Status[] = ['todo', 'in_progress', 'done']
 const COLLAPSE_KEY = (sprintId: string) => `plan-up:collapsed:${sprintId}`
 const GROUP_COLLAPSE_KEY = (parentId: string) =>
   `plan-up:taskgroup-collapsed:${parentId}`
+
+/**
+ * Detect schedule conflicts among one member's leaf tasks: a pair conflicts if
+ * they share a computed start datetime, a computed end datetime, or any
+ * prerequisite. Returns a per-task tooltip string (absent = no conflict). O(n²)
+ * over a member's tasks (small). See design-docs/conflict-warning.md.
+ */
+function computeMemberConflicts(
+  tasks: Task[],
+  tasksById: Map<string, Task>,
+  memberById: Map<string, Member>
+): Map<string, string> {
+  type Hit = { seq: number; kind: 'start' | 'end' | 'prereq' }
+  const plans = new Map(
+    tasks.map((t) => [t.id, computeWorkingPlan(t, tasksById, memberById)])
+  )
+  const startKey = (t: Task) => {
+    const p = plans.get(t.id)!
+    return p.startDate ? `${p.startDate}T${p.startTime ?? ''}` : null
+  }
+  const endKey = (t: Task) => {
+    const p = plans.get(t.id)!
+    return p.dueDate ? `${p.dueDate}T${p.endTime ?? ''}` : null
+  }
+  const hits = new Map<string, Hit[]>()
+  const push = (id: string, h: Hit) => {
+    const a = hits.get(id) ?? []
+    a.push(h)
+    hits.set(id, a)
+  }
+  for (let i = 0; i < tasks.length; i++) {
+    for (let j = i + 1; j < tasks.length; j++) {
+      const a = tasks[i]
+      const b = tasks[j]
+      const sa = startKey(a)
+      const ea = endKey(a)
+      if (sa && sa === startKey(b)) {
+        push(a.id, { seq: b.sequence, kind: 'start' })
+        push(b.id, { seq: a.sequence, kind: 'start' })
+      }
+      if (ea && ea === endKey(b)) {
+        push(a.id, { seq: b.sequence, kind: 'end' })
+        push(b.id, { seq: a.sequence, kind: 'end' })
+      }
+      if (a.dependsOn.some((d) => b.dependsOn.includes(d))) {
+        push(a.id, { seq: b.sequence, kind: 'prereq' })
+        push(b.id, { seq: a.sequence, kind: 'prereq' })
+      }
+    }
+  }
+  const label = (k: Hit['kind']) =>
+    k === 'start' ? 'start time' : k === 'end' ? 'end time' : 'shared prerequisite'
+  const tips = new Map<string, string>()
+  for (const [id, list] of hits) {
+    const byOther = new Map<number, Set<string>>()
+    for (const h of list) {
+      const s = byOther.get(h.seq) ?? new Set<string>()
+      s.add(label(h.kind))
+      byOther.set(h.seq, s)
+    }
+    const parts = [...byOther.entries()].map(
+      ([seq, kinds]) => `#${seq} (${[...kinds].join(', ')})`
+    )
+    tips.set(id, `Overlaps with ${parts.join('; ')}`)
+  }
+  return tips
+}
 
 /** Roll-up status of a parent task derived from its children (display only). */
 function derivedGroupStatus(children: Task[]): Status {
@@ -332,6 +400,9 @@ function MemberCard({
     if (isOverdue(due, false)) overdue++
     else if (!nextDue || due < nextDue) nextDue = due
   }
+  // Double-booking warnings among this member's leaf tasks (see
+  // design-docs/conflict-warning.md). Cheap O(n²) over a member's tasks.
+  const conflictTips = computeMemberConflicts(leafTasks, tasksById, memberById)
   return (
     <Card>
       <GroupHeader
@@ -341,6 +412,7 @@ function MemberCard({
         count={total}
         countText={`${done}/${total}`}
         stats={<MemberStatsBar overdue={overdue} nextDue={nextDue} />}
+        conflictCount={conflictTips.size}
         collapsed={collapsed}
         onToggleCollapse={onToggleCollapse}
         extras={<MemberDaysOffButton member={member} />}
@@ -362,6 +434,7 @@ function MemberCard({
                 allTasks={allTasks}
                 tasksById={tasksById}
                 showAssignee={false}
+                conflictTips={conflictTips}
               />
               <AddTaskRow
                 projectId={projectId}
@@ -496,6 +569,7 @@ function GroupHeader({
   count,
   countText,
   stats,
+  conflictCount,
   muted,
   collapsed,
   onToggleCollapse,
@@ -508,6 +582,8 @@ function GroupHeader({
   count: number
   /** Overrides the bare count display (e.g. "3/7" done-of-total). */
   countText?: string
+  /** Number of this member's tasks involved in a schedule conflict (amber badge). */
+  conflictCount?: number
   /** Right-aligned stats (overdue/workload) rendered before extras. */
   stats?: React.ReactNode
   muted?: boolean
@@ -554,6 +630,15 @@ function GroupHeader({
         {countText ?? count}
       </span>
       <div className="ml-auto flex items-center gap-2.5">
+        {conflictCount !== undefined && conflictCount > 0 && (
+          <span
+            className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold tabular-nums bg-priority-high/15 text-priority-high"
+            title={`${conflictCount} task${conflictCount === 1 ? '' : 's'} double-booked (same start/end time or shared prerequisite)`}
+          >
+            <AlertTriangle size={12} />
+            {conflictCount}
+          </span>
+        )}
         {stats}
         {extras}
       </div>
@@ -724,6 +809,7 @@ function TitleTextarea({
   welcomeHint,
   priority,
   indent = false,
+  warn,
 }: {
   value: string
   onChange: (v: string) => void
@@ -731,6 +817,7 @@ function TitleTextarea({
   welcomeHint: boolean
   priority: string
   indent?: boolean
+  warn?: string
 }) {
   const ref = useRef<HTMLTextAreaElement>(null)
   const resize = () => {
@@ -786,6 +873,15 @@ function TitleTextarea({
           done ? 'line-through text-ink-faint' : ''
         } ${welcomeHint ? 'welcome-hint' : ''}`}
       />
+      {warn && (
+        <span
+          className="shrink-0 mt-0.5 text-priority-high"
+          title={warn}
+          aria-label={warn}
+        >
+          <AlertTriangle size={13} />
+        </span>
+      )}
     </div>
   )
 }
@@ -941,12 +1037,15 @@ function TaskRows({
   allTasks,
   tasksById,
   showAssignee = true,
+  conflictTips,
 }: {
   tasks: Task[]
   members: Member[]
   allTasks: Task[]
   tasksById: Map<string, Task>
   showAssignee?: boolean
+  /** taskId → conflict tooltip (member double-booking); absent map = no warnings. */
+  conflictTips?: Map<string, string>
 }) {
   const { topLevel, childrenByParent } = useMemo(() => {
     const idSet = new Set(tasks.map((t) => t.id))
@@ -1015,6 +1114,7 @@ function TaskRows({
                     showAssignee={showAssignee}
                     isChild
                     onUngroup={() => setTaskParent(c.id, null)}
+                    warn={conflictTips?.get(c.id)}
                   />
                 ))}
             </Fragment>
@@ -1032,6 +1132,7 @@ function TaskRows({
             showAssignee={showAssignee}
             groupCandidates={candidates}
             onGroupUnder={(pid) => setTaskParent(t.id, pid)}
+            warn={conflictTips?.get(t.id)}
           />
         )
       })}
@@ -1049,6 +1150,7 @@ function TaskRow({
   groupCandidates,
   onGroupUnder,
   onUngroup,
+  warn,
 }: {
   task: Task
   members: Member[]
@@ -1059,6 +1161,8 @@ function TaskRow({
   groupCandidates?: Task[]
   onGroupUnder?: (parentId: string) => void
   onUngroup?: () => void
+  /** Conflict tooltip — renders an amber warning triangle after the title. */
+  warn?: string
 }) {
   const update = (patch: Partial<Task>) => db.tasks.update(task.id, patch)
   const assignee = members.find((m) => m.id === task.assigneeId) ?? null
@@ -1107,6 +1211,7 @@ function TaskRow({
         welcomeHint={isWelcome}
         priority={task.priority}
         indent={isChild}
+        warn={warn}
       />
 
       {showAssignee && (

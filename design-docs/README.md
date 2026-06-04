@@ -59,6 +59,7 @@ Non-obvious behaviors, defaults, persistence keys.
 | [tasks.md](./tasks.md) | Task CRUD, fields, inline editing |
 | [task-groups.md](./task-groups.md) | Group tasks under a parent task (nested, roll-up + collapse) |
 | [scheduling.md](./scheduling.md) | Auto-scheduling engine (effort, prereqs, workdays) |
+| [conflict-warning.md](./conflict-warning.md) | Warn when a member is double-booked (same start/end/prereq) |
 | [dependencies.md](./dependencies.md) | Prerequisites, cycle prevention, blocked state |
 | [status-and-priority.md](./status-and-priority.md) | Status circle/pill, priority chip |
 | [list-view.md](./list-view.md) | Grouped cards, sortable columns, column widths |

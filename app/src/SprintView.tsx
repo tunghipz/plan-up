@@ -1023,6 +1023,10 @@ function StatusPill({ status }: { status: Status }) {
   const meta = STATUS_META[status]
   const bg = `color-mix(in srgb, ${meta.varName} 15%, transparent)`
   const fg = `color-mix(in srgb, ${meta.varName} 100%, #000 22%)`
+  // The interactive StatusPicker's native <select> reserves space for the
+  // widest option ("In progress"), so its pill is always that wide. Reserve
+  // the same width here via an invisible sizer so the group's read-only pill
+  // matches a normal row's pill exactly (see design-docs/task-groups.md).
   return (
     <span
       className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 leading-none"
@@ -1033,11 +1037,19 @@ function StatusPill({ status }: { status: Status }) {
         style={{ background: meta.varName }}
         aria-hidden
       />
-      <span
-        className="text-[11.5px] font-semibold leading-[1.35]"
-        style={{ color: fg }}
-      >
-        {meta.label}
+      <span className="grid">
+        <span
+          className="invisible col-start-1 row-start-1 text-[11.5px] font-semibold leading-[1.35]"
+          aria-hidden
+        >
+          In progress
+        </span>
+        <span
+          className="col-start-1 row-start-1 text-[11.5px] font-semibold leading-[1.35]"
+          style={{ color: fg }}
+        >
+          {meta.label}
+        </span>
       </span>
     </span>
   )

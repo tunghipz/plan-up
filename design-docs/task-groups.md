@@ -36,7 +36,11 @@ separate epic/tag system. Approach **B** chosen 2026-06-04 (see
     bar; the empty grey track read as noise at 0%, removed 2026-06-04),
   - a **derived status** badge (done if all children done; in-progress if any child
     is in-progress/done but not all done; else to-do) — display-only, computed on
-    render, not written to the parent's stored `status`,
+    render, not written to the parent's stored `status`. The badge is the read-only
+    `StatusPill`, sized to match a normal row's interactive pill exactly: that pill's
+    native `<select>` reserves the widest label's width ("In progress"), so `StatusPill`
+    reserves the same via an invisible sizer (no magic px) — group and normal status
+    pills line up regardless of the displayed status,
   - a **summed effort** (sum of children `estimate`) in the Effort cell,
   - **dates** = the span of children (earliest child start → latest child end),
     read-only, shown with the **same date+time format and size as a normal row**

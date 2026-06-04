@@ -50,9 +50,10 @@ npm run dev   # http://localhost:5173
 Khi user nói **"push git"** / "push" / "đẩy lên", chạy lần lượt:
 
 1. **Update README** — đồng bộ `README.md` với các tính năng/đổi mới chưa phản ánh.
-2. **Init dự án (sanity gate)** — từ `app/`: `npx tsc --noEmit && npm run build && npx vitest run`. Phải pass hết mới đi tiếp; fail thì dừng, báo user, không push.
-3. **Commit** — commit mọi thay đổi đang chờ (README + code) với message rõ ràng + trailer.
-4. **Push git** — `git push` lên remote (branch hiện tại).
+2. **Update document liên quan** — rà & cập nhật mọi doc liên quan tới thay đổi cho khớp code mới nhất: `design-docs/<feature>.md` (bump *Last updated*), `design.md`, `design-system.md`, `design-docs/data-model.md`, `design-docs/README.md` (index) nếu có động tới. Đảm bảo doc là nguồn sự thật mới nhất, không lệch với code.
+3. **Init dự án (sanity gate)** — từ `app/`: `npx tsc --noEmit && npm run build && npx vitest run`. Phải pass hết mới đi tiếp; fail thì dừng, báo user, không push.
+4. **Commit** — commit mọi thay đổi đang chờ (docs + code) với message rõ ràng + trailer.
+5. **Push git** — `git push` lên remote (branch hiện tại).
 
 ## Data model
 

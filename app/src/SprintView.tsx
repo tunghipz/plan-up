@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
 } from 'react'
+import { createPortal } from 'react-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
   Plus,
@@ -1192,37 +1193,85 @@ function RowActionsMenu({
 }) {
   const [open, setOpen] = useState(false)
   const [sub, setSub] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
+  // Menu is rendered in a portal (fixed, anchored to the trigger) so it is never
+  // clipped by the member card's overflow-x-auto scroll container. Flips upward
+  // when the trigger sits near the viewport bottom.
+  const [pos, setPos] = useState<{
+    top?: number
+    bottom?: number
+    right: number
+  } | null>(null)
+  const btnRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     if (!open) return
     const onDoc = (e: MouseEvent) => {
-      if (!ref.current?.contains(e.target as Node)) {
+      const t = e.target as Node
+      if (!menuRef.current?.contains(t) && !btnRef.current?.contains(t)) {
         setOpen(false)
         setSub(false)
       }
     }
+    const onScroll = () => {
+      setOpen(false)
+      setSub(false)
+    }
     document.addEventListener('mousedown', onDoc)
-    return () => document.removeEventListener('mousedown', onDoc)
+    window.addEventListener('scroll', onScroll, true)
+    return () => {
+      document.removeEventListener('mousedown', onDoc)
+      window.removeEventListener('scroll', onScroll, true)
+    }
   }, [open])
+  const toggle = () => {
+    if (open) {
+      setOpen(false)
+      setSub(false)
+      return
+    }
+    const r = btnRef.current?.getBoundingClientRect()
+    if (r) {
+      const right = window.innerWidth - r.right
+      const openUp = window.innerHeight - r.bottom < 180
+      setPos(
+        openUp
+          ? { bottom: window.innerHeight - r.top + 6, right }
+          : { top: r.bottom + 6, right }
+      )
+    }
+    setSub(false)
+    setOpen(true)
+  }
   const canGroup = !!(onGroupUnder && groupCandidates && groupCandidates.length > 0)
   const item =
     'w-full flex items-center gap-2 px-2.5 py-1.5 rounded-[7px] text-left transition'
   return (
-    <div ref={ref} className="relative">
+    <div className="relative">
       <button
+        ref={btnRef}
         onClick={(e) => {
           e.stopPropagation()
-          setOpen((v) => !v)
-          setSub(false)
+          toggle()
         }}
         className="w-4 h-4 inline-flex items-center justify-center rounded text-ink-faint opacity-50 group-hover/row:opacity-100 hover:!opacity-100 hover:text-ink hover:bg-canvas-sunk transition"
         aria-label="Row actions"
       >
         <MoreVertical size={12} />
       </button>
-      {open && (
-        <div className="absolute right-0 top-7 z-20 min-w-[190px] rounded-[12px] border border-border-hair bg-surface shadow-[0_10px_30px_rgba(0,0,0,0.16)] p-1 text-sm">
-          {!sub && onUngroup && (
+      {open &&
+        pos &&
+        createPortal(
+          <div
+            ref={menuRef}
+            style={{
+              position: 'fixed',
+              top: pos.top,
+              bottom: pos.bottom,
+              right: pos.right,
+            }}
+            className="z-50 min-w-[190px] rounded-[12px] border border-border-hair bg-surface shadow-[0_10px_30px_rgba(0,0,0,0.16)] p-1 text-sm"
+          >
+            {!sub && onUngroup && (
             <button
               onClick={() => {
                 setOpen(false)
@@ -1278,8 +1327,9 @@ function RowActionsMenu({
               Delete task
             </button>
           )}
-        </div>
-      )}
+          </div>,
+          document.body
+        )}
     </div>
   )
 }

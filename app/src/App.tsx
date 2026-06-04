@@ -309,7 +309,11 @@ function App() {
   }
 
   const capacity = useMemo(() => {
-    const t = tasks ?? []
+    const all = tasks ?? []
+    // Leaf-based: a parent (task with children) is a container, excluded so its
+    // work isn't double-counted with its children. See design-docs/task-groups.md.
+    const parentIds = new Set(all.filter((x) => x.parentId).map((x) => x.parentId))
+    const t = all.filter((x) => !parentIds.has(x.id))
     const total = t.length
     const assigned = t.filter((x) => x.assigneeId !== null).length
     const notEstimated = t.filter((x) => x.estimate === null).length

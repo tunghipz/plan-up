@@ -1,4 +1,11 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import {
+  Fragment,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
   Plus,
@@ -6,12 +13,15 @@ import {
   ChevronDown,
   UserPlus,
   MoreVertical,
+  CornerDownRight,
+  CornerUpLeft,
 } from 'lucide-react'
 import {
   db,
   uid,
   colorForName,
   deleteTask,
+  setTaskParent,
   setDependencies,
   recomputeDates,
   computeWorkingPlan,
@@ -79,6 +89,17 @@ export const STATUS_META: Record<Status, { label: string; varName: string }> = {
 export const STATUS_ORDER: Status[] = ['todo', 'in_progress', 'done']
 
 const COLLAPSE_KEY = (sprintId: string) => `plan-up:collapsed:${sprintId}`
+const GROUP_COLLAPSE_KEY = (parentId: string) =>
+  `plan-up:taskgroup-collapsed:${parentId}`
+
+/** Roll-up status of a parent task derived from its children (display only). */
+function derivedGroupStatus(children: Task[]): Status {
+  if (children.length === 0) return 'todo'
+  if (children.every((c) => c.status === 'done')) return 'done'
+  if (children.some((c) => c.status === 'in_progress' || c.status === 'done'))
+    return 'in_progress'
+  return 'todo'
+}
 
 function loadCollapsed(sprintId: string): Set<string> {
   try {
@@ -285,8 +306,17 @@ function MemberCard({
     React.SetStateAction<{ field: SortField; dir: 'asc' | 'desc' }>
   >
 }) {
-  const total = tasks.length
-  const done = tasks.filter((t) => t.status === 'done').length
+  // Leaf-based counting: a parent (a task with children in this list) is a
+  // container, excluded from done/total/overdue so its work isn't double-counted
+  // with its children. See design-docs/task-groups.md.
+  const parentIds = useMemo(() => {
+    const s = new Set<string>()
+    for (const t of tasks) if (t.parentId) s.add(t.parentId)
+    return s
+  }, [tasks])
+  const leafTasks = tasks.filter((t) => !parentIds.has(t.id))
+  const total = leafTasks.length
+  const done = leafTasks.filter((t) => t.status === 'done').length
   const pct = total ? Math.round((done / total) * 100) : 0
   const memberById = useMemo(() => new Map(members.map((m) => [m.id, m])), [members])
   // Use each task's COMPUTED end (same plan the End column shows) so the header
@@ -294,7 +324,7 @@ function MemberCard({
   // earliest unfinished end that is today-or-later (the next upcoming deadline).
   let overdue = 0
   let nextDue: string | null = null
-  for (const t of tasks) {
+  for (const t of leafTasks) {
     if (t.status === 'done') continue
     const due = computeWorkingPlan(t, tasksById, memberById).dueDate
     if (!due) continue
@@ -325,16 +355,13 @@ function MemberCard({
               <TaskColumnHeader sort={sort} setSort={setSort} showAssignee={false} />
             )}
             <div className="divide-y divide-border">
-              {tasks.map((t) => (
-                <TaskRow
-                  key={t.id}
-                  task={t}
-                  members={members}
-                  allTasks={allTasks}
-                  tasksById={tasksById}
-                  showAssignee={false}
-                />
-              ))}
+              <TaskRows
+                tasks={tasks}
+                members={members}
+                allTasks={allTasks}
+                tasksById={tasksById}
+                showAssignee={false}
+              />
               <AddTaskRow
                 projectId={projectId}
                 sprintId={sprintId}
@@ -383,15 +410,12 @@ function UnassignedCard({
         <div className="min-w-[896px]">
           {tasks.length > 0 && <TaskColumnHeader sort={sort} setSort={setSort} />}
           <div className="divide-y divide-border">
-            {tasks.map((t) => (
-              <TaskRow
-                key={t.id}
-                task={t}
-                members={members}
-                allTasks={allTasks}
-                tasksById={tasksById}
-              />
-            ))}
+            <TaskRows
+              tasks={tasks}
+              members={members}
+              allTasks={allTasks}
+              tasksById={tasksById}
+            />
           </div>
         </div>
       </div>
@@ -698,12 +722,14 @@ function TitleTextarea({
   done,
   welcomeHint,
   priority,
+  indent = false,
 }: {
   value: string
   onChange: (v: string) => void
   done: boolean
   welcomeHint: boolean
   priority: string
+  indent?: boolean
 }) {
   const ref = useRef<HTMLTextAreaElement>(null)
   const resize = () => {
@@ -733,7 +759,16 @@ function TitleTextarea({
     return () => ro.disconnect()
   }, [])
   return (
-    <div className={`${COL.title} flex items-start gap-1.5`}>
+    <div
+      className={`${COL.title} flex items-start gap-1.5 ${indent ? 'relative pl-5' : ''}`}
+    >
+      {indent && (
+        <span
+          className="absolute left-1.5 top-[0.7em] w-2.5 h-px"
+          style={{ background: 'var(--color-ink-faint)' }}
+          aria-hidden
+        />
+      )}
       <PriorityChip priority={priority} />
       <textarea
         ref={ref}
@@ -754,18 +789,275 @@ function TitleTextarea({
   )
 }
 
+/** Static (read-only) status pill — used for a group's derived status. */
+function StatusPill({ status }: { status: Status }) {
+  const meta = STATUS_META[status]
+  const bg = `color-mix(in srgb, ${meta.varName} 15%, transparent)`
+  const fg = `color-mix(in srgb, ${meta.varName} 100%, #000 22%)`
+  return (
+    <span
+      className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 leading-none"
+      style={{ background: bg }}
+    >
+      <span
+        className="w-1.5 h-1.5 rounded-full shrink-0"
+        style={{ background: meta.varName }}
+        aria-hidden
+      />
+      <span
+        className="text-[11.5px] font-semibold leading-[1.35]"
+        style={{ color: fg }}
+      >
+        {meta.label}
+      </span>
+    </span>
+  )
+}
+
+/**
+ * Parent ("group") task row: a real task that also heads a group. Its own
+ * status/effort/dates are replaced by values rolled up from its children —
+ * progress count + bar, derived status, summed effort, child date span. The
+ * title stays editable; a chevron collapses the group. The parent is excluded
+ * from member counts/capacity (leaf-based counting). See design-docs/task-groups.md.
+ */
+function TaskGroupRow({
+  task,
+  childrenTasks,
+  members,
+  tasksById,
+  collapsed,
+  onToggle,
+}: {
+  task: Task
+  childrenTasks: Task[]
+  members: Member[]
+  tasksById: Map<string, Task>
+  collapsed: boolean
+  onToggle: () => void
+}) {
+  const memberById = useMemo(
+    () => new Map(members.map((m) => [m.id, m])),
+    [members]
+  )
+  const total = childrenTasks.length
+  const done = childrenTasks.filter((c) => c.status === 'done').length
+  const pct = total ? Math.round((done / total) * 100) : 0
+  const derived = derivedGroupStatus(childrenTasks)
+  const hasEffort = childrenTasks.some((c) => c.estimate !== null)
+  const effortSum = childrenTasks.reduce((s, c) => s + (c.estimate ?? 0), 0)
+  let minStart: string | null = null
+  let maxDue: string | null = null
+  for (const c of childrenTasks) {
+    const { startDate, dueDate } = computeWorkingPlan(c, tasksById, memberById)
+    if (startDate && (!minStart || startDate < minStart)) minStart = startDate
+    if (dueDate && (!maxDue || dueDate > maxDue)) maxDue = dueDate
+  }
+  return (
+    <div className="task-row group/row relative flex items-center gap-3 px-4 py-2 text-sm hover:bg-surface-hover transition bg-accent/[0.025]">
+      <div className={COL.dot}>
+        <span
+          className="block w-2 h-2 rounded-full"
+          style={{ background: STATUS_META[derived].varName }}
+          aria-hidden
+        />
+      </div>
+      <div className={COL.seq} title="Task number">
+        {task.sequence}
+      </div>
+      <div className={`${COL.title} flex items-center gap-1.5 min-w-0`}>
+        <button
+          onClick={onToggle}
+          className="shrink-0 text-ink-faint hover:text-ink transition"
+          aria-label={collapsed ? 'Expand group' : 'Collapse group'}
+        >
+          <ChevronDown
+            size={14}
+            className={`transition-transform ${collapsed ? '-rotate-90' : ''}`}
+          />
+        </button>
+        <TitleTextarea
+          value={task.title}
+          onChange={(v) => db.tasks.update(task.id, { title: v })}
+          done={false}
+          welcomeHint={false}
+          priority={task.priority}
+        />
+        <span className="shrink-0 text-[11px] font-medium text-ink-faint tabular-nums">
+          {done}/{total}
+        </span>
+        <span className="shrink-0 w-10 h-1.5 rounded-full bg-canvas-sunk overflow-hidden">
+          <span
+            className="block h-full rounded-full bg-status-done"
+            style={{ width: `${pct}%` }}
+          />
+        </span>
+      </div>
+      <div className={COL.effort}>
+        <span className="text-[13px] text-ink-muted tabular-nums">
+          {hasEffort ? effortSum : '—'}
+        </span>
+      </div>
+      <div className={COL.start}>
+        <span className="text-[13px] text-ink-faint tabular-nums">
+          {minStart ? formatShortDate(minStart) : '—'}
+        </span>
+      </div>
+      <div className={COL.due}>
+        <span className="text-[13px] text-ink-faint tabular-nums">
+          {maxDue ? formatShortDate(maxDue) : '—'}
+        </span>
+      </div>
+      <div className={COL.status}>
+        <StatusPill status={derived} />
+      </div>
+      <div className={COL.prereq} />
+      <div className={COL.actions}>
+        <RowActionsMenu
+          onDelete={() => {
+            if (
+              confirm(
+                'Delete this group task? Its grouped tasks become ungrouped, not deleted.'
+              )
+            )
+              deleteTask(task.id)
+          }}
+        />
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Renders a member/unassigned task list as a one-level tree: top-level tasks in
+ * sort order, each parent immediately followed by its (sorted) children. A child
+ * whose parent isn't in this list (moved member/sprint) falls back to top-level.
+ * Returns a fragment so the caller's `divide-y` separates every row uniformly.
+ */
+function TaskRows({
+  tasks,
+  members,
+  allTasks,
+  tasksById,
+  showAssignee = true,
+}: {
+  tasks: Task[]
+  members: Member[]
+  allTasks: Task[]
+  tasksById: Map<string, Task>
+  showAssignee?: boolean
+}) {
+  const { topLevel, childrenByParent } = useMemo(() => {
+    const idSet = new Set(tasks.map((t) => t.id))
+    const childrenByParent = new Map<string, Task[]>()
+    for (const t of tasks) {
+      if (t.parentId && idSet.has(t.parentId)) {
+        const arr = childrenByParent.get(t.parentId) ?? []
+        arr.push(t)
+        childrenByParent.set(t.parentId, arr)
+      }
+    }
+    const isChild = (t: Task) => !!(t.parentId && idSet.has(t.parentId))
+    return { topLevel: tasks.filter((t) => !isChild(t)), childrenByParent }
+  }, [tasks])
+
+  // Collapse state per parent, persisted to localStorage. Seed once for the
+  // parents present; newly-created groups default to expanded.
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set())
+  useEffect(() => {
+    setCollapsed((prev) => {
+      const next = new Set(prev)
+      for (const pid of childrenByParent.keys()) {
+        if (localStorage.getItem(GROUP_COLLAPSE_KEY(pid)) === '1') next.add(pid)
+      }
+      return next
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  const toggle = (id: string) =>
+    setCollapsed((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) {
+        next.delete(id)
+        localStorage.removeItem(GROUP_COLLAPSE_KEY(id))
+      } else {
+        next.add(id)
+        localStorage.setItem(GROUP_COLLAPSE_KEY(id), '1')
+      }
+      return next
+    })
+
+  return (
+    <>
+      {topLevel.map((t) => {
+        const kids = childrenByParent.get(t.id)
+        if (kids && kids.length > 0) {
+          const isCollapsed = collapsed.has(t.id)
+          return (
+            <Fragment key={t.id}>
+              <TaskGroupRow
+                task={t}
+                childrenTasks={kids}
+                members={members}
+                tasksById={tasksById}
+                collapsed={isCollapsed}
+                onToggle={() => toggle(t.id)}
+              />
+              {!isCollapsed &&
+                kids.map((c) => (
+                  <TaskRow
+                    key={c.id}
+                    task={c}
+                    members={members}
+                    allTasks={allTasks}
+                    tasksById={tasksById}
+                    showAssignee={showAssignee}
+                    isChild
+                    onUngroup={() => setTaskParent(c.id, null)}
+                  />
+                ))}
+            </Fragment>
+          )
+        }
+        // Top-level leaf: can be grouped under any other top-level task.
+        const candidates = topLevel.filter((x) => x.id !== t.id)
+        return (
+          <TaskRow
+            key={t.id}
+            task={t}
+            members={members}
+            allTasks={allTasks}
+            tasksById={tasksById}
+            showAssignee={showAssignee}
+            groupCandidates={candidates}
+            onGroupUnder={(pid) => setTaskParent(t.id, pid)}
+          />
+        )
+      })}
+    </>
+  )
+}
+
 function TaskRow({
   task,
   members,
   allTasks,
   tasksById,
   showAssignee = true,
+  isChild = false,
+  groupCandidates,
+  onGroupUnder,
+  onUngroup,
 }: {
   task: Task
   members: Member[]
   allTasks: Task[]
   tasksById: Map<string, Task>
   showAssignee?: boolean
+  isChild?: boolean
+  groupCandidates?: Task[]
+  onGroupUnder?: (parentId: string) => void
+  onUngroup?: () => void
 }) {
   const update = (patch: Partial<Task>) => db.tasks.update(task.id, patch)
   const assignee = members.find((m) => m.id === task.assigneeId) ?? null
@@ -813,6 +1105,7 @@ function TaskRow({
         done={task.status === 'done'}
         welcomeHint={isWelcome}
         priority={task.priority}
+        indent={isChild}
       />
 
       {showAssignee && (
@@ -872,6 +1165,9 @@ function TaskRow({
           onDelete={() => {
             if (confirm('Delete this task?')) deleteTask(task.id)
           }}
+          groupCandidates={groupCandidates}
+          onGroupUnder={onGroupUnder}
+          onUngroup={onUngroup}
         />
       </div>
     </div>
@@ -883,23 +1179,41 @@ function TaskRow({
  * touch-friendly, no hover bias. Currently surfaces just Delete; room to add
  * Duplicate / Move-to-sprint / Archive later without changing the row layout.
  */
-function RowActionsMenu({ onDelete }: { onDelete: () => void }) {
+function RowActionsMenu({
+  onDelete,
+  groupCandidates,
+  onGroupUnder,
+  onUngroup,
+}: {
+  onDelete: () => void
+  groupCandidates?: Task[]
+  onGroupUnder?: (parentId: string) => void
+  onUngroup?: () => void
+}) {
   const [open, setOpen] = useState(false)
+  const [sub, setSub] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
     if (!open) return
     const onDoc = (e: MouseEvent) => {
-      if (!ref.current?.contains(e.target as Node)) setOpen(false)
+      if (!ref.current?.contains(e.target as Node)) {
+        setOpen(false)
+        setSub(false)
+      }
     }
     document.addEventListener('mousedown', onDoc)
     return () => document.removeEventListener('mousedown', onDoc)
   }, [open])
+  const canGroup = !!(onGroupUnder && groupCandidates && groupCandidates.length > 0)
+  const item =
+    'w-full flex items-center gap-2 px-2.5 py-1.5 rounded-[7px] text-left transition'
   return (
     <div ref={ref} className="relative">
       <button
         onClick={(e) => {
           e.stopPropagation()
           setOpen((v) => !v)
+          setSub(false)
         }}
         className="w-4 h-4 inline-flex items-center justify-center rounded text-ink-faint opacity-50 group-hover/row:opacity-100 hover:!opacity-100 hover:text-ink hover:bg-canvas-sunk transition"
         aria-label="Row actions"
@@ -907,17 +1221,63 @@ function RowActionsMenu({ onDelete }: { onDelete: () => void }) {
         <MoreVertical size={12} />
       </button>
       {open && (
-        <div className="absolute right-0 top-7 z-20 min-w-[160px] rounded-[12px] border border-border-hair bg-surface shadow-[0_10px_30px_rgba(0,0,0,0.16)] p-1 text-sm">
-          <button
-            onClick={() => {
-              setOpen(false)
-              onDelete()
-            }}
-            className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-[7px] text-left text-red-500 hover:bg-red-500/10 transition"
-          >
-            <Trash2 size={13} />
-            Delete task
-          </button>
+        <div className="absolute right-0 top-7 z-20 min-w-[190px] rounded-[12px] border border-border-hair bg-surface shadow-[0_10px_30px_rgba(0,0,0,0.16)] p-1 text-sm">
+          {!sub && onUngroup && (
+            <button
+              onClick={() => {
+                setOpen(false)
+                onUngroup()
+              }}
+              className={`${item} text-ink hover:bg-surface-hover`}
+            >
+              <CornerUpLeft size={13} className="text-ink-faint" />
+              Remove from group
+            </button>
+          )}
+          {!sub && canGroup && (
+            <button
+              onClick={() => setSub(true)}
+              className={`${item} text-ink hover:bg-surface-hover`}
+            >
+              <CornerDownRight size={13} className="text-ink-faint" />
+              Group under…
+            </button>
+          )}
+          {sub && canGroup && (
+            <div className="max-h-56 overflow-auto">
+              <div className="px-2.5 py-1 text-[11px] font-semibold text-ink-faint">
+                Group under…
+              </div>
+              {groupCandidates!.map((c) => (
+                <button
+                  key={c.id}
+                  onClick={() => {
+                    setOpen(false)
+                    setSub(false)
+                    onGroupUnder!(c.id)
+                  }}
+                  className={`${item} text-ink hover:bg-surface-hover`}
+                >
+                  <span className="font-mono text-ink-faint text-[12px] shrink-0">
+                    {c.sequence}
+                  </span>
+                  <span className="truncate">{c.title || 'Untitled'}</span>
+                </button>
+              ))}
+            </div>
+          )}
+          {!sub && (
+            <button
+              onClick={() => {
+                setOpen(false)
+                onDelete()
+              }}
+              className={`${item} text-red-500 hover:bg-red-500/10`}
+            >
+              <Trash2 size={13} />
+              Delete task
+            </button>
+          )}
         </div>
       )}
     </div>

@@ -73,6 +73,13 @@ export interface Task {
   createdAt: number
   /** IDs of tasks that must be `done` before this one can start. */
   dependsOn: string[]
+  /**
+   * Optional parent task this task is grouped under (one level only — a child
+   * cannot itself be a parent). Organizational display only; NOT a scheduling
+   * constraint (unlike dependsOn). Non-indexed → no Dexie version bump; children
+   * are grouped in memory. See design-docs/task-groups.md.
+   */
+  parentId?: string | null
 }
 
 class PlanDB extends Dexie {
@@ -712,10 +719,39 @@ export async function setMemberDaysOff(
  * Cascade-safe task delete: also strips the task ID from any other task's
  * `dependsOn` array so we don't leave dangling references.
  */
+/**
+ * Group `childId` under `parentId` (or pass null to ungroup). Enforces a single
+ * level of nesting: the target parent must be top-level (no parent of its own),
+ * and the child must not already have children. See design-docs/task-groups.md.
+ */
+export async function setTaskParent(
+  childId: string,
+  parentId: string | null
+): Promise<void> {
+  if (parentId === null) {
+    await db.tasks.update(childId, { parentId: null })
+    return
+  }
+  if (parentId === childId) return
+  const [parent, hasChildren] = await Promise.all([
+    db.tasks.get(parentId),
+    // parentId is non-indexed → filter, not where()
+    db.tasks.filter((t) => t.parentId === childId).count(),
+  ])
+  // Guard: target must exist & be top-level; child must not be a parent itself.
+  if (!parent || parent.parentId || hasChildren > 0) return
+  await db.tasks.update(childId, { parentId })
+}
+
 export async function deleteTask(taskId: string) {
   const touched: string[] = []
   await db.transaction('rw', db.tasks, async () => {
     await db.tasks.delete(taskId)
+    // Promote any grouped children to top-level (do NOT cascade-delete them).
+    const children = await db.tasks.filter((t) => t.parentId === taskId).toArray()
+    for (const c of children) {
+      await db.tasks.update(c.id, { parentId: null })
+    }
     const dependents = await db.tasks
       .filter((t) => t.dependsOn?.includes(taskId))
       .toArray()

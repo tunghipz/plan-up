@@ -19,10 +19,11 @@ import {
 } from './members'
 
 /**
- * Full-column settings page for the current project: edit the project's own
- * info (name / description / color) and manage its members (name, color,
- * days-off, add/remove). Opened via the gear button; takes over the main
- * column. See design-docs/project-member-settings.md.
+ * Settings for the current project: edit the project's own info (name /
+ * description / color) and manage its members (name, color, days-off,
+ * add/remove). Rendered inside a right-side drawer (App.tsx owns the backdrop
+ * + slide); this component is just the header + scrollable body, sized for a
+ * narrow single column. See design-docs/project-member-settings.md.
  */
 export function ProjectSettingsView({
   project,
@@ -73,7 +74,7 @@ export function ProjectSettingsView({
   }
 
   return (
-    <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+    <div className="flex h-full flex-col min-w-0 overflow-hidden">
       <header className="h-[54px] shrink-0 border-b border-border-hair bg-surface flex items-center px-5 gap-3">
         <h1 className="text-[15px] font-semibold text-ink tracking-[-0.01em]">
           Project settings
@@ -88,8 +89,8 @@ export function ProjectSettingsView({
         </button>
       </header>
 
-      <div className="flex-1 overflow-auto px-6 py-6">
-        <div className="max-w-2xl mx-auto space-y-5">
+      <div className="flex-1 overflow-auto bg-canvas px-5 py-5">
+        <div className="space-y-4">
           {/* Project card */}
           <section className="bg-surface rounded-[14px] p-5 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_6px_16px_rgba(0,0,0,0.04)] space-y-4">
             <h2 className="text-[12px] font-semibold text-ink-faint uppercase tracking-wide">

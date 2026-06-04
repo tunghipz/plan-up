@@ -467,13 +467,8 @@ function App() {
         </div>
       </aside>
 
-      {/* Main column: settings page, or thin header + capacity + sprint view */}
-      {settingsOpen && currentProject ? (
-        <ProjectSettingsView
-          project={currentProject}
-          onClose={() => setSettingsOpen(false)}
-        />
-      ) : (
+      {/* Main column: thin header + capacity + sprint view. Always rendered;
+          settings opens as a right-side drawer overlay (below), not a takeover. */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         <header className="h-[54px] shrink-0 border-b border-border-hair bg-surface flex items-center px-5 gap-3">
           <div className="flex items-center gap-2.5 text-sm min-w-0">
@@ -617,6 +612,32 @@ function App() {
           </main>
         </div>
       </div>
+
+      {/* Settings drawer — right-side inspector over a dimmed backdrop. Both
+          stay mounted while a project exists so the slide animates. */}
+      {currentProject && (
+        <>
+          <div
+            className={`fixed inset-0 z-40 bg-black/25 backdrop-blur-md transition-opacity duration-200 ${
+              settingsOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'
+            }`}
+            onClick={() => setSettingsOpen(false)}
+            aria-hidden
+          />
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Project settings"
+            className={`fixed top-0 right-0 z-50 h-full w-[440px] max-w-[90vw] bg-surface border-l border-border-hair shadow-[-12px_0_50px_rgba(0,0,0,0.18)] transition-transform duration-300 ease-[cubic-bezier(.32,.72,0,1)] ${
+              settingsOpen ? 'translate-x-0' : 'translate-x-full'
+            }`}
+          >
+            <ProjectSettingsView
+              project={currentProject}
+              onClose={() => setSettingsOpen(false)}
+            />
+          </div>
+        </>
       )}
 
       {showNewProject && (

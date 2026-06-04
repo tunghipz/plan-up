@@ -15,12 +15,17 @@ fills two existing gaps: no way to rename a project, and `deleteProject()` was o
 
 ## User-facing behavior
 - A **gear button** in the sprint-panel header (next to the project name) opens the
-  settings page. It **takes over the main column** (List/Board view toggle and the
-  capacity banner are hidden while open). Close via the gear again, an **X**, or `Escape`.
+  settings as a **right-side drawer** (`form: right drawer`, chosen 2026-06-04 over a
+  centered modal / drop-down sheet — see `demo/settings-popup-options.html`). The drawer
+  slides in from the right edge over a dimmed + blurred backdrop; the List/Board area
+  **stays rendered behind** (visible but dimmed) so settings reads as an *inspector* you
+  tweak and dismiss, not a separate page. Close via the gear again, an **X**, the backdrop,
+  or `Escape`.
 - **Keyboard while settings is open** (see [search-and-keyboard.md](./search-and-keyboard.md)):
   `Escape` closes settings **first** (takes priority over the search-clear behavior).
-  `n` (new sprint) and `/` (focus search) are **disabled** while open — the search box is
-  hidden, and a sprint dialog should not stack over settings.
+  `n` (new sprint) and `/` (focus search) are **disabled** while open — even though the
+  search box now stays visible behind the backdrop, its shortcut is gated so typing can't
+  land underneath, and a sprint dialog should not stack over settings.
 - The page scopes to the **current project only** (the one selected in the icon rail) and
   its members. It is not a global project manager.
 - Three inset-grouped cards (card-per-group, per `design-system.md`):
@@ -56,11 +61,16 @@ bump is required — not now.)
 Chosen approach: **B — extract shared member components** (one source of truth between the
 Sprint header and this settings page).
 
-- **`ProjectSettingsView.tsx`** (new) — renders the three cards. Reuses `.editable`,
-  `Avatar`, and the extracted member sub-components below.
+- **`ProjectSettingsView.tsx`** — renders the three cards (header + scrollable body)
+  sized for a narrow drawer (full height, single column, no `max-w` centering). Reuses
+  `.editable`, `Avatar`, and the extracted member sub-components below.
 - **App shell** (`App.tsx`) — a `settingsOpen` boolean (transient, **not** persisted).
-  Gear button toggles it; when true, render `ProjectSettingsView` in place of the
-  List/Board area and hide the view toggle + capacity banner.
+  Gear button toggles it. The main List/Board column **always renders**; the settings
+  drawer is a sibling overlay: a fixed backdrop (`bg-black/25 backdrop-blur-md`, click to
+  close, `pointer-events-none` when closed) + a fixed right panel (`w-[440px] max-w-[90vw]`,
+  `translate-x-full` → `translate-x-0`, eased slide). Both stay mounted whenever a project
+  exists so the open/close transform animates; the view toggle + capacity banner are **no
+  longer hidden** (they sit dimmed behind the backdrop).
   - **Key handler ordering:** put `if (settingsOpen) { setSettingsOpen(false); return }`
     at the **top** of the global `Escape` branch (before the search-clear `return`), so
     Escape closes settings even when the search box has text. Gate `n` and `/` with an

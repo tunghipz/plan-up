@@ -19,24 +19,39 @@ Sáng/Chiều), reinterpreted in plan-up's calm Cupertino language.
 - **Columns = the sprint's workdays only** (weekends skipped, matching the scheduler),
   each day split into two half-day sub-columns: **AM** (Sáng) and **PM** (Chiều).
   A 2-week sprint ≈ 10 workdays × 2 = 20 columns — fits on screen, no horizontal scroll.
-- **Two-row sticky header:** top row = date (`dd/MM`, spanning its two halves), bottom
-  row = `AM` / `PM`. The `TV` (member) and `Task` columns are **sticky on the left**; the
-  header is **sticky on top**, so labels stay visible while scrolling a long member list.
+- **Two-row sticky header:** top row = date (`dd/MM`) **with the weekday under it**
+  (`Mon`…`Fri`) so the axis is orientable; bottom row = `AM` / `PM`. The `TV` (member)
+  and `Task` columns are **sticky on the left**; the header is **sticky on top**, so
+  labels stay visible while scrolling a long member list.
+- **Weekend seam:** wherever a weekend was skipped between two adjacent columns
+  (Fri → Mon), the later column gets a **stronger 2px separator** so the discontinuity is
+  legible (a Fri/Mon jump doesn't read as two consecutive days).
 - **Rows grouped by member (TV)**, same grouping/order as the List view. Each group is a
-  member header row (avatar + name) followed by one row per task. Group/parent tasks (see
-  [task-groups.md](./task-groups.md)) render as a sub-header; their child tasks each get
-  their own bar row beneath.
+  member header row (avatar + name + role) followed by one row per task. Group/parent tasks
+  (see [task-groups.md](./task-groups.md)) render as a sub-header; their child tasks each
+  get their own bar row beneath (indented).
+- **Member load roll-up:** the member header band carries a slim accent **load bar** =
+  the union of that member's task spans across the sprint, so team load reads at the group
+  level (discontinuous load shows as multiple segments). Pure derived; no new data.
 - **Cell fill (flat single color — matches the reference sheet):**
-  - **Active** (the task occupies that half-day) → a single fill color (green,
-    `--color-status-done` family / accent-tinted, dark-safe). No per-status encoding —
-    deliberately flat for at-a-glance reading.
-  - **Day-off** → pink/red tint. A full off-day fills both S and C; a half off-day fills
-    only its half (AM or PM), straight from `member.daysOff`.
-  - **No work** (task not active, not a day-off) → empty / faint hairline cell.
-- **Legend** above the grid: `Active · Day off · No work` (mirrors the reference's
-  Task / Nghỉ / Không có việc).
+  - **Active** (the task occupies that half-day) → a single green fill (dark-safe) with a
+    subtle top inset highlight. **No per-status encoding** — deliberately flat. Contiguous
+    runs get **rounded ends** (left cap on the first active half, right cap on the last) so
+    a task reads as one segment, not loose cells.
+  - **Day-off** → a **diagonal-hatched pink** fill (reads as "off", not as another status).
+    A full off-day fills both AM and PM; a half off-day fills only its half, straight from
+    `member.daysOff`.
+  - **No work** (task not active, not a day-off) → empty cell, with a very faint **per-day
+    zebra** tint to aid horizontal scanning; the interior AM/PM hairline is lighter than the
+    day separator so bars pop.
+- **Unscheduled tasks** (no computed dates — no effort and no prereqs) render a muted title
+  plus a dashed **"no dates"** tag on a dotted baseline instead of a blank row, so an empty
+  row reads as "set effort in List to schedule," not as a broken view.
+- **Legend** above the grid: `Active · Day off · No work · Member load`.
 - **Today marker** — a thin accent vertical line on the current day's column (only when
-  today falls inside the sprint range).
+  today falls inside the sprint range); that day's header tints accent.
+- **Long titles** are clipped to the sticky Task column (`overflow:hidden` + wrap) so they
+  never bleed into the grid.
 - **Read-only.** No drag-to-reschedule. Bars are a pure projection of the auto-scheduler;
   all editing (effort, dates, prereqs, status) stays in the List view. Clicking a task
   row may highlight/scroll it (nice-to-have, not required for v1).
@@ -63,11 +78,20 @@ that already exists:
   - `empty` otherwise.
   Unit-tested independently of React, like `parsePrereqSeqs` /
   `daysOffInRange` ([dependencies.md](./dependencies.md), members doc).
-- **`GanttView.tsx`** (new) — renders **Approach A: a single CSS Grid**:
-  `gridTemplateColumns: [TV] [Task] repeat(2 × workdays, minmax(…, 1fr))`. Sticky left
-  panes and sticky header via `position: sticky` (z-index layering for the top-left
-  corner). Reuses member-grouping + `STATUS_META`/avatar helpers from `SprintView.tsx`;
-  colors via existing CSS-var tokens so dark mode is automatic.
+- **`GanttView.tsx`** (new) — **Approach A:** every visual row is its own CSS grid sharing
+  one fixed column template (`[TV] [Task] repeat(2 × workdays, ${HALF_W}px)`), so columns
+  align without one giant grid. Sticky left panes + sticky header via `position: sticky`
+  (z-index layering for the top-left corner); the outer card is `w-fit` so it hugs the
+  columns. Colors via existing CSS-var tokens so dark mode is automatic. Local helpers:
+  - `weekday(date)` + a `seamSet` (built from `gapBefore`, true when a weekend was skipped)
+    drive the weekday labels and the 2px seam separators.
+  - Per group: each task's `computeWorkingPlan` → `halfDayCells` is flattened to a `2N`
+    `CellKind[]`; `scheduled = !!startDate && !!dueDate` decides bar-cells vs the "no dates"
+    affordance. Run boundaries on the flat array give the rounded segment caps.
+  - `segmentsOf(union)` turns the union of a member's occupied half-days into the load
+    roll-up bars rendered absolutely in the member band.
+  - The `Cell` component encodes per-half border (day separator vs lighter AM/PM hairline
+    vs seam), zebra tint, active fill + rounded caps, and the hatched day-off fill.
 - **`App.tsx`** — extend `ViewMode` to `'list' | 'board' | 'timeline'`, add the
   `Timeline` segment (lucide icon, e.g. `GanttChartSquare`) to `ViewToggle`, and render
   `<GanttView … />` in the main switch. Pass the current sprint's `startDate`/`endDate`,

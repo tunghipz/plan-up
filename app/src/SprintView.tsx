@@ -6,14 +6,12 @@ import {
   useRef,
   useState,
 } from 'react'
-import { createPortal } from 'react-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
   Plus,
   Trash2,
   ChevronDown,
   UserPlus,
-  MoreVertical,
   AlertTriangle,
   Check,
   FolderPlus,
@@ -362,7 +360,10 @@ export function SprintView({
 /**
  * Floating action bar shown while ≥1 task is selected (group-via-selection flow).
  * "Gom nhóm" creates a new group parent from the selection (same member, ≥2, none a
- * group head); "Bỏ nhóm" ungroups any selected children. See design-docs/task-groups.md.
+ * group head); "Bỏ nhóm" ungroups any selected children; "Xoá" deletes the selection
+ * (confirm first; deleting a group head ungroups its children, doesn't cascade). This
+ * bar is the only place to delete a task — there is no per-row kebab.
+ * See design-docs/task-groups.md.
  */
 function SelectionBar({
   selectedIds,
@@ -404,6 +405,18 @@ function SelectionBar({
     )
     onClear()
   }
+  const doDelete = async () => {
+    if (n === 0) return
+    const hasGroup = selected.some((t) => parentIds.has(t.id))
+    const msg = hasGroup
+      ? `Xoá ${n} task đã chọn? Task con của nhóm sẽ được gỡ nhóm, không bị xoá.`
+      : `Xoá ${n} task đã chọn?`
+    if (!confirm(msg)) return
+    // Sequential: deleting a parent promotes its children to top-level, so a
+    // concurrent run could race a selected child's own delete.
+    for (const t of selected) await deleteTask(t.id)
+    onClear()
+  }
 
   return (
     <div
@@ -438,6 +451,13 @@ function SelectionBar({
       >
         <FolderPlus size={14} /> Gom nhóm
       </button>
+      <button
+        onClick={doDelete}
+        className="inline-flex items-center gap-1.5 text-[13px] text-red-300 hover:text-white hover:bg-red-500/80 px-2.5 py-1.5 rounded-[9px] transition"
+      >
+        <Trash2 size={14} /> Xoá
+      </button>
+      <span className="w-px self-stretch bg-white/15" aria-hidden />
       <button
         onClick={onClear}
         className="text-[13px] text-white/70 hover:text-white px-2 py-1.5"
@@ -904,16 +924,16 @@ function AddTaskRow({
       <div className={COL.due} />
       <div className={COL.status} />
       <div className={COL.prereq} />
-      <div className={COL.actions} />
     </div>
   )
 }
 
 // Column widths — kept in sync with TaskColumnHeader. If you change one,
-// change the other. Order: status-dot · seq · title · assignee · effort · start · due · priority · status · prereq · delete
+// change the other. Order: status-dot · seq · title · assignee · effort · start · due · priority · status · prereq
 // Widths sized to measured content + a small buffer (see commit notes):
 //   seq "123"≈24 · "Effort (day)" hdr 73 · date "Jun 30, 17:00"≈99 · "In progress"
-//   pill 97 (+ pl-2). Title takes the slack via flex-1.
+//   pill 97 (+ pl-2). Title takes the slack via flex-1. (Row delete moved off the
+//   row into the multi-select SelectionBar — no per-row actions column.)
 const COL = {
   lead: 'w-5 shrink-0 flex justify-center items-center',
   dot: 'w-4 shrink-0',
@@ -925,7 +945,6 @@ const COL = {
   due: 'w-28 flex justify-end shrink-0',
   status: 'w-28 flex justify-start shrink-0 pl-2',
   prereq: 'w-14 flex justify-end shrink-0',
-  actions: 'w-4 flex justify-center shrink-0',
 }
 
 /**
@@ -1168,18 +1187,6 @@ function TaskGroupRow({
         <StatusPill status={derived} />
       </div>
       <div className={COL.prereq} />
-      <div className={COL.actions}>
-        <RowActionsMenu
-          onDelete={() => {
-            if (
-              confirm(
-                'Delete this group task? Its grouped tasks become ungrouped, not deleted.'
-              )
-            )
-              deleteTask(task.id)
-          }}
-        />
-      </div>
     </div>
   )
 }
@@ -1471,109 +1478,6 @@ function TaskRow({
       <div className={COL.prereq}>
         <PrereqInput task={task} allTasks={allTasks} tasksById={tasksById} />
       </div>
-
-      <div className={COL.actions}>
-        <RowActionsMenu
-          onDelete={() => {
-            if (confirm('Delete this task?')) deleteTask(task.id)
-          }}
-        />
-      </div>
-    </div>
-  )
-}
-
-/**
- * Kebab (⋯) menu rendered at the end of each task row. Always visible —
- * touch-friendly, no hover bias. Currently surfaces just Delete; room to add
- * Duplicate / Move-to-sprint / Archive later without changing the row layout.
- */
-function RowActionsMenu({ onDelete }: { onDelete: () => void }) {
-  const [open, setOpen] = useState(false)
-  // Menu is rendered in a portal (fixed, anchored to the trigger) so it is never
-  // clipped by the member card's overflow-x-auto scroll container. Flips upward
-  // when the trigger sits near the viewport bottom.
-  const [pos, setPos] = useState<{
-    top?: number
-    bottom?: number
-    right: number
-  } | null>(null)
-  const btnRef = useRef<HTMLButtonElement>(null)
-  const menuRef = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    if (!open) return
-    const onDoc = (e: MouseEvent) => {
-      const t = e.target as Node
-      if (!menuRef.current?.contains(t) && !btnRef.current?.contains(t)) {
-        setOpen(false)
-      }
-    }
-    const onScroll = () => setOpen(false)
-    document.addEventListener('mousedown', onDoc)
-    window.addEventListener('scroll', onScroll, true)
-    return () => {
-      document.removeEventListener('mousedown', onDoc)
-      window.removeEventListener('scroll', onScroll, true)
-    }
-  }, [open])
-  const toggle = () => {
-    if (open) {
-      setOpen(false)
-      return
-    }
-    const r = btnRef.current?.getBoundingClientRect()
-    if (r) {
-      const right = window.innerWidth - r.right
-      const openUp = window.innerHeight - r.bottom < 120
-      setPos(
-        openUp
-          ? { bottom: window.innerHeight - r.top + 6, right }
-          : { top: r.bottom + 6, right }
-      )
-    }
-    setOpen(true)
-  }
-  const item =
-    'w-full flex items-center gap-2 px-2.5 py-1.5 rounded-[7px] text-left transition'
-  return (
-    <div className="relative">
-      <button
-        ref={btnRef}
-        onClick={(e) => {
-          e.stopPropagation()
-          toggle()
-        }}
-        className="w-4 h-4 inline-flex items-center justify-center rounded text-ink-faint opacity-50 group-hover/row:opacity-100 hover:!opacity-100 hover:text-ink hover:bg-canvas-sunk transition"
-        aria-label="Row actions"
-      >
-        <MoreVertical size={12} />
-      </button>
-      {open &&
-        pos &&
-        createPortal(
-          <div
-            ref={menuRef}
-            style={{
-              position: 'fixed',
-              top: pos.top,
-              bottom: pos.bottom,
-              right: pos.right,
-            }}
-            className="z-50 min-w-[160px] rounded-[12px] border border-border-hair bg-surface shadow-[0_10px_30px_rgba(0,0,0,0.16)] p-1 text-sm"
-          >
-            <button
-              onClick={() => {
-                setOpen(false)
-                onDelete()
-              }}
-              className={`${item} text-red-500 hover:bg-red-500/10`}
-            >
-              <Trash2 size={13} />
-              Delete task
-            </button>
-          </div>,
-          document.body
-        )}
     </div>
   )
 }
@@ -1664,7 +1568,6 @@ function TaskColumnHeader({
         onSort={onSort}
         align="end"
       />
-      <div className={COL.actions} />
     </div>
   )
 }

@@ -1,9 +1,9 @@
 # Tasks
 
 **Status:** Implemented
-**Last updated:** 2026-06-03
+**Last updated:** 2026-06-04
 **Code:** `app/src/SprintView.tsx` (`TaskRow`, `AddTaskRow`, `TitleTextarea`,
-`EffortCell`, `DatePickCell`, `PrereqInput`, `RowActionsMenu`)
+`EffortCell`, `DatePickCell`, `PrereqInput`, `SelectionBar`)
 
 ## Purpose
 The task is the unit of work. Everything else (sprints, members, scheduling) exists to
@@ -18,8 +18,11 @@ See [data-model.md](./data-model.md).
 - **Add:** the "Add task" row at the bottom of a group — type a title, Enter. New task:
   `status='todo'`, `priority='normal'`, `startDate = sprint start`, `sequence = nextSequence`.
 - **Edit inline** (all in-row): title, effort, start/end date, status, prereqs, assignee.
-- **Delete:** the row's kebab (⋯) → "Delete task" (confirm). Cascade-strips the task from
-  other tasks' `dependsOn`.
+- **Delete:** select the task (hover → checkbox) and use **Xoá** on the floating
+  `SelectionBar` (confirm). Works on a multi-select too. There is **no per-row kebab** —
+  the bar is the only delete affordance. Cascade-strips the task from other tasks'
+  `dependsOn`; deleting a group head ungroups its children (does not cascade). See
+  [task-groups.md](./task-groups.md).
 
 ## Inline editing affordance
 All click-to-edit text fields share the `.editable` class (`index.css`):

@@ -19,6 +19,12 @@
 - Sửa tính năng có sẵn → cập nhật file doc tương ứng (bump *Last updated*) trước, rồi mới code.
 - Code là nguồn sự thật cho *how*; doc là nguồn sự thật cho *what & why*. Giữ doc đồng bộ khi thực tế lệch.
 
+## Demo UI/UX — chỉ dùng HTML
+
+**Khi demo UI/UX hay giao diện → luôn xuất ra file HTML (mở/tương tác được trong trình duyệt), KHÔNG dùng ảnh PNG.**
+- Demo đặt trong `demo/` (đã gitignore). HTML để user hover/click/so sánh trực tiếp, không phải ảnh tĩnh.
+- PNG chỉ được dùng nội bộ để mình tự verify (screenshot kiểm tra), không phải là sản phẩm demo giao cho user.
+
 ## Stack
 
 React 19 + TypeScript + Vite + Tailwind v4 + Dexie (IndexedDB) + TanStack Table + lucide-react.

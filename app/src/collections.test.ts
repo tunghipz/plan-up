@@ -3,14 +3,14 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import { db } from './db'
 import {
   createCollection, renameCollection, deleteCollection, COLLECTION_PALETTE,
-  addSection, renameSection, deleteSection, moveTaskToSection,
+  addSection, deleteSection, moveTaskToSection,
   addStatus, renameStatus, recolorStatus, deleteStatus,
   addCollectionItem,
   exportAll, importAll,
 } from './db'
 
 async function clearAll() {
-  await db.transaction('rw', db.projects, db.members, db.sprints, db.tasks, db.collections, async () => {
+  await db.transaction('rw', [db.projects, db.members, db.sprints, db.tasks, db.collections], async () => {
     await db.tasks.clear(); await db.sprints.clear(); await db.members.clear()
     await db.collections.clear(); await db.projects.clear()
   })

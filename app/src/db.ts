@@ -508,7 +508,6 @@ export async function addCollectionItem(
     id: uid(),
     projectId,
     sequence: maxSeq + 1,
-    title: patch.title,
     assigneeId: null,
     sprintId: null,
     status: 'todo',
@@ -1214,6 +1213,9 @@ export async function createGroupFromSelection(
     }
     if (eligible.length < 2) return null
     const { assigneeId, sprintId, projectId } = eligible[0]
+    // Grouping is a sprint-only operation; collection items (sprintId=null)
+    // are never grouped here.
+    if (!sprintId) return null
     if (eligible.some((t) => t.assigneeId !== assigneeId || t.sprintId !== sprintId))
       return null
     const sprint = await db.sprints.get(sprintId)
@@ -1485,11 +1487,7 @@ export async function importAll(data: ExportPayload) {
   }
   await db.transaction(
     'rw',
-    db.projects,
-    db.members,
-    db.sprints,
-    db.collections,
-    db.tasks,
+    [db.projects, db.members, db.sprints, db.collections, db.tasks],
     async () => {
       await db.tasks.clear()
       await db.sprints.clear()

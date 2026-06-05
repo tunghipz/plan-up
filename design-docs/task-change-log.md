@@ -43,9 +43,14 @@ Every **user-initiated** change to one of these **8** main fields:
 The first 7 are diffed inside `updateTask` (the `LOGGABLE_FIELDS` set). **`dependsOn`
 is special**: prereq edits flow through `setDependencies` (`db.ts`), not `updateTask`,
 so `setDependencies` logs the change itself — with **sequence-range labels** (e.g.
-`Phụ thuộc: — → 1-2`) frozen at write time (per-sprint sequences can renumber). The
-date/time shift that recompute then produces is the *consequence* and stays unlogged
-(premise #2): the log records the prereq edit you made, not the derived schedule churn.
+`Phụ thuộc: — → 1-2`) frozen at write time (per-sprint sequences can renumber).
+
+A prereq edit **also logs the old→new `startDate`/`dueDate`** that the recompute shifts
+on *that same task* (e.g. `Bắt đầu: May 4 → May 6`), so you can see the time before and
+after the dependency moved it. This is the one place a recomputed date is logged: only
+the **direct** consequence on the edited task. Ripple onto *other* tasks, and standalone
+recomputes triggered elsewhere (an upstream effort edit), stay unlogged (premise #2). The
+prereq entry is the newest (top); the date entries sit just under it, all sharing one ts.
 
 Status changes are logged from **both** views: List status-dot cycle, Board
 click-to-cycle (`onCycleStatusId`, `BoardView.tsx:268`), and Board cross-column drag.
@@ -59,7 +64,9 @@ click-to-cycle (`onCycleStatusId`, `BoardView.tsx:268`), and Board cross-column 
 > Dates & effort log the **action, not the resulting state**: editing `estimate` (or a
 > manual `startDate`) logs that edit; the start/due dates the scheduler then shifts via
 > `recomputeDates` are **not** logged. So the log records "bạn đặt Bắt đầu = Jun 10", the
-> value you picked — never the post-recompute value. Intended.
+> value you picked — never the post-recompute value. **Exception:** a **prereq** change
+> additionally logs the old→new dates it shifts on that task (see `dependsOn` above) —
+> there the date move is the whole point of the edit, so capturing it is the intent.
 
 ## Data
 New **non-indexed, optional** field on `Task` (no Dexie version bump — same pattern as

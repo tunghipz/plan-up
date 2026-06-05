@@ -1114,33 +1114,45 @@ export async function setDependencies(
     clean.push(id)
     probe.dependsOn = clean
   }
-  // Log the prereq change itself (the cause) with sequence-range labels — the
-  // dates/times it shifts via recomputeDates are derived and stay unlogged
-  // (premise #2). seq is frozen here since per-sprint sequences can renumber.
   const changed =
     task.dependsOn.length !== clean.length ||
     task.dependsOn.some((d) => !clean.includes(d))
-  if (changed) {
-    const label = (ids: string[]): string | null => {
-      const seqs = ids
-        .map((id) => byId.get(id)?.sequence)
-        .filter((n): n is number => typeof n === 'number')
-      return seqs.length ? formatSeqRanges(seqs) : null
-    }
-    const entry: ChangeLogEntry = {
-      field: 'dependsOn',
-      from: label(task.dependsOn),
-      to: label(clean),
-      ts: Date.now(),
-    }
-    await db.tasks.update(taskId, {
-      dependsOn: clean,
-      changeLog: appendChangeLog(task, [entry]),
-    })
-  } else {
-    await db.tasks.update(taskId, { dependsOn: clean })
-  }
+
+  // Snapshot this task's own dates BEFORE recompute so we can log the old→new
+  // shift the prereq change causes on THIS task (the direct consequence of the
+  // user's edit). Indirect ripple onto OTHER tasks stays unlogged (premise #2).
+  const oldStart = task.startDate
+  const oldDue = task.dueDate
+
+  await db.tasks.update(taskId, { dependsOn: clean })
   await recomputeDates(taskId)
+
+  if (changed) {
+    const after = await db.tasks.get(taskId)
+    if (after) {
+      const label = (ids: string[]): string | null => {
+        const seqs = ids
+          .map((id) => byId.get(id)?.sequence)
+          .filter((n): n is number => typeof n === 'number')
+        return seqs.length ? formatSeqRanges(seqs) : null
+      }
+      const ts = Date.now()
+      // Built so the prereq entry ends up newest (top): the date entries are
+      // unshifted first, then dependsOn. seq is frozen (per-sprint renumbering).
+      const entries: ChangeLogEntry[] = []
+      if (after.startDate !== oldStart)
+        entries.push({ field: 'startDate', from: oldStart, to: after.startDate, ts })
+      if (after.dueDate !== oldDue)
+        entries.push({ field: 'dueDate', from: oldDue, to: after.dueDate, ts })
+      entries.push({
+        field: 'dependsOn',
+        from: label(task.dependsOn),
+        to: label(clean),
+        ts,
+      })
+      await db.tasks.update(taskId, { changeLog: appendChangeLog(after, entries) })
+    }
+  }
   return clean
 }
 

@@ -1163,6 +1163,24 @@ describe('change log', () => {
       await setDependencies('e2', ['e1'])
       expect((await db.tasks.get('e2'))!.changeLog ?? []).toHaveLength(0)
     })
+
+    it('also logs the old→new dates the prereq change shifts on this task', async () => {
+      await makeTask({ id: 'f1', sequence: 1, estimate: 2, startDate: '2026-05-04' })
+      await recomputeDates('f1')
+      await makeTask({ id: 'f2', sequence: 2, estimate: 1, startDate: '2026-05-04' })
+      await recomputeDates('f2')
+      const before = (await db.tasks.get('f2'))!
+      await setDependencies('f2', ['f1']) // f2 now starts after f1 → its start shifts
+
+      const log = (await db.tasks.get('f2'))!.changeLog!
+      // prereq entry is newest (top)
+      expect(log[0]).toMatchObject({ field: 'dependsOn', to: '1' })
+      // and the old start time is captured
+      const startEntry = log.find((e) => e.field === 'startDate')
+      expect(startEntry).toBeTruthy()
+      expect(startEntry!.from).toBe(before.startDate)
+      expect(startEntry!.to).not.toBe(before.startDate)
+    })
   })
 
   describe('scheduler isolation (premise #2 — CRITICAL regression)', () => {

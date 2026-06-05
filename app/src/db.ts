@@ -97,6 +97,34 @@ export interface Sprint {
   endDate: string
 }
 
+export interface Section {
+  id: string
+  name: string
+  /** Optional hex tô chấm header (từ COLLECTION_PALETTE). */
+  color?: string
+}
+
+/** Một status do người dùng tạo trong một collection. */
+export interface CollectionStatus {
+  id: string
+  name: string
+  /** Hex từ COLLECTION_PALETTE. */
+  color: string
+}
+
+export interface Collection {
+  id: string
+  projectId: string
+  name: string
+  /** Thứ tự hiển thị trong sidebar (fractional/integer). */
+  order: number
+  /** Bảng (tables) trong collection, có thứ tự. Luôn ≥ 1 phần tử. */
+  sections: Section[]
+  /** Bộ status do user tự tạo. Có thể rỗng. */
+  statuses: CollectionStatus[]
+  createdAt: number
+}
+
 export interface Task {
   id: string
   projectId: string
@@ -104,7 +132,7 @@ export interface Task {
   sequence: number
   title: string
   assigneeId: string | null
-  sprintId: string
+  sprintId: string | null
   status: Status
   priority: Priority
   startDate: string | null
@@ -142,6 +170,15 @@ export interface Task {
    * design-docs/task-change-log.md.
    */
   changeLog?: ChangeLogEntry[]
+  /**
+   * Collection chứa task này (khi task nằm ngoài sprint). Bất biến: đúng MỘT
+   * trong {sprintId, collectionId} khác null. Indexed để query theo collection.
+   */
+  collectionId?: string | null
+  /** Bảng (Section.id) trong collection. Non-indexed. */
+  sectionId?: string | null
+  /** Trỏ tới CollectionStatus.id trong collection. Non-indexed. */
+  collectionStatusId?: string | null
 }
 
 class PlanDB extends Dexie {
@@ -149,6 +186,7 @@ class PlanDB extends Dexie {
   members!: Table<Member, string>
   sprints!: Table<Sprint, string>
   tasks!: Table<Task, string>
+  collections!: Table<Collection, string>
 
   constructor() {
     super('plan-up')
@@ -265,6 +303,25 @@ class PlanDB extends Dexie {
         }
       }
     })
+    // v9 (2026-06-05): collections (task ngoài sprint). New `collections` table;
+    // tasks gain collectionId (indexed) + sectionId/collectionStatusId (non-indexed);
+    // sprintId becomes nullable. Existing tasks stay sprint tasks (collectionId=null).
+    this.version(9)
+      .stores({
+        projects: 'id, name, createdAt',
+        members: 'id, name, projectId',
+        sprints: 'id, startDate, projectId',
+        collections: 'id, projectId, order',
+        tasks: 'id, sprintId, assigneeId, status, createdAt, projectId, collectionId',
+      })
+      .upgrade(async (tx) => {
+        await tx
+          .table('tasks')
+          .toCollection()
+          .modify((t: Task) => {
+            if (t.collectionId === undefined) t.collectionId = null
+          })
+      })
   }
 }
 

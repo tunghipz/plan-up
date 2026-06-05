@@ -26,11 +26,16 @@ import {
 // overlay — picking name/time never writes boardOrder; back to manual restores the
 // dragged order. A drop flips the destination column to manual (a drag is manual
 // intent), reindexing it so the card lands exactly where dropped.
-type BoardSortMode = 'manual' | 'name' | 'time'
+type BoardSortMode = 'manual' | 'name' | 'time' | 'member'
 type ColSort = { mode: BoardSortMode; dir: 'asc' | 'desc' }
 type BoardSort = Record<Status, ColSort>
-const SORT_MODES: BoardSortMode[] = ['manual', 'name', 'time']
-const SORT_LABELS: Record<BoardSortMode, string> = { manual: 'Manual', name: 'Name', time: 'Time' }
+const SORT_MODES: BoardSortMode[] = ['manual', 'name', 'time', 'member']
+const SORT_LABELS: Record<BoardSortMode, string> = {
+  manual: 'Manual',
+  name: 'Name',
+  time: 'Time',
+  member: 'Member',
+}
 const BOARD_SORT_KEY = 'plan-up:board-sort'
 const freshBoardSort = (): BoardSort => ({
   todo: { mode: 'manual', dir: 'asc' },
@@ -198,6 +203,17 @@ export function BoardView({
         if (ta > tb) return 1 * mul
         return a.sequence - b.sequence
       }
+      if (cs.mode === 'member') {
+        // by assignee name (the avatar the card shows); unassigned sinks last
+        const ma = a.assigneeId ? membersById.get(a.assigneeId)?.name.toLowerCase() ?? null : null
+        const mb = b.assigneeId ? membersById.get(b.assigneeId)?.name.toLowerCase() ?? null : null
+        if (ma === null && mb === null) return a.sequence - b.sequence
+        if (ma === null) return 1
+        if (mb === null) return -1
+        if (ma < mb) return -1 * mul
+        if (ma > mb) return 1 * mul
+        return a.sequence - b.sequence
+      }
       // time: by computed due key; no-due always sinks last regardless of dir
       const ka = timeKeyById.get(a.id) ?? null
       const kb = timeKeyById.get(b.id) ?? null
@@ -213,7 +229,7 @@ export function BoardView({
     for (const s of STATUS_ORDER) out[s].sort((a, b) => cmp(a, b, boardSort[s]))
     return out
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filtered, childrenByParent, boardSort, timeKeyById])
+  }, [filtered, childrenByParent, boardSort, timeKeyById, membersById])
 
   // Per-card display data (status / group roll-up / parent title), precomputed once
   // per data change. Crucial for drag perf: the `group` object keeps a STABLE ref

@@ -157,12 +157,15 @@ without disturbing the others — e.g. sort *In progress* by due date while *To 
 in your hand-dragged priority order. The board's identity is drag-to-reorder, so sort is
 **additive**, never a replacement.
 
-**Model.** Per-column state `{ mode, dir }`, `mode ∈ {manual, name, time}`, default `manual`:
+**Model.** Per-column state `{ mode, dir }`, `mode ∈ {manual, name, time, member}`, default `manual`:
 - **manual** — today's behavior: `orderOf = boardOrder ?? sequence`, ascending (drag order).
 - **name** — `title` A→Z, case-insensitive (reuse the List's `compareTasks` title branch).
 - **time** — the **computed** date the card's Due chip shows (`planById.get(t.id).dueDate`
   + `endTime`), so chip and order always agree. Tiebreak: computed start, then `sequence`.
   Tasks with no due sink to the bottom regardless of `dir`.
+- **member** — the assignee's `Member.name`, case-insensitive (the avatar the card shows),
+  grouping a column by who owns each card. Tiebreak `sequence`. **Unassigned** cards (and
+  group/parent cards with no own assignee) sink to the bottom regardless of `dir`.
 - For **group (parent) cards**: name = parent title; time = the group's rolled-up **latest**
   child due (the end of the date-range chip), via the existing `groupRange`/`metaById` roll-up,
   so a group sorts by the same date it displays.
@@ -195,8 +198,9 @@ Schedule popover).
 - `byStatus` picks the comparator per column from `boardSort[status]`: `manual` = `orderOf`
   (`boardOrder ?? sequence`); `name` = case-insensitive title; `time` = `timeKeyById` (a memo
   that maps each task → its computed due key `YYYY-MM-DDThh:mm`, rolling a parent up to its
-  latest child due). No-due tasks sink last regardless of `dir`. Reuses the precomputed
-  `planById` (no extra scheduler runs — see the drag-perf note above).
+  latest child due); `member` = `membersById.get(t.assigneeId)?.name` lower-cased. No-due (time)
+  and unassigned (member) tasks sink last regardless of `dir`. Reuses the precomputed `planById`
+  (no extra scheduler runs — see the drag-perf note above).
 - **Drop into a *sorted* column reindexes, doesn't fractional-insert.** Under a name/time
   sort the visible neighbours' `boardOrder` isn't monotonic, so a fractional insert would land
   wrong. `handleDrop` instead rewrites the whole column's `boardOrder` to `0,1,2,…` matching the

@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from 'react'
+import { Fragment, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { History } from 'lucide-react'
 import type { ChangeLogEntry, LoggableField } from './db'
@@ -14,15 +14,21 @@ import {
 /**
  * Per-task change log surface (design-docs/task-change-log.md): a hover-revealed
  * 🕒 icon whose tooltip lists the 5 most recent edits, newest-first. Renders
- * nothing when the log is empty (no empty tooltip).
+ * nothing when the log is empty.
  *
- * The tooltip is portalled to <body> with position:fixed so it escapes the
- * card/column `overflow` clipping that would otherwise cut it off; it flips
- * above the icon when there isn't room below. Stable fields are formatted here
- * at render; only assigneeId arrives pre-resolved to a member name.
+ * Layout = "aligned ledger + semantic cues" (chosen 2026-06-05 over plain lines):
+ * a 3-column grid [right-aligned field label · old→new change · faint time] so
+ * values line up and old (faint) vs new (strong) reads at a glance. Two semantic
+ * cues carry extra meaning without extra chrome:
+ *   - status/priority: the NEW value is tinted its Reminders/priority color
+ *   - dependsOn: empty→set is "+ 7" (add), set→empty is a struck removal;
+ *     a set→set change stays a normal old→new.
+ *
+ * Portalled to <body> (position:fixed) so it escapes card/column overflow
+ * clipping; flips above the icon when near the viewport bottom.
  */
 
-/** Format a raw entry value for display. `assigneeId` is already a name. */
+/** Display text for a raw entry value. `assigneeId` is already a member name. */
 function formatValue(field: LoggableField, v: string | null): string {
   if (v === null) return '—'
   switch (field) {
@@ -34,8 +40,44 @@ function formatValue(field: LoggableField, v: string | null): string {
     case 'dueDate':
       return formatShortDate(v)
     default:
-      return v // title, estimate (stringified number), assigneeId (name)
+      return v // title, estimate (stringified), dependsOn (seq label), assignee (name)
   }
+}
+
+/** CSS color for the NEW value, when the field carries a semantic color. */
+function newValueColor(field: LoggableField, to: string): string | undefined {
+  if (field === 'status')
+    return `var(--color-status-${to === 'in_progress' ? 'progress' : to})`
+  if (field === 'priority')
+    return to === 'urgent' || to === 'high'
+      ? `var(--color-priority-${to})`
+      : undefined
+  return undefined
+}
+
+function ChangeText({ e }: { e: ChangeLogEntry }) {
+  // dependsOn: lean on add/remove when one side is the empty set.
+  if (e.field === 'dependsOn') {
+    if (e.from === null && e.to !== null)
+      return (
+        <span style={{ color: 'var(--color-status-done)' }} className="font-medium">
+          + {e.to}
+        </span>
+      )
+    if (e.to === null && e.from !== null)
+      return <span className="text-ink-faint line-through">{e.from}</span>
+  }
+  const oldText = formatValue(e.field, e.from)
+  const newColor = e.to !== null ? newValueColor(e.field, e.to) : undefined
+  return (
+    <>
+      <span className="text-ink-faint">{oldText}</span>
+      <span className="text-ink-faint mx-1">→</span>
+      <span className="font-medium text-ink" style={newColor ? { color: newColor } : undefined}>
+        {formatValue(e.field, e.to)}
+      </span>
+    </>
+  )
 }
 
 export function ChangeLogTooltip({ entries }: { entries?: ChangeLogEntry[] }) {
@@ -77,7 +119,7 @@ export function ChangeLogTooltip({ entries }: { entries?: ChangeLogEntry[] }) {
     >
       <button
         type="button"
-        aria-label="Lịch sử thay đổi"
+        aria-label="Change history"
         className="grid place-items-center text-ink-faint hover:text-ink-muted transition-colors focus:outline-none"
       >
         <History size={13} />
@@ -93,21 +135,26 @@ export function ChangeLogTooltip({ entries }: { entries?: ChangeLogEntry[] }) {
               left: coords?.left ?? -9999,
               visibility: coords ? 'visible' : 'hidden',
             }}
-            className="z-[100] w-max max-w-[300px] rounded-lg border border-border-hair bg-surface px-2.5 py-2 text-left shadow-[0_4px_14px_rgba(0,0,0,0.16)]"
+            className="z-[100] w-max max-w-[320px] rounded-xl border border-border-hair bg-surface px-3 py-2 shadow-[0_1px_3px_rgba(0,0,0,0.12),0_0_0_0.5px_rgba(0,0,0,0.04)]"
           >
-            {entries.map((e, i) => (
-              <span
-                key={i}
-                title={formatTimestamp(e.ts)}
-                className="flex items-baseline gap-1.5 whitespace-nowrap py-0.5 text-[11.5px] leading-snug"
-              >
-                <span className="text-ink-muted">{FIELD_LABEL[e.field]}:</span>
-                <span className="text-ink">
-                  {formatValue(e.field, e.from)} → {formatValue(e.field, e.to)}
-                </span>
-                <span className="text-ink-faint">· {formatRelativeTime(e.ts)}</span>
-              </span>
-            ))}
+            <div className="grid grid-cols-[auto_1fr_auto] items-baseline gap-x-2.5 gap-y-0.5">
+              {entries.map((e, i) => (
+                <Fragment key={i}>
+                  <span className="text-right text-[11px] text-ink-muted whitespace-nowrap">
+                    {FIELD_LABEL[e.field]}
+                  </span>
+                  <span className="text-[12px] whitespace-nowrap">
+                    <ChangeText e={e} />
+                  </span>
+                  <span
+                    title={formatTimestamp(e.ts)}
+                    className="text-right text-[10.5px] text-ink-faint whitespace-nowrap pl-1.5"
+                  >
+                    {formatRelativeTime(e.ts)}
+                  </span>
+                </Fragment>
+              ))}
+            </div>
           </div>,
           document.body
         )}

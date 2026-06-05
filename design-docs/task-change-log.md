@@ -29,7 +29,7 @@ trail** — the cap at 5 is the whole point. Single-user app → no "who", only 
   affordance as the select checkbox). Shown in both **List** (`SprintView`) and **Board**
   (`BoardView`).
 - **Hover/focus** → tooltip listing up to 5 entries, **newest first**, one line each:
-  *field · old → new · giờ tương đối*, e.g. `Người làm: An → Bình · 2h trước`.
+  *field · old → new · relative time*, e.g. `Assignee: An → Bình · 2h ago`.
 - Each line's `title` attr = absolute timestamp (`05/06 23:14`). Relative time is computed
   when the tooltip renders; it does not live-tick while open.
 - **Empty state:** log empty → the icon is **hidden** (no empty tooltip).
@@ -43,10 +43,10 @@ Every **user-initiated** change to one of these **8** main fields:
 The first 7 are diffed inside `updateTask` (the `LOGGABLE_FIELDS` set). **`dependsOn`
 is special**: prereq edits flow through `setDependencies` (`db.ts`), not `updateTask`,
 so `setDependencies` logs the change itself — with **sequence-range labels** (e.g.
-`Phụ thuộc: — → 1-2`) frozen at write time (per-sprint sequences can renumber).
+`Prereqs: — → 1-2`) frozen at write time (per-sprint sequences can renumber).
 
 A prereq edit **also logs the old→new `startDate`/`dueDate`** that the recompute shifts
-on *that same task* (e.g. `Bắt đầu: May 4 → May 6`), so you can see the time before and
+on *that same task* (e.g. `Start: May 4 → May 6`), so you can see the time before and
 after the dependency moved it. This is the one place a recomputed date is logged: only
 the **direct** consequence on the edited task. Ripple onto *other* tasks, and standalone
 recomputes triggered elsewhere (an upstream effort edit), stay unlogged (premise #2). The

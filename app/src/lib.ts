@@ -108,29 +108,29 @@ export const PRIORITY_LABEL: Record<Priority, string> = {
 }
 
 export const FIELD_LABEL: Record<LoggableField, string> = {
-  title: 'Tiêu đề',
-  status: 'Trạng thái',
-  priority: 'Ưu tiên',
-  assigneeId: 'Người làm',
-  startDate: 'Bắt đầu',
-  dueDate: 'Hạn',
+  title: 'Title',
+  status: 'Status',
+  priority: 'Priority',
+  assigneeId: 'Assignee',
+  startDate: 'Start',
+  dueDate: 'Due',
   estimate: 'Effort',
-  dependsOn: 'Phụ thuộc',
+  dependsOn: 'Prereqs',
 }
 
 /**
- * "vừa xong" / "Xm trước" / "Xh trước" / "Xd trước", flipping to an absolute
+ * "just now" / "Xm ago" / "Xh ago" / "Xd ago", flipping to an absolute
  * `MMM d` date past 7 days. `now` is injectable so boundary tests are
  * deterministic (the older dayDiff hardcodes new Date() and can't be tested so).
  */
 export function formatRelativeTime(ts: number, now: number = Date.now()): string {
   const mins = Math.floor(Math.max(0, now - ts) / 60_000)
-  if (mins < 1) return 'vừa xong'
-  if (mins < 60) return `${mins}m trước`
+  if (mins < 1) return 'just now'
+  if (mins < 60) return `${mins}m ago`
   const hrs = Math.floor(mins / 60)
-  if (hrs < 24) return `${hrs}h trước`
+  if (hrs < 24) return `${hrs}h ago`
   const days = Math.floor(hrs / 24)
-  if (days <= 7) return `${days}d trước`
+  if (days <= 7) return `${days}d ago`
   const d = new Date(ts)
   return `${MON[d.getMonth()]} ${d.getDate()}`
 }

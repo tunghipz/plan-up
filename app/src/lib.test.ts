@@ -10,17 +10,17 @@ import {
 describe('formatRelativeTime', () => {
   const now = new Date('2026-06-05T12:00:00').getTime()
   const ago = (ms: number) => now - ms
-  it('shows "vừa xong" under a minute', () => {
-    expect(formatRelativeTime(ago(30_000), now)).toBe('vừa xong')
+  it('shows "just now" under a minute', () => {
+    expect(formatRelativeTime(ago(30_000), now)).toBe('just now')
   })
   it('shows minutes', () => {
-    expect(formatRelativeTime(ago(5 * 60_000), now)).toBe('5m trước')
+    expect(formatRelativeTime(ago(5 * 60_000), now)).toBe('5m ago')
   })
   it('shows hours', () => {
-    expect(formatRelativeTime(ago(3 * 3_600_000), now)).toBe('3h trước')
+    expect(formatRelativeTime(ago(3 * 3_600_000), now)).toBe('3h ago')
   })
   it('shows days up to 7', () => {
-    expect(formatRelativeTime(ago(2 * 86_400_000), now)).toBe('2d trước')
+    expect(formatRelativeTime(ago(2 * 86_400_000), now)).toBe('2d ago')
   })
   it('flips to an absolute MMM d date past 7 days', () => {
     const ts = new Date('2026-05-19T09:00:00').getTime()

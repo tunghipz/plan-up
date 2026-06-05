@@ -254,6 +254,54 @@ export function assignLanes(items: CalItem[]): Map<string, number> {
   return out
 }
 
+export interface BarSegment {
+  itemId: string
+  weekIndex: number
+  /** 1..7 */
+  colStart: number
+  span: number
+  roundL: boolean
+  roundR: boolean
+  /** Cắt mép trái lưới (còn tiếp từ tháng trước). */
+  leftChev: boolean
+  /** Cắt mép phải lưới (còn tiếp sang tháng sau). */
+  rightChev: boolean
+  lane: number
+}
+
+/** Cắt mỗi item thành các đoạn theo từng tuần trong lưới tháng. */
+export function computeBarSegments(
+  items: CalItem[],
+  grid: MonthGrid,
+  lanes: Map<string, number>
+): BarSegment[] {
+  const out: BarSegment[] = []
+  for (const it of items) {
+    const a = dayIndex(it.start)
+    const b = dayIndex(it.end)
+    if (b < grid.gridStart || a > grid.gridEnd) continue
+    grid.weeks.forEach((week, weekIndex) => {
+      const wkStart = week.startIdx
+      const wkEnd = wkStart + 6
+      if (b < wkStart || a > wkEnd) return
+      const segA = Math.max(a, wkStart)
+      const segB = Math.min(b, wkEnd)
+      out.push({
+        itemId: it.id,
+        weekIndex,
+        colStart: segA - wkStart + 1,
+        span: segB - segA + 1,
+        roundL: segA === a,
+        roundR: segB === b,
+        leftChev: segA === grid.gridStart && a < grid.gridStart,
+        rightChev: segB === grid.gridEnd && b > grid.gridEnd,
+        lane: lanes.get(it.id) ?? 0,
+      })
+    })
+  }
+  return out
+}
+
 export function useDarkMode() {
   const [dark, setDark] = useState<boolean>(() => {
     const stored = localStorage.getItem('plan-up:dark')

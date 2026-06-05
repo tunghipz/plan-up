@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { dayIndex, buildMonthGrid, assignLanes } from './lib'
+import { dayIndex, buildMonthGrid, assignLanes, computeBarSegments } from './lib'
 
 describe('buildMonthGrid', () => {
   it('June 2026 is Mon-start, 5 weeks, today flagged, trailing July faint', () => {
@@ -38,5 +38,33 @@ describe('assignLanes', () => {
     ])
     expect(lanes.get('a')).toBe(0)
     expect(lanes.get('b')).toBe(1)
+  })
+})
+
+describe('computeBarSegments', () => {
+  const grid = buildMonthGrid(2026, 5, '2026-06-03') // June, gridStart=Jun1, gridEnd=Jul5
+
+  it('a within-week item: one rounded segment', () => {
+    const items = [{ id: 'a', start: '2026-06-02', end: '2026-06-04' }]
+    const segs = computeBarSegments(items, grid, assignLanes(items))
+    expect(segs).toHaveLength(1)
+    expect(segs[0]).toMatchObject({ weekIndex: 0, colStart: 2, span: 3, roundL: true, roundR: true, leftChev: false, rightChev: false })
+  })
+
+  it('cross-week item splits with correct rounding', () => {
+    const items = [{ id: 'a', start: '2026-06-20', end: '2026-06-23' }] // Sat..Tue
+    const segs = computeBarSegments(items, grid, assignLanes(items))
+    expect(segs).toHaveLength(2)
+    expect(segs[0]).toMatchObject({ weekIndex: 2, colStart: 6, span: 2, roundL: true, roundR: false })
+    expect(segs[1]).toMatchObject({ weekIndex: 3, colStart: 1, span: 2, roundL: false, roundR: true })
+  })
+
+  it('item extending past gridEnd gets rightChev (no rounded right)', () => {
+    const items = [{ id: 'a', start: '2026-06-10', end: '2026-07-20' }]
+    const segs = computeBarSegments(items, grid, assignLanes(items))
+    const last = segs[segs.length - 1]
+    expect(last.rightChev).toBe(true)
+    expect(last.roundR).toBe(false)
+    expect(segs[0].roundL).toBe(true) // bắt đầu Jun 10 là start thật
   })
 })

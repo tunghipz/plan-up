@@ -488,6 +488,45 @@ export async function deleteStatus(collectionId: string, statusId: string): Prom
   })
 }
 
+/**
+ * Tạo một collection-item (Task ngoài sprint). status mặc định = status đầu tiên
+ * của collection (hoặc null nếu chưa có status), startDate = hôm nay, dueDate=null,
+ * sprintId=null. sequence per-project (collection không có numbering riêng).
+ */
+export async function addCollectionItem(
+  collectionId: string,
+  sectionId: string,
+  patch: Partial<Task> & { title: string }
+): Promise<Task> {
+  const c = await db.collections.get(collectionId)
+  const today = new Date().toISOString().slice(0, 10)
+  const projectId = c?.projectId ?? ''
+  const maxSeq = (
+    await db.tasks.where('projectId').equals(projectId).toArray()
+  ).reduce((m, t) => Math.max(m, t.sequence ?? 0), 0)
+  const task: Task = {
+    id: uid(),
+    projectId,
+    sequence: maxSeq + 1,
+    title: patch.title,
+    assigneeId: null,
+    sprintId: null,
+    status: 'todo',
+    priority: 'normal',
+    startDate: today,
+    dueDate: null,
+    estimate: null,
+    createdAt: Date.now(),
+    dependsOn: [],
+    collectionId,
+    sectionId,
+    collectionStatusId: c?.statuses[0]?.id ?? null,
+    ...patch,
+  }
+  await db.tasks.add(task)
+  return task
+}
+
 /** Next sequence number within a sprint. Sequences are never reused. */
 export async function nextSequence(sprintId: string): Promise<number> {
   const all = await db.tasks.where('sprintId').equals(sprintId).toArray()

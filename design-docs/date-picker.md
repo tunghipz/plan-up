@@ -22,7 +22,11 @@ browsers, not Cupertino, not dark-aware, can't show planning context) with a sin
     a weekend even though the scheduler skips them).
   - **Assignee days-off** — a small orange dot under the day (half-day = half dot), so you
     don't schedule onto a known off-day. Shown for the task's assignee (task cells) / the
-    member being edited (days-off picker).
+    member being edited (days-off picker). **Only off-days inside the sprint are dotted** —
+    an off-day in another sprint/month carries no marker (filtered by `sprintRange`).
+  - **Days-off list (footer)** — below the grid, when the assignee has off-days inside the
+    sprint, a compact list spells out each: `Jun 6 · AM off · 08:00–12:00`, `Jun 10 · Off all
+    day`. Always visible (glanceable, no hover needed). Header carries the orange dot key.
   - **Out-of-range** (min/max) — faded, not clickable (days-off entry is clamped to the
     sprint's date range).
 - **Footer**: **Today** (jump+select) and **Clear** (→ null/empty) ghost actions.

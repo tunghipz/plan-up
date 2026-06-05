@@ -46,6 +46,11 @@ function shiftISO(s: string, days: number) {
   dt.setDate(dt.getDate() + days)
   return isoYMD(dt.getFullYear(), dt.getMonth(), dt.getDate())
 }
+// Time detail for an off-day (matches the days-off select wording). The half-day
+// off-window: AM = morning 08:00–12:00, PM = afternoon 13:00–17:00.
+function offDetail(half?: 'am' | 'pm') {
+  return half === 'am' ? 'AM off · 08:00–12:00' : half === 'pm' ? 'PM off · 13:00–17:00' : 'Off all day'
+}
 
 // ---- Month grid + keyboard nav ----
 function CalendarGrid({
@@ -79,7 +84,13 @@ function CalendarGrid({
   const [focus, setFocus] = useState<string>(() => initial)
   const gridRef = useRef<HTMLDivElement>(null)
   const today = todayISO()
-  const offByDate = new Map((daysOff ?? []).map((d) => [d.date, d.half ?? 'all'] as const))
+  // Only mark off-days that fall inside the sprint range — an off-day in another
+  // sprint/month carries no dot (req: "chỉ hiện ngày off trong sprint").
+  const offByDate = new Map(
+    (daysOff ?? [])
+      .filter((d) => !sprintRange || (d.date >= sprintRange.start && d.date <= sprintRange.end))
+      .map((d) => [d.date, d.half ?? 'all'] as const)
+  )
 
   useEffect(() => {
     gridRef.current?.focus()
@@ -233,8 +244,13 @@ function CalendarPopover({
 }) {
   const popRef = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState<{ top: number; left: number }>({ top: -9999, left: -9999 })
+  // Off-days inside the sprint, listed under the grid with their time detail (req #2).
+  const offs = (daysOff ?? [])
+    .filter((d) => !sprintRange || (d.date >= sprintRange.start && d.date <= sprintRange.end))
+    .slice()
+    .sort((a, b) => (a.date < b.date ? -1 : 1))
   const WIDTH = 248
-  const HEIGHT = 320
+  const HEIGHT = 320 + offs.length * 22
 
   useLayoutEffect(() => {
     const pin = () => {
@@ -286,6 +302,20 @@ function CalendarPopover({
         sprintRange={sprintRange}
         daysOff={daysOff}
       />
+      {offs.length > 0 && (
+        <div className="mt-2.5 pt-2.5 border-t border-border-hair">
+          <div className="flex items-center gap-1.5 text-[10.5px] font-semibold text-ink-faint mb-1.5">
+            <span className="w-[7px] h-[7px] rounded-full" style={{ background: 'var(--color-priority-high)' }} aria-hidden />
+            Days off this sprint
+          </div>
+          {offs.map((d) => (
+            <div key={d.date} className="flex items-center gap-2 text-[12px] py-0.5">
+              <span className="w-[46px] shrink-0 font-medium tabular-nums">{formatShortDate(d.date)}</span>
+              <span className="text-ink-muted">{offDetail(d.half)}</span>
+            </div>
+          ))}
+        </div>
+      )}
       <div className="flex items-center justify-between mt-2.5 pt-2.5 border-t border-border-hair">
         <button
           type="button"

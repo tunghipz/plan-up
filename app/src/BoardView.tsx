@@ -12,6 +12,7 @@ import {
   type Task,
 } from './db'
 import { formatShortDate } from './lib'
+import { SprintRangeContext } from './DatePicker'
 import {
   STATUS_META,
   STATUS_ORDER,
@@ -77,12 +78,14 @@ export function BoardView({
   projectId,
   sprintId,
   sprintStartDate,
+  sprintEndDate,
   tasks,
   search,
 }: {
   projectId: string
   sprintId: string
   sprintStartDate: string
+  sprintEndDate: string
   tasks: Task[]
   search: string
 }) {
@@ -432,6 +435,7 @@ export function BoardView({
     return <p className="text-ink-muted py-12 text-center">Loading…</p>
 
   return (
+    <SprintRangeContext.Provider value={{ start: sprintStartDate, end: sprintEndDate }}>
     <div ref={gridRef} className="grid grid-cols-1 md:grid-cols-3 items-start gap-5 max-w-6xl">
       {STATUS_ORDER.map((status) => {
         const meta = STATUS_META[status]
@@ -519,6 +523,7 @@ export function BoardView({
       })}
       {dragged && <DragGhost task={dragged} innerRef={ghostRef} />}
     </div>
+    </SprintRangeContext.Provider>
   )
 }
 

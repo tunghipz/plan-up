@@ -36,7 +36,7 @@ import {
   type Status,
 } from './db'
 import { Avatar, MemberDaysOffButton } from './members'
-import { DatePickCell } from './DatePicker'
+import { DatePickCell, SprintRangeContext } from './DatePicker'
 import {
   formatRelativeDate,
   formatShortDate,
@@ -360,6 +360,7 @@ export function SprintView({
   const isFilteredEmpty = filteredTasks.length === 0 && search.trim() !== ''
 
   return (
+    <SprintRangeContext.Provider value={{ start: sprintStartDate, end: sprintEndDate }}>
     <div className="space-y-4 max-w-5xl">
       {isEmpty && <EmptyState onAddMember={() => setShowAddMember(true)} />}
 
@@ -430,6 +431,7 @@ export function SprintView({
         onClear={clearSelection}
       />
     </div>
+    </SprintRangeContext.Provider>
   )
 }
 

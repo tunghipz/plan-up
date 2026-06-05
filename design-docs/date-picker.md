@@ -32,8 +32,8 @@ browsers, not Cupertino, not dark-aware, can't show planning context) with a sin
 ## Where it's used
 | Surface | Component | Extras passed |
 |---|---|---|
-| List start/due | `DatePickCell` (SprintView task rows) | assignee `daysOff` dots · `locked` (computed-from-prereqs/effort) · `time` suffix · overdue red |
-| Board quick-edit | `DatePickCell` (BoardView `DatePopover`) | assignee `daysOff` · same lock/time |
+| List start/due | `DatePickCell` (SprintView task rows) | assignee `daysOff` dots · `locked` (computed-from-prereqs/effort) · `time` suffix · overdue red · **clamped + shaded to the sprint range** (via `SprintRangeContext`) |
+| Board quick-edit | `DatePickCell` (BoardView `DatePopover`) | assignee `daysOff` · same lock/time · **clamped + shaded to the sprint range** (context) |
 | Sprint create/edit | `DateField` (App `NewSprintDialog`) | plain (no range/days-off — it's *defining* the sprint) |
 | Member days-off | `DateField` (members popover) | `min`/`max` = sprint range · `sprintRange` shade · existing days as `daysOff` dots. The AM/PM/All `<select>` + Add stay as-is |
 
@@ -57,10 +57,16 @@ browsers, not Cupertino, not dark-aware, can't show planning context) with a sin
 - **time suffix** (08:00 / 17:00, display-only) and **overdue** red highlight unchanged.
 - SF tabular-nums; no monospace (drops a `font-mono` slip the old members `DateField` had).
 
-## Scoping notes / follow-ups
-- Task-cell **sprint-range shade** is deferred: `CalendarGrid` supports `sprintRange`, but
-  the List `TaskRow` / Board `DatePopover` don't currently have the sprint's end date in
-  scope, so wiring it would thread props through several layers. Day-off dots + weekend dim
-  already deliver the core "don't pick a non-working day" hint; sprint-shade can be wired
-  later by passing `sprintRange` once the end date is threaded.
+## Sprint scoping (task cells)
+A task belongs to a sprint, so its start/due picker is **clamped to the sprint's date
+range** — days outside the sprint are faded + non-selectable, and the range is shaded. To
+avoid threading the sprint range through `TaskRows → TaskRow` / `UnassignedCard` /
+`DatePopover`, the range is provided via **`SprintRangeContext`**: `SprintView` and
+`BoardView` each wrap their tree in `<SprintRangeContext.Provider value={{start,end}}>`, and
+`DatePickCell` reads it (an explicit `sprintRange` prop still overrides). The popover opens on
+the sprint month even when the date is empty (the initial view/focus is clamped into the
+range). `DateField` does **not** read the context — the sprint dialog must stay unclamped
+(it's *defining* the range), and days-off passes its range explicitly.
+
+## Notes
 - localStorage: none (the picker holds no persistent UI pref).

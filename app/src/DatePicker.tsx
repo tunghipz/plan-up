@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { formatShortDate } from './lib'
@@ -12,6 +12,13 @@ import { formatShortDate } from './lib'
 
 export type DayOff = { date: string; half?: 'am' | 'pm' }
 export type DateRange = { start: string; end: string }
+
+/**
+ * Sprint date range, provided by SprintView / BoardView so task-date pickers
+ * clamp + shade to the current sprint without threading the range through every
+ * row. DatePickCell reads it; DateField does NOT (sprint dialog stays unclamped).
+ */
+export const SprintRangeContext = createContext<DateRange | null>(null)
 
 const MONTHS = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -56,8 +63,17 @@ function CalendarGrid({
   sprintRange?: DateRange | null
   daysOff?: DayOff[]
 }) {
-  const [view, setView] = useState(() => ymOf(value))
-  const [focus, setFocus] = useState<string>(() => value || todayISO())
+  // Initial focus/view: the value if set, else today clamped into [min,max] (so an
+  // empty picker opens on the sprint month rather than a fully-disabled month).
+  const initial = (() => {
+    if (value) return value
+    const t = todayISO()
+    if (min && t < min) return min
+    if (max && t > max) return max
+    return t
+  })()
+  const [view, setView] = useState(() => ymOf(initial))
+  const [focus, setFocus] = useState<string>(() => initial)
   const gridRef = useRef<HTMLDivElement>(null)
   const today = todayISO()
   const offByDate = new Map((daysOff ?? []).map((d) => [d.date, d.half ?? 'all'] as const))
@@ -314,6 +330,10 @@ export function DatePickCell({
 }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLButtonElement>(null)
+  // A task belongs to a sprint → clamp + shade the picker to that sprint range.
+  // Explicit prop wins; otherwise the range comes from SprintRangeContext.
+  const ctxRange = useContext(SprintRangeContext)
+  const range = sprintRange ?? ctxRange
   const date = value ? formatShortDate(value) : ''
   const label = value && time ? `${date}, ${time}` : date
   const valueCls = value
@@ -351,7 +371,9 @@ export function DatePickCell({
           value={value}
           onChange={onChange}
           onClose={() => setOpen(false)}
-          sprintRange={sprintRange}
+          min={range?.start}
+          max={range?.end}
+          sprintRange={range}
           daysOff={daysOff}
         />
       )}

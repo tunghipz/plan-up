@@ -217,5 +217,5 @@ consistent with the rest of the app's pickers.
 ## Rules & edge cases
 - Board is intentionally minimal — no inline date/effort/prereq editing (that's the list).
 - Active view persisted at `localStorage['plan-up:view']`.
-- Per-column sort (when built) persists at `localStorage['plan-up:board-sort']`; a drag into a
-  column resets that column to manual sort.
+- Per-column sort persists at `localStorage['plan-up:board-sort']`; a drag into a column resets
+  that column to manual sort.

@@ -391,6 +391,50 @@ export async function deleteCollection(id: string): Promise<void> {
   })
 }
 
+export async function addSection(collectionId: string, name: string): Promise<void> {
+  const c = await db.collections.get(collectionId)
+  if (!c) return
+  const sections = [...c.sections, { id: uid(), name: name.trim() || 'New table' }]
+  await db.collections.update(collectionId, { sections })
+}
+
+export async function renameSection(
+  collectionId: string,
+  sectionId: string,
+  name: string
+): Promise<void> {
+  const n = name.trim()
+  if (!n) return
+  const c = await db.collections.get(collectionId)
+  if (!c) return
+  const sections = c.sections.map((s) => (s.id === sectionId ? { ...s, name: n } : s))
+  await db.collections.update(collectionId, { sections })
+}
+
+/** Xoá 1 bảng: item của nó dồn về bảng đầu. Không cho xoá bảng cuối cùng. */
+export async function deleteSection(
+  collectionId: string,
+  sectionId: string
+): Promise<void> {
+  await db.transaction('rw', db.collections, db.tasks, async () => {
+    const c = await db.collections.get(collectionId)
+    if (!c || c.sections.length <= 1) return
+    const remaining = c.sections.filter((s) => s.id !== sectionId)
+    if (remaining.length === c.sections.length) return
+    const fallback = remaining[0].id
+    await db.tasks
+      .where('collectionId')
+      .equals(collectionId)
+      .filter((t) => t.sectionId === sectionId)
+      .modify({ sectionId: fallback })
+    await db.collections.update(collectionId, { sections: remaining })
+  })
+}
+
+export async function moveTaskToSection(taskId: string, sectionId: string): Promise<void> {
+  await db.tasks.update(taskId, { sectionId })
+}
+
 /** Next sequence number within a sprint. Sequences are never reused. */
 export async function nextSequence(sprintId: string): Promise<number> {
   const all = await db.tasks.where('sprintId').equals(sprintId).toArray()

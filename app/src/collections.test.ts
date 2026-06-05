@@ -3,6 +3,7 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import { db } from './db'
 import {
   createCollection, renameCollection, deleteCollection, COLLECTION_PALETTE,
+  addSection, renameSection, deleteSection, moveTaskToSection,
 } from './db'
 
 async function clearAll() {
@@ -83,5 +84,54 @@ describe('collection CRUD', () => {
     await deleteCollection(c.id)
     expect(await db.collections.get(c.id)).toBeUndefined()
     expect(await db.tasks.where('collectionId').equals(c.id).count()).toBe(0)
+  })
+})
+
+describe('section CRUD', () => {
+  beforeEach(clearAll)
+  async function setup() {
+    await db.projects.add({ id: 'p1', name: 'P', createdAt: 1 })
+    return createCollection('p1', 'X')
+  }
+
+  it('addSection appends a named table', async () => {
+    const c = await setup()
+    await addSection(c.id, 'Tháng 6')
+    const got = await db.collections.get(c.id)
+    expect(got?.sections.map((s) => s.name)).toEqual(['All', 'Tháng 6'])
+  })
+
+  it('deleteSection moves its items to the FIRST section, never removes last', async () => {
+    const c = await setup()
+    await addSection(c.id, 'B')
+    const fresh = await db.collections.get(c.id)
+    const [all, b] = fresh!.sections
+    await db.tasks.add({
+      id: 't1', projectId: 'p1', sequence: 1, title: 'a', assigneeId: null,
+      sprintId: null, status: 'todo', priority: 'normal', startDate: null,
+      dueDate: null, estimate: null, createdAt: 1, dependsOn: [],
+      collectionId: c.id, sectionId: b.id, collectionStatusId: null,
+    })
+    await deleteSection(c.id, b.id)
+    expect((await db.collections.get(c.id))?.sections).toHaveLength(1)
+    expect((await db.tasks.get('t1'))?.sectionId).toBe(all.id)
+    // không xoá section cuối cùng
+    await deleteSection(c.id, all.id)
+    expect((await db.collections.get(c.id))?.sections).toHaveLength(1)
+  })
+
+  it('moveTaskToSection sets sectionId', async () => {
+    const c = await setup()
+    await addSection(c.id, 'B')
+    const fresh = await db.collections.get(c.id)
+    const b = fresh!.sections[1]
+    await db.tasks.add({
+      id: 't1', projectId: 'p1', sequence: 1, title: 'a', assigneeId: null,
+      sprintId: null, status: 'todo', priority: 'normal', startDate: null,
+      dueDate: null, estimate: null, createdAt: 1, dependsOn: [],
+      collectionId: c.id, sectionId: fresh!.sections[0].id, collectionStatusId: null,
+    })
+    await moveTaskToSection('t1', b.id)
+    expect((await db.tasks.get('t1'))?.sectionId).toBe(b.id)
   })
 })

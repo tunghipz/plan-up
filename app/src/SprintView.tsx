@@ -28,6 +28,7 @@ import {
   setDependencies,
   findCyclePath,
   recomputeDates,
+  updateTask,
   computeWorkingPlan,
   isTaskBlocked,
   nextSequence,
@@ -35,6 +36,7 @@ import {
   type Task,
   type Status,
 } from './db'
+import { ChangeLogTooltip } from './ChangeLogTooltip'
 import { Avatar, MemberDaysOffButton } from './members'
 import { DatePickCell, SprintRangeContext } from './DatePicker'
 import {
@@ -1055,6 +1057,7 @@ function TitleTextarea({
   priority,
   indent = false,
   bold = false,
+  trailing,
 }: {
   value: string
   onChange: (v: string) => void
@@ -1063,6 +1066,8 @@ function TitleTextarea({
   priority: string
   indent?: boolean
   bold?: boolean
+  /** Optional element rendered snug after the title text (e.g. change-log 🕒). */
+  trailing?: React.ReactNode
 }) {
   const ref = useRef<HTMLTextAreaElement>(null)
   const resize = () => {
@@ -1096,6 +1101,9 @@ function TitleTextarea({
       className={`${COL.title} flex items-start gap-1.5 ${indent ? 'pl-5' : ''}`}
     >
       <PriorityChip priority={priority} />
+      {/* field-sizing:content makes the box hug its text so `trailing` sits snug
+          right after the title; min-w-0 lets flex shrink it to fit the trailing
+          icon on long titles (no overflow into the next column). */}
       <textarea
         ref={ref}
         value={value}
@@ -1107,10 +1115,11 @@ function TitleTextarea({
             ;(e.target as HTMLTextAreaElement).blur()
           }
         }}
-        className={`flex-1 min-w-0 editable bg-transparent resize-none overflow-hidden leading-snug whitespace-pre-wrap break-words ${
+        className={`[field-sizing:content] min-w-0 max-w-full editable bg-transparent resize-none overflow-hidden leading-snug whitespace-pre-wrap break-words ${
           done ? 'line-through text-ink-faint' : ''
         } ${welcomeHint ? 'welcome-hint' : ''} ${bold ? 'font-semibold' : ''}`}
       />
+      {trailing && <span className="shrink-0 self-start mt-[3px]">{trailing}</span>}
     </div>
   )
 }
@@ -1236,7 +1245,7 @@ function TaskGroupRow({
         </button>
         <TitleTextarea
           value={task.title}
-          onChange={(v) => db.tasks.update(task.id, { title: v })}
+          onChange={(v) => updateTask(task.id, { title: v })}
           done={false}
           welcomeHint={false}
           priority={task.priority}
@@ -1414,7 +1423,9 @@ function TaskRow({
   selected?: boolean
   onToggleSelect?: () => void
 }) {
-  const update = (patch: Partial<Task>) => db.tasks.update(task.id, patch)
+  // Canonical user-edit funnel → records a change-log entry per changed field
+  // (design-docs/task-change-log.md). Covers title/status/assignee/effort/dates.
+  const update = (patch: Partial<Task>) => updateTask(task.id, patch)
   const assignee = members.find((m) => m.id === task.assigneeId) ?? null
   const blocked = isTaskBlocked(task, tasksById)
   const isWelcome = task.title.startsWith(WELCOME_PREFIX)
@@ -1503,6 +1514,7 @@ function TaskRow({
         welcomeHint={isWelcome}
         priority={task.priority}
         indent={isChild}
+        trailing={<ChangeLogTooltip entries={task.changeLog} />}
       />
 
       {showAssignee && (

@@ -57,6 +57,7 @@ Non-obvious behaviors, defaults, persistence keys.
 | [members-and-days-off.md](./members-and-days-off.md) | Member labels, colors, off-days |
 | [member-title.md](./member-title.md) | Optional per-member role label (free-text), shown in settings + sprint header |
 | [tasks.md](./tasks.md) | Task CRUD, fields, inline editing |
+| [task-change-log.md](./task-change-log.md) | Per-task change log — last 5 user edits, hover 🕒 tooltip |
 | [task-groups.md](./task-groups.md) | Group tasks under a parent task (nested, roll-up + collapse) |
 | [scheduling.md](./scheduling.md) | Auto-scheduling engine (effort, prereqs, workdays) |
 | [conflict-warning.md](./conflict-warning.md) | Warn when a member is double-booked (same start/end/prereq) |

@@ -7,10 +7,13 @@ import {
   nextSequence,
   computeWorkingPlan,
   recomputeDates,
+  updateTask,
+  logStatusChange,
   type Member,
   type Status,
   type Task,
 } from './db'
+import { ChangeLogTooltip } from './ChangeLogTooltip'
 import { formatShortDate } from './lib'
 import { SprintRangeContext } from './DatePicker'
 import {
@@ -265,7 +268,7 @@ export function BoardView({
       if (!t || childrenByParent.get(id)?.length) return // parent status is derived
       const idx = STATUS_ORDER.indexOf(t.status)
       const next = STATUS_ORDER[(idx + 1) % STATUS_ORDER.length]
-      void db.tasks.update(id, { status: next })
+      void logStatusChange(id, t.status, next)
     },
     [tasksById, childrenByParent]
   )
@@ -306,13 +309,17 @@ export function BoardView({
     const t = tasksById.get(id)
     if (!t || childrenByParent.get(id)?.length) return // ignore parents
     if (boardSort[status].mode === 'manual') {
-      // Manual column: keep the lightweight single-write path — one fractional
-      // boardOrder between the slot's neighbours (+ status if it crossed columns).
+      // Manual column: one fractional boardOrder between the slot's neighbours,
+      // plus a logged status change if it crossed columns. boardOrder is written
+      // raw (not loggable); status goes through logStatusChange so the move shows
+      // in the card's change log (parity with the List status control).
       const order = orderForDrop(status, index, id)
-      const patch: Partial<Task> = {}
-      if (t.status !== status) patch.status = status
-      if (order != null && order !== t.boardOrder) patch.boardOrder = order
-      if (Object.keys(patch).length) void db.tasks.update(id, patch)
+      const crossed = t.status !== status
+      void (async () => {
+        if (order != null && order !== t.boardOrder)
+          await db.tasks.update(id, { boardOrder: order })
+        if (crossed) await logStatusChange(id, t.status, status)
+      })()
       return
     }
     // Sorted column: a drop is manual intent. Reindex the whole column to its
@@ -337,8 +344,14 @@ export function BoardView({
       })
       // Flip to manual only AFTER the reindex commits, so the column doesn't briefly
       // re-sort stale boardOrder values (visible jump). Until then it stays in its
-      // sorted mode showing the right order.
-      .then(() => setColSort(status, { mode: 'manual', dir: 'asc' }))
+      // sorted mode showing the right order. The reindex already persisted the new
+      // status (raw); logStatusChange then records the transition outside that
+      // tasks-only transaction (calling it inside would nest a wider db.members
+      // scope and throw — see design-docs/task-change-log.md).
+      .then(() => {
+        setColSort(status, { mode: 'manual', dir: 'asc' })
+        if (t.status !== status) void logStatusChange(id, t.status, status)
+      })
   }
 
   // Stable card drag handlers — they read the card's id/status/index from `data-*`
@@ -874,7 +887,7 @@ function DatePopover({
           <EffortCell
             value={task.estimate}
             onChange={async (v) => {
-              await db.tasks.update(task.id, { estimate: v })
+              await updateTask(task.id, { estimate: v })
               await recomputeDates(task.id)
             }}
           />
@@ -891,7 +904,7 @@ function DatePopover({
             ariaLabel="Start date"
             daysOff={assigneeDaysOff}
             onChange={async (v) => {
-              await db.tasks.update(task.id, { startDate: v })
+              await updateTask(task.id, { startDate: v })
               await recomputeDates(task.id)
             }}
           />
@@ -906,7 +919,7 @@ function DatePopover({
             locked={endLocked}
             ariaLabel="Due date"
             daysOff={assigneeDaysOff}
-            onChange={(v) => db.tasks.update(task.id, { dueDate: v })}
+            onChange={(v) => updateTask(task.id, { dueDate: v })}
           />
         </div>
       </div>
@@ -1014,7 +1027,7 @@ const BoardCard = memo(function BoardCard({
             task={task}
             members={members}
             onChange={async (id) => {
-              await db.tasks.update(task.id, { assigneeId: id })
+              await updateTask(task.id, { assigneeId: id })
               await recomputeDates(task.id)
             }}
           />
@@ -1068,6 +1081,11 @@ const BoardCard = memo(function BoardCard({
         >
           {isParent && <LayersGlyph />}
           {task.title || <span className="text-ink-faint italic">Untitled</span>}
+          {!isParent && (
+            <span className="inline-flex align-middle ml-1">
+              <ChangeLogTooltip entries={task.changeLog} />
+            </span>
+          )}
         </div>
       </div>
       {group && (

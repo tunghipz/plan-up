@@ -4,6 +4,44 @@ export type Status = 'todo' | 'in_progress' | 'done'
 export type Priority = 'urgent' | 'high' | 'normal' | 'low' | 'none'
 
 /**
+ * Fields whose user-initiated edits are recorded in `Task.changeLog`.
+ * `dependsOn` is intentionally excluded (it flows through setDependencies, not
+ * updateTask) — see design-docs/task-change-log.md.
+ */
+export type LoggableField =
+  | 'title'
+  | 'status'
+  | 'priority'
+  | 'assigneeId'
+  | 'startDate'
+  | 'dueDate'
+  | 'estimate'
+
+export const LOGGABLE_FIELDS: readonly LoggableField[] = [
+  'title',
+  'status',
+  'priority',
+  'assigneeId',
+  'startDate',
+  'dueDate',
+  'estimate',
+]
+
+/**
+ * One recorded change. `from`/`to` store the RAW value for stable fields
+ * (formatted at render by ChangeLogTooltip); only `assigneeId` freezes the
+ * resolved member NAME at write time so history survives the member being
+ * deleted. See design-docs/task-change-log.md.
+ */
+export interface ChangeLogEntry {
+  field: LoggableField
+  from: string | null
+  to: string | null
+  /** epoch ms, captured at write time */
+  ts: number
+}
+
+/**
  * A day off for a member.
  * - `half` omitted → entire day off (contributes 0 to effort)
  * - `half: 'am'` → morning off, afternoon worked (contributes 0.5)
@@ -87,6 +125,13 @@ export interface Task {
    * See design-docs/board-view.md.
    */
   boardOrder?: number
+  /**
+   * The 5 most recent user-initiated field changes, newest-first (ring buffer).
+   * Non-indexed → no Dexie version bump; rows without it read as []. Written only
+   * through updateTask / logStatusChange (never the scheduler). See
+   * design-docs/task-change-log.md.
+   */
+  changeLog?: ChangeLogEntry[]
 }
 
 class PlanDB extends Dexie {
@@ -581,6 +626,134 @@ export function computeStartEnd(
   return { startDate: plan.startDate, dueDate: plan.dueDate }
 }
 
+// ──────────────────────────────────────────────────────────────────────────
+// Change log (design-docs/task-change-log.md)
+//
+//   user edit ──▶ updateTask / logStatusChange ──▶ appendChangeLog ──▶ write
+//                 (the ONLY log writers)            (coalesce + cap 5)
+//   scheduler  ──▶ raw db.tasks.update ─────────────────────────────▶ write
+//                 (recomputeDates, rollover, …)     NO log — premise #2
+// ──────────────────────────────────────────────────────────────────────────
+
+const CHANGELOG_CAP = 5
+/** Window in which consecutive TITLE keystrokes collapse into one entry. */
+const TITLE_COALESCE_MS = 2 * 60 * 1000
+
+/** Value-based equality for a loggable field (all 7 are scalars or null). */
+function loggableValuesEqual(a: unknown, b: unknown): boolean {
+  return a === b
+}
+
+/** Resolve a raw field value to the string stored in a ChangeLogEntry. */
+function changeLogValue(
+  field: LoggableField,
+  raw: unknown,
+  members: Member[] | null
+): string | null {
+  if (raw === null || raw === undefined) return null
+  if (field === 'assigneeId') {
+    // Freeze the member NAME (survives the member being deleted later).
+    return members?.find((m) => m.id === raw)?.name ?? null
+  }
+  return String(raw)
+}
+
+/**
+ * Pure: fold `entries` (newest last) into `task.changeLog`, applying title-only
+ * coalescing and capping to the 5 most recent. Exported for unit tests.
+ *
+ * Coalesce: a new `title` entry whose predecessor at the head is also `title`
+ * AND within TITLE_COALESCE_MS updates that entry's `to`+`ts` (keeping its
+ * original `from`); if that makes `from === to` (typed back to origin), the
+ * entry is dropped. No other field coalesces — each edit is a distinct entry,
+ * so e.g. todo→in_progress→done is preserved as two transitions.
+ */
+export function appendChangeLog(
+  task: Pick<Task, 'changeLog'>,
+  entries: ChangeLogEntry[]
+): ChangeLogEntry[] {
+  const log = task.changeLog ? [...task.changeLog] : []
+  for (const e of entries) {
+    const head = log[0]
+    if (
+      e.field === 'title' &&
+      head &&
+      head.field === 'title' &&
+      e.ts - head.ts <= TITLE_COALESCE_MS
+    ) {
+      const merged: ChangeLogEntry = { ...head, to: e.to, ts: e.ts }
+      if (merged.from === merged.to) log.shift() // reverted to origin → drop
+      else log[0] = merged
+    } else {
+      log.unshift(e)
+    }
+  }
+  return log.slice(0, CHANGELOG_CAP)
+}
+
+/**
+ * Canonical USER-edit path for a task. Diffs `patch` against LOGGABLE_FIELDS,
+ * records one entry per actually-changed field, and writes patch + changeLog in
+ * a single transaction. Does NOT recompute dates — callers keep their explicit
+ * recomputeDates() after (which uses the raw, unlogged write path).
+ */
+export async function updateTask(
+  id: string,
+  patch: Partial<Task>
+): Promise<void> {
+  await db.transaction('rw', db.tasks, db.members, async () => {
+    const task = await db.tasks.get(id)
+    if (!task) return
+    // Only load members when an assignee label needs freezing (title fires per
+    // keystroke — don't scan members on every character).
+    const members: Member[] | null =
+      'assigneeId' in patch ? await db.members.toArray() : null
+    const now = Date.now()
+    const entries: ChangeLogEntry[] = []
+    for (const field of LOGGABLE_FIELDS) {
+      if (!(field in patch)) continue
+      const before = task[field as keyof Task]
+      const after = (patch as Record<string, unknown>)[field]
+      if (loggableValuesEqual(before, after)) continue
+      entries.push({
+        field,
+        from: changeLogValue(field, before, members),
+        to: changeLogValue(field, after, members),
+        ts: now,
+      })
+    }
+    const updates: Partial<Task> = { ...patch }
+    if (entries.length) updates.changeLog = appendChangeLog(task, entries)
+    await db.tasks.update(id, updates)
+  })
+}
+
+/**
+ * Log a status change from the Board, where editing happens via drag /
+ * click-to-cycle rather than the List funnel. Kept separate from updateTask so
+ * it opens a `db.tasks`-only transaction — calling updateTask (scope
+ * `db.tasks, db.members`) from inside the Board's sorted-column reindex
+ * transaction (scope `db.tasks`) would violate Dexie sub-transaction scoping
+ * and throw. `from`/`to` are passed explicitly so this is safe to call AFTER a
+ * raw write has already persisted the new status.
+ */
+export async function logStatusChange(
+  id: string,
+  from: Status,
+  to: Status
+): Promise<void> {
+  if (from === to) return
+  await db.transaction('rw', db.tasks, async () => {
+    const task = await db.tasks.get(id)
+    if (!task) return
+    const entry: ChangeLogEntry = { field: 'status', from, to, ts: Date.now() }
+    await db.tasks.update(id, {
+      status: to,
+      changeLog: appendChangeLog(task, [entry]),
+    })
+  })
+}
+
 /**
  * Recompute dates for `taskId` and walk forward to any tasks that depend on
  * it. Idempotent — stops when a task's computed dates equal current ones.
@@ -1061,6 +1234,9 @@ export async function importAll(data: ExportPayload) {
           projectId: pid,
           startDate: t.startDate ?? null,
           dependsOn: Array.isArray(t.dependsOn) ? t.dependsOn : [],
+          // Clamp untrusted import to the same cap the write-path enforces, so a
+          // hand-edited export can't smuggle an unbounded changeLog. (#changelog)
+          changeLog: Array.isArray(t.changeLog) ? t.changeLog.slice(0, 5) : [],
           sequence: seq,
         }
       })

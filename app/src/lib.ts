@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import type { Status, Priority, LoggableField } from './db'
 
 const MS = 86400_000
 
@@ -83,6 +84,61 @@ export function formatSprintRange(start: string, end: string): string {
     return `${MON[a.getMonth()]} ${a.getDate()} – ${b.getDate()}`
   }
   return `${formatShortDate(start)} – ${formatShortDate(end)}`
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Change-log labels + time formatting (see design-docs/task-change-log.md).
+// Label maps live here (the shared pure-utils module) rather than being moved
+// out of SprintView's STATUS_META — that constant is used by SprintView,
+// BoardView and GanttView and carries theme fields irrelevant to the log.
+// ──────────────────────────────────────────────────────────────────────────
+
+export const STATUS_LABEL: Record<Status, string> = {
+  todo: 'To do',
+  in_progress: 'In progress',
+  done: 'Done',
+}
+
+export const PRIORITY_LABEL: Record<Priority, string> = {
+  urgent: 'Urgent',
+  high: 'High',
+  normal: 'Normal',
+  low: 'Low',
+  none: 'None',
+}
+
+export const FIELD_LABEL: Record<LoggableField, string> = {
+  title: 'Tiêu đề',
+  status: 'Trạng thái',
+  priority: 'Ưu tiên',
+  assigneeId: 'Người làm',
+  startDate: 'Bắt đầu',
+  dueDate: 'Hạn',
+  estimate: 'Effort',
+}
+
+/**
+ * "vừa xong" / "Xm trước" / "Xh trước" / "Xd trước", flipping to an absolute
+ * `MMM d` date past 7 days. `now` is injectable so boundary tests are
+ * deterministic (the older dayDiff hardcodes new Date() and can't be tested so).
+ */
+export function formatRelativeTime(ts: number, now: number = Date.now()): string {
+  const mins = Math.floor(Math.max(0, now - ts) / 60_000)
+  if (mins < 1) return 'vừa xong'
+  if (mins < 60) return `${mins}m trước`
+  const hrs = Math.floor(mins / 60)
+  if (hrs < 24) return `${hrs}h trước`
+  const days = Math.floor(hrs / 24)
+  if (days <= 7) return `${days}d trước`
+  const d = new Date(ts)
+  return `${MON[d.getMonth()]} ${d.getDate()}`
+}
+
+/** Absolute `dd/mm HH:mm` for an entry's hover title. */
+export function formatTimestamp(ts: number): string {
+  const d = new Date(ts)
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${p(d.getDate())}/${p(d.getMonth() + 1)} ${p(d.getHours())}:${p(d.getMinutes())}`
 }
 
 // ──────────────────────────────────────────────────────────────────────────

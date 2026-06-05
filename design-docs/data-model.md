@@ -1,7 +1,7 @@
 # Data model
 
 **Status:** Implemented
-**Last updated:** 2026-06-03
+**Last updated:** 2026-06-05
 **Code:** `app/src/db.ts`
 
 ## Purpose
@@ -30,9 +30,20 @@ Four IndexedDB tables (Dexie database name **`plan-up`**):
 ### `Task` (`db.ts:45`)
 `id` · `projectId` · `sequence` (number, per-sprint) · `title` · `assigneeId` (`string|null`) ·
 `sprintId` · `status` · `priority` · `startDate` (`string|null`) · `dueDate` (`string|null`) ·
-`estimate` (`number|null`, effort in days) · `createdAt` · `dependsOn: string[]` (task IDs)
+`estimate` (`number|null`, effort in days) · `createdAt` · `dependsOn: string[]` (task IDs) ·
+`changeLog?: ChangeLogEntry[]`
+- `changeLog` is an **optional, non-indexed** field holding the **5 most recent**
+  user-initiated field changes (newest-first ring buffer). Like `description`/`color` it
+  needs **no Dexie version bump**; rows without it read as `[]`. Written only through
+  `updateTask()` / `logStatusChange()`, never by the scheduler. See
+  [task-change-log.md](./task-change-log.md).
 
 ### Value types
+- `ChangeLogEntry`: `{ field: LoggableField; from: string|null; to: string|null;
+  ts: number }` over 7 loggable fields (title, status, priority, assigneeId, startDate,
+  dueDate, estimate). `from`/`to` store the **raw** value for stable fields (formatted at
+  render); only `assigneeId` freezes the resolved member **name** at write time so history
+  survives the member being deleted. See [task-change-log.md](./task-change-log.md).
 - `DayOff` (`db.ts:14`): `{ date: string; half?: 'am' | 'pm' }`. No `half` → whole day off
   (0 working days); `half` → 0.5 day. AM vs PM is human-readable only; both contribute 0.5.
 - `Status` (`db.ts:3`): `'todo' | 'in_progress' | 'done'`.

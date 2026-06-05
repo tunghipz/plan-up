@@ -1,5 +1,39 @@
 import { describe, it, expect } from 'vitest'
-import { parsePrereqSeqs, formatSeqRanges, sprintWorkdays } from './lib'
+import {
+  parsePrereqSeqs,
+  formatSeqRanges,
+  sprintWorkdays,
+  formatRelativeTime,
+  formatTimestamp,
+} from './lib'
+
+describe('formatRelativeTime', () => {
+  const now = new Date('2026-06-05T12:00:00').getTime()
+  const ago = (ms: number) => now - ms
+  it('shows "vừa xong" under a minute', () => {
+    expect(formatRelativeTime(ago(30_000), now)).toBe('vừa xong')
+  })
+  it('shows minutes', () => {
+    expect(formatRelativeTime(ago(5 * 60_000), now)).toBe('5m trước')
+  })
+  it('shows hours', () => {
+    expect(formatRelativeTime(ago(3 * 3_600_000), now)).toBe('3h trước')
+  })
+  it('shows days up to 7', () => {
+    expect(formatRelativeTime(ago(2 * 86_400_000), now)).toBe('2d trước')
+  })
+  it('flips to an absolute MMM d date past 7 days', () => {
+    const ts = new Date('2026-05-19T09:00:00').getTime()
+    expect(formatRelativeTime(ts, now)).toBe('May 19')
+  })
+})
+
+describe('formatTimestamp', () => {
+  it('formats dd/mm HH:mm zero-padded', () => {
+    const ts = new Date('2026-06-05T09:07:00').getTime()
+    expect(formatTimestamp(ts)).toBe('05/06 09:07')
+  })
+})
 
 describe('parsePrereqSeqs', () => {
   it('parses a comma/space list', () => {

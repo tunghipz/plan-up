@@ -53,6 +53,7 @@ Non-obvious behaviors, defaults, persistence keys.
 | [projects.md](./projects.md) | Multi-project create/switch/delete |
 | [project-member-settings.md](./project-member-settings.md) | Gear → settings page: edit project info (name/description/color) + members + delete |
 | [sprints.md](./sprints.md) | Sprint CRUD, biweekly defaults, per-sprint sequence |
+| [collections.md](./collections.md) | **(Planned)** Task ngoài sprint — collection tự đặt tên, nhiều bảng (sections), view List + Calendar liền mạch, status FEATURE/EVENT |
 | [sprint-rollover.md](./sprint-rollover.md) | Move unfinished tasks to next sprint |
 | [members-and-days-off.md](./members-and-days-off.md) | Member labels, colors, off-days |
 | [member-title.md](./member-title.md) | Optional per-member role label (free-text), shown in settings + sprint header |

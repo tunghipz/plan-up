@@ -149,6 +149,66 @@ List), and **task creation** via `db.tasks.add` + `nextSequence` (bottom compose
   closes. Dragging is suppressed inside it (the article isn't draggable; the composer isn't a
   card).
 
+## Per-column sort
+*Designed via /office-hours 2026-06-05 (builder mode); implemented same day.*
+
+**What & why.** Each column gets its own sort so you can ask "what's next" per status
+without disturbing the others — e.g. sort *In progress* by due date while *To do* stays
+in your hand-dragged priority order. The board's identity is drag-to-reorder, so sort is
+**additive**, never a replacement.
+
+**Model.** Per-column state `{ mode, dir }`, `mode ∈ {manual, name, time}`, default `manual`:
+- **manual** — today's behavior: `orderOf = boardOrder ?? sequence`, ascending (drag order).
+- **name** — `title` A→Z, case-insensitive (reuse the List's `compareTasks` title branch).
+- **time** — the **computed** date the card's Due chip shows (`planById.get(t.id).dueDate`
+  + `endTime`), so chip and order always agree. Tiebreak: computed start, then `sequence`.
+  Tasks with no due sink to the bottom regardless of `dir`.
+- For **group (parent) cards**: name = parent title; time = the group's rolled-up **latest**
+  child due (the end of the date-range chip), via the existing `groupRange`/`metaById` roll-up,
+  so a group sorts by the same date it displays.
+
+**Non-destructive overlay.** Picking name/time is view-only — it **never writes `boardOrder`**.
+Switching a column back to **Manual** restores the hand-dragged order intact (the `boardOrder`
+values were never touched).
+
+**Drag stays first-class.** A drop is manual intent, so **dropping a card into a column
+auto-switches that column's `mode` to `manual`** (`dropTo` sets `boardOrder` between the slot's
+neighbours as today, then flips that column to manual so the drop position is honored and
+becomes the new manual order). The source column keeps its own sort. This is the only state
+change a drag causes. (Within a sorted column, the `<DropSlot>` still tracks the cursor; on
+drop the column reverts to manual and the card lands at the slot.)
+
+**Persistence.** `localStorage['plan-up:board-sort']` — a per-status map
+`{ todo, in_progress, done } → { mode, dir }`, loaded on mount, saved on change. Survives
+view/sprint/project switch and reload, mirroring the List's `plan-up:sort`. Validated on load
+(unknown mode/dir → default), like `loadSort`. Kept **separate** from `plan-up:sort` because
+this is per-column and carries the extra `manual` mode the List doesn't have.
+
+**UI.** A small `ArrowUpDown` (lucide) icon button in each column `<header>`, right of the count
+→ a tiny popover menu: **Manual · Name · Time** rows (active row in `accent`) + an asc/desc
+toggle. When `mode !== 'manual'`, the header shows a faint direction arrow so the column's sort
+state is glanceable at rest. The button is `data-no-drag` so it never starts a card drag, and
+the menu follows the design system's calm popover pattern (same family as the quick-edit
+Schedule popover).
+
+**Implementation notes (as built).**
+- `byStatus` picks the comparator per column from `boardSort[status]`: `manual` = `orderOf`
+  (`boardOrder ?? sequence`); `name` = case-insensitive title; `time` = `timeKeyById` (a memo
+  that maps each task → its computed due key `YYYY-MM-DDThh:mm`, rolling a parent up to its
+  latest child due). No-due tasks sink last regardless of `dir`. Reuses the precomputed
+  `planById` (no extra scheduler runs — see the drag-perf note above).
+- **Drop into a *sorted* column reindexes, doesn't fractional-insert.** Under a name/time
+  sort the visible neighbours' `boardOrder` isn't monotonic, so a fractional insert would land
+  wrong. `handleDrop` instead rewrites the whole column's `boardOrder` to `0,1,2,…` matching the
+  displayed order with the card spliced in at the slot (one `db.transaction`), then flips the
+  column to `manual` **after the write commits** (so it doesn't briefly re-sort stale values).
+  A drop into a column already in `manual` keeps the old lightweight single fractional write.
+- `SortMenu` (per column) is `memo`'d with stable props (`sort` ref stable unless that column
+  changed; `onChange = setColSort` is a `useCallback`), so the frequent re-renders during a card
+  drag skip it — preserving the drag-perf work. The icon button carries `data-no-drag`.
+
 ## Rules & edge cases
 - Board is intentionally minimal — no inline date/effort/prereq editing (that's the list).
 - Active view persisted at `localStorage['plan-up:view']`.
+- Per-column sort (when built) persists at `localStorage['plan-up:board-sort']`; a drag into a
+  column resets that column to manual sort.

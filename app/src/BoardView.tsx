@@ -1,5 +1,6 @@
 import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
+import { ArrowUpDown } from 'lucide-react'
 import {
   db,
   uid,
@@ -19,6 +20,48 @@ import {
   DatePickCell,
   EffortCell,
 } from './SprintView'
+
+// Per-column sort (see design-docs/board-view.md). Each column carries its own
+// {mode, dir}; `manual` is the default drag order. Sort is a NON-DESTRUCTIVE view
+// overlay — picking name/time never writes boardOrder; back to manual restores the
+// dragged order. A drop flips the destination column to manual (a drag is manual
+// intent), reindexing it so the card lands exactly where dropped.
+type BoardSortMode = 'manual' | 'name' | 'time'
+type ColSort = { mode: BoardSortMode; dir: 'asc' | 'desc' }
+type BoardSort = Record<Status, ColSort>
+const SORT_MODES: BoardSortMode[] = ['manual', 'name', 'time']
+const SORT_LABELS: Record<BoardSortMode, string> = { manual: 'Manual', name: 'Name', time: 'Time' }
+const BOARD_SORT_KEY = 'plan-up:board-sort'
+const freshBoardSort = (): BoardSort => ({
+  todo: { mode: 'manual', dir: 'asc' },
+  in_progress: { mode: 'manual', dir: 'asc' },
+  done: { mode: 'manual', dir: 'asc' },
+})
+// Load + validate the per-column sort (unknown mode/dir → manual/asc), mirroring the
+// List's loadSort. Survives view/sprint/project switch and reload.
+function loadBoardSort(): BoardSort {
+  try {
+    const raw = localStorage.getItem(BOARD_SORT_KEY)
+    if (!raw) return freshBoardSort()
+    const parsed = JSON.parse(raw) as Partial<Record<Status, Partial<ColSort>>>
+    const pick = (s: Status): ColSort => {
+      const c = parsed?.[s]
+      const mode = c && SORT_MODES.includes(c.mode as BoardSortMode) ? (c.mode as BoardSortMode) : 'manual'
+      const dir = c?.dir === 'desc' ? 'desc' : 'asc'
+      return { mode, dir }
+    }
+    return { todo: pick('todo'), in_progress: pick('in_progress'), done: pick('done') }
+  } catch {
+    return freshBoardSort()
+  }
+}
+function saveBoardSort(s: BoardSort) {
+  try {
+    localStorage.setItem(BOARD_SORT_KEY, JSON.stringify(s))
+  } catch {
+    // localStorage unavailable, swallow
+  }
+}
 
 /**
  * Cupertino kanban board. Three columns on the grey canvas; cards are white,
@@ -108,13 +151,69 @@ export function BoardView({
   // Order within a column: manual board order if set, else sequence. Ascending
   // everywhere (top = first) for predictable drag — replaces the old Done-desc.
   const orderOf = (t: Task) => t.boardOrder ?? t.sequence
+
+  // Per-column sort state, persisted to localStorage. See design-docs/board-view.md.
+  const [boardSort, setBoardSort] = useState<BoardSort>(loadBoardSort)
+  useEffect(() => {
+    saveBoardSort(boardSort)
+  }, [boardSort])
+  const setColSort = useCallback((status: Status, next: ColSort) => {
+    setBoardSort((prev) => (prev[status] === next ? prev : { ...prev, [status]: next }))
+  }, [])
+
+  // "Sort by time" key = the COMPUTED date the card's Due chip shows (so chip and
+  // order agree), reusing the precomputed planById (no extra scheduler runs). A
+  // parent rolls up to its latest child due — the end of its date-range chip.
+  // null (no due) → sorts last. ISO `YYYY-MM-DDThh:mm` strings compare chronologically.
+  const timeKeyById = useMemo(() => {
+    const m = new Map<string, string | null>()
+    const leafKey = (id: string): string | null => {
+      const p = planById.get(id)
+      return p?.dueDate ? `${p.dueDate}T${p.endTime ?? ''}` : null
+    }
+    for (const t of tasks) {
+      const kids = childrenByParent.get(t.id)
+      if (kids && kids.length) {
+        let k: string | null = null
+        for (const c of kids) {
+          const ck = leafKey(c.id)
+          if (ck && (!k || ck > k)) k = ck
+        }
+        m.set(t.id, k)
+      } else {
+        m.set(t.id, leafKey(t.id))
+      }
+    }
+    return m
+  }, [tasks, childrenByParent, planById])
+
   const byStatus = useMemo(() => {
+    const cmp = (a: Task, b: Task, cs: ColSort): number => {
+      if (cs.mode === 'manual') return orderOf(a) - orderOf(b)
+      const mul = cs.dir === 'asc' ? 1 : -1
+      if (cs.mode === 'name') {
+        const ta = (a.title || '').toLowerCase()
+        const tb = (b.title || '').toLowerCase()
+        if (ta < tb) return -1 * mul
+        if (ta > tb) return 1 * mul
+        return a.sequence - b.sequence
+      }
+      // time: by computed due key; no-due always sinks last regardless of dir
+      const ka = timeKeyById.get(a.id) ?? null
+      const kb = timeKeyById.get(b.id) ?? null
+      if (ka === null && kb === null) return a.sequence - b.sequence
+      if (ka === null) return 1
+      if (kb === null) return -1
+      if (ka < kb) return -1 * mul
+      if (ka > kb) return 1 * mul
+      return a.sequence - b.sequence
+    }
     const out: Record<Status, Task[]> = { todo: [], in_progress: [], done: [] }
     for (const t of filtered) out[effectiveStatus(t)].push(t)
-    for (const s of STATUS_ORDER) out[s].sort((a, b) => orderOf(a) - orderOf(b))
+    for (const s of STATUS_ORDER) out[s].sort((a, b) => cmp(a, b, boardSort[s]))
     return out
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filtered, childrenByParent])
+  }, [filtered, childrenByParent, boardSort, timeKeyById])
 
   // Per-card display data (status / group roll-up / parent title), precomputed once
   // per data change. Crucial for drag perf: the `group` object keeps a STABLE ref
@@ -184,13 +283,43 @@ export function BoardView({
     if (!after) return orderOf(before!) + 1
     return (orderOf(before!) + orderOf(after!)) / 2
   }
-  const dropTo = (status: Status, id: string, order: number | null) => {
+  const handleDrop = (status: Status, id: string, index: number) => {
     const t = tasksById.get(id)
     if (!t || childrenByParent.get(id)?.length) return // ignore parents
-    const patch: Partial<Task> = {}
-    if (t.status !== status) patch.status = status
-    if (order != null && order !== t.boardOrder) patch.boardOrder = order
-    if (Object.keys(patch).length) void db.tasks.update(id, patch)
+    if (boardSort[status].mode === 'manual') {
+      // Manual column: keep the lightweight single-write path — one fractional
+      // boardOrder between the slot's neighbours (+ status if it crossed columns).
+      const order = orderForDrop(status, index, id)
+      const patch: Partial<Task> = {}
+      if (t.status !== status) patch.status = status
+      if (order != null && order !== t.boardOrder) patch.boardOrder = order
+      if (Object.keys(patch).length) void db.tasks.update(id, patch)
+      return
+    }
+    // Sorted column: a drop is manual intent. Reindex the whole column to its
+    // current displayed (sorted) order with the card spliced in at the slot, then
+    // flip the column to manual so that arrangement sticks and the card lands
+    // exactly where dropped. (Fractional insert would be wrong here — the visible
+    // neighbours' boardOrder isn't monotonic under a name/time sort.)
+    const cur = byStatus[status]
+    const rest = cur.filter((x) => x.id !== id)
+    let pos = 0
+    for (let i = 0; i < index && i < cur.length; i++) if (cur[i].id !== id) pos++
+    rest.splice(Math.min(pos, rest.length), 0, t)
+    void db
+      .transaction('rw', db.tasks, async () => {
+        for (let i = 0; i < rest.length; i++) {
+          const x = rest[i]
+          const changes: Partial<Task> = {}
+          if (x.boardOrder !== i) changes.boardOrder = i
+          if (x.id === id && t.status !== status) changes.status = status
+          if (Object.keys(changes).length) await db.tasks.update(x.id, changes)
+        }
+      })
+      // Flip to manual only AFTER the reindex commits, so the column doesn't briefly
+      // re-sort stale boardOrder values (visible jump). Until then it stays in its
+      // sorted mode showing the right order.
+      .then(() => setColSort(status, { mode: 'manual', dir: 'asc' }))
   }
 
   // Stable card drag handlers — they read the card's id/status/index from `data-*`
@@ -311,7 +440,7 @@ export function BoardView({
               e.preventDefault()
               const id = e.dataTransfer.getData('text/plain') || dragId
               const index = over?.status === status ? over.index : list.length
-              if (id) dropTo(status, id, orderForDrop(status, index, id))
+              if (id) handleDrop(status, id, index)
               clearDrag()
             }}
           >
@@ -325,6 +454,7 @@ export function BoardView({
               <span className="text-[12.5px] ml-auto text-ink-faint tab-data">
                 {list.length}
               </span>
+              <SortMenu status={status} sort={boardSort[status]} onChange={setColSort} />
             </header>
             <div className="flex-1 flex flex-col gap-2.5">
               {list.length === 0 && !isOver && (
@@ -532,6 +662,105 @@ function scrollableAncestor(el: HTMLElement | null): HTMLElement | null {
   }
   return null
 }
+
+/** Per-column sort control: a small icon button in the column header that opens a
+ * calm popover (Manual / Name / Time + asc-desc toggle). memo'd with stable props
+ * (sort ref is stable unless the column changed; onChange is a stable useCallback),
+ * so the constant re-renders during a card drag skip it — preserving the drag-perf
+ * work. See design-docs/board-view.md. */
+const SortMenu = memo(function SortMenu({
+  status,
+  sort,
+  onChange,
+}: {
+  status: Status
+  sort: ColSort
+  onChange: (status: Status, next: ColSort) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('mousedown', onDoc)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDoc)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+  const active = sort.mode !== 'manual'
+  return (
+    <div ref={ref} className="relative" data-no-drag>
+      <button
+        type="button"
+        data-no-drag
+        onClick={() => setOpen((o) => !o)}
+        aria-label={`Sort ${status} column`}
+        title="Sort column"
+        className={`flex items-center gap-0.5 rounded p-1 transition hover:bg-black/[0.05] ${
+          active ? 'text-accent' : 'text-ink-faint hover:text-ink'
+        }`}
+      >
+        <ArrowUpDown size={13} strokeWidth={2} aria-hidden />
+        {active && (
+          <span className="text-[9px] leading-none" aria-hidden>
+            {sort.dir === 'asc' ? '▲' : '▼'}
+          </span>
+        )}
+      </button>
+      {open && (
+        <div
+          role="menu"
+          className="absolute right-0 top-full mt-1 z-30 min-w-[150px] rounded-[10px] border border-border-hair bg-surface p-1 shadow-[0_10px_30px_rgba(0,0,0,0.16)]"
+        >
+          {SORT_MODES.map((m) => {
+            const isActive = sort.mode === m
+            return (
+              <button
+                key={m}
+                type="button"
+                role="menuitemradio"
+                aria-checked={isActive}
+                onClick={() => {
+                  onChange(status, { mode: m, dir: m === 'manual' ? 'asc' : sort.dir })
+                  if (m === 'manual') setOpen(false)
+                }}
+                className={`flex w-full items-center justify-between gap-2 rounded-[7px] px-2.5 py-1.5 text-left text-[13px] transition hover:bg-black/[0.04] ${
+                  isActive ? 'text-accent font-medium' : 'text-ink'
+                }`}
+              >
+                <span>{SORT_LABELS[m]}</span>
+                {isActive && m !== 'manual' && (
+                  <span className="text-[10px]" aria-hidden>
+                    {sort.dir === 'asc' ? '▲' : '▼'}
+                  </span>
+                )}
+              </button>
+            )
+          })}
+          <div className="my-1 border-t border-border-hair" />
+          <button
+            type="button"
+            disabled={sort.mode === 'manual'}
+            onClick={() => onChange(status, { ...sort, dir: sort.dir === 'asc' ? 'desc' : 'asc' })}
+            className="flex w-full items-center justify-between gap-2 rounded-[7px] px-2.5 py-1.5 text-left text-[13px] text-ink transition enabled:hover:bg-black/[0.04] disabled:cursor-default disabled:opacity-40"
+          >
+            <span>Direction</span>
+            <span className="text-[11px] tab-data" aria-hidden>
+              {sort.mode === 'manual' ? '—' : sort.dir === 'asc' ? 'Asc ▲' : 'Desc ▼'}
+            </span>
+          </button>
+        </div>
+      )}
+    </div>
+  )
+})
 
 /** Insertion gap shown while dragging — marks where the card will land. The card
  * content rides the cursor as a floating tilted ghost (<DragGhost>), not here. */

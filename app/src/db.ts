@@ -1,12 +1,14 @@
 import Dexie, { type Table } from 'dexie'
+import { formatSeqRanges } from './lib'
 
 export type Status = 'todo' | 'in_progress' | 'done'
 export type Priority = 'urgent' | 'high' | 'normal' | 'low' | 'none'
 
 /**
  * Fields whose user-initiated edits are recorded in `Task.changeLog`.
- * `dependsOn` is intentionally excluded (it flows through setDependencies, not
- * updateTask) — see design-docs/task-change-log.md.
+ * `dependsOn` is part of the union but NOT in LOGGABLE_FIELDS: it never arrives
+ * via an updateTask patch — it flows through setDependencies, which logs it
+ * itself (with sequence-range labels). See design-docs/task-change-log.md.
  */
 export type LoggableField =
   | 'title'
@@ -16,6 +18,7 @@ export type LoggableField =
   | 'startDate'
   | 'dueDate'
   | 'estimate'
+  | 'dependsOn'
 
 export const LOGGABLE_FIELDS: readonly LoggableField[] = [
   'title',
@@ -1111,7 +1114,32 @@ export async function setDependencies(
     clean.push(id)
     probe.dependsOn = clean
   }
-  await db.tasks.update(taskId, { dependsOn: clean })
+  // Log the prereq change itself (the cause) with sequence-range labels — the
+  // dates/times it shifts via recomputeDates are derived and stay unlogged
+  // (premise #2). seq is frozen here since per-sprint sequences can renumber.
+  const changed =
+    task.dependsOn.length !== clean.length ||
+    task.dependsOn.some((d) => !clean.includes(d))
+  if (changed) {
+    const label = (ids: string[]): string | null => {
+      const seqs = ids
+        .map((id) => byId.get(id)?.sequence)
+        .filter((n): n is number => typeof n === 'number')
+      return seqs.length ? formatSeqRanges(seqs) : null
+    }
+    const entry: ChangeLogEntry = {
+      field: 'dependsOn',
+      from: label(task.dependsOn),
+      to: label(clean),
+      ts: Date.now(),
+    }
+    await db.tasks.update(taskId, {
+      dependsOn: clean,
+      changeLog: appendChangeLog(task, [entry]),
+    })
+  } else {
+    await db.tasks.update(taskId, { dependsOn: clean })
+  }
   await recomputeDates(taskId)
   return clean
 }

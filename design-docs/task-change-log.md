@@ -13,9 +13,9 @@ tooltip), `app/src/SprintView.tsx` (`TaskRow` edit funnel + 🕒), `app/src/Boar
 > board status logs **inline** (not via `updateTask` — that nested a wider Dexie
 > transaction scope inside a narrower one and would throw); coalesce is **title-only**
 > (coalescing status/priority destroyed real transitions); label maps live in **`lib.ts`**
-> (not moved out of `SprintView` — `STATUS_META` is used in 3 modules); **`dependsOn`
-> deferred** (it flows through `setDependencies`, not `updateTask`). See "Eng review
-> decisions" below.
+> (not moved out of `SprintView` — `STATUS_META` is used in 3 modules). **`dependsOn`**
+> is logged by `setDependencies` (its own path, sequence-range labels), added
+> 2026-06-05. See "Eng review decisions" below.
 
 ## Purpose
 Once you edit a task you lose all memory of how it got to its current state — "khi nào
@@ -36,19 +36,24 @@ trail** — the cap at 5 is the whole point. Single-user app → no "who", only 
 - **No tap handler** — touch deferred (desktop-first).
 
 ## What is logged
-Every **user-initiated** change to one of these **7** main fields, in a single
-`LOGGABLE_FIELDS` set:
+Every **user-initiated** change to one of these **8** main fields:
 
-`title` · `status` · `priority` · `assigneeId` · `startDate` · `dueDate` · `estimate`
+`title` · `status` · `priority` · `assigneeId` · `startDate` · `dueDate` · `estimate` · `dependsOn`
 
-`dependsOn` is **deferred** (see Eng review decisions). Status changes are logged from
-**both** views: List status-dot cycle, Board click-to-cycle (`onCycleStatusId`,
-`BoardView.tsx:268`), and Board cross-column drag.
+The first 7 are diffed inside `updateTask` (the `LOGGABLE_FIELDS` set). **`dependsOn`
+is special**: prereq edits flow through `setDependencies` (`db.ts`), not `updateTask`,
+so `setDependencies` logs the change itself — with **sequence-range labels** (e.g.
+`Phụ thuộc: — → 1-2`) frozen at write time (per-sprint sequences can renumber). The
+date/time shift that recompute then produces is the *consequence* and stays unlogged
+(premise #2): the log records the prereq edit you made, not the derived schedule churn.
+
+Status changes are logged from **both** views: List status-dot cycle, Board
+click-to-cycle (`onCycleStatusId`, `BoardView.tsx:268`), and Board cross-column drag.
 
 ### What is NOT logged
 - **Scheduler recomputations** (`recomputeDates`/`recomputeAllDates` rewriting dates).
-- **System mutations:** sprint rollover, parent/group ops, dependency edits
-  (`setDependencies`), board reorder (`boardOrder`), sequence renumbering.
+- **System mutations:** sprint rollover, parent/group ops, board reorder
+  (`boardOrder`), sequence renumbering.
 - **Task creation** — the log starts empty.
 
 > Dates & effort log the **action, not the resulting state**: editing `estimate` (or a
@@ -63,7 +68,9 @@ New **non-indexed, optional** field on `Task` (no Dexie version bump — same pa
 ```ts
 type LoggableField =
   | 'title' | 'status' | 'priority' | 'assigneeId'
-  | 'startDate' | 'dueDate' | 'estimate'
+  | 'startDate' | 'dueDate' | 'estimate' | 'dependsOn'
+  // dependsOn is in the union but NOT in LOGGABLE_FIELDS (updateTask's diff set) —
+  // it's logged by setDependencies instead.
 
 type ChangeLogEntry = {
   field: LoggableField
@@ -74,10 +81,11 @@ type ChangeLogEntry = {
 // Task gains:  changeLog?: ChangeLogEntry[]   // newest-first, length ≤ 5
 ```
 
-### Labels — render-time, except assignee (Decision 1A, revised)
-Only **`assigneeId`** is delete-vulnerable, so its **resolved member name** is frozen into
-`from`/`to` at write time (survives the member being deleted). Every other field stores its
-**raw** value and is formatted by the tooltip at render:
+### Labels — render-time, except assignee & dependsOn (Decision 1A, revised)
+Two fields freeze a label at write time: **`assigneeId`** (resolved member name — survives
+the member being deleted) and **`dependsOn`** (sequence-range string — per-sprint sequences
+can renumber). Every other field stores its **raw** value and is formatted by the tooltip at
+render:
 - **status / priority** → `STATUS_LABEL` / `PRIORITY_LABEL` (new label-only maps in
   `lib.ts` — `STATUS_META` stays in `SprintView`, untouched).
 - **startDate / dueDate** → `formatShortDate` ("Jun 10", month-first); `—` for null.
@@ -157,14 +165,14 @@ past the write-path cap.
 - **3A→title-only coalesce:** coalescing status/priority would erase real transitions.
 - **4A→`lib.ts` label maps:** `STATUS_META` is used in SprintView+BoardView+GanttView and
   carries theme fields; moving it was wrong. Tiny label-only maps go in `lib.ts`.
-- **`dependsOn` deferred:** it flows through `setDependencies` (`db.ts:920`), not
-  `updateTask`. Logging it cleanly is a follow-up (and ties into a possible
-  "explain why the date moved" recompute-provenance feature).
+- **`dependsOn`:** logged by `setDependencies` (it flows through there, not
+  `updateTask`) with frozen sequence-range labels. (Originally deferred in the eng
+  review; added 2026-06-05 on request — prereq edits shift dates and users want the
+  cause recorded.)
 - **5A:** conditional `db.members` load (only when `assigneeId` in patch).
 - **Import clamp:** built this PR.
 
 ## Future / open questions
-- **`dependsOn` logging** — deferred; needs `setDependencies` to share `appendChangeLog`.
 - **Recompute provenance** ("why did this date move?") — the causal effort/prereq → date
   chain is intentionally not logged here; a separate provenance feature could log scheduler
   writes *with their cause*. Out of scope.

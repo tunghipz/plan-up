@@ -1147,6 +1147,24 @@ describe('change log', () => {
     })
   })
 
+  describe('dependsOn (logged via setDependencies)', () => {
+    it('logs a prereq change with sequence-range labels', async () => {
+      await makeTask({ id: 'd1', sequence: 1 })
+      await makeTask({ id: 'd2', sequence: 2 })
+      await makeTask({ id: 'd3', sequence: 3, dependsOn: [] })
+      await setDependencies('d3', ['d1', 'd2'])
+      const log = (await db.tasks.get('d3'))!.changeLog!
+      expect(log[0]).toMatchObject({ field: 'dependsOn', from: null, to: '1-2' })
+    })
+
+    it('does not log when the prereq set is unchanged', async () => {
+      await makeTask({ id: 'e1', sequence: 1 })
+      await makeTask({ id: 'e2', sequence: 2, dependsOn: ['e1'] })
+      await setDependencies('e2', ['e1'])
+      expect((await db.tasks.get('e2'))!.changeLog ?? []).toHaveLength(0)
+    })
+  })
+
   describe('scheduler isolation (premise #2 — CRITICAL regression)', () => {
     it('recomputeDates shifting a downstream date adds NO changeLog entry', async () => {
       // a (effort 2) → b depends on a. Changing a's effort recomputes b's dates.

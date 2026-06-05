@@ -40,10 +40,12 @@ Four IndexedDB tables (Dexie database name **`plan-up`**):
 
 ### Value types
 - `ChangeLogEntry`: `{ field: LoggableField; from: string|null; to: string|null;
-  ts: number }` over 7 loggable fields (title, status, priority, assigneeId, startDate,
-  dueDate, estimate). `from`/`to` store the **raw** value for stable fields (formatted at
-  render); only `assigneeId` freezes the resolved member **name** at write time so history
-  survives the member being deleted. See [task-change-log.md](./task-change-log.md).
+  ts: number }` over 8 loggable fields (title, status, priority, assigneeId, startDate,
+  dueDate, estimate, dependsOn). `from`/`to` store the **raw** value for stable fields
+  (formatted at render); `assigneeId` freezes the resolved member **name** and `dependsOn`
+  freezes a **sequence-range** label at write time (the former survives member deletion,
+  the latter survives per-sprint sequence renumbering). `dependsOn` is logged by
+  `setDependencies`; the other 7 by `updateTask`. See [task-change-log.md](./task-change-log.md).
 - `DayOff` (`db.ts:14`): `{ date: string; half?: 'am' | 'pm' }`. No `half` → whole day off
   (0 working days); `half` → 0.5 day. AM vs PM is human-readable only; both contribute 0.5.
 - `Status` (`db.ts:3`): `'todo' | 'in_progress' | 'done'`.

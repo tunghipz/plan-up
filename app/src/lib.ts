@@ -115,6 +115,7 @@ export const FIELD_LABEL: Record<LoggableField, string> = {
   startDate: 'Bắt đầu',
   dueDate: 'Hạn',
   estimate: 'Effort',
+  dependsOn: 'Phụ thuộc',
 }
 
 /**

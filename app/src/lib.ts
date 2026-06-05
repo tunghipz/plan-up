@@ -166,6 +166,64 @@ export function sprintWorkdays(start: string, end: string): string[] {
   return out
 }
 
+// ──────────────────────────────────────────────────────────────────────────
+// Collection Calendar — pure helpers (see design-docs/collections.md)
+// idx = số ngày kể từ epoch theo UTC, để so sánh & cộng ngày không lệch TZ.
+// ──────────────────────────────────────────────────────────────────────────
+
+export function dayIndex(dateStr: string): number {
+  const [y, m, d] = dateStr.split('-').map(Number)
+  return Math.floor(Date.UTC(y, m - 1, d) / 86_400_000)
+}
+function dateFromIndex(i: number): string {
+  return new Date(i * 86_400_000).toISOString().slice(0, 10)
+}
+
+export interface MonthCell {
+  date: string
+  day: number
+  inMonth: boolean
+  isToday: boolean
+}
+export interface MonthWeek {
+  startIdx: number
+  cells: MonthCell[]
+}
+export interface MonthGrid {
+  year: number
+  month0: number
+  weeks: MonthWeek[]
+  gridStart: number
+  gridEnd: number
+}
+
+/** Lưới tháng Mon-start, số tuần động (5–6) đủ phủ tháng. */
+export function buildMonthGrid(year: number, month0: number, todayStr: string): MonthGrid {
+  const firstIdx = Math.floor(Date.UTC(year, month0, 1) / 86_400_000)
+  const dow = (new Date(firstIdx * 86_400_000).getUTCDay() + 6) % 7 // Mon=0
+  const gridStart = firstIdx - dow
+  const daysInMonth = new Date(Date.UTC(year, month0 + 1, 0)).getUTCDate()
+  const weekCount = Math.ceil((dow + daysInMonth) / 7)
+  const todayIdx = dayIndex(todayStr)
+  const weeks: MonthWeek[] = []
+  for (let w = 0; w < weekCount; w++) {
+    const startIdx = gridStart + w * 7
+    const cells: MonthCell[] = []
+    for (let c = 0; c < 7; c++) {
+      const idx = startIdx + c
+      const d = new Date(idx * 86_400_000)
+      cells.push({
+        date: dateFromIndex(idx),
+        day: d.getUTCDate(),
+        inMonth: d.getUTCMonth() === month0,
+        isToday: idx === todayIdx,
+      })
+    }
+    weeks.push({ startIdx, cells })
+  }
+  return { year, month0, weeks, gridStart, gridEnd: gridStart + weekCount * 7 - 1 }
+}
+
 export function useDarkMode() {
   const [dark, setDark] = useState<boolean>(() => {
     const stored = localStorage.getItem('plan-up:dark')

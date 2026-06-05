@@ -857,6 +857,7 @@ function DatePopover({
   const plan = computeWorkingPlan(task, tasksById, membersById)
   const startLocked = task.dependsOn.length > 0
   const endLocked = task.dependsOn.length > 0 || (task.estimate !== null && task.estimate > 0)
+  const assigneeDaysOff = task.assigneeId ? membersById.get(task.assigneeId)?.daysOff : undefined
   return (
     <div className="absolute top-[42px] right-2 z-30 w-[232px] rounded-[13px] border border-border-hair bg-surface p-2 shadow-[0_8px_30px_rgba(0,0,0,0.18)]">
       <div className="text-[11px] font-bold uppercase tracking-[0.04em] text-ink-faint px-1.5 pt-0.5 pb-1.5">
@@ -883,6 +884,7 @@ function DatePopover({
             time={plan.startTime}
             locked={startLocked}
             ariaLabel="Start date"
+            daysOff={assigneeDaysOff}
             onChange={async (v) => {
               await db.tasks.update(task.id, { startDate: v })
               await recomputeDates(task.id)
@@ -898,6 +900,7 @@ function DatePopover({
             time={plan.endTime}
             locked={endLocked}
             ariaLabel="Due date"
+            daysOff={assigneeDaysOff}
             onChange={(v) => db.tasks.update(task.id, { dueDate: v })}
           />
         </div>

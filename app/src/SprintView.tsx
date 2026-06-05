@@ -36,6 +36,7 @@ import {
   type Status,
 } from './db'
 import { Avatar, MemberDaysOffButton } from './members'
+import { DatePickCell } from './DatePicker'
 import {
   formatRelativeDate,
   formatShortDate,
@@ -43,6 +44,9 @@ import {
   parsePrereqSeqs,
   formatSeqRanges,
 } from './lib'
+
+// Re-exported so existing importers (BoardView) keep `from './SprintView'`.
+export { DatePickCell }
 
 const WELCOME_PREFIX = 'Welcome —'
 
@@ -1526,6 +1530,7 @@ function TaskRow({
             await recomputeDates(task.id)
           }}
           ariaLabel="Start date"
+          daysOff={assignee?.daysOff}
         />
       </div>
 
@@ -1540,6 +1545,7 @@ function TaskRow({
           highlight={overdue ? 'overdue' : null}
           onChange={(v) => update({ dueDate: v })}
           ariaLabel="Due date"
+          daysOff={assignee?.daysOff}
         />
       </div>
 
@@ -1854,89 +1860,6 @@ function AssigneePicker({
         ))}
       </select>
     </label>
-  )
-}
-
-export function DatePickCell({
-  value,
-  highlight = null,
-  locked = false,
-  time,
-  onChange,
-  ariaLabel,
-}: {
-  value: string | null
-  highlight?: 'overdue' | null
-  locked?: boolean
-  /**
-   * Optional fixed time-of-day shown after the date (e.g. "08:00" for
-   * start-of-day, "17:00" for end-of-day). Display-only — the underlying
-   * Task.startDate / Task.dueDate values stay yyyy-mm-dd.
-   */
-  time?: string
-  onChange: (v: string | null) => void
-  ariaLabel: string
-}) {
-  const ref = useRef<HTMLInputElement>(null)
-  const date = formatRelativeDate(value)
-  const label = value && time ? `${date}, ${time}` : date
-
-  const open = (e: React.MouseEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    if (locked) return
-    const el = ref.current
-    if (!el) return
-    if (typeof el.showPicker === 'function') {
-      try {
-        el.showPicker()
-        return
-      } catch {
-        /* gesture-required failure, fall through */
-      }
-    }
-    el.focus()
-    el.click()
-  }
-
-  const valueCls = value
-    ? highlight === 'overdue'
-      ? 'text-red-500 font-medium'
-      : 'text-ink-muted'
-    : 'text-ink-faint'
-
-  return (
-    <button
-      type="button"
-      onClick={open}
-      disabled={locked}
-      aria-label={ariaLabel}
-      title={
-        locked
-          ? 'Computed from prerequisites. Clear Pre to edit manually.'
-          : undefined
-      }
-      className={`relative inline-flex items-center justify-end w-full h-8 px-2 rounded-md border border-transparent transition ${valueCls} ${
-        locked
-          ? 'cursor-default'
-          : 'cursor-pointer hover:border-border-strong hover:bg-canvas'
-      }`}
-    >
-      {value ? (
-        <span className="text-sm whitespace-nowrap">{label}</span>
-      ) : (
-        <span className="text-sm text-ink-faint">—</span>
-      )}
-      <input
-        ref={ref}
-        type="date"
-        value={value ?? ''}
-        onChange={(e) => onChange(e.target.value || null)}
-        className="absolute inset-0 opacity-0 pointer-events-none"
-        tabIndex={-1}
-        aria-hidden="true"
-      />
-    </button>
   )
 }
 

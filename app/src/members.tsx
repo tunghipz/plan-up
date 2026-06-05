@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Calendar } from 'lucide-react'
 import { db, setMemberDaysOff, PALETTE, type Member } from './db'
+import { DateField } from './DatePicker'
 import { formatShortDate } from './lib'
 
 /**
@@ -120,69 +121,6 @@ export function MemberColorDot({ member }: { member: Member }) {
         </div>
       )}
     </div>
-  )
-}
-
-/**
- * Input-styled date picker. Shows formatted dd/mm/yy and opens the native
- * picker on click. `color-scheme` (set globally) themes the picker popup.
- */
-function DateField({
-  value,
-  onChange,
-  placeholder = 'dd/mm/yy',
-  min,
-  max,
-}: {
-  value: string
-  onChange: (v: string) => void
-  placeholder?: string
-  /** Optional inclusive bounds for the native date picker (sprint-scoped entry). */
-  min?: string
-  max?: string
-}) {
-  const ref = useRef<HTMLInputElement>(null)
-  const open = (e: React.MouseEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    const el = ref.current
-    if (!el) return
-    if (typeof el.showPicker === 'function') {
-      try {
-        el.showPicker()
-        return
-      } catch {
-        /* fall through */
-      }
-    }
-    el.focus()
-    el.click()
-  }
-  return (
-    <button
-      type="button"
-      onClick={open}
-      className="relative flex-1 text-sm bg-canvas border border-border rounded px-2 py-1 text-left h-7 focus:border-accent outline-none"
-    >
-      {value ? (
-        <span className="text-ink tabular-nums font-mono">
-          {formatShortDate(value)}
-        </span>
-      ) : (
-        <span className="text-ink-faint">{placeholder}</span>
-      )}
-      <input
-        ref={ref}
-        type="date"
-        value={value}
-        min={min}
-        max={max}
-        onChange={(e) => onChange(e.target.value)}
-        className="absolute inset-0 opacity-0 pointer-events-none"
-        tabIndex={-1}
-        aria-hidden="true"
-      />
-    </button>
   )
 }
 
@@ -383,9 +321,12 @@ export function MemberDaysOffButton({
               <DateField
                 value={draftDate}
                 onChange={setDraftDate}
-                placeholder="dd/mm/yy"
+                placeholder="Pick a date"
                 min={range?.start}
                 max={range?.end}
+                sprintRange={range ?? null}
+                daysOff={visibleDays}
+                className="relative flex-1 text-sm bg-canvas border border-border rounded px-2 py-1 text-left h-7 focus:border-accent outline-none"
               />
               <select
                 value={draftHalf}

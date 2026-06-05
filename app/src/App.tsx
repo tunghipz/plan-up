@@ -34,7 +34,8 @@ import { SprintView } from './SprintView'
 import { BoardView } from './BoardView'
 import { GanttView } from './GanttView'
 import { ProjectSettingsView } from './ProjectSettingsView'
-import { formatShortDate, formatSprintRange, useDarkMode } from './lib'
+import { DateField } from './DatePicker'
+import { formatSprintRange, useDarkMode } from './lib'
 
 const CURRENT_PROJECT_KEY = 'plan-up:currentProjectId'
 const VIEW_KEY = 'plan-up:view'
@@ -1019,61 +1020,6 @@ function SprintNameEditor({ sprint }: { sprint: Sprint }) {
     >
       {sprint.name}
     </span>
-  )
-}
-
-/**
- * Input-styled date field showing dd/mm/yy. Hides the native input behind
- * a button so the displayed format is locale-independent. The native
- * picker still opens on click (themed via global `color-scheme`).
- */
-function DateField({
-  value,
-  onChange,
-  placeholder = 'Pick a date',
-}: {
-  value: string
-  onChange: (v: string) => void
-  placeholder?: string
-}) {
-  const ref = useRef<HTMLInputElement>(null)
-  const open = (e: React.MouseEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    const el = ref.current
-    if (!el) return
-    if (typeof el.showPicker === 'function') {
-      try {
-        el.showPicker()
-        return
-      } catch {
-        /* fall through */
-      }
-    }
-    el.focus()
-    el.click()
-  }
-  return (
-    <button
-      type="button"
-      onClick={open}
-      className="relative mt-1 w-full text-sm bg-surface border border-border rounded-[8px] px-3 py-2 text-left focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent transition"
-    >
-      {value ? (
-        <span className="text-ink tabular-nums">{formatShortDate(value)}</span>
-      ) : (
-        <span className="text-ink-faint">{placeholder}</span>
-      )}
-      <input
-        ref={ref}
-        type="date"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="absolute inset-0 opacity-0 pointer-events-none"
-        tabIndex={-1}
-        aria-hidden="true"
-      />
-    </button>
   )
 }
 

@@ -183,9 +183,9 @@ Prop drilling `App → SprintView → MemberCard → AddTaskRow`. Default tốn 
 - Overdue (past + not done) → `--color-overdue` đỏ + `font-semibold`. Empty → icon Calendar nhạt thay placeholder.
 - ⚠️ *Đây là decision có thể revert về dd/mm/yy nếu user thích — flag trong commit.*
 
-### 5.5 Native picker *(giữ nguyên — hành vi)*
-- `<select>` ẩn (assignee/priority/status): label + `<select className="absolute inset-0 opacity-0">`.
-- `<input type=date>` qua button + `showPicker()` (date cells). Whole cell là touch target có hover affordance. Chi tiết pattern + lý do giữ như cũ.
+### 5.5 Pickers
+- **Chọn 1 trong tập nhỏ** (assignee/priority/status): `<select>` ẩn — label + `<select className="absolute inset-0 opacity-0">`. Native, keyboard sẵn, ít chrome (dùng cho cả per-column sort của Board).
+- **Ngày tháng**: **custom Cupertino calendar popover** (`DatePicker.tsx`: `DatePickCell`, `DateField`) — KHÔNG còn `<input type=date>` native. Lý do đổi: native là chrome trình duyệt, không nhất quán/không dark-aware/không hiện được context lịch. Calendar mới: Mon-start, today ring, selected fill, cuối tuần mờ-nhưng-chọn-được, **chấm day-off của assignee** (cam, nửa chấm = half-day), out-of-range (min/max) bị mờ/khoá, footer Today/Clear, keyboard ←→↑↓/Enter/Esc. Portal + outside-click, theo float-shadow §4.2. Chi tiết: [`design-docs/date-picker.md`](design-docs/date-picker.md).
 
 ### 5.6 Hover-reveal delete *(giữ nguyên — hành vi)*
 - `opacity-0 group-hover/<scope>:opacity-100`. Scope `card` (member delete) + `row` (task delete). `confirm()` cho member (cascade), không cho task.

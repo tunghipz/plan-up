@@ -187,12 +187,15 @@ view/sprint/project switch and reload, mirroring the List's `plan-up:sort`. Vali
 (unknown mode/dir → default), like `loadSort`. Kept **separate** from `plan-up:sort` because
 this is per-column and carries the extra `manual` mode the List doesn't have.
 
-**UI.** A small `ArrowUpDown` (lucide) icon button in each column `<header>`, right of the count
-→ a tiny popover menu: **Manual · Name · Time** rows (active row in `accent`) + an asc/desc
-toggle. When `mode !== 'manual'`, the header shows a faint direction arrow so the column's sort
-state is glanceable at rest. The button is `data-no-drag` so it never starts a card drag, and
-the menu follows the design system's calm popover pattern (same family as the quick-edit
-Schedule popover).
+**UI — native picker (design-system §5.5).** In each column `<header>`, right of the count, a
+calm pill with a **hidden `<select>` overlay** for the mode (Manual · Name · Time · Member) —
+the same native-picker pattern as the List's assignee/priority selects, not a bespoke popover.
+Idle (manual) the pill shows just a faint `ArrowUpDown` glyph so the header stays quiet; when a
+column is sorted the pill turns `accent` and shows the mode label (e.g. **Name**), with a small
+**▲/▼ ghost button** beside it to flip direction. The control is `data-no-drag` so it never
+starts a card drag. Chosen over a custom popover (via /huashu-design DNA review): the OS owns the
+dropdown → free keyboard nav, dark-safe through tokens, zero custom outside-click chrome,
+consistent with the rest of the app's pickers.
 
 **Implementation notes (as built).**
 - `byStatus` picks the comparator per column from `boardSort[status]`: `manual` = `orderOf`

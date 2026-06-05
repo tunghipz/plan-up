@@ -1,6 +1,6 @@
 import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { ArrowUpDown } from 'lucide-react'
+import { ArrowUpDown, ChevronDown } from 'lucide-react'
 import {
   db,
   uid,
@@ -679,11 +679,14 @@ function scrollableAncestor(el: HTMLElement | null): HTMLElement | null {
   return null
 }
 
-/** Per-column sort control: a small icon button in the column header that opens a
- * calm popover (Manual / Name / Time + asc-desc toggle). memo'd with stable props
- * (sort ref is stable unless the column changed; onChange is a stable useCallback),
- * so the constant re-renders during a card drag skip it — preserving the drag-perf
- * work. See design-docs/board-view.md. */
+/** Per-column sort control — the app's native-picker pattern (design-system §5.5,
+ * same as the assignee/priority selects): a calm pill with a hidden <select> overlay
+ * for the mode (Manual / Name / Time / Member), plus a small ▲/▼ ghost button shown
+ * only when sorted to flip direction. Idle columns show just a faint ⇅ glyph so the
+ * header stays quiet. No custom popover / outside-click handling — the OS owns the
+ * dropdown (free keyboard nav, dark-safe via tokens). memo'd with stable props, so the
+ * frequent re-renders during a card drag skip it — preserving the drag-perf work.
+ * See design-docs/board-view.md. */
 const SortMenu = memo(function SortMenu({
   status,
   sort,
@@ -693,86 +696,51 @@ const SortMenu = memo(function SortMenu({
   sort: ColSort
   onChange: (status: Status, next: ColSort) => void
 }) {
-  const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    if (!open) return
-    const onDoc = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
-    }
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false)
-    }
-    document.addEventListener('mousedown', onDoc)
-    document.addEventListener('keydown', onKey)
-    return () => {
-      document.removeEventListener('mousedown', onDoc)
-      document.removeEventListener('keydown', onKey)
-    }
-  }, [open])
   const active = sort.mode !== 'manual'
   return (
-    <div ref={ref} className="relative" data-no-drag>
-      <button
-        type="button"
-        data-no-drag
-        onClick={() => setOpen((o) => !o)}
-        aria-label={`Sort ${status} column`}
-        title="Sort column"
-        className={`flex items-center gap-0.5 rounded p-1 transition hover:bg-black/[0.05] ${
-          active ? 'text-accent' : 'text-ink-faint hover:text-ink'
+    <div className="flex items-center gap-1" data-no-drag>
+      <span
+        className={`relative inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[12px] transition ${
+          active
+            ? 'text-accent border border-accent/35'
+            : 'text-ink-faint hover:text-ink hover:bg-surface-hover'
         }`}
       >
-        <ArrowUpDown size={13} strokeWidth={2} aria-hidden />
-        {active && (
-          <span className="text-[9px] leading-none" aria-hidden>
+        {active ? (
+          <span className="font-medium">{SORT_LABELS[sort.mode]}</span>
+        ) : (
+          <ArrowUpDown size={13} strokeWidth={2} aria-hidden />
+        )}
+        <ChevronDown size={11} strokeWidth={2} className="text-ink-faint" aria-hidden />
+        <select
+          aria-label={`Sort ${status} column`}
+          className="absolute inset-0 cursor-pointer opacity-0"
+          value={sort.mode}
+          onChange={(e) => {
+            const mode = e.target.value as BoardSortMode
+            onChange(status, { mode, dir: mode === 'manual' ? 'asc' : sort.dir })
+          }}
+        >
+          {SORT_MODES.map((m) => (
+            <option key={m} value={m}>
+              {SORT_LABELS[m]}
+            </option>
+          ))}
+        </select>
+      </span>
+      {active && (
+        <button
+          type="button"
+          data-no-drag
+          aria-label={`Sort direction: ${sort.dir === 'asc' ? 'ascending' : 'descending'}`}
+          title="Toggle direction"
+          onClick={() => onChange(status, { ...sort, dir: sort.dir === 'asc' ? 'desc' : 'asc' })}
+          className="rounded-full p-1 text-accent leading-none transition hover:bg-surface-hover"
+        >
+          <span className="text-[10px] leading-none" aria-hidden>
             {sort.dir === 'asc' ? '▲' : '▼'}
           </span>
-        )}
-      </button>
-      {open && (
-        <div
-          role="menu"
-          className="absolute right-0 top-full mt-1 z-30 min-w-[150px] rounded-[10px] border border-border-hair bg-surface p-1 shadow-[0_10px_30px_rgba(0,0,0,0.16)]"
-        >
-          {SORT_MODES.map((m) => {
-            const isActive = sort.mode === m
-            return (
-              <button
-                key={m}
-                type="button"
-                role="menuitemradio"
-                aria-checked={isActive}
-                onClick={() => {
-                  onChange(status, { mode: m, dir: m === 'manual' ? 'asc' : sort.dir })
-                  if (m === 'manual') setOpen(false)
-                }}
-                className={`flex w-full items-center justify-between gap-2 rounded-[7px] px-2.5 py-1.5 text-left text-[13px] transition hover:bg-black/[0.04] ${
-                  isActive ? 'text-accent font-medium' : 'text-ink'
-                }`}
-              >
-                <span>{SORT_LABELS[m]}</span>
-                {isActive && m !== 'manual' && (
-                  <span className="text-[10px]" aria-hidden>
-                    {sort.dir === 'asc' ? '▲' : '▼'}
-                  </span>
-                )}
-              </button>
-            )
-          })}
-          <div className="my-1 border-t border-border-hair" />
-          <button
-            type="button"
-            disabled={sort.mode === 'manual'}
-            onClick={() => onChange(status, { ...sort, dir: sort.dir === 'asc' ? 'desc' : 'asc' })}
-            className="flex w-full items-center justify-between gap-2 rounded-[7px] px-2.5 py-1.5 text-left text-[13px] text-ink transition enabled:hover:bg-black/[0.04] disabled:cursor-default disabled:opacity-40"
-          >
-            <span>Direction</span>
-            <span className="text-[11px] tab-data" aria-hidden>
-              {sort.mode === 'manual' ? '—' : sort.dir === 'asc' ? 'Asc ▲' : 'Desc ▼'}
-            </span>
-          </button>
-        </div>
+        </button>
       )}
     </div>
   )

@@ -435,6 +435,59 @@ export async function moveTaskToSection(taskId: string, sectionId: string): Prom
   await db.tasks.update(taskId, { sectionId })
 }
 
+export async function addStatus(
+  collectionId: string,
+  name: string,
+  color: string
+): Promise<void> {
+  const c = await db.collections.get(collectionId)
+  if (!c) return
+  const statuses = [...c.statuses, { id: uid(), name: name.trim() || 'New status', color }]
+  await db.collections.update(collectionId, { statuses })
+}
+
+export async function renameStatus(
+  collectionId: string,
+  statusId: string,
+  name: string
+): Promise<void> {
+  const n = name.trim()
+  if (!n) return
+  const c = await db.collections.get(collectionId)
+  if (!c) return
+  await db.collections.update(collectionId, {
+    statuses: c.statuses.map((s) => (s.id === statusId ? { ...s, name: n } : s)),
+  })
+}
+
+export async function recolorStatus(
+  collectionId: string,
+  statusId: string,
+  color: string
+): Promise<void> {
+  const c = await db.collections.get(collectionId)
+  if (!c) return
+  await db.collections.update(collectionId, {
+    statuses: c.statuses.map((s) => (s.id === statusId ? { ...s, color } : s)),
+  })
+}
+
+/** Xoá status: item đang dùng nó về null (ô Status trống). */
+export async function deleteStatus(collectionId: string, statusId: string): Promise<void> {
+  await db.transaction('rw', db.collections, db.tasks, async () => {
+    const c = await db.collections.get(collectionId)
+    if (!c) return
+    await db.collections.update(collectionId, {
+      statuses: c.statuses.filter((s) => s.id !== statusId),
+    })
+    await db.tasks
+      .where('collectionId')
+      .equals(collectionId)
+      .filter((t) => t.collectionStatusId === statusId)
+      .modify({ collectionStatusId: null })
+  })
+}
+
 /** Next sequence number within a sprint. Sequences are never reused. */
 export async function nextSequence(sprintId: string): Promise<number> {
   const all = await db.tasks.where('sprintId').equals(sprintId).toArray()

@@ -4,6 +4,7 @@ import { db } from './db'
 import {
   createCollection, renameCollection, deleteCollection, COLLECTION_PALETTE,
   addSection, renameSection, deleteSection, moveTaskToSection,
+  addStatus, renameStatus, recolorStatus, deleteStatus,
 } from './db'
 
 async function clearAll() {
@@ -133,5 +134,45 @@ describe('section CRUD', () => {
     })
     await moveTaskToSection('t1', b.id)
     expect((await db.tasks.get('t1'))?.sectionId).toBe(b.id)
+  })
+})
+
+describe('status CRUD', () => {
+  beforeEach(clearAll)
+  async function setup() {
+    await db.projects.add({ id: 'p1', name: 'P', createdAt: 1 })
+    return createCollection('p1', 'X')
+  }
+
+  it('addStatus appends with a palette color', async () => {
+    const c = await setup()
+    await addStatus(c.id, 'LIVE', '#34C759')
+    const got = await db.collections.get(c.id)
+    expect(got?.statuses.map((s) => s.name)).toContain('LIVE')
+  })
+
+  it('recolorStatus + renameStatus mutate in place', async () => {
+    const c = await setup()
+    const sid = c.statuses[0].id
+    await renameStatus(c.id, sid, 'SHIPPED')
+    await recolorStatus(c.id, sid, '#AF52DE')
+    const got = await db.collections.get(c.id)
+    const s = got!.statuses.find((x) => x.id === sid)!
+    expect(s.name).toBe('SHIPPED')
+    expect(s.color).toBe('#AF52DE')
+  })
+
+  it('deleteStatus nulls items that used it', async () => {
+    const c = await setup()
+    const sid = c.statuses[0].id
+    await db.tasks.add({
+      id: 't1', projectId: 'p1', sequence: 1, title: 'a', assigneeId: null,
+      sprintId: null, status: 'todo', priority: 'normal', startDate: null,
+      dueDate: null, estimate: null, createdAt: 1, dependsOn: [],
+      collectionId: c.id, sectionId: c.sections[0].id, collectionStatusId: sid,
+    })
+    await deleteStatus(c.id, sid)
+    expect((await db.collections.get(c.id))?.statuses.find((s) => s.id === sid)).toBeUndefined()
+    expect((await db.tasks.get('t1'))?.collectionStatusId).toBeNull()
   })
 })

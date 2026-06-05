@@ -63,13 +63,16 @@ function CalendarGrid({
   sprintRange?: DateRange | null
   daysOff?: DayOff[]
 }) {
-  // Initial focus/view: the value if set, else today clamped into [min,max] (so an
-  // empty picker opens on the sprint month rather than a fully-disabled month).
+  // Initial focus/view: the value if set, else today nudged into the relevant range
+  // so an empty picker opens on the sprint month. Uses min/max if present (days-off
+  // hard clamp), else the sprintRange (task cells: shade only, still opens there).
   const initial = (() => {
     if (value) return value
     const t = todayISO()
-    if (min && t < min) return min
-    if (max && t > max) return max
+    const lo = min ?? sprintRange?.start
+    const hi = max ?? sprintRange?.end
+    if (lo && t < lo) return lo
+    if (hi && t > hi) return hi
     return t
   })()
   const [view, setView] = useState(() => ymOf(initial))
@@ -330,8 +333,9 @@ export function DatePickCell({
 }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLButtonElement>(null)
-  // A task belongs to a sprint → clamp + shade the picker to that sprint range.
-  // Explicit prop wins; otherwise the range comes from SprintRangeContext.
+  // A task belongs to a sprint → shade that range + open the picker on it (shade
+  // ONLY — no min/max, every date stays selectable). Explicit prop wins; otherwise
+  // the range comes from SprintRangeContext.
   const ctxRange = useContext(SprintRangeContext)
   const range = sprintRange ?? ctxRange
   const date = value ? formatShortDate(value) : ''
@@ -371,8 +375,6 @@ export function DatePickCell({
           value={value}
           onChange={onChange}
           onClose={() => setOpen(false)}
-          min={range?.start}
-          max={range?.end}
           sprintRange={range}
           daysOff={daysOff}
         />

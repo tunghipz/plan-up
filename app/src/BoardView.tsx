@@ -160,7 +160,13 @@ export function BoardView({
   // Ref mirror of dragId so the (stable) card handlers can early-return without
   // closing over the dragId state — keeps their identity stable for memo.
   const dragIdRef = useRef<string | null>(null)
+  // Coalesce the constant dragover stream into one hit-test + setOver per frame.
+  // overRaf holds the scheduled frame; pendingHit the latest card to test against.
+  const overRaf = useRef(0)
+  const pendingHit = useRef<{ el: HTMLElement; status: Status; base: number; clientY: number } | null>(null)
   const clearDrag = useCallback(() => {
+    if (overRaf.current) { cancelAnimationFrame(overRaf.current); overRaf.current = 0 }
+    pendingHit.current = null
     dragIdRef.current = null
     setDragId(null)
     setOver(null)
@@ -215,14 +221,28 @@ export function BoardView({
     e.preventDefault()
     e.stopPropagation() // beat the column-level append
     e.dataTransfer.dropEffect = 'move'
+    // Stash the latest target; do the getBoundingClientRect + setOver once per frame.
+    // dragover fires faster than the frame rate, and reading a rect right after the
+    // previous frame mutated the DOM (slot moved) forces a synchronous reflow — so we
+    // defer the read into rAF where layout has already settled, coalescing the burst.
     const el = e.currentTarget as HTMLElement
-    const status = el.dataset.status as Status
-    const base = Number(el.dataset.index)
-    const r = el.getBoundingClientRect()
-    const index = base + (e.clientY - r.top > r.height / 2 ? 1 : 0)
-    setOver((prev) =>
-      prev && prev.status === status && prev.index === index ? prev : { status, index }
-    )
+    pendingHit.current = {
+      el,
+      status: el.dataset.status as Status,
+      base: Number(el.dataset.index),
+      clientY: e.clientY,
+    }
+    if (overRaf.current) return
+    overRaf.current = requestAnimationFrame(() => {
+      overRaf.current = 0
+      const h = pendingHit.current
+      if (!h || !dragIdRef.current) return
+      const r = h.el.getBoundingClientRect()
+      const index = h.base + (h.clientY - r.top > r.height / 2 ? 1 : 0)
+      setOver((prev) =>
+        prev && prev.status === h.status && prev.index === index ? prev : { status: h.status, index }
+      )
+    })
   }, [])
 
   // Edge auto-scroll: dragging near the top/bottom edge scrolls the board's
@@ -267,7 +287,7 @@ export function BoardView({
     return <p className="text-ink-muted py-12 text-center">Loading…</p>
 
   return (
-    <div ref={gridRef} className="grid grid-cols-1 md:grid-cols-3 gap-5 max-w-6xl">
+    <div ref={gridRef} className="grid grid-cols-1 md:grid-cols-3 items-start gap-5 max-w-6xl">
       {STATUS_ORDER.map((status) => {
         const meta = STATUS_META[status]
         const list = byStatus[status]
@@ -275,7 +295,7 @@ export function BoardView({
         return (
           <section
             key={status}
-            className={`flex flex-col gap-2.5 min-h-[200px] rounded-[14px] transition-colors ${
+            className={`flex flex-col gap-2.5 min-h-[200px] rounded-[14px] [contain:layout] ${
               isOver ? 'bg-accent/[0.05]' : ''
             }`}
             onDragOver={(e) => {
@@ -535,7 +555,7 @@ const BLANK_DRAG_IMG =
 
 /** The lifted card that follows the cursor while dragging — tilted, shadowed.
  * Positioned imperatively (transform) by the dragover listener for smoothness. */
-function DragGhost({ task, innerRef }: { task: Task; innerRef: React.Ref<HTMLDivElement> }) {
+const DragGhost = memo(function DragGhost({ task, innerRef }: { task: Task; innerRef: React.Ref<HTMLDivElement> }) {
   const meta = STATUS_META[task.status]
   return (
     <div
@@ -557,7 +577,7 @@ function DragGhost({ task, innerRef }: { task: Task; innerRef: React.Ref<HTMLDiv
       </div>
     </div>
   )
-}
+})
 
 function CalendarIcon() {
   return (

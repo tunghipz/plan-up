@@ -10,7 +10,9 @@ Read-mostly; deep editing stays in the list view.
 
 ## User-facing behavior
 - Three columns on the grey canvas: **To do · In progress · Done** (the `STATUS_ORDER`),
-  each with the status icon, label, and a count.
+  each with the status icon, label, and a count. Columns are **natural-height** (each grows
+  with its own cards, kanban-style — not force-stretched to equal height), so dragging a card
+  between columns only relayouts the columns involved, not the whole board.
 - **Cards** (white, large-radius, soft shadow) show: status circle (click to cycle status),
   title, `#sequence`, priority tag (urgent/high only), a due chip, and the assignee avatar.
 - **Task groups (parents)** are bucketed and shown by their **derived status** (rolled up
@@ -118,6 +120,24 @@ List), and **task creation** via `db.tasks.add` + `nextSequence` (bottom compose
     - Each task's `computeWorkingPlan` is still precomputed once into `planById` (useMemo keyed
       on tasks), so even when a card *does* render its due chip never re-runs the scheduler.
     - The board is written to the DB **only on drop** (`dropTo`), never mid-move.
+  - **Perf — cross-column drag stays at 60fps (layout/paint, not React).** With cards already
+    memo-stable, the residual jank when crossing columns was pure layout/paint cost. Three fixes:
+    - **Natural-height columns** (`items-start` on the grid + `[contain:layout]` on each
+      `<section>`): the grid no longer force-stretches all columns to the tallest, so when the
+      `<DropSlot>` (58px) leaves the source column and enters the target, only those two columns
+      relayout — the reflow no longer cascades to the whole grid. `contain: layout` scopes each
+      column's internal reflow to itself (no clip, so card shadows still bleed past the edge).
+    - **rAF-coalesced hit-testing:** native `dragover` fires faster than the frame rate. The
+      handler keeps `preventDefault`/`dropEffect` synchronous (HTML5 DnD needs them) but defers
+      the `getBoundingClientRect()` + `setOver` into a single `requestAnimationFrame`, coalescing
+      a burst of events into **one** read+update per frame *after* layout has settled — killing
+      the per-event forced reflow (layout thrash). `clearDrag` cancels any pending frame. The
+      drop lands on the last *committed* `over`, so the card lands exactly where the visible slot
+      is (a stale pending frame can't desync slot vs. landing).
+    - **Instant column tint** (dropped `transition-colors`): the `isOver` background tint now
+      flips instantly instead of animating, so crossing no longer repaints both columns' full
+      card stacks every frame for the transition's duration. `<DragGhost>` is also `memo`-wrapped
+      so it doesn't re-render on each `over` change.
 - Reuses `STATUS_META` / `STATUS_ORDER` / `StatusIcon` / `derivedGroupStatus` / `DatePickCell`
   / `EffortCell` from `SprintView.tsx`, and `recomputeDates` / `computeWorkingPlan` from
   `db.ts` — so the quick-edit lock rules and recompute behavior stay identical to the List,

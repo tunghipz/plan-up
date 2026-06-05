@@ -19,6 +19,7 @@ import {
   Ungroup,
   Link2,
   Link2Off,
+  GripVertical,
 } from 'lucide-react'
 import {
   db,
@@ -28,6 +29,8 @@ import {
   setTaskParent,
   createGroupFromSelection,
   setDependencies,
+  orderBetween,
+  setListOrder,
   findCyclePath,
   recomputeDates,
   updateTask,
@@ -71,7 +74,7 @@ function compareTasks(a: Task, b: Task, field: SortField, dir: 'asc' | 'desc'): 
   const mul = dir === 'asc' ? 1 : -1
   const va: string | number =
     field === 'seq'
-      ? a.sequence
+      ? (a.listOrder ?? a.sequence)
       : field === 'title'
         ? (a.title || '').toLowerCase()
         : field === 'effort'
@@ -83,7 +86,7 @@ function compareTasks(a: Task, b: Task, field: SortField, dir: 'asc' | 'desc'): 
               : (a[field] ?? '￿')
   const vb: string | number =
     field === 'seq'
-      ? b.sequence
+      ? (b.listOrder ?? b.sequence)
       : field === 'title'
         ? (b.title || '').toLowerCase()
         : field === 'effort'
@@ -714,6 +717,7 @@ function MemberCard({
                 conflictTips={conflictTips}
                 selectedIds={selectedIds}
                 onToggleSelect={onToggleSelect}
+                canReorder={sort.field === 'seq'}
               />
               <AddTaskRow
                 projectId={projectId}
@@ -774,6 +778,7 @@ function UnassignedCard({
               tasksById={tasksById}
               selectedIds={selectedIds}
               onToggleSelect={onToggleSelect}
+              canReorder={sort.field === 'seq'}
             />
           </div>
         </div>
@@ -1214,6 +1219,100 @@ function StatusPill({ status }: { status: Status }) {
  * title stays editable; a chevron collapses the group. The parent is excluded
  * from member counts/capacity (leaf-based counting). See design-docs/task-groups.md.
  */
+/**
+ * Per-row drag state handed down from TaskRows. `enabled` gates the whole feature
+ * (only in the default seq order); `active` = a drag is in progress in this card.
+ */
+type RowDrag = {
+  id: string
+  enabled: boolean
+  active: boolean
+  dragging: boolean
+  over: 'before' | 'after' | null
+  onStart: () => void
+  onOver: (el: HTMLElement, clientY: number) => void
+  onDrop: (el: HTMLElement, clientY: number) => void
+  onEnd: () => void
+}
+
+/**
+ * Wires native HTML5 drag to a row. The row is always `draggable` (when the
+ * feature is on) but a drag only *starts* if it was initiated from the grip —
+ * tracked via a synchronous ref set on the grip's pointerdown, so there's no
+ * state-update race on the first drag and text selection / clicks elsewhere
+ * never start one. The whole row is the drag image. Returns the grip, the
+ * drop-slot indicator line, and the props to spread on the row element.
+ */
+function useDragHandle(drag?: RowDrag) {
+  const armedRef = useRef(false)
+  const enabled = !!drag?.enabled
+  const grip = enabled ? (
+    <button
+      type="button"
+      aria-label="Drag to reorder"
+      onPointerDown={(e) => {
+        e.stopPropagation()
+        armedRef.current = true
+        // If they press the grip but never drag (just a click), disarm on release.
+        const off = () => {
+          armedRef.current = false
+          window.removeEventListener('pointerup', off)
+        }
+        window.addEventListener('pointerup', off)
+      }}
+      onClick={(e) => e.stopPropagation()}
+      className="absolute left-0.5 top-1/2 -translate-y-1/2 z-20 grid place-items-center w-4 h-6 text-ink-faint/70 hover:text-ink-muted opacity-0 group-hover/row:opacity-100 transition-opacity cursor-grab active:cursor-grabbing touch-none"
+    >
+      <GripVertical size={14} />
+    </button>
+  ) : null
+
+  const indicator = enabled ? (
+    <>
+      {drag!.over === 'before' && (
+        <div className="absolute left-3 right-3 -top-px h-0.5 rounded-full bg-accent pointer-events-none z-20" />
+      )}
+      {drag!.over === 'after' && (
+        <div className="absolute left-3 right-3 -bottom-px h-0.5 rounded-full bg-accent pointer-events-none z-20" />
+      )}
+    </>
+  ) : null
+
+  const rowProps: React.HTMLAttributes<HTMLDivElement> = enabled
+    ? {
+        draggable: true,
+        onDragStart: (e) => {
+          // Only a grip-initiated drag counts; anything else (text selection,
+          // dragging an inline control) is cancelled.
+          if (!armedRef.current) {
+            e.preventDefault()
+            return
+          }
+          e.dataTransfer.effectAllowed = 'move'
+          e.dataTransfer.setData('text/plain', drag!.id)
+          drag!.onStart()
+        },
+        onDragOver: (e) => {
+          if (!drag!.active) return
+          e.preventDefault()
+          e.dataTransfer.dropEffect = 'move'
+          drag!.onOver(e.currentTarget, e.clientY)
+        },
+        onDrop: (e) => {
+          if (!drag!.active) return
+          e.preventDefault()
+          drag!.onDrop(e.currentTarget, e.clientY)
+        },
+        onDragEnd: () => {
+          armedRef.current = false
+          drag!.onEnd()
+        },
+      }
+    : {}
+
+  return { grip, indicator, rowProps, dragging: !!drag?.dragging }
+}
+
 function TaskGroupRow({
   task,
   childrenTasks,
@@ -1221,6 +1320,7 @@ function TaskGroupRow({
   tasksById,
   collapsed,
   onToggle,
+  drag,
 }: {
   task: Task
   childrenTasks: Task[]
@@ -1228,7 +1328,9 @@ function TaskGroupRow({
   tasksById: Map<string, Task>
   collapsed: boolean
   onToggle: () => void
+  drag?: RowDrag
 }) {
+  const { grip, indicator, rowProps, dragging } = useDragHandle(drag)
   const memberById = useMemo(
     () => new Map(members.map((m) => [m.id, m])),
     [members]
@@ -1266,7 +1368,14 @@ function TaskGroupRow({
     }
   }
   return (
-    <div className="task-row group/row relative flex items-center gap-3 px-4 py-2 text-sm hover:bg-surface-hover transition bg-accent/[0.025]">
+    <div
+      {...rowProps}
+      className={`task-row group/row relative flex items-center gap-3 px-4 py-2 text-sm hover:bg-surface-hover transition bg-accent/[0.025] ${
+        dragging ? 'opacity-40' : ''
+      }`}
+    >
+      {grip}
+      {indicator}
       <div className={COL.lead} />
       <div className={COL.dot}>
         <span
@@ -1339,6 +1448,7 @@ function TaskRows({
   conflictTips,
   selectedIds,
   onToggleSelect,
+  canReorder = false,
 }: {
   tasks: Task[]
   members: Member[]
@@ -1350,6 +1460,8 @@ function TaskRows({
   /** Multi-select state for the group-via-selection flow. */
   selectedIds?: Set<string>
   onToggleSelect?: (id: string) => void
+  /** Drag-to-reorder is only offered in the default (seq) order. */
+  canReorder?: boolean
 }) {
   const { topLevel, childrenByParent } = useMemo(() => {
     const idSet = new Set(tasks.map((t) => t.id))
@@ -1391,6 +1503,102 @@ function TaskRows({
       return next
     })
 
+  // ── Drag-to-reorder (default order only) ────────────────────────────────
+  // State lives here so a drag is naturally scoped to this one card: another
+  // card's TaskRows has its own (null) dragId, so dropping there is a no-op.
+  const [dragId, setDragId] = useState<string | null>(null)
+  // Lane = which sibling list the dragged row reorders within: '__top__' for
+  // top-level rows (incl. group heads), or a parentId for a child. Drops only
+  // land on rows in the same lane (no drag-reparenting).
+  const dragLaneRef = useRef<string>('__top__')
+  const [over, setOver] = useState<{ id: string; pos: 'before' | 'after' } | null>(null)
+  const overRaf = useRef(0)
+  const pendingHit = useRef<{ id: string; el: HTMLElement; clientY: number } | null>(null)
+
+  const laneOf = (t: Task) =>
+    t.parentId && childrenByParent.has(t.parentId) ? t.parentId : '__top__'
+  const laneArray = (lane: string) =>
+    lane === '__top__' ? topLevel : childrenByParent.get(lane) ?? []
+  const effOrder = (t: Task) => t.listOrder ?? t.sequence
+
+  const endDrag = () => {
+    setDragId(null)
+    setOver(null)
+    if (overRaf.current) {
+      cancelAnimationFrame(overRaf.current)
+      overRaf.current = 0
+    }
+  }
+  const beginDrag = (t: Task) => {
+    dragLaneRef.current = laneOf(t)
+    setDragId(t.id)
+  }
+  const hoverRow = (targetId: string, el: HTMLElement, clientY: number) => {
+    if (!dragId) return
+    const target = tasksById.get(targetId)
+    // Only show a slot on a same-lane row that isn't the dragged row itself.
+    if (!target || targetId === dragId || laneOf(target) !== dragLaneRef.current) {
+      if (over) setOver(null)
+      return
+    }
+    pendingHit.current = { id: targetId, el, clientY }
+    if (overRaf.current) return
+    overRaf.current = requestAnimationFrame(() => {
+      overRaf.current = 0
+      const h = pendingHit.current
+      if (!h || !dragId) return
+      const r = h.el.getBoundingClientRect()
+      const pos: 'before' | 'after' =
+        h.clientY - r.top > r.height / 2 ? 'after' : 'before'
+      setOver((prev) =>
+        prev && prev.id === h.id && prev.pos === pos ? prev : { id: h.id, pos }
+      )
+    })
+  }
+  const dropOnRow = (targetId: string, el: HTMLElement, clientY: number) => {
+    const id = dragId
+    const lane = dragLaneRef.current
+    const dragged = id ? tasksById.get(id) : null
+    const target = tasksById.get(targetId)
+    endDrag()
+    if (!id || !dragged || !target || targetId === id || laneOf(target) !== lane) return
+    // Compute the slot fresh from the drop event (avoids a stale rAF `over`).
+    const r = el.getBoundingClientRect()
+    const pos: 'before' | 'after' = clientY - r.top > r.height / 2 ? 'after' : 'before'
+    const arr = laneArray(lane)
+    const fromIndex = arr.findIndex((x) => x.id === id)
+    const rest = arr.filter((x) => x.id !== id)
+    let insertAt = rest.findIndex((x) => x.id === targetId)
+    if (insertAt < 0) return
+    if (pos === 'after') insertAt += 1
+    const before = rest[insertAt - 1] ?? null
+    const after = rest[insertAt] ?? null
+    // No-op if it lands back in its own gap.
+    const left = arr[fromIndex - 1] ?? null
+    const right = arr[fromIndex + 1] ?? null
+    if ((before?.id ?? null) === (left?.id ?? null) && (after?.id ?? null) === (right?.id ?? null))
+      return
+    const newOrder = orderBetween(
+      before ? effOrder(before) : null,
+      after ? effOrder(after) : null
+    )
+    if (newOrder !== dragged.listOrder) void setListOrder(id, newOrder)
+  }
+  const dragFor = (t: Task): RowDrag | undefined =>
+    canReorder
+      ? {
+          id: t.id,
+          enabled: true,
+          active: dragId !== null,
+          dragging: dragId === t.id,
+          over: over?.id === t.id ? over.pos : null,
+          onStart: () => beginDrag(t),
+          onOver: (el, clientY) => hoverRow(t.id, el, clientY),
+          onDrop: (el, clientY) => dropOnRow(t.id, el, clientY),
+          onEnd: endDrag,
+        }
+      : undefined
+
   return (
     <>
       {topLevel.map((t) => {
@@ -1406,6 +1614,7 @@ function TaskRows({
                 tasksById={tasksById}
                 collapsed={isCollapsed}
                 onToggle={() => toggle(t.id)}
+                drag={dragFor(t)}
               />
               {!isCollapsed &&
                 kids.map((c) => (
@@ -1422,6 +1631,7 @@ function TaskRows({
                     onToggleSelect={
                       onToggleSelect ? () => onToggleSelect(c.id) : undefined
                     }
+                    drag={dragFor(c)}
                   />
                 ))}
             </Fragment>
@@ -1440,6 +1650,7 @@ function TaskRows({
             onToggleSelect={
               onToggleSelect ? () => onToggleSelect(t.id) : undefined
             }
+            drag={dragFor(t)}
           />
         )
       })}
@@ -1457,6 +1668,7 @@ function TaskRow({
   warn,
   selected = false,
   onToggleSelect,
+  drag,
 }: {
   task: Task
   members: Member[]
@@ -1468,7 +1680,9 @@ function TaskRow({
   warn?: string
   selected?: boolean
   onToggleSelect?: () => void
+  drag?: RowDrag
 }) {
+  const { grip, indicator, rowProps, dragging } = useDragHandle(drag)
   // Canonical user-edit funnel → records a change-log entry per changed field
   // (design-docs/task-change-log.md). Covers title/status/assignee/effort/dates.
   const update = (patch: Partial<Task>) => updateTask(task.id, patch)
@@ -1491,11 +1705,14 @@ function TaskRow({
 
   return (
     <div
+      {...rowProps}
       className={`task-row group/row relative flex items-center gap-3 px-4 py-2 text-sm transition ${
         selected ? 'bg-accent-soft' : 'hover:bg-surface-hover'
-      }`}
+      } ${dragging ? 'opacity-40' : ''}`}
       title={blocked ? 'Blocked — waiting on a prerequisite task' : undefined}
     >
+      {grip}
+      {indicator}
       <div className={`${COL.lead} relative self-stretch`}>
         {/* Conflict triangle at rest; hidden while hovering the row or when selected. */}
         {warn && (

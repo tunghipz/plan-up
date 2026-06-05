@@ -129,6 +129,13 @@ export interface Task {
    */
   boardOrder?: number
   /**
+   * Manual List ordering within a member card, in the default (seq) sort order
+   * (fractional index). Set when a row is dragged to a new position in the List;
+   * absent tasks fall back to `sequence`. Non-indexed → no Dexie bump; never logged
+   * and never touches `sequence`. See design-docs/list-view.md.
+   */
+  listOrder?: number
+  /**
    * The 5 most recent user-initiated field changes, newest-first (ring buffer).
    * Non-indexed → no Dexie version bump; rows without it read as []. Written only
    * through updateTask / logStatusChange (never the scheduler). See
@@ -284,6 +291,24 @@ export async function nextSequence(sprintId: string): Promise<number> {
   let max = 0
   for (const t of all) if ((t.sequence ?? 0) > max) max = t.sequence ?? 0
   return max + 1
+}
+
+/**
+ * Fractional order strictly between two displayed neighbours' effective orders,
+ * for List drag-reorder. `null` = no neighbour on that side. Both null → 0 (lone
+ * item, order untouched-equivalent). The displayed lane is sorted by effective
+ * order, so the midpoint always lands the row exactly where it was dropped.
+ */
+export function orderBetween(before: number | null, after: number | null): number {
+  if (before == null && after == null) return 0
+  if (before == null) return after! - 1
+  if (after == null) return before + 1
+  return (before + after) / 2
+}
+
+/** Persist a List manual order (raw — not logged, no date recompute). */
+export async function setListOrder(taskId: string, order: number): Promise<void> {
+  await db.tasks.update(taskId, { listOrder: order })
 }
 
 /**

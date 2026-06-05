@@ -31,12 +31,18 @@ Four IndexedDB tables (Dexie database name **`plan-up`**):
 `id` · `projectId` · `sequence` (number, per-sprint) · `title` · `assigneeId` (`string|null`) ·
 `sprintId` · `status` · `priority` · `startDate` (`string|null`) · `dueDate` (`string|null`) ·
 `estimate` (`number|null`, effort in days) · `createdAt` · `dependsOn: string[]` (task IDs) ·
-`changeLog?: ChangeLogEntry[]`
+`changeLog?: ChangeLogEntry[]` · `boardOrder?: number` · `listOrder?: number`
 - `changeLog` is an **optional, non-indexed** field holding the **5 most recent**
   user-initiated field changes (newest-first ring buffer). Like `description`/`color` it
   needs **no Dexie version bump**; rows without it read as `[]`. Written only through
   `updateTask()` / `logStatusChange()`, never by the scheduler. See
   [task-change-log.md](./task-change-log.md).
+- `boardOrder` / `listOrder` are **optional, non-indexed** fractional ordering fields —
+  manual drag position on the **Board** (per status column) and in the **List** (default
+  order, within a member card) respectively. Both fall back to `sequence` when unset, are
+  **never logged** (arrangement, not data), and need **no Dexie version bump**. `sequence`
+  itself is immutable (task-number + prereq reference) and reordering never touches it.
+  See [board-view.md](./board-view.md) and [list-view.md](./list-view.md).
 
 ### Value types
 - `ChangeLogEntry`: `{ field: LoggableField; from: string|null; to: string|null;

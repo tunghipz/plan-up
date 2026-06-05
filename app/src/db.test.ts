@@ -35,6 +35,8 @@ import {
   updateTask,
   logStatusChange,
   appendChangeLog,
+  orderBetween,
+  setListOrder,
   type Task,
   type Member,
   type ChangeLogEntry,
@@ -1202,6 +1204,58 @@ describe('change log', () => {
       const id = await makeTask({ estimate: 2, startDate: '2026-05-04' })
       await recomputeAllDates()
       expect(await logOf(id)).toHaveLength(0)
+    })
+  })
+})
+
+describe('List drag-reorder', () => {
+  describe('orderBetween (pure)', () => {
+    it('returns the midpoint between two neighbours', () => {
+      expect(orderBetween(2, 3)).toBe(2.5)
+      expect(orderBetween(2, 4)).toBe(3)
+    })
+    it('drops below the first item (no neighbour above)', () => {
+      expect(orderBetween(null, 1)).toBe(0)
+    })
+    it('drops past the last item (no neighbour below)', () => {
+      expect(orderBetween(5, null)).toBe(6)
+    })
+    it('returns 0 for a lone item (both null)', () => {
+      expect(orderBetween(null, null)).toBe(0)
+    })
+    it('stays strictly between, so repeated inserts keep ordering', () => {
+      const mid = orderBetween(2, 3) // 2.5
+      expect(mid).toBeGreaterThan(2)
+      expect(mid).toBeLessThan(3)
+      const mid2 = orderBetween(2, mid) // 2.25
+      expect(mid2).toBeGreaterThan(2)
+      expect(mid2).toBeLessThan(mid)
+    })
+  })
+
+  describe('setListOrder', () => {
+    it('writes listOrder raw without a change-log entry', async () => {
+      const id = uid()
+      await db.tasks.add({
+        id,
+        projectId: P,
+        sequence: 1,
+        title: 'task',
+        assigneeId: null,
+        sprintId: 's-lo',
+        status: 'todo',
+        priority: 'normal',
+        startDate: null,
+        dueDate: null,
+        estimate: null,
+        createdAt: 0,
+        dependsOn: [],
+      })
+      await setListOrder(id, 2.5)
+      const t = (await db.tasks.get(id))!
+      expect(t.listOrder).toBe(2.5)
+      expect(t.changeLog ?? []).toHaveLength(0)
+      expect(t.sequence).toBe(1) // never touched
     })
   })
 })

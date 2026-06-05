@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { ChevronDown, List, Calendar, X } from 'lucide-react'
+import { ChevronDown, List, Calendar, X, Plus } from 'lucide-react'
 import {
   db,
   addSection,
@@ -8,6 +8,11 @@ import {
   deleteSection,
   addCollectionItem,
   renameCollection,
+  addStatus,
+  renameStatus,
+  recolorStatus,
+  deleteStatus,
+  COLLECTION_PALETTE,
   type Collection,
   type CollectionStatus,
   type Task,
@@ -19,6 +24,26 @@ const COLLAPSE_KEY = (collectionId: string) =>
 
 /** Grid columns shared by the column-header row and each item row. */
 const ROW_GRID = 'grid-cols-[24px_1fr_96px_96px_112px]'
+
+/** Floating-shadow surface for popovers/menus (design-system §4.2). */
+const FLOAT_SHADOW =
+  'shadow-[0_8px_30px_rgba(0,0,0,0.18),0_0_0_0.5px_rgba(0,0,0,0.06)]'
+
+/** Close `ref` element when a click lands outside it. */
+function useOutsideClose(
+  ref: React.RefObject<HTMLElement | null>,
+  open: boolean,
+  close: () => void
+) {
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) close()
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [ref, open, close])
+}
 
 export function CollectionView({
   collectionId,
@@ -55,7 +80,10 @@ export function CollectionView({
             COLLECTION
           </span>
         </div>
-        <Segmented tab={tab} onChange={setTab} />
+        <div className="flex items-center gap-2.5 relative">
+          <StatusEditor collection={collection} />
+          <Segmented tab={tab} onChange={setTab} />
+        </div>
       </div>
 
       {tab === 'list' ? (
@@ -68,6 +96,7 @@ export function CollectionView({
               section={sec}
               items={itemsBySection(sec.id)}
               statusById={statusById}
+              statuses={collection.statuses}
             />
           ))}
           <button
@@ -186,12 +215,14 @@ function SectionCard({
   section,
   items,
   statusById,
+  statuses,
   canDelete,
 }: {
   collectionId: string
   section: { id: string; name: string; color?: string }
   items: Task[]
   statusById: Map<string, CollectionStatus>
+  statuses: CollectionStatus[]
   canDelete: boolean
 }) {
   const [collapsed, setCollapsed] = useState(
@@ -264,7 +295,12 @@ function SectionCard({
           </div>
 
           {items.map((t) => (
-            <ItemRow key={t.id} task={t} statusById={statusById} />
+            <ItemRow
+              key={t.id}
+              task={t}
+              statusById={statusById}
+              statuses={statuses}
+            />
           ))}
 
           <button
@@ -352,9 +388,11 @@ function SectionName({
 function ItemRow({
   task,
   statusById,
+  statuses,
 }: {
   task: Task
   statusById: Map<string, CollectionStatus>
+  statuses: CollectionStatus[]
 }) {
   const status = task.collectionStatusId
     ? statusById.get(task.collectionStatusId)
@@ -377,7 +415,7 @@ function ItemRow({
       <span className="text-[13px] text-ink-muted tabular-nums">
         {task.dueDate ? formatShortDate(task.dueDate) : '—'}
       </span>
-      <StatusPill status={status} />
+      <StatusPill task={task} status={status} statuses={statuses} />
     </div>
   )
 }
@@ -441,29 +479,202 @@ function ItemTitle({ task }: { task: Task }) {
   )
 }
 
-/** Display-only status pill (click-to-assign editor lands in Task 12). */
-function StatusPill({ status }: { status?: CollectionStatus }) {
-  if (!status) {
-    return (
-      <span className="text-[11.5px] font-medium text-ink-faint">
-        No status
-      </span>
-    )
+/** Click-to-assign status pill. */
+function StatusPill({
+  task,
+  status,
+  statuses,
+}: {
+  task: Task
+  status?: CollectionStatus
+  statuses: CollectionStatus[]
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  useOutsideClose(ref, open, () => setOpen(false))
+
+  const assign = async (id: string | null) => {
+    setOpen(false)
+    await db.tasks.update(task.id, { collectionStatusId: id })
   }
+
   return (
-    <span
-      className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-[3px] text-[11.5px] font-semibold w-fit"
-      style={{
-        background: `color-mix(in srgb, ${status.color} 16%, transparent)`,
-        color: status.color,
-      }}
-    >
-      <span
-        className="w-1.5 h-1.5 rounded-full"
-        style={{ background: status.color }}
-        aria-hidden
-      />
-      {status.name}
-    </span>
+    <div ref={ref} className="relative">
+      <button
+        onClick={() => setOpen((p) => !p)}
+        className="cursor-pointer hover:opacity-80 transition"
+        aria-label="Assign status"
+      >
+        {status ? (
+          <span
+            className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-[3px] text-[11.5px] font-semibold w-fit"
+            style={{
+              background: `color-mix(in srgb, ${status.color} 16%, transparent)`,
+              color: status.color,
+            }}
+          >
+            <span
+              className="w-1.5 h-1.5 rounded-full"
+              style={{ background: status.color }}
+              aria-hidden
+            />
+            {status.name}
+          </span>
+        ) : (
+          <span className="text-[11.5px] font-medium text-ink-faint">
+            No status
+          </span>
+        )}
+      </button>
+      {open && (
+        <div
+          className={`absolute right-0 top-full mt-1 z-30 bg-surface rounded-[10px] py-1 min-w-[140px] ${FLOAT_SHADOW}`}
+        >
+          {statuses.map((s) => (
+            <button
+              key={s.id}
+              onClick={() => void assign(s.id)}
+              className="w-full flex items-center gap-2 px-3 py-1.5 text-[13px] text-ink hover:bg-surface-hover transition"
+            >
+              <span
+                className="w-2.5 h-2.5 rounded-full shrink-0"
+                style={{ background: s.color }}
+                aria-hidden
+              />
+              {s.name}
+            </button>
+          ))}
+          <div className="border-t border-border-hair my-1" />
+          <button
+            onClick={() => void assign(null)}
+            className="w-full flex items-center gap-2 px-3 py-1.5 text-[13px] text-ink-muted hover:bg-surface-hover transition"
+          >
+            <span className="w-2.5 h-2.5 rounded-full border border-border shrink-0" aria-hidden />
+            No status
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** Per-collection status editor popover (Statuses button in header). */
+function StatusEditor({ collection }: { collection: Collection }) {
+  const [open, setOpen] = useState(false)
+  const [paletteFor, setPaletteFor] = useState<string | null>(null)
+  const ref = useRef<HTMLDivElement>(null)
+  useOutsideClose(ref, open, () => {
+    setOpen(false)
+    setPaletteFor(null)
+  })
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        data-statuses-btn
+        onClick={() => {
+          setOpen((p) => !p)
+          setPaletteFor(null)
+        }}
+        className={`flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded-[7px] border transition ${
+          open
+            ? 'bg-surface text-ink border-border shadow-[0_1px_3px_rgba(0,0,0,0.12)]'
+            : 'text-ink-muted border-transparent hover:border-border hover:text-ink'
+        }`}
+        aria-expanded={open}
+        aria-label="Edit statuses"
+      >
+        Statuses
+      </button>
+
+      {open && (
+        <div
+          className={`absolute right-0 top-full mt-1.5 z-40 bg-surface rounded-[12px] w-[260px] py-2 ${FLOAT_SHADOW}`}
+        >
+          <div className="px-4 pb-1.5 pt-0.5 text-[11px] font-semibold text-ink-faint tracking-wider">
+            STATUSES
+          </div>
+
+          {collection.statuses.map((s) => (
+            <div
+              key={s.id}
+              data-status-row
+              className="flex items-center gap-2 px-3 py-1.5 hover:bg-surface-hover transition group"
+            >
+              {/* Color swatch → palette picker */}
+              <div className="relative shrink-0">
+                <button
+                  className="w-4 h-4 rounded-full border border-white/20 shadow-sm hover:scale-110 transition"
+                  style={{ background: s.color }}
+                  onClick={() => setPaletteFor(paletteFor === s.id ? null : s.id)}
+                  aria-label="Change color"
+                />
+                {paletteFor === s.id && (
+                  <div
+                    className={`absolute left-0 top-full mt-1 z-50 bg-surface rounded-[10px] p-2 grid grid-cols-5 gap-1.5 w-[110px] ${FLOAT_SHADOW}`}
+                    onMouseDown={(e) => e.stopPropagation()}
+                  >
+                    {COLLECTION_PALETTE.map((c) => (
+                      <button
+                        key={c}
+                        className="w-4 h-4 rounded-full hover:scale-125 transition"
+                        style={{ background: c }}
+                        onClick={() => {
+                          void recolorStatus(collection.id, s.id, c)
+                          setPaletteFor(null)
+                        }}
+                        aria-label={c}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Name input */}
+              <input
+                defaultValue={s.name}
+                onBlur={(e) => {
+                  const v = e.currentTarget.value.trim()
+                  if (v && v !== s.name) void renameStatus(collection.id, s.id, v)
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') e.currentTarget.blur()
+                  else if (e.key === 'Escape') {
+                    e.currentTarget.value = s.name
+                    e.currentTarget.blur()
+                  }
+                }}
+                className="flex-1 min-w-0 text-[13px] text-ink bg-transparent border-b border-transparent focus:border-accent focus:outline-none"
+                aria-label="Status name"
+              />
+
+              {/* Delete */}
+              <button
+                onClick={async () => {
+                  if (window.confirm(`Delete status "${s.name}"?`)) {
+                    await deleteStatus(collection.id, s.id)
+                  }
+                }}
+                className="opacity-0 group-hover:opacity-60 hover:!opacity-100 text-ink-faint hover:text-red-500 transition p-0.5 rounded"
+                aria-label={`Delete ${s.name}`}
+              >
+                <X size={13} />
+              </button>
+            </div>
+          ))}
+
+          <div className="border-t border-border-hair mx-3 my-1.5" />
+          <button
+            onClick={() =>
+              void addStatus(collection.id, 'New status', COLLECTION_PALETTE[0])
+            }
+            className="w-full flex items-center gap-2 px-3 py-1.5 text-[13px] text-accent hover:bg-accent-soft transition"
+          >
+            <Plus size={13} strokeWidth={2.5} />
+            Add status
+          </button>
+        </div>
+      )}
+    </div>
   )
 }

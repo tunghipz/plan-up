@@ -64,7 +64,7 @@ Non-obvious behaviors, defaults, persistence keys.
 | [dependencies.md](./dependencies.md) | Prerequisites, cycle prevention, blocked state |
 | [status-and-priority.md](./status-and-priority.md) | Status circle/pill, priority chip |
 | [date-picker.md](./date-picker.md) | Custom Cupertino calendar picker (sprint-aware, days-off dots + list) |
-| [list-view.md](./list-view.md) | Grouped cards, sortable columns, column widths |
+| [list-view.md](./list-view.md) | Grouped cards, sortable columns, column widths, drag-to-reorder |
 | [member-header-summary.md](./member-header-summary.md) | Progress ring, overdue, next deadline, days off |
 | [board-view.md](./board-view.md) | Cupertino kanban |
 | [gantt-view.md](./gantt-view.md) | Timeline — Apple-Calendar swimlanes (one event block per task), per sprint |

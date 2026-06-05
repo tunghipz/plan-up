@@ -1,7 +1,7 @@
 # Task groups (parent task with nested children)
 
 **Status:** Implemented
-**Last updated:** 2026-06-04
+**Last updated:** 2026-06-05
 **Code:** `app/src/db.ts` (`Task.parentId`, `createGroupFromSelection`, `setTaskParent`),
 `app/src/SprintView.tsx` (`MemberCard` task tree render, `TaskGroupRow` parent roll-up,
 `SelectionBar` group/ungroup/delete), collapse persisted in `localStorage`
@@ -17,17 +17,20 @@ separate epic/tag system. Approach **B** chosen 2026-06-04 (see
 ## User-facing behavior
 - **Create a group (multi-select):** hover a task row → a **checkbox** appears in the
   left gutter; check several tasks **of the same member**. A **floating action bar**
-  slides up at the bottom: *"N đã chọn · [Bỏ nhóm] · [Gom nhóm] · [Xoá] · [Huỷ]"*.
-  - **Gom nhóm** creates a **new parent task** titled `New group` (rename inline) and
+  slides up at the bottom (English labels): *"N selected · [Ungroup] · [Chain prereqs] ·
+  [Clear prereqs] · [Group] · [Delete] · [Cancel]"*.
+  - **Group** creates a **new parent task** titled `New group` (rename inline) and
     nests the selected tasks under it. Enabled only when ≥2 are selected, all share the
     same assignee, and none is already a group head (one level).
-  - **Bỏ nhóm** ungroups any selected children (clears their `parentId`); shown when the
+  - **Ungroup** ungroups any selected children (clears their `parentId`); shown when the
     selection contains ≥1 grouped task.
-  - **Xoá** deletes the selected tasks (confirm first; works on a multi-select).
+  - **Chain prereqs** / **Clear prereqs** set or clear prerequisites across the selection —
+    see [dependencies.md](./dependencies.md#bulk-actions-multi-select).
+  - **Delete** deletes the selected tasks (confirm first; works on a multi-select).
     Deleting a group head ungroups its children rather than cascade-deleting them; the
     confirm copy says so when the selection contains a group head. Deletes run
     sequentially so a parent's child-promotion can't race a selected child's own delete.
-  - **Huỷ** clears the selection. Selection also clears on sprint change.
+  - **Cancel** clears the selection. Selection also clears on sprint change.
   - Checkboxes are hover-revealed (hidden at rest, kept visible while selected) so the
     resting list stays calm; they share the left gutter with the conflict triangle.
   - **There is no per-row kebab (⋯).** Grouping is select-driven and **delete also lives

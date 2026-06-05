@@ -1,10 +1,10 @@
 # Dependencies (prerequisites)
 
 **Status:** Implemented
-**Last updated:** 2026-06-04
+**Last updated:** 2026-06-05
 **Code:** `app/src/db.ts` (`addDependency`, `removeDependency`, `setDependencies`,
 `wouldCreateCycle`, `findCyclePath`, `isTaskBlocked`), `app/src/SprintView.tsx`
-(`PrereqInput`), `app/src/lib.ts` (`parsePrereqSeqs`, `formatSeqRanges`),
+(`PrereqInput`, `SelectionBar`), `app/src/lib.ts` (`parsePrereqSeqs`, `formatSeqRanges`),
 `app/src/index.css` (`.prereq-chip*` path-trace animation)
 
 ## Purpose
@@ -57,6 +57,30 @@ chain them, remove the back-edge first (here: clear 6's dependency on 7).
   returned to report cyclic vs unknown numbers in a portal popover. Display uses
   `formatSeqRanges`.
 
+## Bulk actions (multi-select)
+The selection toolbar (`SelectionBar` in `SprintView.tsx`, shown when ≥1 task is selected)
+offers two prereq actions alongside Group / Ungroup / Delete. Both reuse `setDependencies`
+per task, so cycle/self/duplicate filtering, change-log entries, and date recompute all come
+for free. Single click, **no confirmation** (the change log records old→new as the safety net).
+
+- **Chain prereqs** — enabled only with **≥2** selected (else disabled, tooltip "Select ≥2
+  tasks to chain"). Orders the selected tasks **top-to-bottom by their displayed order** and,
+  for each adjacent pair (A above B), makes **B depend on A**. Existing prereqs are **kept**
+  (additive): `setDependencies(B.id, unique([...B.dependsOn, A.id]))`. Only the chain's head
+  is left untouched → **N-1** calls, run **sequentially top-to-bottom** so each task's
+  recomputed dates are in place before the next link is computed (dates cascade correctly).
+- **Clear prereqs** — enabled when ≥1 selected task has a non-empty `dependsOn`. Wipes every
+  selected task's prereqs entirely: `setDependencies(task.id, [])` for each.
+
+After either action the selection is cleared. The chain is built top-to-bottom and is a
+forward DAG, so it can't introduce a cycle among the selected tasks; `setDependencies` still
+guards against cycles formed via pre-existing prereqs.
+
+`SelectionBar` labels are English: **Group**, **Ungroup**, **Delete**, **Cancel**, plus the
+new **Chain prereqs** / **Clear prereqs**.
+
 ## Rules & edge cases
 - Because links are by ID, sprint renumbering and rollover never break them.
 - Deleting a task strips its ID from every other task's `dependsOn` and recomputes them.
+- Selection state clears when the sprint changes, so bulk prereq actions are always
+  same-sprint (matching the per-sprint sequence model).

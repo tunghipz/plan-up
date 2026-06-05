@@ -17,6 +17,8 @@ import {
   Check,
   FolderPlus,
   Ungroup,
+  Link2,
+  Link2Off,
 } from 'lucide-react'
 import {
   db,
@@ -439,11 +441,13 @@ export function SprintView({
 
 /**
  * Floating action bar shown while ≥1 task is selected (group-via-selection flow).
- * "Gom nhóm" creates a new group parent from the selection (same member, ≥2, none a
- * group head); "Bỏ nhóm" ungroups any selected children; "Xoá" deletes the selection
- * (confirm first; deleting a group head ungroups its children, doesn't cascade). This
- * bar is the only place to delete a task — there is no per-row kebab.
- * See design-docs/task-groups.md.
+ * "Group" creates a new group parent from the selection (same member, ≥2, none a
+ * group head); "Ungroup" ungroups any selected children; "Chain prereqs" links the
+ * selection top-to-bottom (each depends on the one above, keeping existing prereqs,
+ * ≥2 needed); "Clear prereqs" wipes dependsOn on the selection; "Delete" deletes the
+ * selection (confirm first; deleting a group head ungroups its children, doesn't
+ * cascade). This bar is the only place to delete a task — there is no per-row kebab.
+ * See design-docs/task-groups.md and design-docs/dependencies.md.
  */
 function SelectionBar({
   selectedIds,
@@ -474,9 +478,35 @@ function SelectionBar({
   const canGroup = sameMember && noneParent
   const anyChild = selected.some((t) => !!t.parentId)
 
+  // Chain follows the displayed top-to-bottom order, so order by the source array
+  // (not Set insertion order). ≥2 needed to form a chain.
+  const selectedInOrder = allTasks.filter((t) => selectedIds.has(t.id))
+  const canChain = selectedInOrder.length >= 2
+  const canClearPrereq = selected.some((t) => t.dependsOn.length > 0)
+
   const doGroup = async () => {
     if (!canGroup) return
     await createGroupFromSelection(selected.map((t) => t.id))
+    onClear()
+  }
+  // Chain prereqs: for each adjacent pair (A above B), make B depend on A,
+  // keeping B's existing prereqs. Run top-to-bottom so each link sees the
+  // prior task's recomputed dates before the next is computed.
+  const doChain = async () => {
+    if (!canChain) return
+    for (let i = 1; i < selectedInOrder.length; i++) {
+      const prev = selectedInOrder[i - 1]
+      const cur = selectedInOrder[i]
+      const next = [...new Set([...cur.dependsOn, prev.id])]
+      await setDependencies(cur.id, next)
+    }
+    onClear()
+  }
+  const doClearPrereq = async () => {
+    if (!canClearPrereq) return
+    for (const t of selected) {
+      if (t.dependsOn.length > 0) await setDependencies(t.id, [])
+    }
     onClear()
   }
   const doUngroup = async () => {
@@ -489,8 +519,8 @@ function SelectionBar({
     if (n === 0) return
     const hasGroup = selected.some((t) => parentIds.has(t.id))
     const msg = hasGroup
-      ? `Xoá ${n} task đã chọn? Task con của nhóm sẽ được gỡ nhóm, không bị xoá.`
-      : `Xoá ${n} task đã chọn?`
+      ? `Delete ${n} selected task(s)? Group children will be ungrouped, not deleted.`
+      : `Delete ${n} selected task(s)?`
     if (!confirm(msg)) return
     // Sequential: deleting a parent promotes its children to top-level, so a
     // concurrent run could race a selected child's own delete.
@@ -509,40 +539,56 @@ function SelectionBar({
       aria-label="Selected tasks"
     >
       <span className="text-[13.5px]">
-        <b className="font-semibold tabular-nums">{n}</b> đã chọn
+        <b className="font-semibold tabular-nums">{n}</b> selected
       </span>
       {anyChild && (
         <button
           onClick={doUngroup}
           className="inline-flex items-center gap-1.5 text-[13px] text-white/80 hover:text-white px-2.5 py-1.5 rounded-[9px] hover:bg-white/10 transition"
         >
-          <Ungroup size={14} /> Bỏ nhóm
+          <Ungroup size={14} /> Ungroup
         </button>
       )}
+      <button
+        onClick={doChain}
+        disabled={!canChain}
+        title={canChain ? undefined : 'Select ≥2 tasks to chain'}
+        className="inline-flex items-center gap-1.5 text-[13px] text-white/80 hover:text-white px-2.5 py-1.5 rounded-[9px] hover:bg-white/10 transition disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+      >
+        <Link2 size={14} /> Chain prereqs
+      </button>
+      <button
+        onClick={doClearPrereq}
+        disabled={!canClearPrereq}
+        title={canClearPrereq ? undefined : 'No prereqs to clear'}
+        className="inline-flex items-center gap-1.5 text-[13px] text-white/80 hover:text-white px-2.5 py-1.5 rounded-[9px] hover:bg-white/10 transition disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+      >
+        <Link2Off size={14} /> Clear prereqs
+      </button>
       <button
         onClick={doGroup}
         disabled={!canGroup}
         title={
           canGroup
             ? undefined
-            : 'Chọn ≥2 task cùng một người (không phải nhóm) để gom'
+            : 'Select ≥2 tasks with the same assignee (not a group) to group'
         }
         className="inline-flex items-center gap-1.5 text-[13px] font-semibold rounded-[9px] px-3 py-1.5 transition disabled:opacity-40 disabled:cursor-not-allowed bg-white text-[#1d1d1f] hover:bg-white/90"
       >
-        <FolderPlus size={14} /> Gom nhóm
+        <FolderPlus size={14} /> Group
       </button>
       <button
         onClick={doDelete}
         className="inline-flex items-center gap-1.5 text-[13px] text-red-300 hover:text-white hover:bg-red-500/80 px-2.5 py-1.5 rounded-[9px] transition"
       >
-        <Trash2 size={14} /> Xoá
+        <Trash2 size={14} /> Delete
       </button>
       <span className="w-px self-stretch bg-white/15" aria-hidden />
       <button
         onClick={onClear}
         className="text-[13px] text-white/70 hover:text-white px-2 py-1.5"
       >
-        Huỷ
+        Cancel
       </button>
     </div>
   )

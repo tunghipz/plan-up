@@ -25,11 +25,14 @@ import {
   recomputeAllDates,
   moveUnfinishedToNextSprint,
   createProject,
+  createCollection,
   type Project,
   type Sprint,
   type Task,
+  type Collection,
   type ExportPayload,
 } from './db'
+import { CollectionView } from './CollectionView'
 import { SprintView } from './SprintView'
 import { BoardView } from './BoardView'
 import { GanttView } from './GanttView'
@@ -53,6 +56,22 @@ function App() {
     else localStorage.removeItem(CURRENT_PROJECT_KEY)
   }
   const [currentSprintId, setCurrentSprintId] = useState<string | null>(null)
+  // Container đang xem: 'sprint' (mặc định) hoặc 'collection'.
+  const SELKIND_KEY = 'plan-up:selKind'
+  const SELCOLL_KEY = 'plan-up:selCollectionId'
+  const [selKind, setSelKindState] = useState<'sprint' | 'collection'>(
+    () => (localStorage.getItem(SELKIND_KEY) === 'collection' ? 'collection' : 'sprint')
+  )
+  const [currentCollectionId, setCurrentCollectionIdState] = useState<string | null>(
+    () => localStorage.getItem(SELCOLL_KEY)
+  )
+  const selectSprint = (id: string) => {
+    setCurrentSprintId(id); setSelKindState('sprint'); localStorage.setItem(SELKIND_KEY, 'sprint')
+  }
+  const selectCollection = (id: string) => {
+    setCurrentCollectionIdState(id); localStorage.setItem(SELCOLL_KEY, id)
+    setSelKindState('collection'); localStorage.setItem(SELKIND_KEY, 'collection')
+  }
   const [view, setViewState] = useState<ViewMode>(() => {
     const v = localStorage.getItem(VIEW_KEY)
     return v === 'board' ? 'board' : v === 'timeline' ? 'timeline' : 'list'
@@ -160,6 +179,16 @@ function App() {
     [seeded, currentProjectId]
   )
 
+  const collections = useLiveQuery<Collection[]>(
+    () =>
+      seeded && currentProjectId
+        ? db.collections.where('projectId').equals(currentProjectId).sortBy('order')
+        : Promise.resolve([] as Collection[]),
+    [seeded, currentProjectId]
+  )
+  const currentCollection =
+    collections?.find((c) => c.id === currentCollectionId) ?? null
+
   const tasks = useLiveQuery<Task[]>(
     () =>
       currentSprintId
@@ -179,6 +208,7 @@ function App() {
   const sprintTaskCounts = useMemo(() => {
     const counts = new Map<string, { total: number; done: number }>()
     for (const t of projectTasks ?? []) {
+      if (!t.sprintId) continue
       const c = counts.get(t.sprintId) ?? { total: 0, done: 0 }
       c.total++
       if (t.status === 'done') c.done++
@@ -427,7 +457,7 @@ function App() {
                 return (
                   <button
                     key={s.id}
-                    onClick={() => setCurrentSprintId(s.id)}
+                    onClick={() => selectSprint(s.id)}
                     className={`w-full text-left flex items-center gap-2.5 px-2.5 py-2 mb-0.5 text-[14px] rounded-lg transition ${
                       isActive
                         ? 'bg-accent text-white'
@@ -454,6 +484,42 @@ function App() {
                 <div className="px-3 py-3 text-[13px] text-ink-faint italic">
                   No sprints yet
                 </div>
+              )}
+            </div>
+            <div className="flex items-center justify-between px-[18px] pt-3 pb-1.5">
+              <span className="text-[12px] font-semibold text-ink-faint">Collections</span>
+              <button
+                onClick={async () => {
+                  const name = prompt('Tên collection:')
+                  if (name && name.trim() && currentProjectId) {
+                    const c = await createCollection(currentProjectId, name)
+                    selectCollection(c.id)
+                  }
+                }}
+                title="New collection"
+                className="inline-flex items-center text-accent hover:bg-accent-soft -mr-1 p-1 rounded-md transition"
+              >
+                <Plus size={16} strokeWidth={2} />
+              </button>
+            </div>
+            <div className="px-2.5 pb-2">
+              {collections?.map((c) => {
+                const isActive = selKind === 'collection' && c.id === currentCollectionId
+                return (
+                  <button
+                    key={c.id}
+                    onClick={() => selectCollection(c.id)}
+                    className={`w-full text-left flex items-center gap-2.5 px-2.5 py-2 mb-0.5 text-[14px] rounded-lg transition ${
+                      isActive ? 'bg-accent text-white' : 'text-ink hover:bg-surface-hover'
+                    }`}
+                  >
+                    <span className={`w-2 h-2 rounded-full shrink-0 ${isActive ? 'bg-white/90' : 'bg-ink-faint'}`} aria-hidden />
+                    <span className="flex-1 min-w-0 truncate font-medium">{c.name}</span>
+                  </button>
+                )
+              })}
+              {collections && collections.length === 0 && (
+                <div className="px-3 py-2 text-[13px] text-ink-faint italic">No collections</div>
               )}
             </div>
           </>
@@ -561,7 +627,7 @@ function App() {
         </header>
 
         <div className="flex-1 overflow-auto">
-          {currentSprint && (
+          {selKind === 'sprint' && currentSprint && (
             <CapacityBanner
               total={capacity.total}
               assigned={capacity.assigned}
@@ -585,6 +651,8 @@ function App() {
                   Create your first project
                 </button>
               </div>
+            ) : selKind === 'collection' && currentCollection && currentProjectId ? (
+              <CollectionView collectionId={currentCollection.id} projectId={currentProjectId} />
             ) : sprints.length === 0 ? (
               <div className="py-20 text-center space-y-4">
                 <p className="text-ink-muted">

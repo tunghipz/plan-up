@@ -16,7 +16,7 @@ describe('buildMonthGrid', () => {
   it('a month that needs 6 weeks returns 6', () => {
     // Aug 2026: Aug 1 is Saturday → spills to 6 rows
     const g = buildMonthGrid(2026, 7, '2026-08-01')
-    expect(g.weeks.length).toBeGreaterThanOrEqual(5)
+    expect(g.weeks.length).toBe(6)
     expect(g.weeks[0].cells.some((c) => c.day === 1 && c.inMonth)).toBe(true)
   })
 })
@@ -66,5 +66,18 @@ describe('computeBarSegments', () => {
     expect(last.rightChev).toBe(true)
     expect(last.roundR).toBe(false)
     expect(segs[0].roundL).toBe(true) // bắt đầu Jun 10 là start thật
+  })
+
+  it('item ending exactly on gridEnd has rightChev=false', () => {
+    const items = [{ id: 'a', start: '2026-06-25', end: '2026-07-05' }] // Jul 5 = gridEnd for June 2026
+    const segs = computeBarSegments(items, grid, assignLanes(items))
+    const last = segs[segs.length - 1]
+    expect(last.rightChev).toBe(false)
+    expect(last.roundR).toBe(true)
+  })
+
+  it('item entirely outside grid produces no segments', () => {
+    const items = [{ id: 'a', start: '2025-01-01', end: '2025-01-31' }]
+    expect(computeBarSegments(items, grid, assignLanes(items))).toHaveLength(0)
   })
 })

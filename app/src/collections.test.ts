@@ -6,6 +6,7 @@ import {
   addSection, renameSection, deleteSection, moveTaskToSection,
   addStatus, renameStatus, recolorStatus, deleteStatus,
   addCollectionItem,
+  exportAll, importAll,
 } from './db'
 
 async function clearAll() {
@@ -151,6 +152,31 @@ describe('addCollectionItem', () => {
     expect(t.startDate).toMatch(/^\d{4}-\d{2}-\d{2}$/)
     expect(t.title).toBe('Đập trứng')
     expect((await db.tasks.get(t.id))?.title).toBe('Đập trứng')
+  })
+})
+
+describe('export/import collections', () => {
+  beforeEach(clearAll)
+  it('round-trips collections + their items', async () => {
+    await db.projects.add({ id: 'p1', name: 'P', createdAt: 1 })
+    const c = await createCollection('p1', 'Live-ops')
+    await addCollectionItem(c.id, c.sections[0].id, { title: 'Đập trứng' })
+    const payload = await exportAll()
+    expect(payload.version).toBe(3)
+    expect(payload.collections?.length).toBe(1)
+    await clearAll()
+    await importAll(payload)
+    expect(await db.collections.count()).toBe(1)
+    expect(await db.tasks.where('collectionId').equals(c.id).count()).toBe(1)
+  })
+
+  it('still imports a v2 payload (no collections) without error', async () => {
+    await importAll({
+      version: 2, exportedAt: 'x',
+      projects: [{ id: 'p1', name: 'P', createdAt: 1 }],
+      members: [], sprints: [], tasks: [],
+    })
+    expect(await db.collections.count()).toBe(0)
   })
 })
 

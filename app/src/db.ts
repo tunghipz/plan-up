@@ -1449,34 +1449,38 @@ export async function deleteMember(memberId: string) {
 }
 
 export interface ExportPayload {
-  version: 1 | 2
+  version: 1 | 2 | 3
   exportedAt: string
   /** v2 introduces multi-project. v1 payloads have no `projects` field. */
   projects?: Project[]
   members: Member[]
   sprints: Sprint[]
+  /** v3 introduces collections (task ngoài sprint). */
+  collections?: Collection[]
   tasks: Task[]
 }
 
 export async function exportAll(): Promise<ExportPayload> {
-  const [projects, members, sprints, tasks] = await Promise.all([
+  const [projects, members, sprints, collections, tasks] = await Promise.all([
     db.projects.toArray(),
     db.members.toArray(),
     db.sprints.toArray(),
+    db.collections.toArray(),
     db.tasks.toArray(),
   ])
   return {
-    version: 2,
+    version: 3,
     exportedAt: new Date().toISOString(),
     projects,
     members,
     sprints,
+    collections,
     tasks,
   }
 }
 
 export async function importAll(data: ExportPayload) {
-  if (!data || (data.version !== 1 && data.version !== 2)) {
+  if (!data || ![1, 2, 3].includes(data.version)) {
     throw new Error('Unsupported export version')
   }
   await db.transaction(
@@ -1484,11 +1488,13 @@ export async function importAll(data: ExportPayload) {
     db.projects,
     db.members,
     db.sprints,
+    db.collections,
     db.tasks,
     async () => {
       await db.tasks.clear()
       await db.sprints.clear()
       await db.members.clear()
+      await db.collections.clear()
       await db.projects.clear()
       // v1 payloads predate multi-project — synthesize a default project
       // and stamp it onto every row.
@@ -1521,6 +1527,12 @@ export async function importAll(data: ExportPayload) {
       }))
       await db.sprints.bulkAdd(sprints)
 
+      if (data.version === 3 && Array.isArray(data.collections)) {
+        await db.collections.bulkAdd(
+          data.collections.map((c) => ({ ...c, projectId: pidOf(c) }))
+        )
+      }
+
       // Sequence backfill is per-project for v1 payloads.
       const seqCounter = new Map<string, number>()
       const sorted = [...data.tasks].sort(
@@ -1545,6 +1557,9 @@ export async function importAll(data: ExportPayload) {
           // hand-edited export can't smuggle an unbounded changeLog. (#changelog)
           changeLog: Array.isArray(t.changeLog) ? t.changeLog.slice(0, 5) : [],
           sequence: seq,
+          collectionId: t.collectionId ?? null,
+          sectionId: t.sectionId ?? null,
+          collectionStatusId: t.collectionStatusId ?? null,
         }
       })
       await db.tasks.bulkAdd(tasks)

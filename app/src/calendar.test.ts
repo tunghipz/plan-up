@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { dayIndex, buildMonthGrid } from './lib'
+import { dayIndex, buildMonthGrid, assignLanes } from './lib'
 
 describe('buildMonthGrid', () => {
   it('June 2026 is Mon-start, 5 weeks, today flagged, trailing July faint', () => {
@@ -18,5 +18,25 @@ describe('buildMonthGrid', () => {
     const g = buildMonthGrid(2026, 7, '2026-08-01')
     expect(g.weeks.length).toBeGreaterThanOrEqual(5)
     expect(g.weeks[0].cells.some((c) => c.day === 1 && c.inMonth)).toBe(true)
+  })
+})
+
+describe('assignLanes', () => {
+  it('non-overlapping items share lane 0', () => {
+    const lanes = assignLanes([
+      { id: 'a', start: '2026-06-02', end: '2026-06-04' },
+      { id: 'b', start: '2026-06-05', end: '2026-06-07' },
+    ])
+    expect(lanes.get('a')).toBe(0)
+    expect(lanes.get('b')).toBe(0)
+  })
+
+  it('overlapping items get distinct lanes', () => {
+    const lanes = assignLanes([
+      { id: 'a', start: '2026-06-02', end: '2026-06-10' },
+      { id: 'b', start: '2026-06-05', end: '2026-06-07' },
+    ])
+    expect(lanes.get('a')).toBe(0)
+    expect(lanes.get('b')).toBe(1)
   })
 })

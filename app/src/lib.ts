@@ -224,6 +224,36 @@ export function buildMonthGrid(year: number, month0: number, todayStr: string): 
   return { year, month0, weeks, gridStart, gridEnd: gridStart + weekCount * 7 - 1 }
 }
 
+export interface CalItem {
+  id: string
+  /** yyyy-mm-dd inclusive. */
+  start: string
+  end: string
+}
+
+/**
+ * Gán mỗi item một lane (hàng) cố định. Sort theo start (tie-break: dài hơn
+ * trước), gán lane thấp nhất mà item cuối trên lane đó đã KẾT THÚC trước khi
+ * item này bắt đầu. Item không chồng ngày → chung lane.
+ */
+export function assignLanes(items: CalItem[]): Map<string, number> {
+  const sorted = [...items].sort((x, y) => {
+    const dx = dayIndex(x.start) - dayIndex(y.start)
+    if (dx !== 0) return dx
+    return dayIndex(y.end) - dayIndex(x.end) // dài hơn trước
+  })
+  const laneEnd: number[] = [] // idx kết thúc của item cuối trên mỗi lane
+  const out = new Map<string, number>()
+  for (const it of sorted) {
+    const a = dayIndex(it.start)
+    let lane = 0
+    while (lane < laneEnd.length && laneEnd[lane] >= a) lane++
+    out.set(it.id, lane)
+    laneEnd[lane] = dayIndex(it.end)
+  }
+  return out
+}
+
 export function useDarkMode() {
   const [dark, setDark] = useState<boolean>(() => {
     const stored = localStorage.getItem('plan-up:dark')

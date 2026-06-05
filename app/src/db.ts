@@ -342,6 +342,55 @@ export function colorForName(name: string): string {
   return PALETTE[Math.abs(h) % PALETTE.length]
 }
 
+/** Palette hệ Apple cho status/section màu (design-system §2.4 + đỏ/xám). */
+export const COLLECTION_PALETTE = [
+  '#0071E3', '#34C759', '#FF9500', '#FF3B30', '#AF52DE',
+  '#FF2D55', '#5AC8FA', '#5856D6', '#FF6482', '#8E8E93',
+] as const
+
+/** Status mặc định khi tạo collection (user sửa được sau). */
+function defaultStatuses(): CollectionStatus[] {
+  return [
+    { id: uid(), name: 'FEATURE', color: '#FF9500' },
+    { id: uid(), name: 'EVENT', color: '#0071E3' },
+  ]
+}
+
+/** Tạo collection mới: 1 section "All" + bộ status mặc định. order = max+1. */
+export async function createCollection(
+  projectId: string,
+  name: string
+): Promise<Collection> {
+  const existing = await db.collections.where('projectId').equals(projectId).toArray()
+  const order = existing.reduce((m, c) => Math.max(m, c.order), -1) + 1
+  const col: Collection = {
+    id: uid(),
+    projectId,
+    name: name.trim() || 'Untitled',
+    order,
+    sections: [{ id: uid(), name: 'All' }],
+    statuses: defaultStatuses(),
+    createdAt: Date.now(),
+  }
+  await db.collections.add(col)
+  return col
+}
+
+/** Đổi tên collection (trim, bỏ qua nếu rỗng). */
+export async function renameCollection(id: string, name: string): Promise<void> {
+  const n = name.trim()
+  if (!n) return
+  await db.collections.update(id, { name: n })
+}
+
+/** Xoá collection + toàn bộ item của nó (destructive — caller confirm trước). */
+export async function deleteCollection(id: string): Promise<void> {
+  await db.transaction('rw', db.collections, db.tasks, async () => {
+    await db.tasks.where('collectionId').equals(id).delete()
+    await db.collections.delete(id)
+  })
+}
+
 /** Next sequence number within a sprint. Sequences are never reused. */
 export async function nextSequence(sprintId: string): Promise<number> {
   const all = await db.tasks.where('sprintId').equals(sprintId).toArray()

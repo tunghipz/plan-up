@@ -1499,10 +1499,12 @@ export async function importAll(data: ExportPayload) {
       await db.collections.clear()
       await db.projects.clear()
       // v1 payloads predate multi-project — synthesize a default project
-      // and stamp it onto every row.
+      // and stamp it onto every row. Any payload that carries `projects`
+      // (v2, v3, …) must keep its real project ids, otherwise sprints/
+      // collections/tasks (which reference projectId) get orphaned.
       let projects: Project[]
       let defaultId: string | null = null
-      if (data.version === 2 && data.projects && data.projects.length > 0) {
+      if (data.projects && data.projects.length > 0) {
         projects = data.projects
       } else {
         defaultId = uid()

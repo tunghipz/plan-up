@@ -170,6 +170,27 @@ describe('export/import collections', () => {
     expect(await db.tasks.where('collectionId').equals(c.id).count()).toBe(1)
   })
 
+  it('preserves project ids on a v3 import so rows are not orphaned', async () => {
+    // Regression: a v3 payload used to fall through to the "synthesize a new
+    // project" branch, giving the project a fresh uid while sprints/collections
+    // kept their original projectId — leaving the visible project empty.
+    await db.projects.add({ id: 'p1', name: 'P', createdAt: 1 })
+    await db.sprints.add({ id: 's1', projectId: 'p1', name: 'Sprint 1', startDate: '2026-06-01', endDate: '2026-06-14' })
+    const c = await createCollection('p1', 'Live-ops')
+    await addCollectionItem(c.id, c.sections[0].id, { title: 'Đập trứng' })
+
+    const payload = await exportAll()
+    await clearAll()
+    await importAll(payload)
+
+    // The project keeps its real id (not a synthesized one)…
+    expect(await db.projects.get('p1')).toBeDefined()
+    expect((await db.projects.toArray()).map((p) => p.id)).toEqual(['p1'])
+    // …so every child row still points at a project that exists.
+    expect((await db.sprints.get('s1'))?.projectId).toBe('p1')
+    expect((await db.collections.get(c.id))?.projectId).toBe('p1')
+  })
+
   it('still imports a v2 payload (no collections) without error', async () => {
     await importAll({
       version: 2, exportedAt: 'x',

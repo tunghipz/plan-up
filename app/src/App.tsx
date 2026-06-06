@@ -84,6 +84,7 @@ function App() {
   }
   const [showNewSprint, setShowNewSprint] = useState(false)
   const [showNewProject, setShowNewProject] = useState(false)
+  const [showNewCollection, setShowNewCollection] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [search, setSearch] = useState('')
   const [dark, setDark] = useDarkMode()
@@ -491,13 +492,7 @@ function App() {
             <div className="flex items-center justify-between px-[18px] pt-3 pb-1.5">
               <span className="text-[12px] font-semibold text-ink-faint">Collections</span>
               <button
-                onClick={async () => {
-                  const name = prompt('Collection name:')
-                  if (name && name.trim() && currentProjectId) {
-                    const c = await createCollection(currentProjectId, name)
-                    selectCollection(c.id)
-                  }
-                }}
+                onClick={() => setShowNewCollection(true)}
                 title="New collection"
                 className="inline-flex items-center text-accent hover:bg-accent-soft -mr-1 p-1 rounded-md transition"
               >
@@ -772,6 +767,17 @@ function App() {
           }}
         />
       )}
+
+      {showNewCollection && currentProjectId && (
+        <NewCollectionDialog
+          projectId={currentProjectId}
+          onClose={() => setShowNewCollection(false)}
+          onCreate={(c) => {
+            selectCollection(c.id)
+            setShowNewCollection(false)
+          }}
+        />
+      )}
     </div>
   )
 }
@@ -988,6 +994,70 @@ function NewProjectDialog({
         <div className="text-xs text-ink-muted">
           A new project starts empty — add members, sprints, and tasks after
           creating.
+        </div>
+        <div className="flex justify-end gap-2 pt-2">
+          <button
+            onClick={onClose}
+            className="px-3.5 py-1.5 text-sm font-medium text-ink-muted hover:bg-surface-hover rounded-[8px] transition"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={submit}
+            disabled={!name.trim()}
+            className="px-4 py-1.5 text-sm font-medium bg-accent hover:bg-accent-hover text-white rounded-[8px] disabled:opacity-50 transition"
+          >
+            Create
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/** New-collection modal — same Cupertino sheet as New Sprint, name only. */
+function NewCollectionDialog({
+  projectId,
+  onClose,
+  onCreate,
+}: {
+  projectId: string
+  onClose: () => void
+  onCreate: (c: Collection) => void
+}) {
+  const [name, setName] = useState('')
+  const submit = async () => {
+    const trimmed = name.trim()
+    if (!trimmed) return
+    const c = await createCollection(projectId, trimmed)
+    onCreate(c)
+  }
+  return (
+    <div
+      className="fixed inset-0 bg-black/25 backdrop-blur-md flex items-center justify-center p-4 z-50"
+      onClick={onClose}
+    >
+      <div
+        className="bg-surface text-ink rounded-[16px] shadow-[0_20px_60px_rgba(0,0,0,0.28)] w-full max-w-md p-6 space-y-4 border border-border-hair"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 className="text-[19px] font-bold tracking-[-0.014em]">
+          New Collection
+        </h2>
+        <label className="block">
+          <span className="text-xs text-ink-muted">Name</span>
+          <input
+            autoFocus
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && submit()}
+            placeholder="Live-ops 2026"
+            className="mt-1 w-full px-3 py-2 border border-border bg-surface rounded-[8px] text-sm focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent transition"
+          />
+        </label>
+        <div className="text-xs text-ink-muted">
+          A collection holds tasks outside any sprint — events, changelog,
+          ad-hoc items. It starts with one table you can rename.
         </div>
         <div className="flex justify-end gap-2 pt-2">
           <button

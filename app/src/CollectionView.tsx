@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { ChevronDown, List, Calendar, X, Plus, GripVertical } from 'lucide-react'
 import {
@@ -24,8 +25,20 @@ import { DatePickCell } from './DatePicker'
 const COLLAPSE_KEY = (collectionId: string) =>
   `plan-up:collCollapsed:${collectionId}`
 
-/** Grid columns shared by the column-header row and each item row. */
-const ROW_GRID = 'grid-cols-[24px_1fr_96px_96px_112px]'
+/**
+ * Column widths shared by the column-header row and each item row — mirrors the
+ * sprint list view's `COL` (SprintView.tsx) so Collections feel identical, minus
+ * the scheduling columns (no seq/assignee/effort/prereq). Flex, not grid: the
+ * title absorbs the slack via flex-1; the rest are fixed and shrink-0.
+ */
+const COL = {
+  lead: 'w-5 shrink-0 flex justify-center items-center',
+  dot: 'w-4 shrink-0 flex justify-center',
+  title: 'flex-1 min-w-[150px]',
+  start: 'w-28 flex justify-end shrink-0',
+  due: 'w-28 flex justify-end shrink-0',
+  status: 'w-28 flex justify-start shrink-0 pl-2',
+}
 
 /** Floating-shadow surface for popovers/menus (design-system §4.2). */
 const FLOAT_SHADOW =
@@ -64,6 +77,7 @@ export function CollectionView({
     ) ?? []
 
   const [tab, setTab] = useState<'list' | 'calendar'>('list')
+  const [addingTable, setAddingTable] = useState(false)
 
   if (!collection) {
     return <div className="p-6 text-ink-muted">Loading…</div>
@@ -103,10 +117,7 @@ export function CollectionView({
           ))}
           <button
             data-add-table
-            onClick={async () => {
-              const name = window.prompt('New table name:')
-              if (name && name.trim()) await addSection(collectionId, name)
-            }}
+            onClick={() => setAddingTable(true)}
             className="w-full py-3 text-[13.5px] font-semibold text-accent border border-dashed border-border rounded-[14px] hover:bg-accent-soft transition"
           >
             ＋ Add table
@@ -114,6 +125,20 @@ export function CollectionView({
         </div>
       ) : (
         <CollectionCalendar collection={collection} items={items} />
+      )}
+
+      {addingTable && (
+        <NameModal
+          title="New Table"
+          placeholder="Untitled"
+          hint="A table groups items inside this collection — e.g. “Q3 events”, “Shipped”."
+          submitLabel="Add"
+          onClose={() => setAddingTable(false)}
+          onSubmit={async (name) => {
+            await addSection(collectionId, name)
+            setAddingTable(false)
+          }}
+        />
       )}
     </div>
   )
@@ -174,6 +199,76 @@ function CollectionTitle({ collection }: { collection: Collection }) {
     >
       {collection.name}
     </h2>
+  )
+}
+
+/**
+ * Name-only Cupertino modal — same sheet as App's New Sprint / New Collection
+ * dialogs. Used for "Add table". Enter submits; scrim/Cancel closes.
+ */
+function NameModal({
+  title,
+  placeholder,
+  hint,
+  submitLabel = 'Create',
+  onClose,
+  onSubmit,
+}: {
+  title: string
+  placeholder?: string
+  hint?: string
+  submitLabel?: string
+  onClose: () => void
+  onSubmit: (name: string) => void | Promise<void>
+}) {
+  const [name, setName] = useState('')
+  const submit = () => {
+    const t = name.trim()
+    if (!t) return
+    void onSubmit(t)
+  }
+  return (
+    <div
+      className="fixed inset-0 bg-black/25 backdrop-blur-md flex items-center justify-center p-4 z-50"
+      onClick={onClose}
+    >
+      <div
+        className="bg-surface text-ink rounded-[16px] shadow-[0_20px_60px_rgba(0,0,0,0.28)] w-full max-w-md p-6 space-y-4 border border-border-hair"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 className="text-[19px] font-bold tracking-[-0.014em]">{title}</h2>
+        <label className="block">
+          <span className="text-xs text-ink-muted">Name</span>
+          <input
+            autoFocus
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') submit()
+              else if (e.key === 'Escape') onClose()
+            }}
+            placeholder={placeholder}
+            className="mt-1 w-full px-3 py-2 border border-border bg-surface rounded-[8px] text-sm focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent transition"
+          />
+        </label>
+        {hint && <div className="text-xs text-ink-muted">{hint}</div>}
+        <div className="flex justify-end gap-2 pt-2">
+          <button
+            onClick={onClose}
+            className="px-3.5 py-1.5 text-sm font-medium text-ink-muted hover:bg-surface-hover rounded-[8px] transition"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={submit}
+            disabled={!name.trim()}
+            className="px-4 py-1.5 text-sm font-medium bg-accent hover:bg-accent-hover text-white rounded-[8px] disabled:opacity-50 transition"
+          >
+            {submitLabel}
+          </button>
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -274,18 +369,22 @@ function SectionCard({
         dropActive ? 'ring-2 ring-accent/40' : ''
       }`}
     >
-      <div className="group flex items-center gap-2.5 px-[18px] py-3 select-none">
-        <button
-          onClick={toggle}
-          className="text-ink-faint shrink-0"
-          title={collapsed ? 'Expand' : 'Collapse'}
-          aria-label={collapsed ? 'Expand table' : 'Collapse table'}
-        >
-          <ChevronDown
-            size={14}
-            className={`transition-transform ${collapsed ? '-rotate-90' : ''}`}
-          />
-        </button>
+      {/* Whole header toggles collapse (mirrors the sprint group card). The
+          rename field and delete button stopPropagation so they don't toggle. */}
+      <div
+        onClick={toggle}
+        role="button"
+        aria-expanded={!collapsed}
+        className={`group flex items-center gap-2.5 px-[18px] py-[13px] select-none cursor-pointer transition hover:bg-surface-hover ${
+          collapsed ? '' : 'border-b border-border'
+        }`}
+      >
+        <ChevronDown
+          size={14}
+          className={`text-ink-faint shrink-0 transition-transform ${
+            collapsed ? '-rotate-90' : ''
+          }`}
+        />
         <SectionName collectionId={collectionId} section={section} />
         <span className="text-[13px] font-medium text-ink-faint tabular-nums">
           {items.length}
@@ -293,7 +392,8 @@ function SectionCard({
         <span className="flex-1" />
         {canDelete && (
           <button
-            onClick={async () => {
+            onClick={async (e) => {
+              e.stopPropagation()
               if (
                 window.confirm(
                   `Delete table “${section.name}”? Its items move to the first table.`
@@ -313,37 +413,36 @@ function SectionCard({
 
       {!collapsed && (
         <div>
-          <div
-            className={`grid ${ROW_GRID} gap-[13px] items-center px-[18px] py-[7px] bg-black/[0.018] dark:bg-white/[0.02] text-[11px] font-semibold text-ink-faint border-t border-border-hair`}
-          >
-            <span />
-            <span>Name</span>
-            <span>Start</span>
-            <span>End</span>
-            <span>Status</span>
+          {/* Quiet column header — same look as the sprint list (canvas-sunk
+              tint + hairline), labels aligned to the row columns via COL. */}
+          <div className="flex items-center gap-3 px-4 py-1.5 border-b border-border-hair bg-canvas-sunk/40">
+            <div className={COL.lead} />
+            <div className={COL.dot} />
+            <div className={`${COL.title} text-[11px] tracking-normal text-ink-faint font-medium`}>
+              Name
+            </div>
+            <div className={`${COL.start} text-[11px] tracking-normal text-ink-faint font-medium`}>
+              Start
+            </div>
+            <div className={`${COL.due} text-[11px] tracking-normal text-ink-faint font-medium`}>
+              End
+            </div>
+            <div className={`${COL.status} text-[11px] tracking-normal text-ink-faint font-medium`}>
+              Status
+            </div>
           </div>
 
-          {items.map((t) => (
-            <ItemRow
-              key={t.id}
-              task={t}
-              statusById={statusById}
-              statuses={statuses}
-            />
-          ))}
-
-          <button
-            onClick={async () => {
-              const title = window.prompt('Item title:')
-              if (title && title.trim())
-                await addCollectionItem(collectionId, section.id, {
-                  title: title.trim(),
-                })
-            }}
-            className="w-full text-left px-[18px] py-[11px] text-[13.5px] text-accent border-t border-border-hair hover:bg-surface-hover transition"
-          >
-            ＋ Add item
-          </button>
+          <div className="divide-y divide-border">
+            {items.map((t) => (
+              <ItemRow
+                key={t.id}
+                task={t}
+                statusById={statusById}
+                statuses={statuses}
+              />
+            ))}
+            <AddItemRow collectionId={collectionId} sectionId={section.id} />
+          </div>
         </div>
       )}
     </div>
@@ -387,6 +486,7 @@ function SectionName({
       <input
         ref={inputRef}
         value={draft}
+        onClick={(e) => e.stopPropagation()}
         onChange={(e) => setDraft(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === 'Enter') {
@@ -406,6 +506,7 @@ function SectionName({
   return (
     <span
       className="text-[15.5px] font-semibold text-ink tracking-[-0.01em] truncate cursor-text hover:underline decoration-dotted underline-offset-4"
+      onClick={(e) => e.stopPropagation()}
       onDoubleClick={() => setEditing(true)}
       title="Double-click to rename"
     >
@@ -450,104 +551,129 @@ function ItemRow({
         armedRef.current = false
         setDragging(false)
       }}
-      className={`group/row relative grid ${ROW_GRID} gap-[13px] items-center px-[18px] py-[11px] text-[14.5px] border-t border-border-hair hover:bg-surface-hover transition ${
-        dragging ? 'opacity-50' : ''
+      className={`task-row group/row relative flex items-center gap-3 px-4 py-2 text-sm transition hover:bg-surface-hover ${
+        dragging ? 'opacity-40' : ''
       }`}
     >
-      <button
-        type="button"
-        aria-label="Drag to another table"
-        onPointerDown={(e) => {
-          e.stopPropagation()
-          armedRef.current = true
-          const off = () => {
-            armedRef.current = false
-            window.removeEventListener('pointerup', off)
-          }
-          window.addEventListener('pointerup', off)
-        }}
-        onClick={(e) => e.stopPropagation()}
-        className="absolute left-0 top-1/2 -translate-y-1/2 z-10 grid place-items-center w-4 h-6 text-ink-faint/70 hover:text-ink-muted opacity-0 group-hover/row:opacity-100 transition-opacity cursor-grab active:cursor-grabbing touch-none"
-      >
-        <GripVertical size={14} />
-      </button>
-      <span
-        className="w-[17px] h-[17px] rounded-full justify-self-start"
-        style={{ background: dotColor }}
-        aria-hidden
-      />
+      {/* Lead gutter — hover-revealed grip; arming a drag here keeps the title
+          textarea and date/status controls free to receive normal clicks. */}
+      <div className={`${COL.lead} relative self-stretch`}>
+        <button
+          type="button"
+          aria-label="Drag to another table"
+          onPointerDown={(e) => {
+            e.stopPropagation()
+            armedRef.current = true
+            const off = () => {
+              armedRef.current = false
+              window.removeEventListener('pointerup', off)
+            }
+            window.addEventListener('pointerup', off)
+          }}
+          onClick={(e) => e.stopPropagation()}
+          className="absolute inset-0 grid place-items-center text-ink-faint/70 hover:text-ink-muted opacity-0 group-hover/row:opacity-100 transition-opacity cursor-grab active:cursor-grabbing touch-none"
+        >
+          <GripVertical size={14} />
+        </button>
+      </div>
+      <div className={COL.dot}>
+        <span
+          className="w-3 h-3 rounded-full"
+          style={{ background: dotColor }}
+          aria-hidden
+        />
+      </div>
       <ItemTitle task={task} />
-      <DatePickCell
-        value={task.startDate}
-        onChange={(v) => db.tasks.update(task.id, { startDate: v })}
-        ariaLabel="Start date"
-      />
-      <DatePickCell
-        value={task.dueDate}
-        onChange={(v) => db.tasks.update(task.id, { dueDate: v })}
-        ariaLabel="Due date"
-      />
-      <StatusPill task={task} status={status} statuses={statuses} />
+      <div className={COL.start}>
+        <DatePickCell
+          value={task.startDate}
+          onChange={(v) => db.tasks.update(task.id, { startDate: v })}
+          ariaLabel="Start date"
+        />
+      </div>
+      <div className={COL.due}>
+        <DatePickCell
+          value={task.dueDate}
+          onChange={(v) => db.tasks.update(task.id, { dueDate: v })}
+          ariaLabel="Due date"
+        />
+      </div>
+      <div className={COL.status}>
+        <StatusPill task={task} status={status} statuses={statuses} />
+      </div>
     </div>
   )
 }
 
-/** Inline-edit the item title (Enter / blur commits). */
+/**
+ * Always-editable item title — tap anywhere to edit, just like the sprint list's
+ * TitleTextarea. Writes on each keystroke; Enter commits (blurs), Shift+Enter
+ * adds a line. `field-sizing:content` hugs the text; the manual resize is a
+ * fallback for browsers without it.
+ */
 function ItemTitle({ task }: { task: Task }) {
-  const [editing, setEditing] = useState(false)
-  const [draft, setDraft] = useState(task.title)
-  const inputRef = useRef<HTMLInputElement>(null)
-
-  useEffect(() => {
-    if (editing) {
-      setDraft(task.title)
-      requestAnimationFrame(() => {
-        inputRef.current?.focus()
-        inputRef.current?.select()
-      })
-    }
-  }, [editing, task.title])
-
-  const commit = async () => {
-    const n = draft.trim()
-    setEditing(false)
-    if (n && n !== task.title) await db.tasks.update(task.id, { title: n })
-    else if (!n) setDraft(task.title)
+  const ref = useRef<HTMLTextAreaElement>(null)
+  const resize = () => {
+    const el = ref.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = el.scrollHeight + 'px'
   }
-  const cancel = () => {
-    setDraft(task.title)
-    setEditing(false)
-  }
+  useLayoutEffect(resize, [task.title])
 
-  if (editing) {
-    return (
-      <input
-        ref={inputRef}
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
+  return (
+    <div className={`${COL.title} flex items-start`}>
+      <textarea
+        ref={ref}
+        value={task.title}
+        rows={1}
+        onChange={(e) => void db.tasks.update(task.id, { title: e.target.value })}
         onKeyDown={(e) => {
-          if (e.key === 'Enter') {
+          if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault()
-            void commit()
-          } else if (e.key === 'Escape') {
-            e.preventDefault()
-            cancel()
+            ;(e.target as HTMLTextAreaElement).blur()
           }
         }}
-        onBlur={() => void commit()}
-        className="editable text-[14.5px] text-ink bg-transparent min-w-0 w-full"
-        aria-label="Rename item"
+        className="[field-sizing:content] min-w-0 max-w-full editable text-ink bg-transparent resize-none overflow-hidden leading-snug whitespace-pre-wrap break-words"
+        aria-label="Item title"
       />
-    )
+    </div>
+  )
+}
+
+/** Inline add-item row (type + Enter) — mirrors the sprint list's AddTaskRow. */
+function AddItemRow({
+  collectionId,
+  sectionId,
+}: {
+  collectionId: string
+  sectionId: string
+}) {
+  const [title, setTitle] = useState('')
+  const add = async () => {
+    const t = title.trim()
+    if (!t) return
+    await addCollectionItem(collectionId, sectionId, { title: t })
+    setTitle('')
   }
   return (
-    <span
-      className="truncate text-ink cursor-text hover:underline decoration-dotted underline-offset-4"
-      onDoubleClick={() => setEditing(true)}
-      title="Double-click to rename"
-    >
-      {task.title}
-    </span>
+    <div className="flex items-center gap-3 px-4 py-2 text-sm">
+      <div className={COL.lead} />
+      <div className={COL.dot}>
+        <Plus size={14} className="text-ink-faint" />
+      </div>
+      <input
+        value={title}
+        onChange={(e) => setTitle(e.target.value)}
+        onKeyDown={(e) => e.key === 'Enter' && void add()}
+        placeholder="Add item"
+        className={`${COL.title} editable placeholder:text-ink-faint bg-transparent`}
+        aria-label="Add item"
+      />
+      <div className={COL.start} />
+      <div className={COL.due} />
+      <div className={COL.status} />
+    </div>
   )
 }
 
@@ -562,8 +688,60 @@ function StatusPill({
   statuses: CollectionStatus[]
 }) {
   const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
-  useOutsideClose(ref, open, () => setOpen(false))
+  const anchorRef = useRef<HTMLButtonElement>(null)
+  const popRef = useRef<HTMLDivElement>(null)
+  const [pos, setPos] = useState<{ top: number; left: number }>({
+    top: -9999,
+    left: -9999,
+  })
+  const MENU_W = 160
+
+  // Pin a fixed-position menu to the pill — portalled to <body> so the card's
+  // `overflow-hidden` (rounded corners) can't clip it. Mirrors DatePicker.
+  useLayoutEffect(() => {
+    if (!open) return
+    const pin = () => {
+      const r = anchorRef.current?.getBoundingClientRect()
+      if (!r) return
+      let left = Math.min(r.left, window.innerWidth - 8 - MENU_W)
+      left = Math.max(8, left)
+      const menuH = (statuses.length + 1) * 34 + 16
+      let top = r.bottom + 4
+      if (top + menuH > window.innerHeight - 8)
+        top = Math.max(8, r.top - menuH - 4)
+      setPos({ top, left })
+    }
+    pin()
+    window.addEventListener('scroll', pin, true)
+    window.addEventListener('resize', pin)
+    return () => {
+      window.removeEventListener('scroll', pin, true)
+      window.removeEventListener('resize', pin)
+    }
+  }, [open, statuses.length])
+
+  // Close on outside click (anchor OR menu excluded) and Escape.
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node
+      if (
+        popRef.current?.contains(t) ||
+        anchorRef.current?.contains(t)
+      )
+        return
+      setOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
 
   const assign = async (id: string | null) => {
     setOpen(false)
@@ -571,15 +749,16 @@ function StatusPill({
   }
 
   return (
-    <div ref={ref} className="relative">
+    <>
       <button
+        ref={anchorRef}
         onClick={() => setOpen((p) => !p)}
         className="cursor-pointer hover:opacity-80 transition"
         aria-label="Assign status"
       >
         {status ? (
           <span
-            className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-[3px] text-[11.5px] font-semibold w-fit"
+            className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11.5px] font-semibold leading-none w-fit"
             style={{
               background: `color-mix(in srgb, ${status.color} 16%, transparent)`,
               color: status.color,
@@ -598,35 +777,48 @@ function StatusPill({
           </span>
         )}
       </button>
-      {open && (
-        <div
-          className={`absolute right-0 top-full mt-1 z-30 bg-surface rounded-[10px] py-1 min-w-[140px] ${FLOAT_SHADOW}`}
-        >
-          {statuses.map((s) => (
+      {open &&
+        createPortal(
+          <div
+            ref={popRef}
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              position: 'fixed',
+              top: pos.top,
+              left: pos.left,
+              width: MENU_W,
+            }}
+            className={`z-50 bg-surface rounded-[10px] py-1 ${FLOAT_SHADOW}`}
+          >
+            {statuses.map((s) => (
+              <button
+                key={s.id}
+                onClick={() => void assign(s.id)}
+                className="w-full flex items-center gap-2 px-3 py-1.5 text-[13px] text-ink hover:bg-surface-hover transition"
+              >
+                <span
+                  className="w-2.5 h-2.5 rounded-full shrink-0"
+                  style={{ background: s.color }}
+                  aria-hidden
+                />
+                {s.name}
+              </button>
+            ))}
+            <div className="border-t border-border-hair my-1" />
             <button
-              key={s.id}
-              onClick={() => void assign(s.id)}
-              className="w-full flex items-center gap-2 px-3 py-1.5 text-[13px] text-ink hover:bg-surface-hover transition"
+              onClick={() => void assign(null)}
+              className="w-full flex items-center gap-2 px-3 py-1.5 text-[13px] text-ink-muted hover:bg-surface-hover transition"
             >
               <span
-                className="w-2.5 h-2.5 rounded-full shrink-0"
-                style={{ background: s.color }}
+                className="w-2.5 h-2.5 rounded-full border border-border shrink-0"
                 aria-hidden
               />
-              {s.name}
+              No status
             </button>
-          ))}
-          <div className="border-t border-border-hair my-1" />
-          <button
-            onClick={() => void assign(null)}
-            className="w-full flex items-center gap-2 px-3 py-1.5 text-[13px] text-ink-muted hover:bg-surface-hover transition"
-          >
-            <span className="w-2.5 h-2.5 rounded-full border border-border shrink-0" aria-hidden />
-            No status
-          </button>
-        </div>
-      )}
-    </div>
+          </div>,
+          document.body
+        )}
+    </>
   )
 }
 

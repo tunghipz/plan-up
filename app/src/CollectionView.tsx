@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { ChevronDown, List, Calendar, X, Plus } from 'lucide-react'
+import { ChevronDown, List, Calendar, X, Plus, GripVertical } from 'lucide-react'
 import {
   db,
   addSection,
@@ -8,6 +8,7 @@ import {
   deleteSection,
   addCollectionItem,
   renameCollection,
+  moveTaskToSection,
   addStatus,
   renameStatus,
   recolorStatus,
@@ -239,10 +240,39 @@ function SectionCard({
     })
   }
 
+  // Drop target for items dragged in from another section.
+  const [dropActive, setDropActive] = useState(false)
+
   return (
     <div
       data-section-card
-      className="bg-surface rounded-[14px] shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_22px_rgba(0,0,0,0.05)] overflow-hidden"
+      data-section-drop
+      onDragOver={(e) => {
+        // Allow drops carrying a collection item id.
+        if (e.dataTransfer.types.includes('text/plain')) {
+          e.preventDefault()
+          e.dataTransfer.dropEffect = 'move'
+          if (!dropActive) setDropActive(true)
+        }
+      }}
+      onDragLeave={(e) => {
+        // Only clear when the pointer actually leaves the card (not a child).
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+          setDropActive(false)
+        }
+      }}
+      onDrop={(e) => {
+        e.preventDefault()
+        setDropActive(false)
+        const id = e.dataTransfer.getData('text/plain')
+        // No-op if dropped onto the section it already belongs to.
+        if (id && !items.some((t) => t.id === id)) {
+          void moveTaskToSection(id, section.id)
+        }
+      }}
+      className={`bg-surface rounded-[14px] shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_22px_rgba(0,0,0,0.05)] overflow-hidden transition-shadow ${
+        dropActive ? 'ring-2 ring-accent/40' : ''
+      }`}
     >
       <div className="group flex items-center gap-2.5 px-[18px] py-3 select-none">
         <button
@@ -398,10 +428,49 @@ function ItemRow({
     : undefined
   const dotColor = status?.color ?? '#C7C7CC'
 
+  // Grip-armed native drag: a drag only starts if it was begun from the grip,
+  // so inline title editing and the date/status controls are never hijacked.
+  const armedRef = useRef(false)
+  const [dragging, setDragging] = useState(false)
+
   return (
     <div
-      className={`grid ${ROW_GRID} gap-[13px] items-center px-[18px] py-[11px] text-[14.5px] border-t border-border-hair hover:bg-surface-hover transition`}
+      data-item-row
+      draggable
+      onDragStart={(e) => {
+        if (!armedRef.current) {
+          e.preventDefault()
+          return
+        }
+        e.dataTransfer.effectAllowed = 'move'
+        e.dataTransfer.setData('text/plain', task.id)
+        setDragging(true)
+      }}
+      onDragEnd={() => {
+        armedRef.current = false
+        setDragging(false)
+      }}
+      className={`group/row relative grid ${ROW_GRID} gap-[13px] items-center px-[18px] py-[11px] text-[14.5px] border-t border-border-hair hover:bg-surface-hover transition ${
+        dragging ? 'opacity-50' : ''
+      }`}
     >
+      <button
+        type="button"
+        aria-label="Drag to another table"
+        onPointerDown={(e) => {
+          e.stopPropagation()
+          armedRef.current = true
+          const off = () => {
+            armedRef.current = false
+            window.removeEventListener('pointerup', off)
+          }
+          window.addEventListener('pointerup', off)
+        }}
+        onClick={(e) => e.stopPropagation()}
+        className="absolute left-0 top-1/2 -translate-y-1/2 z-10 grid place-items-center w-4 h-6 text-ink-faint/70 hover:text-ink-muted opacity-0 group-hover/row:opacity-100 transition-opacity cursor-grab active:cursor-grabbing touch-none"
+      >
+        <GripVertical size={14} />
+      </button>
       <span
         className="w-[17px] h-[17px] rounded-full justify-self-start"
         style={{ background: dotColor }}

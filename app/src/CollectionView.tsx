@@ -18,6 +18,7 @@ import {
   type Task,
 } from './db'
 import { formatShortDate } from './lib'
+import { CollectionCalendar } from './CollectionCalendar'
 
 const COLLAPSE_KEY = (collectionId: string) =>
   `plan-up:collCollapsed:${collectionId}`
@@ -111,9 +112,7 @@ export function CollectionView({
           </button>
         </div>
       ) : (
-        <div className="text-ink-faint p-12 text-center text-[14px] border border-dashed border-border rounded-[14px]">
-          Calendar view — coming soon
-        </div>
+        <CollectionCalendar collection={collection} items={items} />
       )}
     </div>
   )

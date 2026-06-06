@@ -504,7 +504,10 @@ export async function addCollectionItem(
   const maxSeq = (
     await db.tasks.where('projectId').equals(projectId).toArray()
   ).reduce((m, t) => Math.max(m, t.sequence ?? 0), 0)
-  const task: Task = {
+  // Build the task: spread patch for caller overrides (e.g. title, priority),
+  // then force the three container fields so patch can never violate the
+  // "exactly one container" invariant (sprintId=null, collectionId+sectionId pinned).
+  const base: Task = {
     id: uid(),
     projectId,
     sequence: maxSeq + 1,
@@ -517,11 +520,12 @@ export async function addCollectionItem(
     estimate: null,
     createdAt: Date.now(),
     dependsOn: [],
+    collectionStatusId: c?.statuses[0]?.id ?? null,
     collectionId,
     sectionId,
-    collectionStatusId: c?.statuses[0]?.id ?? null,
     ...patch,
   }
+  const task: Task = { ...base, sprintId: null, collectionId, sectionId }
   await db.tasks.add(task)
   return task
 }

@@ -13,6 +13,7 @@ import {
   Star,
   Plus,
   Settings,
+  X,
 } from 'lucide-react'
 import {
   db,
@@ -26,6 +27,7 @@ import {
   moveUnfinishedToNextSprint,
   createProject,
   createCollection,
+  deleteCollection,
   type Project,
   type Sprint,
   type Task,
@@ -490,7 +492,7 @@ function App() {
               <span className="text-[12px] font-semibold text-ink-faint">Collections</span>
               <button
                 onClick={async () => {
-                  const name = prompt('Tên collection:')
+                  const name = prompt('Collection name:')
                   if (name && name.trim() && currentProjectId) {
                     const c = await createCollection(currentProjectId, name)
                     selectCollection(c.id)
@@ -506,16 +508,35 @@ function App() {
               {collections?.map((c) => {
                 const isActive = selKind === 'collection' && c.id === currentCollectionId
                 return (
-                  <button
-                    key={c.id}
-                    onClick={() => selectCollection(c.id)}
-                    className={`w-full text-left flex items-center gap-2.5 px-2.5 py-2 mb-0.5 text-[14px] rounded-lg transition ${
-                      isActive ? 'bg-accent text-white' : 'text-ink hover:bg-surface-hover'
-                    }`}
-                  >
-                    <span className={`w-2 h-2 rounded-full shrink-0 ${isActive ? 'bg-white/90' : 'bg-ink-faint'}`} aria-hidden />
-                    <span className="flex-1 min-w-0 truncate font-medium">{c.name}</span>
-                  </button>
+                  <div key={c.id} className="group relative mb-0.5">
+                    <button
+                      onClick={() => selectCollection(c.id)}
+                      className={`w-full text-left flex items-center gap-2.5 px-2.5 py-2 text-[14px] rounded-lg transition ${
+                        isActive ? 'bg-accent text-white' : 'text-ink hover:bg-surface-hover'
+                      }`}
+                    >
+                      <span className={`w-2 h-2 rounded-full shrink-0 ${isActive ? 'bg-white/90' : 'bg-ink-faint'}`} aria-hidden />
+                      <span className="flex-1 min-w-0 truncate font-medium">{c.name}</span>
+                    </button>
+                    <button
+                      onClick={async (e) => {
+                        e.stopPropagation()
+                        if (!confirm(`Delete collection "${c.name}" and all its items?`)) return
+                        await deleteCollection(c.id)
+                        if (selKind === 'collection' && currentCollectionId === c.id) {
+                          setSelKindState('sprint')
+                          localStorage.setItem(SELKIND_KEY, 'sprint')
+                        }
+                      }}
+                      title="Delete collection"
+                      aria-label={`Delete collection ${c.name}`}
+                      className={`absolute right-1.5 top-1/2 -translate-y-1/2 w-5 h-5 flex items-center justify-center rounded transition opacity-0 group-hover:opacity-100 ${
+                        isActive ? 'text-white/70 hover:text-white hover:bg-white/20' : 'text-ink-faint hover:text-red-500 hover:bg-red-500/10'
+                      }`}
+                    >
+                      <X size={13} strokeWidth={2} />
+                    </button>
+                  </div>
                 )
               })}
               {collections && collections.length === 0 && (

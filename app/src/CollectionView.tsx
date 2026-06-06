@@ -17,8 +17,8 @@ import {
   type CollectionStatus,
   type Task,
 } from './db'
-import { formatShortDate } from './lib'
 import { CollectionCalendar } from './CollectionCalendar'
+import { DatePickCell } from './DatePicker'
 
 const COLLAPSE_KEY = (collectionId: string) =>
   `plan-up:collCollapsed:${collectionId}`
@@ -408,12 +408,16 @@ function ItemRow({
         aria-hidden
       />
       <ItemTitle task={task} />
-      <span className="text-[13px] text-ink-muted tabular-nums">
-        {task.startDate ? formatShortDate(task.startDate) : '—'}
-      </span>
-      <span className="text-[13px] text-ink-muted tabular-nums">
-        {task.dueDate ? formatShortDate(task.dueDate) : '—'}
-      </span>
+      <DatePickCell
+        value={task.startDate}
+        onChange={(v) => db.tasks.update(task.id, { startDate: v })}
+        ariaLabel="Start date"
+      />
+      <DatePickCell
+        value={task.dueDate}
+        onChange={(v) => db.tasks.update(task.id, { dueDate: v })}
+        ariaLabel="Due date"
+      />
       <StatusPill task={task} status={status} statuses={statuses} />
     </div>
   )

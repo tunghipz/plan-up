@@ -1,7 +1,7 @@
 # Data model
 
 **Status:** Implemented
-**Last updated:** 2026-06-05
+**Last updated:** 2026-06-06
 **Code:** `app/src/db.ts`
 
 ## Purpose
@@ -29,9 +29,10 @@ Four IndexedDB tables (Dexie database name **`plan-up`**):
 
 ### `Task` (`db.ts:45`)
 `id` · `projectId` · `sequence` (number, per-sprint) · `title` · `assigneeId` (`string|null`) ·
-`sprintId` · `status` · `priority` · `startDate` (`string|null`) · `dueDate` (`string|null`) ·
+`sprintId` (`string | null`) · `status` · `priority` · `startDate` (`string|null`) · `dueDate` (`string|null`) ·
 `estimate` (`number|null`, effort in days) · `createdAt` · `dependsOn: string[]` (task IDs) ·
-`changeLog?: ChangeLogEntry[]` · `boardOrder?: number` · `listOrder?: number`
+`changeLog?: ChangeLogEntry[]` · `boardOrder?: number` · `listOrder?: number` ·
+`collectionId?: string | null` · `sectionId?: string | null` · `collectionStatusId?: string | null`
 - `changeLog` is an **optional, non-indexed** field holding the **5 most recent**
   user-initiated field changes (newest-first ring buffer). Like `description`/`color` it
   needs **no Dexie version bump**; rows without it read as `[]`. Written only through
@@ -43,6 +44,23 @@ Four IndexedDB tables (Dexie database name **`plan-up`**):
   **never logged** (arrangement, not data), and need **no Dexie version bump**. `sequence`
   itself is immutable (task-number + prereq reference) and reordering never touches it.
   See [board-view.md](./board-view.md) and [list-view.md](./list-view.md).
+- `sprintId` is now `string | null` — `null` when the task belongs to a collection.
+- `collectionId?` (`string | null`) — **indexed**. The collection this task belongs to; `null` for sprint tasks. **Invariant: exactly one of `sprintId` / `collectionId` is non-null.**
+- `sectionId?` (`string | null`) — non-indexed. The `Section.id` within the collection (arrangement only, never logged).
+- `collectionStatusId?` (`string | null`) — non-indexed. Points to a `CollectionStatus.id` in the collection's `statuses` array (the user-defined status for this item).
+
+### `Collection` (`db.ts:115`)
+`id` · `projectId` · `name` · `order` (number, fractional sidebar position) ·
+`sections: Section[]` · `statuses: CollectionStatus[]` · `createdAt` (number)
+- `sections` and `statuses` are **embedded arrays** (not separate tables) — ordered, not indexed. A new collection is seeded with 1 section "All" and a default status set the user can edit.
+
+### `Section` (embedded in Collection)
+`id` · `name` · `color?` (optional hex from COLLECTION_PALETTE)
+- Embedded in `Collection.sections`; no separate IndexedDB table or index.
+
+### `CollectionStatus` (embedded in Collection)
+`id` · `name` · `color` (hex from COLLECTION_PALETTE)
+- User-defined status per collection (not shared across collections). Embedded in `Collection.statuses`.
 
 ### Value types
 - `ChangeLogEntry`: `{ field: LoggableField; from: string|null; to: string|null;
@@ -61,7 +79,7 @@ All dates are stored as `yyyy-mm-dd` strings.
 
 ## Schema versioning
 
-Dexie `version().stores()` + an upgrade callback per bump. Current version: **8**.
+Dexie `version().stores()` + an upgrade callback per bump. Current version: **9**.
 
 | Ver | Change |
 | --- | --- |
@@ -73,12 +91,14 @@ Dexie `version().stores()` + an upgrade callback per bump. Current version: **8*
 | 6 | `daysOff` shape `string[]` → `DayOff[]`. |
 | 7 | Add `projects` table; backfill `projectId` on members/sprints/tasks (default "My Project"). |
 | 8 | `sequence` becomes **per-sprint** (was per-project); each sprint renumbered 1..N by `createdAt`. |
+| 9 | Add `collections` table; tasks gain `collectionId` index + `sectionId`/`collectionStatusId` (non-indexed); `sprintId` becomes nullable. Backfill `collectionId = null` on all existing tasks. |
 
 Current indexes:
 - `projects`: `id, name, createdAt`
 - `members`: `id, name, projectId`
 - `sprints`: `id, startDate, projectId`
-- `tasks`: `id, sprintId, assigneeId, status, createdAt, projectId`
+- `tasks`: `id, sprintId, assigneeId, status, createdAt, projectId, collectionId`
+- `collections`: `id, projectId, order`
 
 ## Rules & edge cases
 - **Bump the version + add an upgrade callback whenever a field/index changes.** Never

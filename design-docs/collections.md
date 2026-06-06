@@ -1,10 +1,13 @@
 # Collections (task ngoài sprint)
 
-**Status:** Planned
-**Last updated:** 2026-06-05
-**Code (planned):** `app/src/db.ts` (schema v9, `collections` table, CRUD),
-`app/src/CollectionView.tsx` (List card-per-section), `app/src/CollectionCalendar.tsx`
-(month grid + thanh liên tục), `app/src/App.tsx` (sidebar Sprints / Collections)
+**Status:** Implemented
+**Last updated:** 2026-06-06
+**Code:** `app/src/db.ts` (schema v9 + collection/section/status/item CRUD, export v3),
+`app/src/lib.ts` (buildMonthGrid/assignLanes/computeBarSegments — pure calendar helpers),
+`app/src/CollectionView.tsx` (List card-per-section + status editor + click-assign +
+editable Start/End dates via shared `DatePickCell`, enabling multi-day events),
+`app/src/CollectionCalendar.tsx` (month grid + seamless multi-day bars + multi-month chevrons),
+`app/src/App.tsx` (sidebar SPRINTS/COLLECTIONS + routing)
 
 ## Purpose
 Cho app một **chỗ chứa task ngoài sprint**: event live-ops, changelog/tính năng đã ship,

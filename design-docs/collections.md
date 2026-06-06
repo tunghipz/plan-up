@@ -113,20 +113,25 @@ collection-item (`sprintId = null`) tự động không bị đụng tới. Khô
   mất dữ liệu.
 - Export/import: thêm `collections` vào payload; bump `ExportPayload.version`. Import file cũ vẫn work.
 
-## Implementation (planned)
+## Implementation
 - **`db.ts`** — interface `Collection`/`Section`; `version(9).stores(...).upgrade(...)`;
-  CRUD: `addCollection(name)`, `renameCollection`, `deleteCollection`, `reorderCollection`,
+  CRUD: `createCollection(projectId, name)`, `renameCollection`, `deleteCollection`,
   `addSection(collectionId, name)`, `renameSection`, `deleteSection`, `moveTaskToSection`;
-  `addStatus(collectionId, name, color)`, `renameStatus`, `recolorStatus`, `deleteStatus`,
-  `reorderStatus`; `addCollectionItem(collectionId, sectionId, patch)`; cập nhật export/import +
+  `addStatus(collectionId, name, color)`, `renameStatus`, `recolorStatus`, `deleteStatus`;
+  `addCollectionItem(collectionId, sectionId, patch)`; cập nhật export/import +
   `seedFresh` (seed status mặc định cho collection mới).
+  > Lưu ý: `reorderCollection` và `reorderStatus` **không được implement** — status reordering bị descope.
 - **`CollectionView.tsx`** — segmented List/Calendar; List render card-per-section (tái dùng
-  group-card + COL của list-view, bỏ các cột scheduling; drag item giữa section).
+  group-card + COL của list-view, bỏ các cột scheduling); kéo-thả item giữa các bảng (section)
+  qua HTML5 DnD + hover grip — gọi `moveTaskToSection` để cập nhật `sectionId` của item.
 - **`CollectionCalendar.tsx`** — month grid + lane packing + segment-theo-tuần + chevron đa tháng +
   Soft bar; nav tháng; dùng lại token màu status.
-- **`App.tsx`** — sidebar mục SPRINTS / COLLECTIONS; state container hiện tại (sprint vs collection)
-  + persist `plan-up:currentContainer` localStorage.
-- Tái dùng: `DatePicker.tsx`, status pill, list card, drag-reorder.
+- **`App.tsx`** — sidebar mục SPRINTS / COLLECTIONS; xoá collection (hover X + confirm); state
+  container hiện tại (sprint vs collection) persist qua **hai** localStorage key:
+  - `plan-up:selKind` — `'sprint'` | `'collection'`
+  - `plan-up:selCollectionId` — ID của collection đang chọn
+  - (Collapse state của từng section dùng `plan-up:collCollapsed:<collectionId>:<sectionId>`.)
+- Tái dùng: `DatePickCell` (shared editable date), status pill, list card, drag-reorder.
 
 ## Rules & edge cases
 - **Tạo collection** → tự có 1 section "All".
@@ -145,6 +150,8 @@ collection-item (`sprintId = null`) tự động không bị đụng tới. Khô
   1 ngày hiện End "—".
 
 ## Future / open questions
+- **Sắp xếp status** (drag-reorder) trong bộ status của collection — chưa build (descoped); có thể
+  thêm sau nếu cần.
 - Tô màu thanh Calendar **theo section** (thay vì theo status) — option sau.
 - Lọc Calendar **theo status** (vd chỉ xem các item một status), hoặc ẩn một số status khỏi Calendar.
 - Xoá collection: có nên cho **"move items sang collection khác"** trước khi xoá, thay vì xoá luôn?

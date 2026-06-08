@@ -455,7 +455,9 @@ function App() {
             </div>
             <div className="flex-1 overflow-auto px-2.5 pb-2">
               {sprints?.map((s) => {
-                const isActive = s.id === currentSprintId
+                // Only one container highlights at a time — a remembered sprint
+                // must not stay lit while a collection is selected (and vice versa).
+                const isActive = selKind === 'sprint' && s.id === currentSprintId
                 const c = sprintTaskCounts.get(s.id)
                 const allDone = c && c.total > 0 && c.done === c.total
                 return (

@@ -38,7 +38,9 @@ html.dark input, html.dark select, html.dark textarea, html.dark button {
   --color-border-hair: rgba(0, 0, 0, 0.06);
   --color-ink: #1d1d1f;
   --color-ink-muted: #6e6e73;
-  --color-ink-faint: #a1a1a6;
+  /* AA-compliant on white/canvas (~4.5:1): tertiary text (counts, column
+     headers, idle carets) must stay legible. Was #a1a1a6 (2.57:1). */
+  --color-ink-faint: #76767a;
 
   /* Vibrancy base for sidebars (paired with backdrop-blur at component level) */
   --color-vibrancy: rgba(248, 248, 250, 0.72);
@@ -56,6 +58,11 @@ html.dark input, html.dark select, html.dark textarea, html.dark button {
   --color-priority-normal: #0071e3;
   --color-priority-low: #8e8e93;
   --color-priority-none: #d1d1d6;
+
+  /* Warning text ("⚠ N not estimated"). Dark amber so the LABEL hits AA on
+     white (~4.5:1) — distinct from --color-priority-high (#ff9500, used as a
+     fill/dot where 4.5:1 isn't required). */
+  --color-warn-ink: #a06600;
 }
 
 .dark {
@@ -74,7 +81,8 @@ html.dark input, html.dark select, html.dark textarea, html.dark button {
   --color-border-hair: rgba(255, 255, 255, 0.07);
   --color-ink: #f5f5f7;
   --color-ink-muted: #aeaeb2;
-  --color-ink-faint: #8e8e93;
+  /* AA on dark card surface (#2c2c2e) too, not just canvas. Was #8e8e93. */
+  --color-ink-faint: #98989e;
 
   --color-vibrancy: rgba(30, 30, 32, 0.62);
   --color-fill: rgba(255, 255, 255, 0.09);
@@ -88,6 +96,9 @@ html.dark input, html.dark select, html.dark textarea, html.dark button {
   --color-priority-normal: #0a84ff;
   --color-priority-low: #8e8e93;
   --color-priority-none: #48484a;
+
+  /* On dark canvas the bright amber already exceeds AA — keep it vivid. */
+  --color-warn-ink: #ff9f0a;
 }
 
 body {

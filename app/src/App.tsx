@@ -1009,7 +1009,7 @@ function CapacityBanner({
           <LegendDot color="var(--color-accent)" n={inFlight} label="in progress" />
           <LegendDot color="var(--color-border-strong)" n={open} label="open" />
           {notEstimated > 0 && (
-            <span className="text-priority-high">
+            <span className="text-warn-ink">
               ⚠ {notEstimated} not estimated
             </span>
           )}

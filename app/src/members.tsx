@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Calendar } from 'lucide-react'
+import { Calendar, X } from 'lucide-react'
 import { db, setMemberDaysOff, PALETTE, type Member } from './db'
 import { DateField } from './DatePicker'
 import { formatShortDate } from './lib'
@@ -324,7 +324,7 @@ export function MemberDaysOffButton({
                 className="text-ink-faint hover:text-red-500 opacity-0 group-hover/day:opacity-100 transition"
                 aria-label={`Remove ${d.date}`}
               >
-                ✕
+                <X size={14} />
               </button>
             </div>
           ))}

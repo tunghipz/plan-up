@@ -2170,7 +2170,7 @@ function StatusPicker({
       <select
         value={status}
         onChange={(e) => onChange(e.target.value as Status)}
-        className="text-[11.5px] font-semibold px-0 m-0 border-0 bg-transparent appearance-none cursor-pointer outline-none leading-[1.35] h-auto"
+        className="text-[11.5px] font-semibold px-0 m-0 border-0 bg-transparent appearance-none cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-accent/40 rounded-full leading-[1.35] h-auto"
         style={{ color: fg, width: 'auto', minWidth: 'max-content' }}
         aria-label="Status"
       >
@@ -2537,7 +2537,7 @@ function AddMemberRow({
           }
         }}
         placeholder="Member name (press Enter)"
-        className="flex-1 outline-none text-sm bg-transparent placeholder:text-ink-faint"
+        className="flex-1 outline-none focus-visible:ring-2 focus-visible:ring-accent/40 rounded-[6px] text-sm bg-transparent placeholder:text-ink-faint"
       />
       <button
         onClick={() => {

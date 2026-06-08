@@ -624,7 +624,7 @@ function AddTaskComposer({
         onBlur={() => {
           if (!title.trim()) close()
         }}
-        className="w-full resize-none break-words bg-transparent text-[14px] leading-snug text-ink outline-none placeholder:text-ink-faint"
+        className="w-full resize-none break-words bg-transparent text-[14px] leading-snug text-ink outline-none focus-visible:ring-2 focus-visible:ring-accent/40 rounded-[6px] placeholder:text-ink-faint"
       />
       <div className="mt-2 flex items-center gap-1.5 text-[11px] text-ink-faint">
         <kbd className="rounded-[5px] bg-fill px-1.5 py-px font-semibold text-ink-muted">↵</kbd>

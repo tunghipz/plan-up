@@ -328,7 +328,7 @@ function AddMember({ projectId }: { projectId: string }) {
           if (e.key === 'Enter' && !e.nativeEvent.isComposing) submit()
         }}
           placeholder="Add member (press Enter)"
-          className="flex-1 text-sm bg-transparent outline-none placeholder:text-ink-faint"
+          className="flex-1 text-sm bg-transparent outline-none focus-visible:ring-2 focus-visible:ring-accent/40 rounded-[6px] placeholder:text-ink-faint"
           aria-label="Add member"
         />
       </div>

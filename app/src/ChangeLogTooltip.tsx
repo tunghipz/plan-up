@@ -147,7 +147,7 @@ export function ChangeLogTooltip({ entries }: { entries?: ChangeLogEntry[] }) {
       <button
         type="button"
         aria-label="Change history"
-        className="grid place-items-center text-ink-faint hover:text-ink-muted transition-colors focus:outline-none"
+        className="grid place-items-center text-ink-faint hover:text-ink-muted transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 rounded-[6px]"
       >
         <History size={13} />
       </button>

@@ -540,7 +540,7 @@ function SelectionBar({
 
   return (
     <div
-      className={`fixed left-1/2 bottom-6 z-40 -translate-x-1/2 flex items-center gap-3 rounded-[14px] bg-ink dark:bg-[#2c2c2e] dark:ring-1 dark:ring-white/10 text-white pl-4 pr-2 py-2 shadow-[0_8px_30px_rgba(0,0,0,0.22),0_0_0_0.5px_rgba(0,0,0,0.06)] transition-all duration-200 ${
+      className={`fixed left-1/2 bottom-6 z-40 -translate-x-1/2 flex items-center gap-3 rounded-[14px] bg-ink dark:bg-[#2c2c2e] dark:ring-1 dark:ring-white/10 text-white pl-4 pr-2 py-2 shadow-[0_8px_30px_rgba(0,0,0,0.22),0_0_0_0.5px_rgba(0,0,0,0.06)] transition-[opacity,transform] duration-200 ${
         n > 0
           ? 'opacity-100 translate-y-0'
           : 'opacity-0 translate-y-3 pointer-events-none'
@@ -1086,8 +1086,8 @@ const COL = {
  * are the silent default (no tag), keeping the title row calm.
  */
 const PRIORITY_STICKER: Record<string, { label: string; bg: string; fg: string }> = {
-  urgent: { label: 'Urgent', bg: 'rgba(255,59,48,0.12)', fg: '#d70015' },
-  high: { label: 'High', bg: 'rgba(255,149,0,0.15)', fg: '#b25e00' },
+  urgent: { label: 'Urgent', bg: 'rgba(255,59,48,0.12)', fg: 'color-mix(in srgb, var(--color-priority-urgent) 100%, #000 22%)' },
+  high: { label: 'High', bg: 'rgba(255,149,0,0.15)', fg: 'color-mix(in srgb, var(--color-priority-high) 100%, #000 22%)' },
 }
 function PriorityChip({ priority }: { priority: string }) {
   const meta = PRIORITY_STICKER[priority]
@@ -2175,11 +2175,7 @@ function StatusPicker({
         aria-label="Status"
       >
         {Object.entries(STATUS_META).map(([k, m]) => (
-          <option
-            key={k}
-            value={k}
-            style={{ color: '#172b4d', background: '#fff' }}
-          >
+          <option key={k} value={k}>
             {m.label}
           </option>
         ))}

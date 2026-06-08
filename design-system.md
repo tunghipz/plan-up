@@ -202,7 +202,17 @@ Có column header → mọi row dùng cùng `COL` widths trong `SprintView.tsx`.
 Click cả `GroupHeader` row để collapse; ChevronDown rotate; persist localStorage `plan-up:collapsed:{sprintId}`; reset khi đổi sprint; delete dùng `stopPropagation`.
 
 ### 5.10 Ghost / toolbar actions
-"Add member", "Add task", "Roll over", "Export/Import" → **text xanh ghost** (Apple toolbar). Solid accent fill chỉ cho primary action trong dialog ("Create"/"Save"). "+ " trong sidebar = icon xanh mảnh.
+**Chrome-level actions** — "Roll over", "Export/Import" → **text xanh ghost** (Apple toolbar). Solid accent fill chỉ cho primary action trong dialog ("Create"/"Save"). "+ " trong sidebar = icon xanh mảnh. *(Lưu ý: "Add item/task" là inline-add row — §5.7, không phải ghost button; "Add table/member" là add-group slot — §5.11.)*
+
+### 5.11 Add-a-group button (dashed slot) *(thống nhất 2026-06-08)*
+Hành động **thêm một group-card mới** vào list card-per-group — Collection "Add table", Sprint "Add member" — dùng **chung một** affordance: nút full-width **viền đứt** (dashed slot = "một card sẽ xuất hiện ở đây"), **calm lúc nghỉ, accent khi có ý định**.
+
+- Component dùng chung: **`AddGroupButton`** (`app/src/AddGroupButton.tsx`) — props `icon` (lucide) + `label` + `onClick`. Không copy-paste class, một nguồn sự thật để không lệch lại.
+- Class: `w-full flex items-center justify-center gap-1.5 py-2.5 text-[13px] font-semibold text-ink-muted border border-dashed border-border rounded-[14px] transition hover:text-accent hover:border-accent/40 hover:bg-accent-soft`.
+- **Lúc nghỉ:** `text-ink-muted` + viền đứt xám — bình tĩnh, **không** tô accent (accent là *tín hiệu*, không phải chrome — §2.1). **Hover:** text + viền + nền chuyển accent-soft → accent xuất hiện đúng lúc tay với tới.
+- **Radius = `rounded-[14px]`** (radius của *group card*, không phải button 8px ở §4.5) — vì nó là **placeholder cho một card sắp tạo**, không phải nút toolbar.
+- Icon lucide `size={14}`; glyph theo ngữ cảnh (`Plus` cho table, `UserPlus` cho member) nhưng *treatment* (size/màu/vị trí) đồng nhất.
+- Đây cũng là việc gỡ **trùng affordance** (§8.3): trước đây Add table = accent dashed loud, Add member = ghost xám quiet — cùng một việc mà hai kiểu.
 
 ## 6. Interaction rules *(giữ nguyên)*
 

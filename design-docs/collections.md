@@ -40,9 +40,19 @@ theo section do user tạo). Mỗi bảng:
 - Kéo-thả item **giữa các bảng** để chuyển section (dùng lại drag-reorder hiện có).
 
 ### Hai view: List | Calendar
-Segmented control góc phải (chỉ 2 nút, **bỏ Board**).
+Toggle sống trên **top bar** (một *context bar* duy nhất), **không** lặp trong nội dung. Top bar
+là adaptive theo container đang xem: sprint → `List / Board / Timeline`; collection → `List / Calendar`
+(chỉ 2 nút, **bỏ Board**). Cùng *một* component toggle, đổi options theo `selKind`.
 - **List:** card-per-section như trên.
 - **Calendar:** lịch tháng (Mon-start), **thanh event liền mạch** (xem phần Calendar bên dưới).
+
+> **Một context bar, không double-toggle (2026-06-08).** Trước đây top bar luôn hiện chrome của
+> sprint (tên sprint + ★ + dải ngày + `List/Board/Timeline`) *kể cả* khi xem collection, trong khi
+> `CollectionView` lại tự vẽ identity + toggle `List/Calendar` riêng bên dưới → **hai toggle, hai
+> identity chồng nhau**, toggle trên không điều khiển được collection. Nay top bar đổi *context*
+> theo container: xem collection thì bên trái là identity collection (icon stack + tên đổi-được +
+> summary), bên phải là `Statuses` + toggle `List/Calendar`. `CollectionView` chỉ còn render nội
+> dung — bỏ hẳn sub-header. View state của collection persist qua `plan-up:collectionView`.
 
 ### UX refinements (2026-06-08)
 Một loạt chỉnh nhỏ để Collections bám sát design-system constitution (đọc kèm
@@ -70,6 +80,10 @@ Một loạt chỉnh nhỏ để Collections bám sát design-system constitutio
    nút Delete đỏ). Không còn dialog OS xám phá DNA (§8).
 8. **Calendar — Today + legend.** Nút **Today** (hiện khi không ở tháng hiện tại) nhảy về tháng nay;
    hàng **legend** (chấm màu + tên status) phía trên lưới để map màu → status.
+9. **Một context bar — hết double-toggle (xem "Hai view" ở trên).** Identity collection + `Statuses`
+   + toggle `List/Calendar` dời lên top bar; toggle dùng chung một component adaptive với sprint
+   (`List/Board/Timeline`). `CollectionView` bỏ sub-header, chỉ render nội dung. Đúng DNA "calm
+   utility + single source of truth": một thanh, một toggle, không chrome thừa.
 
 ### Status — người dùng tự tạo (per-collection)
 Mỗi collection có **bộ status riêng do người dùng tự định nghĩa** — không cố định, không dùng
@@ -150,7 +164,9 @@ collection-item (`sprintId = null`) tự động không bị đụng tới. Khô
   `addCollectionItem(collectionId, sectionId, patch)`; cập nhật export/import +
   `seedFresh` (seed status mặc định cho collection mới).
   > Lưu ý: `reorderCollection` và `reorderStatus` **không được implement** — status reordering bị descope.
-- **`CollectionView.tsx`** — segmented List/Calendar; List render card-per-section **bám sát
+- **`CollectionView.tsx`** — view (`list`/`calendar`) là **controlled prop** do `App.tsx` truyền
+  từ top-bar toggle (không còn `tab` state nội bộ, không còn `Segmented` hay sub-header); identity
+  (`CollectionBarIdentity`) + `StatusEditor` được export để top bar render. List render card-per-section **bám sát
   list-view của sprint**: cùng layout flex + bộ hằng `COL` (lead grip-gutter · dot · title flex-1 ·
   Start `w-28` · End `w-28` · Status `w-28`), cùng column-header `bg-canvas-sunk/40` + nhãn
   `text-[11px] text-ink-faint`, các row trong `divide-y divide-border`. **Title luôn ở chế độ sửa**
@@ -166,6 +182,9 @@ collection-item (`sprintId = null`) tự động không bị đụng tới. Khô
   container hiện tại (sprint vs collection) persist qua **hai** localStorage key:
   - `plan-up:selKind` — `'sprint'` | `'collection'`
   - `plan-up:selCollectionId` — ID của collection đang chọn
+  - `plan-up:collectionView` — `'list'` | `'calendar'` (view của collection, lái bởi top-bar toggle)
+  - Top bar dùng **một** `ViewToggle` adaptive (nhận `options` theo container) + render
+    `CollectionBarIdentity` / `StatusEditor` bên phải khi `selKind === 'collection'`.
   - (Collapse state của từng section dùng `plan-up:collCollapsed:<collectionId>:<sectionId>`.)
 - Tái dùng: `DatePickCell` (shared editable date), status pill, list card, drag-reorder.
 

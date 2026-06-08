@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { ChevronDown, List, Calendar, X, Plus, GripVertical, Layers, Pencil } from 'lucide-react'
+import { ChevronDown, X, Plus, GripVertical, Layers, Pencil } from 'lucide-react'
 import {
   db,
   addSection,
@@ -21,6 +21,7 @@ import {
 } from './db'
 import { CollectionCalendar } from './CollectionCalendar'
 import { DatePickCell } from './DatePicker'
+import { AddGroupButton } from './AddGroupButton'
 
 const COLLAPSE_KEY = (collectionId: string) =>
   `plan-up:collCollapsed:${collectionId}`
@@ -62,9 +63,14 @@ function useOutsideClose(
 
 export function CollectionView({
   collectionId,
+  view,
+  onViewInList,
 }: {
   collectionId: string
-  projectId: string
+  /** Controlled view — driven by the single adaptive toggle in App's top bar. */
+  view: 'list' | 'calendar'
+  /** Calendar's "View in list →" callback (App flips the top-bar toggle). */
+  onViewInList: () => void
 }) {
   const collection = useLiveQuery<Collection | undefined>(
     () => db.collections.get(collectionId),
@@ -76,7 +82,6 @@ export function CollectionView({
       [collectionId]
     ) ?? []
 
-  const [tab, setTab] = useState<'list' | 'calendar'>('list')
   const [addingTable, setAddingTable] = useState(false)
 
   if (!collection) {
@@ -87,23 +92,13 @@ export function CollectionView({
   const itemsBySection = (sectionId: string) =>
     items.filter((t) => t.sectionId === sectionId)
 
+  // Identity (name + summary), Statuses, and the List/Calendar toggle all live in
+  // App's top context bar now — see CollectionBarIdentity / StatusEditor below and
+  // the adaptive ViewToggle in App.tsx. This body renders content only (no header),
+  // so there's a single context bar instead of two stacked toggles.
   return (
-    <div className="max-w-5xl mx-auto px-1">
-      <div className="flex items-center justify-between gap-3 mb-4 pt-1 flex-wrap">
-        <div className="flex flex-col gap-0.5 min-w-0">
-          <div className="flex items-center gap-2 min-w-0">
-            <Layers size={15} className="text-ink-faint shrink-0" aria-hidden />
-            <CollectionTitle collection={collection} />
-          </div>
-          <CollectionSummary items={items} statuses={collection.statuses} />
-        </div>
-        <div className="flex items-center gap-2.5 relative">
-          <StatusEditor collection={collection} />
-          <Segmented tab={tab} onChange={setTab} />
-        </div>
-      </div>
-
-      {tab === 'list' ? (
+    <div className="max-w-5xl mx-auto px-1 pt-4">
+      {view === 'list' ? (
         <div className="space-y-4">
           {collection.sections.map((sec) => (
             <SectionCard
@@ -116,19 +111,17 @@ export function CollectionView({
               statuses={collection.statuses}
             />
           ))}
-          <button
-            data-add-table
+          <AddGroupButton
+            icon={Plus}
+            label="Add table"
             onClick={() => setAddingTable(true)}
-            className="w-full py-3 text-[13.5px] font-semibold text-accent border border-dashed border-border rounded-[14px] hover:bg-accent-soft transition"
-          >
-            ＋ Add table
-          </button>
+          />
         </div>
       ) : (
         <CollectionCalendar
           collection={collection}
           items={items}
-          onViewInList={() => setTab('list')}
+          onViewInList={onViewInList}
         />
       )}
 
@@ -173,7 +166,7 @@ function CollectionSummary({
     .map((s) => ({ color: s.color, n: byStatus.get(s.id)! }))
   const none = byStatus.get(NONE) ?? 0
   return (
-    <div className="flex items-center gap-2 text-[12px] text-ink-faint font-medium pl-[23px]">
+    <div className="flex items-center gap-2 text-[12px] text-ink-faint font-medium shrink-0">
       <span className="tabular-nums">
         {items.length} {items.length === 1 ? 'item' : 'items'}
       </span>
@@ -243,14 +236,14 @@ function CollectionTitle({ collection }: { collection: Collection }) {
           }
         }}
         onBlur={() => void commit()}
-        className="editable text-[18px] font-bold text-ink tracking-[-0.018em] bg-transparent min-w-0 max-w-[320px]"
+        className="editable font-semibold text-ink display-tight bg-transparent min-w-0 max-w-[260px]"
         aria-label="Rename collection"
       />
     )
   }
   return (
     <h2
-      className="group/title inline-flex items-center gap-1.5 min-w-0 text-[18px] font-bold text-ink tracking-[-0.018em] cursor-text"
+      className="group/title inline-flex items-center gap-1.5 min-w-0 font-semibold text-ink display-tight cursor-text"
       onClick={() => setEditing(true)}
       title="Click to rename"
     >
@@ -334,35 +327,26 @@ function NameModal({
   )
 }
 
-/** Apple-style segmented List/Calendar control. */
-function Segmented({
-  tab,
-  onChange,
+/**
+ * Compact collection identity for App's top context bar — the parallel of the
+ * sprint name/date shown when a sprint is selected. Inline-rename title + a quiet
+ * item-count/status-dots summary. Queries its own items so App stays lean.
+ */
+export function CollectionBarIdentity({
+  collection,
 }: {
-  tab: 'list' | 'calendar'
-  onChange: (t: 'list' | 'calendar') => void
+  collection: Collection
 }) {
-  const item = (mode: 'list' | 'calendar', label: string, Icon: typeof List) => {
-    const active = tab === mode
-    return (
-      <button
-        onClick={() => onChange(mode)}
-        className={`flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded-[7px] transition ${
-          active
-            ? 'bg-surface text-ink shadow-[0_1px_3px_rgba(0,0,0,0.12),0_0_0_0.5px_rgba(0,0,0,0.04)]'
-            : 'text-ink-muted hover:text-ink'
-        }`}
-        aria-pressed={active}
-      >
-        <Icon size={13} strokeWidth={active ? 2 : 1.75} />
-        {label}
-      </button>
-    )
-  }
+  const items =
+    useLiveQuery<Task[]>(
+      () => db.tasks.where('collectionId').equals(collection.id).toArray(),
+      [collection.id]
+    ) ?? []
   return (
-    <div className="flex gap-1 bg-black/[0.06] dark:bg-white/[0.08] rounded-[9px] p-[3px]">
-      {item('list', 'List', List)}
-      {item('calendar', 'Calendar', Calendar)}
+    <div className="flex items-center gap-2.5 min-w-0">
+      <Layers size={15} className="text-ink-faint shrink-0" aria-hidden />
+      <CollectionTitle collection={collection} />
+      <CollectionSummary items={items} statuses={collection.statuses} />
     </div>
   )
 }
@@ -921,7 +905,7 @@ function StatusPill({
 }
 
 /** Per-collection status editor popover (Statuses button in header). */
-function StatusEditor({ collection }: { collection: Collection }) {
+export function StatusEditor({ collection }: { collection: Collection }) {
   const [open, setOpen] = useState(false)
   const [paletteFor, setPaletteFor] = useState<string | null>(null)
   const [confirmId, setConfirmId] = useState<string | null>(null)

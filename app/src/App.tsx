@@ -10,6 +10,7 @@ import {
   List,
   LayoutGrid,
   GanttChartSquare,
+  Calendar,
   Star,
   Plus,
   Settings,
@@ -36,7 +37,7 @@ import {
   type Collection,
   type ExportPayload,
 } from './db'
-import { CollectionView } from './CollectionView'
+import { CollectionView, CollectionBarIdentity, StatusEditor } from './CollectionView'
 import { useConfirm } from './ConfirmDialog'
 import { SprintView } from './SprintView'
 import { BoardView } from './BoardView'
@@ -48,6 +49,7 @@ import { formatSprintRange, useDarkMode } from './lib'
 const CURRENT_PROJECT_KEY = 'plan-up:currentProjectId'
 const VIEW_KEY = 'plan-up:view'
 type ViewMode = 'list' | 'board' | 'timeline'
+type CollectionViewMode = 'list' | 'calendar'
 
 function App() {
   const [seedError, setSeedError] = useState<string | null>(null)
@@ -84,6 +86,16 @@ function App() {
   const setView = (v: ViewMode) => {
     setViewState(v)
     localStorage.setItem(VIEW_KEY, v)
+  }
+  // Collection view (List/Calendar) — lifted here so the single adaptive top-bar
+  // toggle can drive it; persisted separately from the sprint view.
+  const COLLVIEW_KEY = 'plan-up:collectionView'
+  const [collectionView, setCollectionViewState] = useState<CollectionViewMode>(
+    () => (localStorage.getItem(COLLVIEW_KEY) === 'calendar' ? 'calendar' : 'list')
+  )
+  const setCollectionView = (v: CollectionViewMode) => {
+    setCollectionViewState(v)
+    localStorage.setItem(COLLVIEW_KEY, v)
   }
   const [showNewSprint, setShowNewSprint] = useState(false)
   const [showNewProject, setShowNewProject] = useState(false)
@@ -651,7 +663,9 @@ function App() {
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         <header className="h-[54px] shrink-0 border-b border-border-hair bg-surface flex items-center px-5 gap-3">
           <div className="flex items-center gap-2.5 text-sm min-w-0">
-            {currentSprint ? (
+            {selKind === 'collection' && currentCollection ? (
+              <CollectionBarIdentity collection={currentCollection} />
+            ) : currentSprint ? (
               <>
                 <SprintNameEditor
                   key={currentSprint.id}
@@ -674,7 +688,7 @@ function App() {
             ) : (
               <span className="text-ink-faint">No sprint selected</span>
             )}
-            {currentSprint && nextSprint && unfinishedCount > 0 && (
+            {selKind === 'sprint' && currentSprint && nextSprint && unfinishedCount > 0 && (
               <button
                 onClick={rollover}
                 className="text-xs flex items-center gap-1 text-accent rounded-md px-2 py-1 hover:bg-accent-soft transition ml-1"
@@ -689,7 +703,18 @@ function App() {
             )}
           </div>
           <div className="ml-auto flex items-center gap-1.5">
-            <ViewToggle view={view} onChange={setView} />
+            {selKind === 'collection' && currentCollection ? (
+              <>
+                <StatusEditor collection={currentCollection} />
+                <ViewToggle
+                  value={collectionView}
+                  options={COLLECTION_VIEWS}
+                  onChange={setCollectionView}
+                />
+              </>
+            ) : (
+              <ViewToggle value={view} options={SPRINT_VIEWS} onChange={setView} />
+            )}
             <div className="w-px h-5 bg-border-hair mx-1" />
             <div className="relative">
               <Search
@@ -758,7 +783,11 @@ function App() {
                 </button>
               </div>
             ) : selKind === 'collection' && currentCollection && currentProjectId ? (
-              <CollectionView collectionId={currentCollection.id} projectId={currentProjectId} />
+              <CollectionView
+                collectionId={currentCollection.id}
+                view={collectionView}
+                onViewInList={() => setCollectionView('list')}
+              />
             ) : sprints.length === 0 ? (
               <div className="py-20 text-center space-y-4">
                 <p className="text-ink-muted">
@@ -1172,41 +1201,53 @@ function NewCollectionDialog({
 }
 
 /**
- * Apple-style segmented control switching between list and board view.
+ * Single adaptive view toggle for the top context bar. The segments are passed in
+ * via `options`, so the same component renders the sprint set (List/Board/Timeline)
+ * or the collection set (List/Calendar) — one toggle, container-aware (collections.md).
  */
-function ViewToggle({
-  view,
+function ViewToggle<T extends string>({
+  value,
+  options,
   onChange,
 }: {
-  view: ViewMode
-  onChange: (v: ViewMode) => void
+  value: T
+  options: { value: T; label: string; Icon: typeof List }[]
+  onChange: (v: T) => void
 }) {
-  const item = (mode: ViewMode, label: string, Icon: typeof List) => {
-    const active = view === mode
-    return (
-      <button
-        onClick={() => onChange(mode)}
-        className={`flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded-[7px] transition ${
-          active
-            ? 'bg-surface text-ink shadow-[0_1px_3px_rgba(0,0,0,0.12),0_0_0_0.5px_rgba(0,0,0,0.04)]'
-            : 'text-ink-muted hover:text-ink'
-        }`}
-        title={`${label} view`}
-        aria-pressed={active}
-      >
-        <Icon size={13} strokeWidth={active ? 2 : 1.75} />
-        <span>{label}</span>
-      </button>
-    )
-  }
   return (
     <div className="inline-flex items-center gap-0.5 p-0.5 rounded-[9px] bg-fill">
-      {item('list', 'List', List)}
-      {item('board', 'Board', LayoutGrid)}
-      {item('timeline', 'Timeline', GanttChartSquare)}
+      {options.map(({ value: v, label, Icon }) => {
+        const active = value === v
+        return (
+          <button
+            key={v}
+            onClick={() => onChange(v)}
+            className={`flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded-[7px] transition ${
+              active
+                ? 'bg-surface text-ink shadow-[0_1px_3px_rgba(0,0,0,0.12),0_0_0_0.5px_rgba(0,0,0,0.04)]'
+                : 'text-ink-muted hover:text-ink'
+            }`}
+            title={`${label} view`}
+            aria-pressed={active}
+          >
+            <Icon size={13} strokeWidth={active ? 2 : 1.75} />
+            <span>{label}</span>
+          </button>
+        )
+      })}
     </div>
   )
 }
+
+const SPRINT_VIEWS: { value: ViewMode; label: string; Icon: typeof List }[] = [
+  { value: 'list', label: 'List', Icon: List },
+  { value: 'board', label: 'Board', Icon: LayoutGrid },
+  { value: 'timeline', label: 'Timeline', Icon: GanttChartSquare },
+]
+const COLLECTION_VIEWS: { value: CollectionViewMode; label: string; Icon: typeof List }[] = [
+  { value: 'list', label: 'List', Icon: List },
+  { value: 'calendar', label: 'Calendar', Icon: Calendar },
+]
 
 /**
  * Inline-rename sprint name. Double-click or click pencil → editable input.

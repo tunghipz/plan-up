@@ -45,6 +45,7 @@ import { ChangeLogTooltip } from './ChangeLogTooltip'
 import { Avatar, MemberDaysOffButton } from './members'
 import { DatePickCell, SprintRangeContext } from './DatePicker'
 import { useConfirm } from './ConfirmDialog'
+import { AddGroupButton } from './AddGroupButton'
 import {
   formatRelativeDate,
   formatShortDate,
@@ -2438,14 +2439,7 @@ function AddMemberRow({
   }
 
   if (!active) {
-    return (
-      <button
-        onClick={onActivate}
-        className="w-full text-sm text-ink-faint hover:text-ink hover:bg-canvas-sunk rounded-lg py-2.5 flex items-center justify-center gap-1.5 transition"
-      >
-        <UserPlus size={14} /> Add member
-      </button>
-    )
+    return <AddGroupButton icon={UserPlus} label="Add member" onClick={onActivate} />
   }
 
   return (

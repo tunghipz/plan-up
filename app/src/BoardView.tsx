@@ -926,8 +926,8 @@ function DatePopover({
 }
 
 const PRIO_TAG: Record<string, { label: string; bg: string; fg: string }> = {
-  urgent: { label: 'Urgent', bg: 'rgba(255,59,48,0.12)', fg: '#d70015' },
-  high: { label: 'High', bg: 'rgba(255,149,0,0.15)', fg: '#b25e00' },
+  urgent: { label: 'Urgent', bg: 'rgba(255,59,48,0.12)', fg: 'color-mix(in srgb, var(--color-priority-urgent) 100%, #000 22%)' },
+  high: { label: 'High', bg: 'rgba(255,149,0,0.15)', fg: 'color-mix(in srgb, var(--color-priority-high) 100%, #000 22%)' },
 }
 
 // Wrapped in memo so the per-dragover re-renders of BoardView don't re-render every

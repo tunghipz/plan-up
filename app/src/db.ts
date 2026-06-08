@@ -609,6 +609,21 @@ export async function setListOrder(taskId: string, order: number): Promise<void>
 }
 
 /**
+ * Rewrite a whole lane's `listOrder` to clean integer spacing (0..N-1) in the
+ * given display order, in one transaction. Fallback for `orderBetween` when
+ * repeated midpoint inserts into the same gap exhaust float precision
+ * (`(a+b)/2 === a`) and two rows would otherwise collide on an equal order —
+ * which made a drag silently "not take". Never touches the immutable `sequence`.
+ */
+export async function renormalizeListOrder(orderedIds: string[]): Promise<void> {
+  await db.transaction('rw', db.tasks, async () => {
+    for (let i = 0; i < orderedIds.length; i++) {
+      await db.tasks.update(orderedIds[i], { listOrder: i })
+    }
+  })
+}
+
+/**
  * Create a new project. The new project is empty — caller is responsible
  * for adding members / sprints. Returns the created project.
  */

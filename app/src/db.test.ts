@@ -40,6 +40,7 @@ import {
   appendChangeLog,
   orderBetween,
   setListOrder,
+  renormalizeListOrder,
   type Task,
   type Member,
   type ChangeLogEntry,
@@ -1366,6 +1367,37 @@ describe('List drag-reorder', () => {
       expect(t.listOrder).toBe(2.5)
       expect(t.changeLog ?? []).toHaveLength(0)
       expect(t.sequence).toBe(1) // never touched
+    })
+  })
+
+  describe('renormalizeListOrder', () => {
+    it('assigns clean integer listOrder in the given order, leaving sequence alone', async () => {
+      const mk = async (id: string, seq: number, listOrder: number) => {
+        await db.tasks.add({
+          id, projectId: P, sequence: seq, title: id, assigneeId: null, sprintId: 's-rn',
+          status: 'todo', priority: 'normal', startDate: null, dueDate: null, estimate: null,
+          createdAt: 0, dependsOn: [], listOrder,
+        })
+      }
+      // Three rows whose fractional orders have converged (a drag would collide).
+      await mk('a', 1, 1)
+      await mk('b', 2, 1.5)
+      await mk('c', 3, 1.5000000000000002)
+      // Renormalise into the desired display order c, a, b.
+      await renormalizeListOrder(['c', 'a', 'b'])
+      expect((await db.tasks.get('c'))!.listOrder).toBe(0)
+      expect((await db.tasks.get('a'))!.listOrder).toBe(1)
+      expect((await db.tasks.get('b'))!.listOrder).toBe(2)
+      // Distinct again — a subsequent sort by listOrder is stable.
+      const orders = [
+        (await db.tasks.get('a'))!.listOrder,
+        (await db.tasks.get('b'))!.listOrder,
+        (await db.tasks.get('c'))!.listOrder,
+      ]
+      expect(new Set(orders).size).toBe(3)
+      // sequence untouched
+      expect((await db.tasks.get('a'))!.sequence).toBe(1)
+      expect((await db.tasks.get('c'))!.sequence).toBe(3)
     })
   })
 })

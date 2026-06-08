@@ -282,7 +282,16 @@ function CalendarPopover({
         onClose()
       }
     }
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        // Return focus to the trigger on keyboard dismiss (a11y) — safe because
+        // focus is inside the picker here. We deliberately do NOT do this on
+        // outside-click/select, which would yank focus away from wherever the
+        // user just clicked.
+        anchorRef.current?.focus?.()
+        onClose()
+      }
+    }
     document.addEventListener('mousedown', onDoc)
     document.addEventListener('keydown', onKey)
     return () => {

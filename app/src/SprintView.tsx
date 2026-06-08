@@ -31,6 +31,7 @@ import {
   setDependencies,
   orderBetween,
   setListOrder,
+  renormalizeListOrder,
   findCyclePath,
   recomputeDates,
   updateTask,
@@ -1640,11 +1641,23 @@ function TaskRows({
     const right = arr[fromIndex + 1] ?? null
     if ((before?.id ?? null) === (left?.id ?? null) && (after?.id ?? null) === (right?.id ?? null))
       return
-    const newOrder = orderBetween(
-      before ? effOrder(before) : null,
-      after ? effOrder(after) : null
-    )
-    if (newOrder !== dragged.listOrder) void setListOrder(id, newOrder)
+    const beforeOrder = before ? effOrder(before) : null
+    const afterOrder = after ? effOrder(after) : null
+    const newOrder = orderBetween(beforeOrder, afterOrder)
+    // If the midpoint can't separate from a neighbour (float precision exhausted
+    // after many inserts into the same gap), the cheap one-row write would make
+    // two rows share an order and the drag would silently not take — renormalize
+    // the whole lane to clean integers instead.
+    const collides =
+      (beforeOrder != null && newOrder <= beforeOrder) ||
+      (afterOrder != null && newOrder >= afterOrder)
+    if (collides) {
+      const orderedIds = rest.map((x) => x.id)
+      orderedIds.splice(insertAt, 0, id)
+      void renormalizeListOrder(orderedIds)
+    } else if (newOrder !== dragged.listOrder) {
+      void setListOrder(id, newOrder)
+    }
   }
   const dragFor = (t: Task): RowDrag | undefined =>
     canReorder

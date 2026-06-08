@@ -1,4 +1,4 @@
-import { Fragment, useLayoutEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { History } from 'lucide-react'
 import type { ChangeLogEntry, LoggableField } from './db'
@@ -86,6 +86,33 @@ export function ChangeLogTooltip({ entries }: { entries?: ChangeLogEntry[] }) {
   const popRef = useRef<HTMLDivElement>(null)
   const [coords, setCoords] = useState<{ top: number; left: number } | null>(null)
 
+  // The tooltip is portalled to <body>, so it isn't a DOM child of the anchor:
+  // moving the cursor from the icon toward it leaves the anchor and would close
+  // it before the pointer arrives. Bridge the gap with a short close delay that
+  // the tooltip's own mouseenter cancels — so hovering onto it (to read the
+  // timestamp titles) keeps it open.
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const cancelClose = () => {
+    if (closeTimer.current) {
+      clearTimeout(closeTimer.current)
+      closeTimer.current = null
+    }
+  }
+  const openNow = () => {
+    cancelClose()
+    setOpen(true)
+  }
+  const scheduleClose = () => {
+    cancelClose()
+    closeTimer.current = setTimeout(() => setOpen(false), 120)
+  }
+  useEffect(
+    () => () => {
+      if (closeTimer.current) clearTimeout(closeTimer.current)
+    },
+    []
+  )
+
   // Measure after the popover mounts (hidden), then place it: below the icon by
   // default, flipped above if it would overflow the viewport bottom; right edge
   // aligned to the icon, clamped to the viewport.
@@ -112,10 +139,10 @@ export function ChangeLogTooltip({ entries }: { entries?: ChangeLogEntry[] }) {
     <span
       ref={anchorRef}
       className="relative inline-flex"
-      onMouseEnter={() => setOpen(true)}
-      onMouseLeave={() => setOpen(false)}
-      onFocus={() => setOpen(true)}
-      onBlur={() => setOpen(false)}
+      onMouseEnter={openNow}
+      onMouseLeave={scheduleClose}
+      onFocus={openNow}
+      onBlur={scheduleClose}
     >
       <button
         type="button"
@@ -129,6 +156,8 @@ export function ChangeLogTooltip({ entries }: { entries?: ChangeLogEntry[] }) {
           <div
             ref={popRef}
             role="tooltip"
+            onMouseEnter={cancelClose}
+            onMouseLeave={scheduleClose}
             style={{
               position: 'fixed',
               top: coords?.top ?? -9999,

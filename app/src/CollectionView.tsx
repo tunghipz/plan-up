@@ -716,7 +716,7 @@ function ItemTitle({ task }: { task: Task }) {
             ;(e.target as HTMLTextAreaElement).blur()
           }
         }}
-        className="[field-sizing:content] min-w-0 max-w-full editable text-ink bg-transparent resize-none overflow-hidden leading-snug whitespace-pre-wrap break-words"
+        className="flex-1 min-w-0 editable text-ink bg-transparent resize-none overflow-hidden leading-snug whitespace-pre-wrap break-words"
         aria-label="Item title"
       />
     </div>

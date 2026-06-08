@@ -1159,9 +1159,10 @@ function TitleTextarea({
       className={`${COL.title} flex items-start gap-1.5 ${indent ? 'pl-5' : ''}`}
     >
       <PriorityChip priority={priority} />
-      {/* field-sizing:content makes the box hug its text so `trailing` sits snug
-          right after the title; min-w-0 lets flex shrink it to fit the trailing
-          icon on long titles (no overflow into the next column). */}
+      {/* flex-1 fills the whole Task column so the title (and its click-to-edit
+          hit area) stretches like the Add-task row, instead of hugging its text.
+          min-w-0 lets it shrink so a `trailing` icon never overflows; trailing
+          right-aligns at the column edge. Height auto-grows via resize() above. */}
       <textarea
         ref={ref}
         value={value}
@@ -1173,7 +1174,7 @@ function TitleTextarea({
             ;(e.target as HTMLTextAreaElement).blur()
           }
         }}
-        className={`[field-sizing:content] min-w-0 max-w-full editable bg-transparent resize-none overflow-hidden leading-snug whitespace-pre-wrap break-words ${
+        className={`flex-1 min-w-0 editable bg-transparent resize-none overflow-hidden leading-snug whitespace-pre-wrap break-words ${
           done ? 'line-through text-ink-faint' : ''
         } ${welcomeHint ? 'welcome-hint' : ''} ${bold ? 'font-semibold' : ''}`}
       />

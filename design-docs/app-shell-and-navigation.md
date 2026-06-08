@@ -1,7 +1,7 @@
 # App shell & navigation
 
 **Status:** Implemented
-**Last updated:** 2026-06-03
+**Last updated:** 2026-06-08
 **Code:** `app/src/App.tsx`
 
 ## Purpose
@@ -30,10 +30,18 @@ Three cards, shown when a sprint is selected, computed from the current sprint's
 - Live data via Dexie `useLiveQuery`: projects (by `createdAt`), sprints (by
   `currentProjectId`, ordered `startDate`), tasks (by `currentSprintId`), project-wide
   tasks (for sprint counts).
+- **Sidebar list area — single scroll + collapsible sections (2026-06-08):** the
+  **Sprints** and **Collections** lists share **one** `flex-1 overflow-auto` wrapper
+  (neither list is `flex-1` itself), so Collections sits directly under Sprints and any
+  leftover space falls *below* both — no dead gap between them. Each section header is a
+  **collapsible row** (click toggles; `ChevronDown` rotates `-90°` when collapsed; a muted
+  count shows next to the label when > 0). The `+` button `stopPropagation`s so it never
+  toggles. Collapse state persists per section in `localStorage`.
 
 ## Rules & edge cases
 - **localStorage keys:** `plan-up:currentProjectId`, `plan-up:view`,
-  `plan-up:sidebarWidth`, `plan-up:dark`, `plan-up:collapsed:<sprintId>`.
+  `plan-up:sidebarWidth`, `plan-up:dark`, `plan-up:collapsed:<sprintId>`,
+  `plan-up:sidebarSprintsCollapsed`, `plan-up:sidebarCollectionsCollapsed`.
 - Current **sprint** is *not* persisted across sessions — on load it defaults to the
   latest sprint (by `startDate`) in the current project; resets when the project changes.
 - The header **star** button is a visual placeholder (no handler yet).

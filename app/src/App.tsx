@@ -15,6 +15,7 @@ import {
   Settings,
   X,
   Pencil,
+  ChevronDown,
 } from 'lucide-react'
 import {
   db,
@@ -88,6 +89,25 @@ function App() {
   const [showNewProject, setShowNewProject] = useState(false)
   const [showNewCollection, setShowNewCollection] = useState(false)
   const confirm = useConfirm()
+  // Collapsible sidebar sections — persisted per section (design-system §6.2).
+  const SPRINTS_COLLAPSED_KEY = 'plan-up:sidebarSprintsCollapsed'
+  const COLLS_COLLAPSED_KEY = 'plan-up:sidebarCollectionsCollapsed'
+  const [sprintsCollapsed, setSprintsCollapsed] = useState(
+    () => localStorage.getItem(SPRINTS_COLLAPSED_KEY) === '1'
+  )
+  const [collectionsCollapsed, setCollectionsCollapsed] = useState(
+    () => localStorage.getItem(COLLS_COLLAPSED_KEY) === '1'
+  )
+  const toggleSprintsCollapsed = () =>
+    setSprintsCollapsed((p) => {
+      localStorage.setItem(SPRINTS_COLLAPSED_KEY, p ? '0' : '1')
+      return !p
+    })
+  const toggleCollectionsCollapsed = () =>
+    setCollectionsCollapsed((p) => {
+      localStorage.setItem(COLLS_COLLAPSED_KEY, p ? '0' : '1')
+      return !p
+    })
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [search, setSearch] = useState('')
   const [dark, setDark] = useDarkMode()
@@ -454,19 +474,39 @@ function App() {
                 task{(projectTasks?.length ?? 0) === 1 ? '' : 's'}
               </div>
             </div>
-            <div className="flex items-center justify-between px-[18px] pt-2 pb-1.5">
-              <span className="text-[12px] font-semibold text-ink-faint">
+            <div className="flex-1 overflow-auto">
+            <div
+              onClick={toggleSprintsCollapsed}
+              role="button"
+              aria-expanded={!sprintsCollapsed}
+              className="flex items-center justify-between px-[18px] pt-2 pb-1.5 cursor-pointer select-none"
+            >
+              <span className="flex items-center gap-1.5 text-[12px] font-semibold text-ink-faint">
+                <ChevronDown
+                  size={12}
+                  className={`shrink-0 transition-transform ${sprintsCollapsed ? '-rotate-90' : ''}`}
+                  aria-hidden
+                />
                 Sprints
+                {(sprints?.length ?? 0) > 0 && (
+                  <span className="tabular-nums font-medium text-ink-faint/70">
+                    {sprints?.length}
+                  </span>
+                )}
               </span>
               <button
-                onClick={() => setShowNewSprint(true)}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setShowNewSprint(true)
+                }}
                 title="New sprint (n)"
                 className="inline-flex items-center text-accent hover:bg-accent-soft -mr-1 p-1 rounded-md transition"
               >
                 <Plus size={16} strokeWidth={2} />
               </button>
             </div>
-            <div className="flex-1 overflow-auto px-2.5 pb-2">
+            {!sprintsCollapsed && (
+            <div className="px-2.5 pb-2">
               {sprints?.map((s) => {
                 // Only one container highlights at a time — a remembered sprint
                 // must not stay lit while a collection is selected (and vice versa).
@@ -505,16 +545,38 @@ function App() {
                 </div>
               )}
             </div>
-            <div className="flex items-center justify-between px-[18px] pt-3 pb-1.5">
-              <span className="text-[12px] font-semibold text-ink-faint">Collections</span>
+            )}
+            <div
+              onClick={toggleCollectionsCollapsed}
+              role="button"
+              aria-expanded={!collectionsCollapsed}
+              className="flex items-center justify-between px-[18px] pt-3 pb-1.5 cursor-pointer select-none"
+            >
+              <span className="flex items-center gap-1.5 text-[12px] font-semibold text-ink-faint">
+                <ChevronDown
+                  size={12}
+                  className={`shrink-0 transition-transform ${collectionsCollapsed ? '-rotate-90' : ''}`}
+                  aria-hidden
+                />
+                Collections
+                {(collections?.length ?? 0) > 0 && (
+                  <span className="tabular-nums font-medium text-ink-faint/70">
+                    {collections?.length}
+                  </span>
+                )}
+              </span>
               <button
-                onClick={() => setShowNewCollection(true)}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setShowNewCollection(true)
+                }}
                 title="New collection"
                 className="inline-flex items-center text-accent hover:bg-accent-soft -mr-1 p-1 rounded-md transition"
               >
                 <Plus size={16} strokeWidth={2} />
               </button>
             </div>
+            {!collectionsCollapsed && (
             <div className="px-2.5 pb-2">
               {collections?.map((c) => {
                 const isActive = selKind === 'collection' && c.id === currentCollectionId
@@ -563,6 +625,8 @@ function App() {
               {collections && collections.length === 0 && (
                 <div className="px-3 py-2 text-[13px] text-ink-faint italic">No collections</div>
               )}
+            </div>
+            )}
             </div>
           </>
         ) : (

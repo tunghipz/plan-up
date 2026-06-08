@@ -17,6 +17,7 @@ import {
   MemberColorDot,
   MemberDaysOffButton,
 } from './members'
+import { useConfirm } from './ConfirmDialog'
 
 /**
  * Settings for the current project: edit the project's own info (name /
@@ -32,6 +33,7 @@ export function ProjectSettingsView({
   project: Project
   onClose: () => void
 }) {
+  const confirm = useConfirm()
   const members = useLiveQuery(
     () => db.members.where('projectId').equals(project.id).toArray(),
     [project.id]
@@ -64,9 +66,11 @@ export function ProjectSettingsView({
 
   const removeProject = async () => {
     if (
-      !confirm(
-        `Delete project "${project.name}"? This permanently removes its sprints, tasks, and members. This cannot be undone.`
-      )
+      !(await confirm({
+        title: 'Delete project?',
+        message: `“${project.name}” and all its sprints, tasks, and members will be permanently deleted. This can’t be undone.`,
+        confirmLabel: 'Delete',
+      }))
     )
       return
     await deleteProject(project.id)
@@ -185,6 +189,7 @@ export function ProjectSettingsView({
 
 /** One editable member row: avatar, name, color, days-off, delete. */
 function MemberRow({ member }: { member: Member }) {
+  const confirm = useConfirm()
   const [name, setName] = useState(member.name)
   useEffect(() => setName(member.name), [member.id, member.name])
 
@@ -206,11 +211,13 @@ function MemberRow({ member }: { member: Member }) {
     if (t === (member.title ?? '')) return
     void db.members.update(member.id, { title: t })
   }
-  const remove = () => {
+  const remove = async () => {
     if (
-      !confirm(
-        `Remove member "${member.name}"? Their tasks become Unassigned (not deleted).`
-      )
+      !(await confirm({
+        title: 'Remove member?',
+        message: `“${member.name}” will be removed. Their tasks become Unassigned (not deleted).`,
+        confirmLabel: 'Remove',
+      }))
     )
       return
     void deleteMember(member.id)

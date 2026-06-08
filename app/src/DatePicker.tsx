@@ -348,6 +348,7 @@ export function DatePickCell({
   sprintRange,
   daysOff,
   emptyHint,
+  emptyHintHover = false,
 }: {
   value: string | null
   highlight?: 'overdue' | null
@@ -368,6 +369,11 @@ export function DatePickCell({
    * the sprint view omits it, so its rows keep the plain dash.
    */
   emptyHint?: string
+  /**
+   * Only reveal the `emptyHint` pill on row hover (needs a `group/row` ancestor).
+   * Keeps dense rows (sprint List) calm; collections show the pill always.
+   */
+  emptyHintHover?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLButtonElement>(null)
@@ -404,7 +410,11 @@ export function DatePickCell({
         {value ? (
           <span className="text-sm whitespace-nowrap">{label}</span>
         ) : emptyHint ? (
-          <span className="inline-flex items-center rounded-full border border-dashed border-border px-2.5 py-0.5 text-[11.5px] font-medium text-ink-faint group-hover:border-accent group-hover:text-accent transition">
+          <span
+            className={`inline-flex items-center rounded-full border border-dashed border-border px-2.5 py-0.5 text-[11.5px] font-medium text-ink-faint group-hover:border-accent group-hover:text-accent transition ${
+              emptyHintHover ? 'opacity-0 group-hover/row:opacity-100' : ''
+            }`}
+          >
             ＋ {emptyHint}
           </span>
         ) : (

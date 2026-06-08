@@ -180,7 +180,8 @@ Prop drilling `App → SprintView → MemberCard → AddTaskRow`. Default tốn 
 ### 5.4 Date — Apple-native `MMM d` *(ĐỔI so với bản cũ)*
 - Hiển thị **"MMM d"** (vd `May 19`, `Jun 1`); range `MMM d – MMM d`; có năm khi cần `MMM d, yyyy`. SF tabular-nums.
 - **Lý do đổi từ `dd/mm/yy`**: feel native Apple, tên tháng dễ đọc; vẫn nhất quán (luôn cùng format). Tháng viết tắt locale-independent (en).
-- Overdue (past + not done) → `--color-overdue` đỏ + `font-semibold`. Empty → icon Calendar nhạt thay placeholder.
+- Overdue (past + not done) → `--color-overdue` đỏ + `font-semibold`. Empty → mặc định dấu "—" nhạt.
+- **Empty = quiet dashed pill (opt-in).** `DatePickCell` có prop `emptyHint` → ô trống render **pill viền đứt** `＋ {hint}` (hover thành accent) thay cho "—", để "đọc ra bấm được" (idiom days-off). `emptyHintHover` → pill chỉ hiện khi hover row (`group/row`) — dùng cho hàng dày như sprint List để không nhiễu. **Không** áp cho ô `locked` (scheduler tính). Collection rows luôn hiện pill; sprint List chỉ hover + chỉ ô unlocked.
 - ⚠️ *Đây là decision có thể revert về dd/mm/yy nếu user thích — flag trong commit.*
 
 ### 5.5 Pickers
@@ -192,6 +193,7 @@ Prop drilling `App → SprintView → MemberCard → AddTaskRow`. Default tốn 
 
 ### 5.7 Inline edit là default
 - Title/assignee/date/priority/status inline. Không modal cho task detail. Cần thêm field → expand row inline.
+- **Rename = single-click + ✎ hover** (không double-click ẩn). Tên sprint / collection / table: click 1 lần vào tên → ô input inline; hover hiện icon ✎ nhạt báo "sửa được". Đồng bộ với task title (luôn-sửa-được). Bỏ pattern double-click + gạch chân chấm.
 
 ### 5.8 Column system — mọi task row align *(widths cập nhật theo Cupertino)*
 Có column header → mọi row dùng cùng `COL` widths trong `SprintView.tsx`. Gap `gap-[13px]`, padding `px-[18px] py-[11px]`. Khi đổi 1 cột → đổi header + mọi consumer cùng commit. Date cells dùng chung `DatePickCell`. Hide column header khi sprint 0 task.
@@ -217,6 +219,10 @@ Inline input: Enter commit, Escape cancel khi add-mode. Click outside KHÔNG can
 
 ### 6.4 Confirm trước destructive
 Delete member / delete task / import (replace). Không confirm cho toggle status, change priority, clear date.
+
+**Cách hiện confirm — KHÔNG dùng `window.confirm()`** (dialog OS xám phá DNA, §8). Dùng in-DNA:
+- **Cupertino confirm sheet** (mặc định cho cascade nặng / cross-cutting): scrim `bg-black/25 backdrop-blur-md` + sheet trắng `rounded-[16px]`, nút Cancel (ghost) + nút hành động (đỏ nếu destructive). Dùng qua **`useConfirm()`** (provider `ConfirmDialog.tsx` bọc `<App>`): `if (!(await confirm({title, message, confirmLabel, destructive}))) return`. Drop-in thay cho `confirm()`.
+- **Inline confirm** (cho hành động cục bộ trong 1 card/row — vd xoá table/status của collection): thanh nền đỏ nhạt Delete/Cancel ngay tại chỗ, không bật modal.
 
 ## 7. State & data rules *(giữ nguyên)*
 - `useLiveQuery` cho mọi DB read. Không tự subscribe.

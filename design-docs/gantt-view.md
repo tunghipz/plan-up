@@ -1,7 +1,13 @@
 # Timeline view (calendar swimlanes)
 
 **Status:** Implemented
-**Last updated:** 2026-06-04
+**Last updated:** 2026-06-08
+
+> **Bar click → detail popover (2026-06-08):** event blocks were inert (chỉ `title`
+> tooltip). Nay **bấm bar** mở popover Cupertino (portal + float-shadow) hiển thị
+> title · status · ngày start–end (computed) + **"Open in List →"** (chuyển sprint view
+> về List để sửa). Gantt vẫn là *read-only projection* — popover không sửa ngày tại chỗ
+> (ngày do scheduler tính), chỉ điều hướng sang List.
 **Code:** `app/src/GanttView.tsx`, `app/src/App.tsx` (view toggle),
 `app/src/lib.ts` (`sprintWorkdays`), reads `computeWorkingPlan` from `app/src/db.ts`,
 reuses `STATUS_META` from `app/src/SprintView.tsx` and `Avatar` from `app/src/members.tsx`

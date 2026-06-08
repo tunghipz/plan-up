@@ -1,4 +1,12 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
+import { createPortal } from 'react-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, computeWorkingPlan, type Task, type Member } from './db'
 import { Avatar } from './members'
@@ -59,17 +67,26 @@ export function GanttView({
   sprintEndDate,
   tasks,
   search,
+  onOpenInList,
 }: {
   projectId: string
   sprintStartDate: string
   sprintEndDate: string
   tasks: Task[]
   search: string
+  /** Jump to the List view (the bar popover's "Open in List"). */
+  onOpenInList?: () => void
 }) {
   const members = useLiveQuery(
     () => db.members.where('projectId').equals(projectId).toArray(),
     [projectId]
   )
+  // Click a bar → read-only detail popover (Gantt is a scheduler projection).
+  const [openBar, setOpenBar] = useState<{
+    task: Task
+    status: keyof typeof STATUS_META
+    rect: DOMRect
+  } | null>(null)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const toggle = (id: string) =>
     setExpanded((prev) => {
@@ -479,7 +496,16 @@ export function GanttView({
                       return (
                         <div
                           key={e.task.id}
-                          className="absolute flex items-center rounded-[7px] overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.08)]"
+                          onClick={(ev) =>
+                            setOpenBar({
+                              task: e.task,
+                              status: e.status,
+                              rect: (
+                                ev.currentTarget as HTMLElement
+                              ).getBoundingClientRect(),
+                            })
+                          }
+                          className="absolute flex items-center rounded-[7px] overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.08)] cursor-pointer hover:brightness-95 transition"
                           style={{ ...box, background: softBg(v) }}
                           title={`${STATUS_META[e.status].label} · ${e.task.title}`}
                         >
@@ -563,7 +589,123 @@ export function GanttView({
           })}
         </div>
       </div>
+
+      {openBar && (
+        <BarDetailPopover
+          task={openBar.task}
+          status={openBar.status}
+          anchorRect={openBar.rect}
+          onClose={() => setOpenBar(null)}
+          onOpenInList={onOpenInList}
+        />
+      )}
     </div>
+  )
+}
+
+/**
+ * Read-only detail popover for a Gantt bar (portalled + fixed-positioned, like
+ * the calendar/StatusPill pattern). Gantt dates are scheduler-computed, so this
+ * shows them rather than editing — the action is "Open in List".
+ */
+function BarDetailPopover({
+  task,
+  status,
+  anchorRect,
+  onClose,
+  onOpenInList,
+}: {
+  task: Task
+  status: keyof typeof STATUS_META
+  anchorRect: DOMRect
+  onClose: () => void
+  onOpenInList?: () => void
+}) {
+  const popRef = useRef<HTMLDivElement>(null)
+  const W = 236
+  const [pos, setPos] = useState<{ top: number; left: number }>({
+    top: -9999,
+    left: -9999,
+  })
+  useLayoutEffect(() => {
+    let left = Math.min(anchorRect.left, window.innerWidth - 8 - W)
+    left = Math.max(8, left)
+    const H = 150
+    let top = anchorRect.bottom + 6
+    if (top + H > window.innerHeight - 8) top = Math.max(8, anchorRect.top - H - 6)
+    setPos({ top, left })
+  }, [anchorRect])
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => {
+      if (popRef.current && !popRef.current.contains(e.target as Node)) onClose()
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    const id = window.setTimeout(() => {
+      document.addEventListener('mousedown', onDown)
+      document.addEventListener('keydown', onKey)
+    }, 0)
+    return () => {
+      window.clearTimeout(id)
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [onClose])
+
+  const meta = STATUS_META[status]
+  const v = meta.varName
+  const range =
+    task.startDate && task.dueDate
+      ? task.startDate === task.dueDate
+        ? formatShortDate(task.startDate)
+        : `${formatShortDate(task.startDate)} – ${formatShortDate(task.dueDate)}`
+      : task.startDate
+        ? formatShortDate(task.startDate)
+        : '—'
+
+  return createPortal(
+    <div
+      ref={popRef}
+      onClick={(e) => e.stopPropagation()}
+      style={{ position: 'fixed', top: pos.top, left: pos.left, width: W }}
+      className="z-50 bg-surface border border-border-hair rounded-[14px] shadow-[0_12px_40px_rgba(0,0,0,0.18),0_0_0_0.5px_rgba(0,0,0,0.04)] p-3 space-y-2"
+    >
+      <div className="text-[14px] font-semibold text-ink leading-snug">
+        <span className="tab-data text-ink-faint mr-1">#{task.sequence}</span>
+        {task.title}
+      </div>
+      <div className="flex items-center justify-between text-[12.5px]">
+        <span className="text-ink-faint">Status</span>
+        <span
+          className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11.5px] font-semibold leading-none"
+          style={{ background: softBg(v), color: softFg(v) }}
+        >
+          <span
+            className="w-1.5 h-1.5 rounded-full"
+            style={{ background: v }}
+            aria-hidden
+          />
+          {meta.label}
+        </span>
+      </div>
+      <div className="flex items-center justify-between text-[12.5px]">
+        <span className="text-ink-faint">Dates</span>
+        <span className="text-ink tabular-nums">{range}</span>
+      </div>
+      {onOpenInList && (
+        <button
+          onClick={() => {
+            onOpenInList()
+            onClose()
+          }}
+          className="w-full text-left text-[12.5px] font-medium text-accent rounded-[7px] px-1 py-1 hover:bg-accent-soft transition"
+        >
+          Open in List →
+        </button>
+      )}
+    </div>,
+    document.body
   )
 }
 

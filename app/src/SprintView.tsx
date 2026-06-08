@@ -44,6 +44,7 @@ import {
 import { ChangeLogTooltip } from './ChangeLogTooltip'
 import { Avatar, MemberDaysOffButton } from './members'
 import { DatePickCell, SprintRangeContext } from './DatePicker'
+import { useConfirm } from './ConfirmDialog'
 import {
   formatRelativeDate,
   formatShortDate,
@@ -463,6 +464,7 @@ function SelectionBar({
   allTasks: Task[]
   onClear: () => void
 }) {
+  const confirm = useConfirm()
   const n = selectedIds.size
   const parentIds = useMemo(() => {
     const s = new Set<string>()
@@ -521,10 +523,14 @@ function SelectionBar({
   const doDelete = async () => {
     if (n === 0) return
     const hasGroup = selected.some((t) => parentIds.has(t.id))
-    const msg = hasGroup
-      ? `Delete ${n} selected task(s)? Group children will be ungrouped, not deleted.`
-      : `Delete ${n} selected task(s)?`
-    if (!confirm(msg)) return
+    const ok = await confirm({
+      title: `Delete ${n} task${n === 1 ? '' : 's'}?`,
+      message: hasGroup
+        ? 'Group children will be ungrouped, not deleted.'
+        : undefined,
+      confirmLabel: 'Delete',
+    })
+    if (!ok) return
     // Sequential: deleting a parent promotes its children to top-level, so a
     // concurrent run could race a selected child's own delete.
     for (const t of selected) await deleteTask(t.id)
@@ -1801,6 +1807,8 @@ function TaskRow({
           value={liveStart}
           time={startTime}
           locked={task.dependsOn.length > 0}
+          emptyHint={task.dependsOn.length > 0 ? undefined : 'Start'}
+          emptyHintHover
           onChange={async (v) => {
             await update({ startDate: v })
             // Manual start change recomputes end when effort drives it.
@@ -1819,6 +1827,13 @@ function TaskRow({
             task.dependsOn.length > 0 ||
             (task.estimate !== null && task.estimate > 0)
           }
+          emptyHint={
+            task.dependsOn.length > 0 ||
+            (task.estimate !== null && task.estimate > 0)
+              ? undefined
+              : 'Due'
+          }
+          emptyHintHover
           highlight={overdue ? 'overdue' : null}
           onChange={(v) => update({ dueDate: v })}
           ariaLabel="Due date"

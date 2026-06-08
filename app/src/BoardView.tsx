@@ -901,6 +901,7 @@ function DatePopover({
             value={plan.startDate}
             time={plan.startTime}
             locked={startLocked}
+            emptyHint={startLocked ? undefined : 'Start'}
             ariaLabel="Start date"
             daysOff={assigneeDaysOff}
             onChange={async (v) => {
@@ -917,6 +918,7 @@ function DatePopover({
             value={plan.dueDate}
             time={plan.endTime}
             locked={endLocked}
+            emptyHint={endLocked ? undefined : 'End'}
             ariaLabel="Due date"
             daysOff={assigneeDaysOff}
             onChange={(v) => updateTask(task.id, { dueDate: v })}

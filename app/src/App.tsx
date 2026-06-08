@@ -14,6 +14,7 @@ import {
   Plus,
   Settings,
   X,
+  Pencil,
 } from 'lucide-react'
 import {
   db,
@@ -35,6 +36,7 @@ import {
   type ExportPayload,
 } from './db'
 import { CollectionView } from './CollectionView'
+import { useConfirm } from './ConfirmDialog'
 import { SprintView } from './SprintView'
 import { BoardView } from './BoardView'
 import { GanttView } from './GanttView'
@@ -85,7 +87,7 @@ function App() {
   const [showNewSprint, setShowNewSprint] = useState(false)
   const [showNewProject, setShowNewProject] = useState(false)
   const [showNewCollection, setShowNewCollection] = useState(false)
-  const [deletingCollection, setDeletingCollection] = useState<Collection | null>(null)
+  const confirm = useConfirm()
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [search, setSearch] = useState('')
   const [dark, setDark] = useDarkMode()
@@ -307,7 +309,15 @@ function App() {
     const file = e.target.files?.[0]
     e.target.value = ''
     if (!file) return
-    if (!confirm('Import will REPLACE all current data. Continue?')) return
+    if (
+      !(await confirm({
+        title: 'Replace all data?',
+        message:
+          'Importing will replace every project, sprint, collection, and task currently stored. This can’t be undone.',
+        confirmLabel: 'Replace',
+      }))
+    )
+      return
     try {
       const text = await file.text()
       const data = JSON.parse(text) as ExportPayload
@@ -333,11 +343,14 @@ function App() {
 
   const rollover = async () => {
     if (!currentSprint || !nextSprint || unfinishedCount === 0) return
-    const ok = confirm(
-      `Move ${unfinishedCount} unfinished task${
+    const ok = await confirm({
+      title: 'Roll over unfinished tasks?',
+      message: `Move ${unfinishedCount} unfinished task${
         unfinishedCount === 1 ? '' : 's'
-      } from "${currentSprint.name}" to "${nextSprint.name}"?`
-    )
+      } from “${currentSprint.name}” to “${nextSprint.name}”.`,
+      confirmLabel: 'Move',
+      destructive: false,
+    })
     if (!ok) return
     const result = await moveUnfinishedToNextSprint(currentSprint.id)
     if (result.targetSprintId) {
@@ -517,9 +530,24 @@ function App() {
                       <span className="flex-1 min-w-0 truncate font-medium">{c.name}</span>
                     </button>
                     <button
-                      onClick={(e) => {
+                      onClick={async (e) => {
                         e.stopPropagation()
-                        setDeletingCollection(c)
+                        if (
+                          !(await confirm({
+                            title: 'Delete collection?',
+                            message: `“${c.name}” and all its items will be permanently deleted. This can’t be undone.`,
+                            confirmLabel: 'Delete',
+                          }))
+                        )
+                          return
+                        await deleteCollection(c.id)
+                        if (
+                          selKind === 'collection' &&
+                          currentCollectionId === c.id
+                        ) {
+                          setSelKindState('sprint')
+                          localStorage.setItem(SELKIND_KEY, 'sprint')
+                        }
                       }}
                       title="Delete collection"
                       aria-label={`Delete collection ${c.name}`}
@@ -696,6 +724,7 @@ function App() {
                   sprintEndDate={currentSprint.endDate}
                   tasks={tasks}
                   search={search}
+                  onOpenInList={() => setView('list')}
                 />
               ) : (
                 <SprintView
@@ -777,47 +806,6 @@ function App() {
         />
       )}
 
-      {deletingCollection && (
-        <div
-          className="fixed inset-0 bg-black/25 backdrop-blur-md flex items-center justify-center p-4 z-50"
-          onClick={() => setDeletingCollection(null)}
-        >
-          <div
-            className="bg-surface text-ink rounded-[16px] shadow-[0_20px_60px_rgba(0,0,0,0.28)] w-full max-w-md p-6 space-y-3 border border-border-hair"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h2 className="text-[19px] font-bold tracking-[-0.014em]">
-              Delete collection?
-            </h2>
-            <p className="text-[13.5px] text-ink-muted">
-              “{deletingCollection.name}” and all its items will be permanently
-              deleted. This can’t be undone.
-            </p>
-            <div className="flex justify-end gap-2 pt-2">
-              <button
-                onClick={() => setDeletingCollection(null)}
-                className="px-3.5 py-1.5 text-sm font-medium text-ink-muted hover:bg-surface-hover rounded-[8px] transition"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={async () => {
-                  const c = deletingCollection
-                  setDeletingCollection(null)
-                  await deleteCollection(c.id)
-                  if (selKind === 'collection' && currentCollectionId === c.id) {
-                    setSelKindState('sprint')
-                    localStorage.setItem(SELKIND_KEY, 'sprint')
-                  }
-                }}
-                className="px-4 py-1.5 text-sm font-medium bg-red-500 hover:bg-red-600 text-white rounded-[8px] transition"
-              >
-                Delete
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }
@@ -1211,14 +1199,19 @@ function SprintNameEditor({ sprint }: { sprint: Sprint }) {
   }
   return (
     <span
-      className="font-semibold text-ink truncate display-tight cursor-text hover:underline decoration-dotted underline-offset-4"
-      onDoubleClick={(e) => {
+      className="group/sprintname inline-flex items-center gap-1.5 min-w-0 font-semibold text-ink display-tight cursor-text"
+      onClick={(e) => {
         e.stopPropagation()
         setEditing(true)
       }}
-      title="Double-click to rename"
+      title="Click to rename"
     >
-      {sprint.name}
+      <span className="truncate">{sprint.name}</span>
+      <Pencil
+        size={13}
+        className="text-ink-faint opacity-0 group-hover/sprintname:opacity-60 transition shrink-0"
+        aria-hidden
+      />
     </span>
   )
 }

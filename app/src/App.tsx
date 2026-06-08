@@ -85,6 +85,7 @@ function App() {
   const [showNewSprint, setShowNewSprint] = useState(false)
   const [showNewProject, setShowNewProject] = useState(false)
   const [showNewCollection, setShowNewCollection] = useState(false)
+  const [deletingCollection, setDeletingCollection] = useState<Collection | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [search, setSearch] = useState('')
   const [dark, setDark] = useDarkMode()
@@ -514,14 +515,9 @@ function App() {
                       <span className="flex-1 min-w-0 truncate font-medium">{c.name}</span>
                     </button>
                     <button
-                      onClick={async (e) => {
+                      onClick={(e) => {
                         e.stopPropagation()
-                        if (!confirm(`Delete collection "${c.name}" and all its items?`)) return
-                        await deleteCollection(c.id)
-                        if (selKind === 'collection' && currentCollectionId === c.id) {
-                          setSelKindState('sprint')
-                          localStorage.setItem(SELKIND_KEY, 'sprint')
-                        }
+                        setDeletingCollection(c)
                       }}
                       title="Delete collection"
                       aria-label={`Delete collection ${c.name}`}
@@ -777,6 +773,48 @@ function App() {
             setShowNewCollection(false)
           }}
         />
+      )}
+
+      {deletingCollection && (
+        <div
+          className="fixed inset-0 bg-black/25 backdrop-blur-md flex items-center justify-center p-4 z-50"
+          onClick={() => setDeletingCollection(null)}
+        >
+          <div
+            className="bg-surface text-ink rounded-[16px] shadow-[0_20px_60px_rgba(0,0,0,0.28)] w-full max-w-md p-6 space-y-3 border border-border-hair"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 className="text-[19px] font-bold tracking-[-0.014em]">
+              Delete collection?
+            </h2>
+            <p className="text-[13.5px] text-ink-muted">
+              “{deletingCollection.name}” and all its items will be permanently
+              deleted. This can’t be undone.
+            </p>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                onClick={() => setDeletingCollection(null)}
+                className="px-3.5 py-1.5 text-sm font-medium text-ink-muted hover:bg-surface-hover rounded-[8px] transition"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  const c = deletingCollection
+                  setDeletingCollection(null)
+                  await deleteCollection(c.id)
+                  if (selKind === 'collection' && currentCollectionId === c.id) {
+                    setSelKindState('sprint')
+                    localStorage.setItem(SELKIND_KEY, 'sprint')
+                  }
+                }}
+                className="px-4 py-1.5 text-sm font-medium bg-red-500 hover:bg-red-600 text-white rounded-[8px] transition"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

@@ -1,11 +1,14 @@
-import { useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { CalendarPlus } from 'lucide-react'
 import {
   buildMonthGrid,
   assignLanes,
   computeBarSegments,
   type CalItem,
 } from './lib'
-import type { Collection, Task } from './db'
+import { db, type Collection, type CollectionStatus, type Task } from './db'
+import { DatePickCell } from './DatePicker'
 
 const MONTHS_LONG = [
   'January',
@@ -56,14 +59,20 @@ function shortDate(dateStr: string): string {
 export function CollectionCalendar({
   collection,
   items,
+  onViewInList,
 }: {
   collection: Collection
   items: Task[]
+  /** Jump back to the List tab (used by the bar popover's "View in list"). */
+  onViewInList?: () => void
 }) {
-  const [view, setView] = useState(() => {
-    const d = new Date()
-    return { y: d.getUTCFullYear(), m: d.getUTCMonth() }
-  })
+  const nowY = new Date().getUTCFullYear()
+  const nowM = new Date().getUTCMonth()
+  const [view, setView] = useState(() => ({ y: nowY, m: nowM }))
+  // Open bar editor — { item id, anchor rect } captured on click.
+  const [openItem, setOpenItem] = useState<{ id: string; rect: DOMRect } | null>(
+    null
+  )
 
   const step = (delta: number) => {
     setView((v) => {
@@ -71,6 +80,7 @@ export function CollectionCalendar({
       return { y: v.y + Math.floor(m / 12), m: ((m % 12) + 12) % 12 }
     })
   }
+  const onCurrentMonth = view.y === nowY && view.m === nowM
 
   const taskById = new Map(items.map((t) => [t.id, t]))
   const statusColorById = new Map(
@@ -93,6 +103,9 @@ export function CollectionCalendar({
       start: t.startDate as string,
       end: t.dueDate ?? (t.startDate as string),
     }))
+  // Items with no start date never appear on the grid — surface them in an
+  // "Unscheduled" tray instead of silently dropping them (a trust bug).
+  const unscheduled = items.filter((t) => !t.startDate)
 
   const grid = buildMonthGrid(view.y, view.m, TODAY)
   const lanes = assignLanes(cal)
@@ -104,8 +117,36 @@ export function CollectionCalendar({
 
   return (
     <div>
-      <div className="flex items-center justify-end mb-3">
+      <div className="flex items-center justify-between gap-2 mb-3 flex-wrap">
+        {/* Legend — maps bar color → status. */}
+        {collection.statuses.length > 0 ? (
+          <div className="flex items-center gap-3.5 flex-wrap">
+            {collection.statuses.map((s) => (
+              <span
+                key={s.id}
+                className="inline-flex items-center gap-1.5 text-[11.5px] text-ink-muted"
+              >
+                <span
+                  className="w-2.5 h-2.5 rounded-full"
+                  style={{ background: s.color }}
+                  aria-hidden
+                />
+                {s.name}
+              </span>
+            ))}
+          </div>
+        ) : (
+          <span />
+        )}
         <div className="flex items-center gap-2 text-[14px] font-semibold text-ink">
+          {!onCurrentMonth && (
+            <button
+              onClick={() => setView({ y: nowY, m: nowM })}
+              className="text-[12.5px] font-semibold text-accent rounded-[7px] px-2.5 py-1 hover:bg-accent-soft transition"
+            >
+              Today
+            </button>
+          )}
           <button
             onClick={() => step(-1)}
             className="w-[26px] h-[26px] rounded-[7px] bg-black/[0.05] hover:bg-black/[0.09] text-ink-muted transition grid place-items-center"
@@ -193,7 +234,15 @@ export function CollectionCalendar({
                     key={`${seg.itemId}-${seg.weekIndex}`}
                     data-bar
                     title={title}
-                    className="z-[1] h-[21px] my-px flex items-center gap-[3px] px-[9px] text-[11.5px] font-semibold whitespace-nowrap overflow-hidden cursor-default relative transition hover:brightness-95"
+                    onClick={(e) =>
+                      setOpenItem({
+                        id: seg.itemId,
+                        rect: (
+                          e.currentTarget as HTMLElement
+                        ).getBoundingClientRect(),
+                      })
+                    }
+                    className="z-[1] h-[21px] my-px flex items-center gap-[3px] px-[9px] text-[11.5px] font-semibold whitespace-nowrap overflow-hidden cursor-pointer relative transition hover:brightness-95"
                     style={{
                       gridColumn: `${seg.colStart} / span ${seg.span}`,
                       gridRow: seg.lane + 2,
@@ -229,6 +278,207 @@ export function CollectionCalendar({
           </div>
         ))}
       </div>
+
+      {cal.length === 0 && (
+        <div className="text-center text-[13px] text-ink-faint py-3">
+          {items.length === 0
+            ? 'No items yet — add some in List.'
+            : 'No items have dates yet.'}
+        </div>
+      )}
+
+      {unscheduled.length > 0 && (
+        <div className="mt-3 bg-surface rounded-[14px] shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_22px_rgba(0,0,0,0.05)] px-4 py-3">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-[11px] font-semibold text-ink-faint tracking-wider mr-0.5">
+              UNSCHEDULED · {unscheduled.length}
+            </span>
+            {unscheduled.map((t) => (
+              <UnscheduledChip
+                key={t.id}
+                task={t}
+                color={colorForTask(t)}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {openItem &&
+        (() => {
+          const t = taskById.get(openItem.id)
+          if (!t) return null
+          return (
+            <BarPopover
+              task={t}
+              statuses={collection.statuses}
+              anchorRect={openItem.rect}
+              onClose={() => setOpenItem(null)}
+              onViewInList={onViewInList}
+            />
+          )
+        })()}
     </div>
+  )
+}
+
+/**
+ * A chip for an item with no start date. The whole chip is the date-picker
+ * trigger (a transparent DatePickCell overlay — the §5.5 hidden-control pattern):
+ * pick a date and the item leaves the tray and lands on the grid, so the chip
+ * never has to render a date itself.
+ */
+function UnscheduledChip({ task, color }: { task: Task; color: string }) {
+  return (
+    <span className="relative inline-flex items-center gap-1.5 h-8 bg-canvas border border-border-hair rounded-full pl-2.5 pr-2.5 text-[12.5px] cursor-pointer hover:border-accent transition">
+      <span
+        className="w-2 h-2 rounded-full shrink-0"
+        style={{ background: color }}
+        aria-hidden
+      />
+      <span className="max-w-[150px] truncate">{task.title || 'Untitled'}</span>
+      <CalendarPlus size={13} className="text-ink-faint shrink-0" aria-hidden />
+      <span className="absolute inset-0 opacity-0">
+        <DatePickCell
+          value={null}
+          onChange={(v) => db.tasks.update(task.id, { startDate: v })}
+          ariaLabel={`Schedule ${task.title || 'item'}`}
+        />
+      </span>
+    </span>
+  )
+}
+
+/**
+ * Click-a-bar inline editor — portalled + fixed-positioned (the calendar card is
+ * `overflow-hidden`), mirrors the StatusPill / DatePicker popover pattern. Edit
+ * title · status · start/end, or jump to the List tab.
+ */
+function BarPopover({
+  task,
+  statuses,
+  anchorRect,
+  onClose,
+  onViewInList,
+}: {
+  task: Task
+  statuses: CollectionStatus[]
+  anchorRect: DOMRect
+  onClose: () => void
+  onViewInList?: () => void
+}) {
+  const popRef = useRef<HTMLDivElement>(null)
+  const W = 244
+  const [pos, setPos] = useState<{ top: number; left: number }>({
+    top: -9999,
+    left: -9999,
+  })
+
+  useLayoutEffect(() => {
+    let left = Math.min(anchorRect.left, window.innerWidth - 8 - W)
+    left = Math.max(8, left)
+    const H = 240
+    let top = anchorRect.bottom + 6
+    if (top + H > window.innerHeight - 8) top = Math.max(8, anchorRect.top - H - 6)
+    setPos({ top, left })
+  }, [anchorRect])
+
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => {
+      if (popRef.current && !popRef.current.contains(e.target as Node)) onClose()
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    // Defer so the opening click doesn't immediately close it.
+    const id = window.setTimeout(() => {
+      document.addEventListener('mousedown', onDown)
+      document.addEventListener('keydown', onKey)
+    }, 0)
+    return () => {
+      window.clearTimeout(id)
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [onClose])
+
+  return createPortal(
+    <div
+      ref={popRef}
+      onClick={(e) => e.stopPropagation()}
+      style={{ position: 'fixed', top: pos.top, left: pos.left, width: W }}
+      className="z-50 bg-surface border border-border-hair rounded-[14px] shadow-[0_12px_40px_rgba(0,0,0,0.18),0_0_0_0.5px_rgba(0,0,0,0.04)] p-3 space-y-2.5"
+    >
+      <input
+        value={task.title}
+        onChange={(e) => db.tasks.update(task.id, { title: e.target.value })}
+        className="w-full text-[14px] font-semibold text-ink bg-transparent border-b border-transparent focus:border-accent focus:outline-none pb-0.5"
+        aria-label="Item title"
+      />
+      <div className="flex flex-wrap gap-1.5">
+        {statuses.map((s) => {
+          const active = task.collectionStatusId === s.id
+          return (
+            <button
+              key={s.id}
+              onClick={() =>
+                db.tasks.update(task.id, {
+                  collectionStatusId: active ? null : s.id,
+                })
+              }
+              className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11.5px] font-semibold leading-none transition"
+              style={{
+                background: active
+                  ? `color-mix(in srgb, ${s.color} 16%, transparent)`
+                  : 'transparent',
+                color: active ? s.color : 'var(--color-ink-muted)',
+                boxShadow: active ? 'none' : 'inset 0 0 0 1px var(--color-border)',
+              }}
+            >
+              <span
+                className="w-1.5 h-1.5 rounded-full"
+                style={{ background: s.color }}
+                aria-hidden
+              />
+              {s.name}
+            </button>
+          )
+        })}
+      </div>
+      <div className="flex items-center justify-between gap-2 text-[12.5px]">
+        <span className="text-ink-faint">Start</span>
+        <span className="w-[96px]">
+          <DatePickCell
+            value={task.startDate}
+            onChange={(v) => db.tasks.update(task.id, { startDate: v })}
+            ariaLabel="Start date"
+            emptyHint="Start"
+          />
+        </span>
+      </div>
+      <div className="flex items-center justify-between gap-2 text-[12.5px]">
+        <span className="text-ink-faint">End</span>
+        <span className="w-[96px]">
+          <DatePickCell
+            value={task.dueDate}
+            onChange={(v) => db.tasks.update(task.id, { dueDate: v })}
+            ariaLabel="Due date"
+            emptyHint="End"
+          />
+        </span>
+      </div>
+      {onViewInList && (
+        <button
+          onClick={() => {
+            onViewInList()
+            onClose()
+          }}
+          className="w-full text-left text-[12.5px] font-medium text-accent rounded-[7px] px-1 py-1 hover:bg-accent-soft transition"
+        >
+          View in list →
+        </button>
+      )}
+    </div>,
+    document.body
   )
 }

@@ -347,6 +347,7 @@ export function DatePickCell({
   ariaLabel,
   sprintRange,
   daysOff,
+  emptyHint,
 }: {
   value: string | null
   highlight?: 'overdue' | null
@@ -360,6 +361,13 @@ export function DatePickCell({
   ariaLabel: string
   sprintRange?: DateRange | null
   daysOff?: DayOff[]
+  /**
+   * Opt-in: when set and there's no value, render a "quiet dashed pill"
+   * (`＋ {emptyHint}`) instead of the bare "—" — a discoverable, tappable empty
+   * affordance (matches the days-off pill idiom). Collections pass "Start"/"End";
+   * the sprint view omits it, so its rows keep the plain dash.
+   */
+  emptyHint?: string
 }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLButtonElement>(null)
@@ -389,12 +397,16 @@ export function DatePickCell({
         }}
         aria-label={ariaLabel}
         title={locked ? 'Computed from prerequisites. Clear Pre to edit manually.' : undefined}
-        className={`relative inline-flex items-center justify-end w-full h-8 px-2 rounded-md border border-transparent transition ${valueCls} ${
+        className={`group relative inline-flex items-center justify-end w-full h-8 px-2 rounded-md border border-transparent transition ${valueCls} ${
           locked ? 'cursor-default' : 'cursor-pointer hover:border-border-strong hover:bg-canvas'
         }`}
       >
         {value ? (
           <span className="text-sm whitespace-nowrap">{label}</span>
+        ) : emptyHint ? (
+          <span className="inline-flex items-center rounded-full border border-dashed border-border px-2.5 py-0.5 text-[11.5px] font-medium text-ink-faint group-hover:border-accent group-hover:text-accent transition">
+            ＋ {emptyHint}
+          </span>
         ) : (
           <span className="text-sm text-ink-faint">—</span>
         )}

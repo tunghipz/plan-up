@@ -1,7 +1,7 @@
 # Collections (task ngoài sprint)
 
 **Status:** Implemented
-**Last updated:** 2026-06-06
+**Last updated:** 2026-06-08
 **Code:** `app/src/db.ts` (schema v9 + collection/section/status/item CRUD, export v3),
 `app/src/lib.ts` (buildMonthGrid/assignLanes/computeBarSegments — pure calendar helpers),
 `app/src/CollectionView.tsx` (List card-per-section + status editor + click-assign +
@@ -43,6 +43,33 @@ theo section do user tạo). Mỗi bảng:
 Segmented control góc phải (chỉ 2 nút, **bỏ Board**).
 - **List:** card-per-section như trên.
 - **Calendar:** lịch tháng (Mon-start), **thanh event liền mạch** (xem phần Calendar bên dưới).
+
+### UX refinements (2026-06-08)
+Một loạt chỉnh nhỏ để Collections bám sát design-system constitution (đọc kèm
+[design-system.md](../design-system.md)):
+
+1. **Header = summary, không phải badge.** Bỏ badge "COLLECTION" tô accent đặc (accent là
+   *tín hiệu*, không trang trí — §2.1). Thay bằng: icon stack mờ cạnh tên + dòng summary nhỏ
+   (`N items` + hàng chấm màu phân bố theo status). Tên collection có icon ✎ hiện khi hover.
+2. **Empty state.** Bảng 0 item: ẩn column header, hiện dòng calm "No items yet — add your first
+   below" + vẫn còn dòng Add item inline (CTA tự nhiên). Calendar không có item nào có ngày:
+   "No items have dates yet." / "No items yet — add some in List." (checklist §#4).
+3. **Calendar — Unscheduled tray.** Item **không có startDate** trước đây bị lọc mất khỏi Calendar
+   (trông như mất). Nay hiện trong khay **UNSCHEDULED · N** dưới lưới; mỗi chip có `DatePickCell`
+   để gán ngày (gán xong item nhảy lên lịch). Không gì bị ẩn vô hình.
+4. **Calendar — bar bấm được.** Bar không còn `cursor-default` + chỉ `title`. Bấm bar → popover
+   (portal + float-shadow như StatusPill/DatePicker) sửa inline: title · status (click-assign) ·
+   Start/End (`DatePickCell`) · "View in list →" (đổi segmented về List). Theo §5.7 (inline edit).
+5. **Quiet dashed pill cho ô trống.** "No status" và ngày trống render như **pill viền đứt**
+   (`＋ Status` / `＋ End`), hover thành accent — đúng idiom days-off đã có, đọc ra "bấm được".
+   `DatePickCell` thêm prop optional `emptyHint` (sprint view không truyền → giữ nguyên dấu "—").
+6. **Đổi tên = single-click + ✎.** Tên collection và tên bảng đổi từ *double-click ẩn* sang
+   **single-click để sửa** + icon ✎ hiện khi hover (đồng bộ với item title luôn-sửa-được).
+7. **Bỏ `window.confirm()`.** Xoá bảng / xoá status → **inline confirm** (thanh đỏ nhạt
+   Delete/Cancel ngay trong card/row). Xoá collection → **sheet Cupertino** (cùng style NameModal,
+   nút Delete đỏ). Không còn dialog OS xám phá DNA (§8).
+8. **Calendar — Today + legend.** Nút **Today** (hiện khi không ở tháng hiện tại) nhảy về tháng nay;
+   hàng **legend** (chấm màu + tên status) phía trên lưới để map màu → status.
 
 ### Status — người dùng tự tạo (per-collection)
 Mỗi collection có **bộ status riêng do người dùng tự định nghĩa** — không cố định, không dùng

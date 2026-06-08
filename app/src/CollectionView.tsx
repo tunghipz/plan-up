@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { ChevronDown, List, Calendar, X, Plus, GripVertical } from 'lucide-react'
+import { ChevronDown, List, Calendar, X, Plus, GripVertical, Layers, Pencil } from 'lucide-react'
 import {
   db,
   addSection,
@@ -90,11 +90,12 @@ export function CollectionView({
   return (
     <div className="max-w-5xl mx-auto px-1">
       <div className="flex items-center justify-between gap-3 mb-4 pt-1 flex-wrap">
-        <div className="flex items-center gap-2.5 min-w-0">
-          <CollectionTitle collection={collection} />
-          <span className="text-[10px] font-bold tracking-wide text-white bg-accent rounded-[5px] px-1.5 py-0.5">
-            COLLECTION
-          </span>
+        <div className="flex flex-col gap-0.5 min-w-0">
+          <div className="flex items-center gap-2 min-w-0">
+            <Layers size={15} className="text-ink-faint shrink-0" aria-hidden />
+            <CollectionTitle collection={collection} />
+          </div>
+          <CollectionSummary items={items} statuses={collection.statuses} />
         </div>
         <div className="flex items-center gap-2.5 relative">
           <StatusEditor collection={collection} />
@@ -124,7 +125,11 @@ export function CollectionView({
           </button>
         </div>
       ) : (
-        <CollectionCalendar collection={collection} items={items} />
+        <CollectionCalendar
+          collection={collection}
+          items={items}
+          onViewInList={() => setTab('list')}
+        />
       )}
 
       {addingTable && (
@@ -139,6 +144,58 @@ export function CollectionView({
             setAddingTable(false)
           }}
         />
+      )}
+    </div>
+  )
+}
+
+/**
+ * Calm at-a-glance summary under the title (replaces the old "COLLECTION" accent
+ * badge — accent is a signal, not chrome, §2.1): item count + a row of dots
+ * showing the status distribution. Renders nothing when the collection is empty.
+ */
+function CollectionSummary({
+  items,
+  statuses,
+}: {
+  items: Task[]
+  statuses: CollectionStatus[]
+}) {
+  if (items.length === 0) return null
+  const NONE = '∅'
+  const byStatus = new Map<string, number>()
+  for (const t of items) {
+    const k = t.collectionStatusId ?? NONE
+    byStatus.set(k, (byStatus.get(k) ?? 0) + 1)
+  }
+  const dots = statuses
+    .filter((s) => byStatus.get(s.id))
+    .map((s) => ({ color: s.color, n: byStatus.get(s.id)! }))
+  const none = byStatus.get(NONE) ?? 0
+  return (
+    <div className="flex items-center gap-2 text-[12px] text-ink-faint font-medium pl-[23px]">
+      <span className="tabular-nums">
+        {items.length} {items.length === 1 ? 'item' : 'items'}
+      </span>
+      {(dots.length > 0 || none > 0) && (
+        <span className="flex items-center gap-1">
+          {dots.map((d, i) => (
+            <span
+              key={i}
+              className="w-2 h-2 rounded-full"
+              style={{ background: d.color }}
+              title={`${d.n}`}
+              aria-hidden
+            />
+          ))}
+          {none > 0 && (
+            <span
+              className="w-2 h-2 rounded-full border border-border"
+              title={`${none} no status`}
+              aria-hidden
+            />
+          )}
+        </span>
       )}
     </div>
   )
@@ -193,11 +250,16 @@ function CollectionTitle({ collection }: { collection: Collection }) {
   }
   return (
     <h2
-      className="text-[18px] font-bold text-ink tracking-[-0.018em] truncate cursor-text hover:underline decoration-dotted underline-offset-4"
-      onDoubleClick={() => setEditing(true)}
-      title="Double-click to rename"
+      className="group/title inline-flex items-center gap-1.5 min-w-0 text-[18px] font-bold text-ink tracking-[-0.018em] cursor-text"
+      onClick={() => setEditing(true)}
+      title="Click to rename"
     >
-      {collection.name}
+      <span className="truncate">{collection.name}</span>
+      <Pencil
+        size={13}
+        className="text-ink-faint opacity-0 group-hover/title:opacity-60 transition shrink-0"
+        aria-hidden
+      />
     </h2>
   )
 }
@@ -337,6 +399,8 @@ function SectionCard({
 
   // Drop target for items dragged in from another section.
   const [dropActive, setDropActive] = useState(false)
+  // Inline (in-DNA) delete confirm — replaces window.confirm (§8).
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
 
   return (
     <div
@@ -392,15 +456,9 @@ function SectionCard({
         <span className="flex-1" />
         {canDelete && (
           <button
-            onClick={async (e) => {
+            onClick={(e) => {
               e.stopPropagation()
-              if (
-                window.confirm(
-                  `Delete table “${section.name}”? Its items move to the first table.`
-                )
-              ) {
-                await deleteSection(collectionId, section.id)
-              }
+              setConfirmingDelete(true)
             }}
             title="Delete table"
             aria-label="Delete table"
@@ -411,26 +469,57 @@ function SectionCard({
         )}
       </div>
 
+      {confirmingDelete && (
+        <div className="flex items-center gap-3 px-[18px] py-2.5 bg-red-500/[0.06] border-b border-border text-[13px]">
+          <span className="flex-1 text-ink font-medium">
+            Delete this table? Its items move to the first table.
+          </span>
+          <button
+            onClick={async () => {
+              await deleteSection(collectionId, section.id)
+            }}
+            className="text-red-500 font-semibold hover:underline"
+          >
+            Delete
+          </button>
+          <button
+            onClick={() => setConfirmingDelete(false)}
+            className="text-ink-muted hover:text-ink"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+
       {!collapsed && (
         <div>
           {/* Quiet column header — same look as the sprint list (canvas-sunk
-              tint + hairline), labels aligned to the row columns via COL. */}
-          <div className="flex items-center gap-3 px-4 py-1.5 border-b border-border-hair bg-canvas-sunk/40">
-            <div className={COL.lead} />
-            <div className={COL.dot} />
-            <div className={`${COL.title} text-[11px] tracking-normal text-ink-faint font-medium`}>
-              Name
+              tint + hairline), labels aligned to the row columns via COL. Hidden
+              while the table is empty (mirrors the sprint list, §5.8). */}
+          {items.length > 0 && (
+            <div className="flex items-center gap-3 px-4 py-1.5 border-b border-border-hair bg-canvas-sunk/40">
+              <div className={COL.lead} />
+              <div className={COL.dot} />
+              <div className={`${COL.title} text-[11px] tracking-normal text-ink-faint font-medium`}>
+                Name
+              </div>
+              <div className={`${COL.start} text-[11px] tracking-normal text-ink-faint font-medium`}>
+                Start
+              </div>
+              <div className={`${COL.due} text-[11px] tracking-normal text-ink-faint font-medium`}>
+                End
+              </div>
+              <div className={`${COL.status} text-[11px] tracking-normal text-ink-faint font-medium`}>
+                Status
+              </div>
             </div>
-            <div className={`${COL.start} text-[11px] tracking-normal text-ink-faint font-medium`}>
-              Start
+          )}
+
+          {items.length === 0 && (
+            <div className="px-4 pt-6 pb-1 text-center text-[13.5px] text-ink-faint">
+              No items yet — add your first below.
             </div>
-            <div className={`${COL.due} text-[11px] tracking-normal text-ink-faint font-medium`}>
-              End
-            </div>
-            <div className={`${COL.status} text-[11px] tracking-normal text-ink-faint font-medium`}>
-              Status
-            </div>
-          </div>
+          )}
 
           <div className="divide-y divide-border">
             {items.map((t) => (
@@ -505,12 +594,19 @@ function SectionName({
   }
   return (
     <span
-      className="text-[15.5px] font-semibold text-ink tracking-[-0.01em] truncate cursor-text hover:underline decoration-dotted underline-offset-4"
-      onClick={(e) => e.stopPropagation()}
-      onDoubleClick={() => setEditing(true)}
-      title="Double-click to rename"
+      className="group/sname inline-flex items-center gap-1.5 min-w-0 text-[15.5px] font-semibold text-ink tracking-[-0.01em] cursor-text"
+      onClick={(e) => {
+        e.stopPropagation()
+        setEditing(true)
+      }}
+      title="Click to rename"
     >
-      {section.name}
+      <span className="truncate">{section.name}</span>
+      <Pencil
+        size={12}
+        className="text-ink-faint opacity-0 group-hover/sname:opacity-60 transition shrink-0"
+        aria-hidden
+      />
     </span>
   )
 }
@@ -589,6 +685,7 @@ function ItemRow({
           value={task.startDate}
           onChange={(v) => db.tasks.update(task.id, { startDate: v })}
           ariaLabel="Start date"
+          emptyHint="Start"
         />
       </div>
       <div className={COL.due}>
@@ -596,6 +693,7 @@ function ItemRow({
           value={task.dueDate}
           onChange={(v) => db.tasks.update(task.id, { dueDate: v })}
           ariaLabel="Due date"
+          emptyHint="End"
         />
       </div>
       <div className={COL.status}>
@@ -772,8 +870,8 @@ function StatusPill({
             {status.name}
           </span>
         ) : (
-          <span className="text-[11.5px] font-medium text-ink-faint">
-            No status
+          <span className="inline-flex items-center gap-1 rounded-full border border-dashed border-border px-2.5 py-1 text-[11.5px] font-medium leading-none text-ink-faint hover:border-accent hover:text-accent transition">
+            ＋ Status
           </span>
         )}
       </button>
@@ -826,10 +924,12 @@ function StatusPill({
 function StatusEditor({ collection }: { collection: Collection }) {
   const [open, setOpen] = useState(false)
   const [paletteFor, setPaletteFor] = useState<string | null>(null)
+  const [confirmId, setConfirmId] = useState<string | null>(null)
   const ref = useRef<HTMLDivElement>(null)
   useOutsideClose(ref, open, () => {
     setOpen(false)
     setPaletteFor(null)
+    setConfirmId(null)
   })
 
   return (
@@ -859,7 +959,33 @@ function StatusEditor({ collection }: { collection: Collection }) {
             STATUSES
           </div>
 
-          {collection.statuses.map((s) => (
+          {collection.statuses.map((s) =>
+            confirmId === s.id ? (
+              <div
+                key={s.id}
+                data-status-row
+                className="flex items-center gap-2 px-3 py-1.5 bg-red-500/[0.06] text-[13px]"
+              >
+                <span className="flex-1 min-w-0 truncate text-ink">
+                  Delete “{s.name}”?
+                </span>
+                <button
+                  onClick={async () => {
+                    await deleteStatus(collection.id, s.id)
+                    setConfirmId(null)
+                  }}
+                  className="text-red-500 font-semibold shrink-0"
+                >
+                  Delete
+                </button>
+                <button
+                  onClick={() => setConfirmId(null)}
+                  className="text-ink-muted hover:text-ink shrink-0"
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
             <div
               key={s.id}
               data-status-row
@@ -914,10 +1040,9 @@ function StatusEditor({ collection }: { collection: Collection }) {
 
               {/* Delete */}
               <button
-                onClick={async () => {
-                  if (window.confirm(`Delete status "${s.name}"?`)) {
-                    await deleteStatus(collection.id, s.id)
-                  }
+                onClick={() => {
+                  setPaletteFor(null)
+                  setConfirmId(s.id)
                 }}
                 className="opacity-0 group-hover:opacity-60 hover:!opacity-100 text-ink-faint hover:text-red-500 transition p-0.5 rounded"
                 aria-label={`Delete ${s.name}`}
@@ -925,7 +1050,8 @@ function StatusEditor({ collection }: { collection: Collection }) {
                 <X size={13} />
               </button>
             </div>
-          ))}
+            )
+          )}
 
           <div className="border-t border-border-hair mx-3 my-1.5" />
           <button

@@ -11,7 +11,6 @@ import {
   LayoutGrid,
   GanttChartSquare,
   Calendar,
-  Star,
   Plus,
   Settings,
   X,
@@ -400,9 +399,17 @@ function App() {
     const assigned = t.filter((x) => x.assigneeId !== null).length
     const notEstimated = t.filter((x) => x.estimate === null).length
     const done = t.filter((x) => x.status === 'done').length
+    // Disjoint partition for the stacked capacity bar (sums to total):
+    // done · in-flight (owned, not done) · open (unowned, not done).
+    const inFlight = t.filter(
+      (x) => x.status !== 'done' && x.assigneeId !== null
+    ).length
+    const open = total - done - inFlight
     return {
       total,
       assigned,
+      inFlight,
+      open,
       notEstimated,
       done,
       pctAssigned: total === 0 ? 0 : Math.round((assigned / total) * 100),
@@ -545,7 +552,8 @@ function App() {
                       <span className={`block truncate font-medium ${isActive ? '' : ''}`}>{s.name}</span>
                       <span className={`block text-[11.5px] leading-tight mt-0.5 tab-data ${isActive ? 'text-white/80' : 'text-ink-faint'}`}>
                         {formatSprintRange(s.startDate, s.endDate)}
-                        {c && c.total > 0 && ` · ${c.total} tasks`}
+                        {c && c.total > 0 &&
+                          ` · ${c.total} task${c.total === 1 ? '' : 's'}`}
                       </span>
                     </span>
                   </button>
@@ -671,13 +679,6 @@ function App() {
                   key={currentSprint.id}
                   sprint={currentSprint}
                 />
-                <button
-                  className="inline-flex items-center justify-center w-6 h-6 rounded-md text-ink-faint hover:text-yellow-500 hover:bg-yellow-500/10 transition shrink-0"
-                  title="Star this sprint"
-                  aria-label="Star sprint"
-                >
-                  <Star size={14} />
-                </button>
                 <span className="inline-flex items-center text-xs text-ink-muted shrink-0 tab-data bg-fill rounded-full px-2.5 py-1">
                   {formatSprintRange(
                     currentSprint.startDate,
@@ -761,10 +762,11 @@ function App() {
           {selKind === 'sprint' && currentSprint && (
             <CapacityBanner
               total={capacity.total}
-              assigned={capacity.assigned}
               pctAssigned={capacity.pctAssigned}
               done={capacity.done}
               pctDone={capacity.pctDone}
+              inFlight={capacity.inFlight}
+              open={capacity.open}
               notEstimated={capacity.notEstimated}
             />
           )}
@@ -903,68 +905,105 @@ function App() {
   )
 }
 
+/**
+ * Capacity = single slim stacked bar + inline numbers (design-system §4.7).
+ * The bar partitions the sprint's leaf tasks into three disjoint segments —
+ * done / in-flight (owned, not done) / open (unowned) — that sum to `total`.
+ * `notEstimated` rides the legend as a warning, never the bar.
+ */
 function CapacityBanner({
   total,
-  assigned,
   pctAssigned,
   done,
   pctDone,
+  inFlight,
+  open,
   notEstimated,
 }: {
   total: number
-  assigned: number
   pctAssigned: number
   done: number
   pctDone: number
+  inFlight: number
+  open: number
   notEstimated: number
 }) {
+  if (total === 0) {
+    return (
+      <div className="px-6 pt-5 pb-2 max-w-5xl">
+        <div className="bg-surface rounded-[14px] px-5 py-4 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_6px_16px_rgba(0,0,0,0.04)]">
+          <div className="text-[15px] font-semibold tracking-[-0.01em] text-ink">
+            Sprint capacity
+          </div>
+          <div className="text-[13px] text-ink-muted mt-0.5">
+            No tasks yet — <span className="text-accent">add your first task below</span>.
+          </div>
+        </div>
+      </div>
+    )
+  }
+  const pct = (n: number) => `${(n / total) * 100}%`
   return (
-    <div className="px-6 pt-5 pb-2 grid grid-cols-3 gap-3 max-w-5xl">
-      <Stat
-        label="Backlog"
-        value={total === 0 ? 'Empty' : `${total} task${total === 1 ? '' : 's'}`}
-        sub={total === 0 ? 'Add your first task below' : 'in this sprint'}
-        accent={total === 0}
-      />
-      <Stat
-        label="Assigned"
-        value={`${pctAssigned}%`}
-        sub={`${assigned}/${total || 0} have an owner`}
-      />
-      <Stat
-        label="Progress"
-        value={`${pctDone}%`}
-        sub={
-          notEstimated > 0
-            ? `${done} done · ${notEstimated} not estimated`
-            : `${done} done`
-        }
-      />
+    <div className="px-6 pt-5 pb-2 max-w-5xl">
+      <div className="bg-surface rounded-[14px] px-5 py-4 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_6px_16px_rgba(0,0,0,0.04)]">
+        <div className="flex items-baseline justify-between gap-3">
+          <div className="text-[15px] font-semibold tracking-[-0.01em] text-ink">
+            Sprint capacity
+          </div>
+          <div className="text-[12.5px] text-ink-muted tab-data">
+            <span className="font-semibold text-ink">{total}</span> task
+            {total === 1 ? '' : 's'} ·{' '}
+            <span className="font-semibold text-ink">{pctDone}%</span> done ·{' '}
+            <span className="font-semibold text-ink">{pctAssigned}%</span> assigned
+          </div>
+        </div>
+        <div className="mt-2.5 flex h-2.5 w-full overflow-hidden rounded-full bg-[var(--color-canvas-sunk)]">
+          {done > 0 && (
+            <span className="h-full bg-status-done" style={{ width: pct(done) }} />
+          )}
+          {inFlight > 0 && (
+            <span className="h-full bg-accent" style={{ width: pct(inFlight) }} />
+          )}
+          {open > 0 && (
+            <span
+              className="h-full bg-border-strong"
+              style={{ width: pct(open) }}
+            />
+          )}
+        </div>
+        <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[12.5px] text-ink-muted tab-data">
+          <LegendDot color="var(--color-status-done)" n={done} label="done" />
+          <LegendDot color="var(--color-accent)" n={inFlight} label="in progress" />
+          <LegendDot color="var(--color-border-strong)" n={open} label="open" />
+          {notEstimated > 0 && (
+            <span className="text-priority-high">
+              ⚠ {notEstimated} not estimated
+            </span>
+          )}
+        </div>
+      </div>
     </div>
   )
 }
 
-function Stat({
+function LegendDot({
+  color,
+  n,
   label,
-  value,
-  sub,
-  accent,
 }: {
+  color: string
+  n: number
   label: string
-  value: string
-  sub: string
-  accent?: boolean
 }) {
   return (
-    <div className="bg-surface rounded-[14px] px-4 py-3 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_6px_16px_rgba(0,0,0,0.04)]">
-      <div className="text-[12px] text-ink-faint font-medium">{label}</div>
-      <div
-        className={`text-[22px] font-bold tracking-[-0.018em] mt-0.5 ${accent ? 'text-accent' : 'text-ink'}`}
-      >
-        {value}
-      </div>
-      <div className="text-xs text-ink-muted mt-0.5">{sub}</div>
-    </div>
+    <span className="inline-flex items-center gap-1.5">
+      <span
+        className="inline-block w-2 h-2 rounded-full"
+        style={{ background: color }}
+        aria-hidden
+      />
+      <span className="font-semibold text-ink">{n}</span> {label}
+    </span>
   )
 }
 

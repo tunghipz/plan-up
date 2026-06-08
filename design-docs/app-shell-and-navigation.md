@@ -1,7 +1,7 @@
 # App shell & navigation
 
 **Status:** Implemented
-**Last updated:** 2026-06-08
+**Last updated:** 2026-06-08 (capacity → hybrid stacked bar; removed dead star button)
 **Code:** `app/src/App.tsx`
 
 ## Purpose
@@ -15,14 +15,18 @@ Left → right:
 2. **Sprint panel** (vibrancy, **resizable**) — project name + sprint/task counts, the
    sprint list (active row = accent bg), `+`/`n` to add a sprint. **Drag the right edge**
    to resize.
-3. **Main column** — header toolbar (sprint name, star, date range, Roll over, view
+3. **Main column** — header toolbar (sprint name, date range, Roll over, view
    toggle, search, Export/Import), then the **capacity banner**, then the List/Board view.
 
 ## Capacity banner (`App.tsx` `CapacityBanner`)
-Three cards, shown when a sprint is selected, computed from the current sprint's tasks:
-- **Backlog** — `total` tasks ("Empty" hint when 0).
-- **Assigned** — `round(assigned/total*100)%`, sub "X/Y have an owner".
-- **Progress** — `round(done/total*100)%`, sub "X done · Y not estimated".
+A single slim block (design-system §4.7 hybrid bar), shown when a sprint is selected,
+computed from the current sprint's **leaf** tasks (parents excluded — see task-groups):
+- **Inline summary** — `{total} tasks · {pctDone}% done · {pctAssigned}% assigned`.
+- **Stacked bar** — `rounded-full`, segments done (green) / assigned (accent) / free (grey)
+  by share of `total`.
+- **Legend** — `X done · Y assigned · Z free`, plus `⚠ N not estimated` (priority-high
+  colour) only when `notEstimated > 0`.
+- Empty sprint (`total === 0`) → "No tasks yet — add your first task below" call to action.
 
 ## Implementation
 - Resizable sidebar: `SIDEBAR_MIN=200`, `SIDEBAR_MAX=460`, default `248`, `RAIL_W=58`.
@@ -44,4 +48,3 @@ Three cards, shown when a sprint is selected, computed from the current sprint's
   `plan-up:sidebarSprintsCollapsed`, `plan-up:sidebarCollectionsCollapsed`.
 - Current **sprint** is *not* persisted across sessions — on load it defaults to the
   latest sprint (by `startDate`) in the current project; resets when the project changes.
-- The header **star** button is a visual placeholder (no handler yet).

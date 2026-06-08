@@ -142,9 +142,13 @@ Icon rail + sprint panel dùng `background: var(--color-vibrancy)` + `backdrop-f
 
 Track xám `rgba(0,0,0,0.06)` bo 9px + segment chọn = **nền trắng nổi** (floating shadow). Đây là control chuẩn Apple, thay cho 2 nút toggle rời.
 
-### 4.7 Capacity = thanh tròn + label SF
+### 4.7 Capacity = thanh tròn xếp tầng + số inline (hybrid)
 
-Thanh `rounded-full` xếp tầng (done xanh / assigned accent / free xám), kèm legend SF tabular ("8 days done", "18 of 30 assigned · 60%"). Vẫn là **product feature**, không ẩn sau toggle. Sprint empty → gọi action.
+Một **khối mảnh** trên đầu view (không phải 3 thẻ số rời): tiêu đề "Sprint capacity" + dòng số inline (`12 tasks · 33% done · 75% assigned`), rồi **một thanh `rounded-full` xếp tầng** (done xanh `--color-status-done` / assigned accent / free xám `#dcdce0`), rồi **legend SF tabular** (`4 done · 9 assigned · 3 free`, cảnh báo `⚠ 2 not estimated` màu `--color-priority-high` khi có). Vẫn là **product feature**, không ẩn sau toggle. Sprint empty → gọi action.
+
+- Một thanh = thấy ngay tỷ lệ done/assigned/free, gọn chiều dọc hơn 3 tiles.
+- `notEstimated` không nhồi vào thanh (thanh chỉ tải done/assigned/free) — đặt ở legend dạng cảnh báo.
+- *Decision 2026-06-08*: đổi từ "3 stat tiles" (Backlog/Assigned/Progress) sang hybrid bar này để khớp đúng triết lý "thanh xếp tầng" của DNA; bản tiles cũ nằm trong git history.
 
 ## 5. Component rules
 

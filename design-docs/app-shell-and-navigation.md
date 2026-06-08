@@ -24,8 +24,9 @@ computed from the current sprint's **leaf** tasks (parents excluded — see task
 - **Inline summary** — `{total} tasks · {pctDone}% done · {pctAssigned}% assigned`.
 - **Stacked bar** — `rounded-full`, segments done (green) / assigned (accent) / free (grey)
   by share of `total`.
-- **Legend** — `X done · Y assigned · Z free`, plus `⚠ N not estimated` (priority-high
-  colour) only when `notEstimated > 0`.
+- **Legend** — `X done · Y assigned · Z free`, plus `⚠ N not estimated`
+  (`--color-warn-ink` — dark amber, WCAG AA on white; see design-system §2.2)
+  only when `notEstimated > 0`.
 - Empty sprint (`total === 0`) → "No tasks yet — add your first task below" call to action.
 
 ## Implementation

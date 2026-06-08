@@ -54,7 +54,8 @@ Greyscale theo **hệ xám Apple** (lệch nhẹ cool, gần neutral). CSS varia
 | `--color-separator-soft` | `rgba(0,0,0,0.055)` | `rgba(255,255,255,0.06)` | Đường rất nhẹ |
 | `--color-ink` | `#1D1D1F` | `#F5F5F7` | Text chính |
 | `--color-ink-muted` | `#6E6E73` | `#AEAEB2` | Secondary |
-| `--color-ink-faint` | `#A1A1A6` | `#8E8E93` | Tertiary (count, label, icon idle) |
+| `--color-ink-faint` | `#76767A` | `#98989E` | Tertiary (count, label, icon idle). **WCAG AA**: ~4.5:1 on white card; darkened từ `#A1A1A6` (2.57:1) 2026-06-08 để label/column-header/caret đọc được. Trên canvas xám ~4.15:1 (sát AA — đẩy lên nữa sẽ trùng `ink-muted`, mất tầng). |
+| `--color-warn-ink` | `#A06600` | `#FF9F0A` | Text cảnh báo (`⚠ N not estimated`). Amber tối để **label** đạt AA trên white (~4.78:1); tách khỏi `--color-priority-high` (dùng làm fill/dot, không cần 4.5:1). |
 
 **Quy tắc**: không hardcode hex trong JSX. Đụng màu → thêm token.
 

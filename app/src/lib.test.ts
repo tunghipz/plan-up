@@ -5,6 +5,7 @@ import {
   sprintWorkdays,
   formatRelativeTime,
   formatTimestamp,
+  formatShortDate,
 } from './lib'
 
 describe('formatRelativeTime', () => {
@@ -35,6 +36,19 @@ describe('formatTimestamp', () => {
   })
 })
 
+describe('formatShortDate', () => {
+  // Parses y-m-d by components, so the output is identical in every timezone.
+  // The old `new Date(str)` impl rendered the previous day ("Jun 7") in any
+  // UTC-negative zone — these pin the off-by-one shut.
+  it('formats MMM d from a yyyy-mm-dd string', () => {
+    expect(formatShortDate('2026-06-08')).toBe('Jun 8')
+  })
+  it('handles Jan and Dec boundaries without month drift', () => {
+    expect(formatShortDate('2026-01-01')).toBe('Jan 1')
+    expect(formatShortDate('2026-12-31')).toBe('Dec 31')
+  })
+})
+
 describe('parsePrereqSeqs', () => {
   it('parses a comma/space list', () => {
     expect(parsePrereqSeqs('2, 3 5')).toEqual([2, 3, 5])
@@ -58,6 +72,12 @@ describe('parsePrereqSeqs', () => {
 
   it('empty input → empty list', () => {
     expect(parsePrereqSeqs('   ')).toEqual([])
+  })
+
+  it('ignores an absurdly wide range instead of freezing', () => {
+    expect(parsePrereqSeqs('1-999999999')).toEqual([])
+    // a normal range alongside it still parses
+    expect(parsePrereqSeqs('1-999999999, 3, 4')).toEqual([3, 4])
   })
 })
 

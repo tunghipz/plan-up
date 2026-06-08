@@ -28,6 +28,9 @@ import {
   updateProject,
   nextSequence,
   dedupeSprints,
+  addSprintTask,
+  addCollectionItem,
+  memberNameExists,
   exportAll,
   importAll,
   seedIfEmpty,
@@ -910,6 +913,69 @@ describe('moveUnfinishedToNextSprint', () => {
   })
 })
 
+describe('addSprintTask', () => {
+  const s1 = { id: 's1', projectId: P, name: 'A', startDate: '2026-06-01', endDate: '2026-06-14' }
+
+  it('allocates the next sequence and applies §5.3.1 defaults', async () => {
+    await db.sprints.add(s1)
+    const t = await addSprintTask({
+      projectId: P,
+      sprintId: s1.id,
+      title: 'first',
+      startDate: s1.startDate,
+    })
+    expect(t.sequence).toBe(1)
+    expect(t.status).toBe('todo')
+    expect(t.priority).toBe('normal')
+    expect(t.assigneeId).toBeNull()
+    expect(t.dependsOn).toEqual([])
+    expect(await db.tasks.get(t.id)).toBeTruthy()
+  })
+
+  it('hands out monotonically unique sequences across sequential adds', async () => {
+    await db.sprints.add(s1)
+    const seqs: number[] = []
+    for (let i = 0; i < 5; i++) {
+      const t = await addSprintTask({ projectId: P, sprintId: s1.id, title: `t${i}`, startDate: s1.startDate })
+      seqs.push(t.sequence)
+    }
+    expect(new Set(seqs).size).toBe(5) // no collisions
+    expect(seqs).toEqual([1, 2, 3, 4, 5])
+  })
+
+  it('honours an explicit status (Board composer inherits its column)', async () => {
+    await db.sprints.add(s1)
+    const t = await addSprintTask({ projectId: P, sprintId: s1.id, title: 'x', startDate: s1.startDate, status: 'in_progress' })
+    expect(t.status).toBe('in_progress')
+  })
+})
+
+describe('memberNameExists', () => {
+  it('matches case-insensitively, scoped to the project, skipping exceptId', async () => {
+    await db.members.bulkAdd([
+      { id: 'm1', projectId: P, name: 'Alex', color: '#000', daysOff: [] },
+      { id: 'm2', projectId: 'other', name: 'Sam', color: '#000', daysOff: [] },
+    ])
+    expect(await memberNameExists(P, 'alex')).toBe(true) // case-insensitive
+    expect(await memberNameExists(P, '  ALEX ')).toBe(true) // trimmed
+    expect(await memberNameExists(P, 'Sam')).toBe(false) // different project
+    expect(await memberNameExists(P, 'Alex', 'm1')).toBe(false) // self excluded
+    expect(await memberNameExists(P, '')).toBe(false) // empty never collides
+  })
+})
+
+describe('addCollectionItem', () => {
+  it('ignores patch attempts to override the derived sequence', async () => {
+    await db.collections.add({ id: 'c1', projectId: P, name: 'Col', statuses: [], sections: [{ id: 'sec1', name: 'S' }], order: 0, createdAt: 0 })
+    const a = await addCollectionItem('c1', 'sec1', { title: 'a' })
+    // A malicious/buggy patch must NOT be able to clobber the per-project sequence.
+    const b = await addCollectionItem('c1', 'sec1', { title: 'b', sequence: 1 } as Partial<Task> & { title: string })
+    expect(b.sequence).toBe(a.sequence + 1)
+    expect(b.projectId).toBe(P)
+    expect(b.sprintId).toBeNull()
+  })
+})
+
 describe('export / import round-trip', () => {
   it('preserves all data', async () => {
     await seedIfEmpty()
@@ -962,6 +1028,50 @@ describe('export / import round-trip', () => {
     await expect(
       importAll({ version: 99 as 1, exportedAt: '', members: [], sprints: [], tasks: [] })
     ).rejects.toThrow(/Unsupported/)
+  })
+
+  it('rejects a versioned-but-malformed payload WITHOUT wiping existing data', async () => {
+    await seedIfEmpty()
+    const before = await db.tasks.count()
+    expect(before).toBeGreaterThan(0)
+
+    // Valid `version` but `tasks`/`members`/`sprints` not arrays — e.g. a
+    // truncated or hand-edited backup, or a foreign JSON that happens to carry
+    // `version: 1`. Must throw a clear error and leave the DB untouched.
+    await expect(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      importAll({ version: 2, exportedAt: '' } as any)
+    ).rejects.toThrow(/valid plan-up backup/i)
+
+    await expect(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      importAll({ version: 2, exportedAt: '', members: [], sprints: [], tasks: 'nope' } as any)
+    ).rejects.toThrow(/valid plan-up backup/i)
+
+    // Nothing was cleared.
+    expect(await db.tasks.count()).toBe(before)
+  })
+
+  it('translates a duplicate-id payload into a friendly error and rolls back', async () => {
+    await seedIfEmpty()
+    const before = await db.tasks.count()
+    const mk = (title: string, sequence: number): Task => ({
+      id: 'dup', projectId: P, sequence, title, assigneeId: null, sprintId: 's1',
+      status: 'todo', priority: 'normal', startDate: null, dueDate: null, estimate: null,
+      createdAt: 0, dependsOn: [],
+    })
+    const payload = {
+      version: 2 as const,
+      exportedAt: '',
+      projects: [{ id: P, name: 'T', createdAt: 0 }],
+      members: [],
+      sprints: [{ id: 's1', projectId: P, name: 'S', startDate: '2026-05-01', endDate: '2026-05-14' }],
+      tasks: [mk('a', 1), mk('b', 2)], // two tasks share id 'dup' → BulkError
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await expect(importAll(payload as any)).rejects.toThrow(/duplicate or conflicting/i)
+    // Transaction aborted → the clears were rolled back, original data intact.
+    expect(await db.tasks.count()).toBe(before)
   })
 
   it('clamps an oversized changeLog on import', async () => {

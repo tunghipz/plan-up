@@ -138,8 +138,11 @@ export function ChangeLogTooltip({ entries }: { entries?: ChangeLogEntry[] }) {
             className="z-[100] w-max max-w-[320px] rounded-xl border border-border-hair bg-surface px-3 py-2 shadow-[0_1px_3px_rgba(0,0,0,0.12),0_0_0_0.5px_rgba(0,0,0,0.04)]"
           >
             <div className="grid grid-cols-[auto_1fr_auto] items-baseline gap-x-2.5 gap-y-0.5">
-              {entries.map((e, i) => (
-                <Fragment key={i}>
+              {entries.map((e) => (
+                // Stable key: at most one entry per field per write (same ts),
+                // so ts+field is unique — beats index keys when the log updates
+                // live while the tooltip is open.
+                <Fragment key={`${e.ts}-${e.field}`}>
                   <span className="text-right text-[11px] text-ink-muted whitespace-nowrap">
                     {FIELD_LABEL[e.field]}
                   </span>

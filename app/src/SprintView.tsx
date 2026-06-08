@@ -36,7 +36,7 @@ import {
   updateTask,
   computeWorkingPlan,
   isTaskBlocked,
-  nextSequence,
+  addSprintTask,
   type Member,
   type Task,
   type Status,
@@ -420,7 +420,6 @@ export function SprintView({
           sprintId={sprintId}
           sprintStartDate={sprintStartDate}
           sprintEndDate={sprintEndDate}
-          allMembers={members}
           expanded={showEmpty}
           onToggle={() => setShowEmpty((x) => !x)}
         />
@@ -665,26 +664,33 @@ function MemberCard({
     for (const t of tasks) if (t.parentId) s.add(t.parentId)
     return s
   }, [tasks])
-  const leafTasks = tasks.filter((t) => !parentIds.has(t.id))
-  const total = leafTasks.length
-  const done = leafTasks.filter((t) => t.status === 'done').length
-  const pct = total ? Math.round((done / total) * 100) : 0
   const memberById = useMemo(() => new Map(members.map((m) => [m.id, m])), [members])
-  // Use each task's COMPUTED end (same plan the End column shows) so the header
-  // never disagrees with the rows. overdue = past-due unfinished; nextDue =
-  // earliest unfinished end that is today-or-later (the next upcoming deadline).
-  let overdue = 0
-  let nextDue: string | null = null
-  for (const t of leafTasks) {
-    if (t.status === 'done') continue
-    const due = computeWorkingPlan(t, tasksById, memberById).dueDate
-    if (!due) continue
-    if (isOverdue(due, false)) overdue++
-    else if (!nextDue || due < nextDue) nextDue = due
-  }
-  // Double-booking warnings among this member's leaf tasks (see
-  // design-docs/conflict-warning.md). Cheap O(n²) over a member's tasks.
-  const conflictTips = computeMemberConflicts(leafTasks, tasksById, memberById)
+  // All header stats derive from the same inputs — memoize them as one block so
+  // they don't recompute (incl. the O(n²) conflict scan + a computeWorkingPlan
+  // per task) on every unrelated re-render of this card (e.g. a selection toggle
+  // elsewhere). Recomputes only when this member's tasks/members actually change.
+  const { total, done, pct, overdue, nextDue, conflictTips } = useMemo(() => {
+    const leafTasks = tasks.filter((t) => !parentIds.has(t.id))
+    const total = leafTasks.length
+    const done = leafTasks.filter((t) => t.status === 'done').length
+    const pct = total ? Math.round((done / total) * 100) : 0
+    // Use each task's COMPUTED end (same plan the End column shows) so the header
+    // never disagrees with the rows. overdue = past-due unfinished; nextDue =
+    // earliest unfinished end that is today-or-later (the next upcoming deadline).
+    let overdue = 0
+    let nextDue: string | null = null
+    for (const t of leafTasks) {
+      if (t.status === 'done') continue
+      const due = computeWorkingPlan(t, tasksById, memberById).dueDate
+      if (!due) continue
+      if (isOverdue(due, false)) overdue++
+      else if (!nextDue || due < nextDue) nextDue = due
+    }
+    // Double-booking warnings among this member's leaf tasks (see
+    // design-docs/conflict-warning.md). Cheap O(n²) over a member's tasks.
+    const conflictTips = computeMemberConflicts(leafTasks, tasksById, memberById)
+    return { total, done, pct, overdue, nextDue, conflictTips }
+  }, [tasks, parentIds, tasksById, memberById])
   return (
     <Card>
       <GroupHeader
@@ -800,7 +806,6 @@ function CollapsedMembers({
   sprintId,
   sprintStartDate,
   sprintEndDate,
-  allMembers,
   expanded,
   onToggle,
 }: {
@@ -809,7 +814,6 @@ function CollapsedMembers({
   sprintId: string
   sprintStartDate: string
   sprintEndDate: string
-  allMembers: Member[]
   expanded: boolean
   onToggle: () => void
 }) {
@@ -850,9 +854,6 @@ function CollapsedMembers({
             </div>
           </Card>
         ))}
-      {expanded === false && null}
-      {/* keep allMembers ref stable */}
-      <span className="hidden">{allMembers.length}</span>
     </div>
   )
 }
@@ -1023,24 +1024,14 @@ function AddTaskRow({
   const add = async () => {
     const t = title.trim()
     if (!t) return
-    const seq = await nextSequence(sprintId)
-    await db.tasks.add({
-      id: uid(),
+    setTitle('') // clear synchronously so a fast double-Enter can't double-submit
+    await addSprintTask({
       projectId,
-      sequence: seq,
+      sprintId,
       title: t,
       assigneeId,
-      sprintId,
-      status: 'todo',
-      priority: 'normal',
-      // Default start = sprint start. User can override after creation.
       startDate: sprintStartDate,
-      dueDate: null,
-      estimate: null,
-      createdAt: Date.now(),
-      dependsOn: [],
     })
-    setTitle('')
   }
   return (
     <div className="flex items-center gap-3 px-4 py-2 text-sm">
@@ -1052,7 +1043,11 @@ function AddTaskRow({
       <input
         value={title}
         onChange={(e) => setTitle(e.target.value)}
-        onKeyDown={(e) => e.key === 'Enter' && add()}
+        onKeyDown={(e) => {
+          // isComposing guard: Enter that COMMITS an IME composition (Vietnamese
+          // telex/VNI, etc.) must not also submit the row mid-word.
+          if (e.key === 'Enter' && !e.nativeEvent.isComposing) add()
+        }}
         placeholder="Add task"
         className={`${COL.title} editable placeholder:text-ink-faint bg-transparent`}
       />
@@ -1128,15 +1123,60 @@ function TitleTextarea({
   trailing?: React.ReactNode
 }) {
   const ref = useRef<HTMLTextAreaElement>(null)
+  // Local draft so the textarea is NOT a controlled mirror of the IndexedDB
+  // round-trip. A fully-controlled `value={task.title}` whose onChange writes
+  // async to Dexie races: keystrokes typed before the live-query echoes back get
+  // clobbered and the caret jumps. We render `draft` (instant) and commit the
+  // DB write debounced — mirrors the EffortCell/PrereqInput draft pattern.
+  const [draft, setDraft] = useState(value)
+  const focusedRef = useRef(false)
+  const committedRef = useRef(value)
+  const latestRef = useRef(value)
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const commit = (v: string) => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current)
+      timerRef.current = null
+    }
+    if (v !== committedRef.current) {
+      committedRef.current = v
+      onChange(v)
+    }
+  }
+  // Sync external edits into the draft — but never while focused, or we'd
+  // overwrite what the user is mid-typing.
+  useEffect(() => {
+    if (!focusedRef.current) {
+      setDraft(value)
+      committedRef.current = value
+      latestRef.current = value
+    }
+  }, [value])
+  // Flush any pending debounced commit if we unmount mid-edit (fast navigate)
+  // so the last keystrokes are never dropped.
+  useEffect(
+    () => () => {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current)
+        if (latestRef.current !== committedRef.current) onChange(latestRef.current)
+      }
+    },
+    // onChange identity changes per render (inline arrow); intentionally bind
+    // the cleanup once and read the freshest value via refs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    []
+  )
+
   const resize = () => {
     const el = ref.current
     if (!el) return
     el.style.height = 'auto'
     el.style.height = el.scrollHeight + 'px'
   }
-  // Resize on mount + every value change. useLayoutEffect runs sync before paint
+  // Resize on mount + every draft change. useLayoutEffect runs sync before paint
   // so users never see the "1-line then snap to N lines" flicker.
-  useLayoutEffect(resize, [value])
+  useLayoutEffect(resize, [draft])
   // Re-fit height whenever the textarea's WIDTH changes (window resize, sidebar
   // drag, column changes) — otherwise wrapped lines reflow but the box keeps its
   // old taller height. Track last width so our own height writes don't re-trigger.
@@ -1165,11 +1205,25 @@ function TitleTextarea({
           right-aligns at the column edge. Height auto-grows via resize() above. */}
       <textarea
         ref={ref}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
+        value={draft}
+        onFocus={() => {
+          focusedRef.current = true
+        }}
+        onChange={(e) => {
+          const v = e.target.value
+          setDraft(v)
+          latestRef.current = v
+          if (timerRef.current) clearTimeout(timerRef.current)
+          timerRef.current = setTimeout(() => commit(v), 350)
+        }}
+        onBlur={() => {
+          focusedRef.current = false
+          commit(latestRef.current) // flush immediately on blur
+        }}
         rows={1}
         onKeyDown={(e) => {
-          if (e.key === 'Enter' && !e.shiftKey) {
+          // Don't blur on the Enter that commits an IME composition (Vietnamese).
+          if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
             e.preventDefault()
             ;(e.target as HTMLTextAreaElement).blur()
           }
@@ -2467,7 +2521,7 @@ function AddMemberRow({
         value={name}
         onChange={(e) => setName(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === 'Enter') submit()
+          if (e.key === 'Enter' && !e.nativeEvent.isComposing) submit()
           if (e.key === 'Escape') {
             setName('')
             onDeactivate()

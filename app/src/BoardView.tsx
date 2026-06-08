@@ -3,8 +3,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { ArrowUpDown, ChevronDown } from 'lucide-react'
 import {
   db,
-  uid,
-  nextSequence,
+  addSprintTask,
   computeWorkingPlan,
   recomputeDates,
   updateTask,
@@ -14,7 +13,7 @@ import {
   type Task,
 } from './db'
 import { ChangeLogTooltip } from './ChangeLogTooltip'
-import { formatShortDate } from './lib'
+import { formatShortDate, dayDiff } from './lib'
 import { SprintRangeContext } from './DatePicker'
 import {
   STATUS_META,
@@ -570,23 +569,14 @@ function AddTaskComposer({
   const add = async () => {
     const t = title.trim()
     if (!t) return
-    const seq = await nextSequence(sprintId)
-    await db.tasks.add({
-      id: uid(),
+    setTitle('') // clear synchronously: keeps composer open + blocks double-submit
+    await addSprintTask({
       projectId,
-      sequence: seq,
-      title: t,
-      assigneeId: null,
       sprintId,
-      status, // inherit the column's status
-      priority: 'normal',
+      title: t,
       startDate: sprintStartDate,
-      dueDate: null,
-      estimate: null,
-      createdAt: Date.now(),
-      dependsOn: [],
+      status, // inherit the column's status
     })
-    setTitle('') // keep the composer open + refocus for rapid entry
     requestAnimationFrame(() => {
       grow()
       taRef.current?.focus()
@@ -620,7 +610,8 @@ function AddTaskComposer({
           grow()
         }}
         onKeyDown={(e) => {
-          if (e.key === 'Enter' && !e.shiftKey) {
+          // Skip the Enter that commits an IME composition (Vietnamese, etc.).
+          if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
             e.preventDefault()
             void add()
           } else if (e.key === 'Escape') {
@@ -992,7 +983,7 @@ const BoardCard = memo(function BoardCard({
       displayStatus === 'done'
         ? 'var(--color-status-done)'
         : (() => {
-            const days = (new Date(dd).getTime() - Date.now()) / 86400000
+            const days = dayDiff(dd) // local-day-accurate, TZ-safe
             if (days < 0) return 'var(--color-priority-urgent)'
             if (days < 3) return 'var(--color-priority-high)'
             return 'var(--color-ink-faint)'

@@ -40,8 +40,6 @@ const MONTHS_SHORT = [
 ]
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
-const TODAY = new Date().toISOString().slice(0, 10)
-
 /** Neutral fallback when an item has no (or a deleted) status. */
 const NEUTRAL = '#C7C7CC'
 
@@ -68,6 +66,9 @@ export function CollectionCalendar({
 }) {
   const nowY = new Date().getUTCFullYear()
   const nowM = new Date().getUTCMonth()
+  // Computed per render (NOT frozen at module load) so the "today" highlight
+  // stays correct if the tab is left open across midnight.
+  const today = new Date().toISOString().slice(0, 10)
   const [view, setView] = useState(() => ({ y: nowY, m: nowM }))
   // Open bar editor — { item id, anchor rect } captured on click.
   const [openItem, setOpenItem] = useState<{ id: string; rect: DOMRect } | null>(
@@ -98,16 +99,19 @@ export function CollectionCalendar({
 
   const cal: CalItem[] = items
     .filter((t) => t.startDate)
-    .map((t) => ({
-      id: t.id,
-      start: t.startDate as string,
-      end: t.dueDate ?? (t.startDate as string),
-    }))
+    .map((t) => {
+      const start = t.startDate as string
+      // Clamp end to never precede start: the popover lets start/due be edited
+      // independently, so a user can set due < start. Without this, the segment
+      // span goes negative and lane-packing breaks (zero/negative-width bars).
+      const rawEnd = t.dueDate ?? start
+      return { id: t.id, start, end: rawEnd < start ? start : rawEnd }
+    })
   // Items with no start date never appear on the grid — surface them in an
   // "Unscheduled" tray instead of silently dropping them (a trust bug).
   const unscheduled = items.filter((t) => !t.startDate)
 
-  const grid = buildMonthGrid(view.y, view.m, TODAY)
+  const grid = buildMonthGrid(view.y, view.m, today)
   const lanes = assignLanes(cal)
   const segs = computeBarSegments(cal, grid, lanes)
   const maxLane = cal.reduce((m, c) => Math.max(m, lanes.get(c.id) ?? 0), 0)
@@ -390,15 +394,21 @@ function BarPopover({
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose()
     }
+    // The popover anchors to a snapshot rect, so it can't follow a scrolling
+    // anchor — close it on scroll rather than leave it floating detached.
+    // capture=true so it fires for any scroll container, not just window.
+    const onScroll = () => onClose()
     // Defer so the opening click doesn't immediately close it.
     const id = window.setTimeout(() => {
       document.addEventListener('mousedown', onDown)
       document.addEventListener('keydown', onKey)
+      window.addEventListener('scroll', onScroll, true)
     }, 0)
     return () => {
       window.clearTimeout(id)
       document.removeEventListener('mousedown', onDown)
       document.removeEventListener('keydown', onKey)
+      window.removeEventListener('scroll', onScroll, true)
     }
   }, [onClose])
 

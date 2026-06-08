@@ -3,11 +3,50 @@ import type { Status, Priority, LoggableField } from './db'
 
 const MS = 86400_000
 
-function dayDiff(dateStr: string): number {
+/**
+ * localStorage that never throws. `setItem` raises QuotaExceededError in Safari
+ * private mode / when storage is full, and `getItem` can throw in locked-down
+ * embeddings — either one otherwise crashes a click handler or the very first
+ * render. UI prefs (selection, view mode, sidebar width, collapse state) are
+ * non-critical, so persistence here is best-effort: on failure we no-op and the
+ * app keeps working with in-memory state.
+ */
+export const safeStorage = {
+  get(key: string): string | null {
+    try {
+      return localStorage.getItem(key)
+    } catch {
+      return null
+    }
+  },
+  set(key: string, value: string): void {
+    try {
+      localStorage.setItem(key, value)
+    } catch {
+      /* ignore — storage full or unavailable */
+    }
+  },
+  remove(key: string): void {
+    try {
+      localStorage.removeItem(key)
+    } catch {
+      /* ignore */
+    }
+  },
+}
+
+/**
+ * Whole-day signed difference between `dateStr` (a `yyyy-mm-dd` calendar date)
+ * and today, in the user's LOCAL timezone. Parse the date by components — NOT
+ * `new Date(dateStr)`, which reads `yyyy-mm-dd` as UTC midnight and then drifts
+ * a full day in UTC-negative zones when compared against a local-midnight
+ * `today`. Mirrors the component-parse idiom used by `dayIndex`.
+ */
+export function dayDiff(dateStr: string): number {
   const a = new Date()
   a.setHours(0, 0, 0, 0)
-  const b = new Date(dateStr)
-  b.setHours(0, 0, 0, 0)
+  const [y, m, d] = dateStr.split('-').map(Number)
+  const b = new Date(y, m - 1, d)
   return Math.round((b.getTime() - a.getTime()) / MS)
 }
 
@@ -20,8 +59,11 @@ const MON = [
 /** Format as `MMM d` (Cupertino DNA) — e.g. "May 19". Locale-independent
  * (fixed English month abbreviations) so it reads the same on every machine. */
 export function formatShortDate(dateStr: string): string {
-  const d = new Date(dateStr)
-  return `${MON[d.getMonth()]} ${d.getDate()}`
+  // Read the y-m-d components directly. `new Date(dateStr)` parses as UTC
+  // midnight, so `.getMonth()/.getDate()` (local) render the PREVIOUS day in
+  // UTC-negative zones — an off-by-one on every date the app displays.
+  const [, m, d] = dateStr.split('-').map(Number)
+  return `${MON[m - 1]} ${d}`
 }
 
 export function formatRelativeDate(dateStr: string | null): string {
@@ -40,6 +82,7 @@ export function isOverdue(dateStr: string | null, isDone: boolean): boolean {
  * inclusive ranges written `a-b` (e.g. "2-5, 8" → [2,3,4,5,8]; "5-2" → 2..5).
  * Non-numeric tokens are ignored. See design-docs/dependencies.md.
  */
+const MAX_PREREQ_RANGE = 1000
 export function parsePrereqSeqs(input: string): number[] {
   const out = new Set<number>()
   for (const token of input.split(/[,\s]+/)) {
@@ -49,6 +92,9 @@ export function parsePrereqSeqs(input: string): number[] {
       let a = parseInt(range[1], 10)
       let b = parseInt(range[2], 10)
       if (a > b) [a, b] = [b, a]
+      // Cap the expanded width so a typo like "1-999999999" can't freeze the tab
+      // building a giant Set. No real project has thousands of prereq numbers.
+      if (b - a > MAX_PREREQ_RANGE) continue
       for (let n = a; n <= b; n++) if (n > 0) out.add(n)
     } else {
       const n = parseInt(token, 10)

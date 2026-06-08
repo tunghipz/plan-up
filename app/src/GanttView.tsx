@@ -127,6 +127,17 @@ export function GanttView({
     () => new Map((members ?? []).map((m) => [m.id, m] as [string, Member])),
     [members]
   )
+  // Precompute each task's working plan ONCE per data change — NOT per render.
+  // The `groups` memo below depends on `dayW`, which changes on every
+  // ResizeObserver tick / window resize; without this the entire scheduler
+  // re-ran for every task on each resize frame. Mirrors BoardView's planById.
+  // Covers every task (not just filteredTasks) so a parent's roll-up still sees
+  // children that a search filtered out of view.
+  const planById = useMemo(() => {
+    const m = new Map<string, ReturnType<typeof computeWorkingPlan>>()
+    for (const t of tasksById.values()) m.set(t.id, computeWorkingPlan(t, tasksById, memberById))
+    return m
+  }, [tasksById, memberById])
 
   const N = workdays.length
   const firstDay = workdays[0]
@@ -156,6 +167,13 @@ export function GanttView({
     for (const t of filteredTasks) {
       if (t.assigneeId && byMember.has(t.assigneeId)) byMember.get(t.assigneeId)!.push(t)
     }
+    // NOTE (intentional): the Timeline is an assignee-swimlane view, so tasks
+    // with no assignee — including container PARENTS, which are usually
+    // unassigned — do not appear here, even though List and Board show them.
+    // This is by design: a parent's schedule is fully represented by its
+    // children's bars (which DO show, in their own assignees' lanes). An
+    // unassigned LEAF task is likewise omitted (it has no lane to live in).
+    // Reviewed & accepted 2026-06-08; not a bug.
     return ms
       .filter((m) => (byMember.get(m.id) ?? []).length > 0)
       .map((m) => {
@@ -186,7 +204,7 @@ export function GanttView({
             let minKey: string | null = null
             let maxKey: string | null = null
             for (const c of kids!) {
-              const p = computeWorkingPlan(c, tasksById, memberById)
+              const p = planById.get(c.id)!
               if (p.startDate) {
                 const k = `${p.startDate}T${p.startTime}`
                 if (!minKey || k < minKey) (minKey = k), (sd = p.startDate), (startTime = p.startTime)
@@ -197,7 +215,7 @@ export function GanttView({
               }
             }
           } else {
-            const plan = computeWorkingPlan(task, tasksById, memberById)
+            const plan = planById.get(task.id)!
             sd = plan.startDate
             dd = plan.dueDate
             startTime = plan.startTime
@@ -304,7 +322,7 @@ export function GanttView({
         const laterN = offWindow.length - earlierN
         return { member: m, evs, rows, offWindow, earlierN, laterN, noDates, offBands }
       })
-  }, [members, filteredTasks, workdays, tasksById, memberById, childrenByParent, N, firstDay, lastDay, dayW])
+  }, [members, filteredTasks, workdays, planById, childrenByParent, N, firstDay, lastDay, dayW])
 
   if (!members) return <p className="text-ink-muted py-12 text-center">Loading…</p>
   if (N === 0)
@@ -642,14 +660,18 @@ function BarDetailPopover({
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose()
     }
+    // Anchored to a snapshot rect — close on scroll instead of floating detached.
+    const onScroll = () => onClose()
     const id = window.setTimeout(() => {
       document.addEventListener('mousedown', onDown)
       document.addEventListener('keydown', onKey)
+      window.addEventListener('scroll', onScroll, true)
     }, 0)
     return () => {
       window.clearTimeout(id)
       document.removeEventListener('mousedown', onDown)
       document.removeEventListener('keydown', onKey)
+      window.removeEventListener('scroll', onScroll, true)
     }
   }, [onClose])
 

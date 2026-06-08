@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
 
 /**
  * In-DNA replacement for window.confirm() (design-system §6.4 / §8 — no grey OS
@@ -72,10 +72,40 @@ function ConfirmSheet({
     destructive = true,
   } = opts
 
+  const sheetRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onCancel()
-      else if (e.key === 'Enter') onConfirm()
+      if (e.key === 'Escape') {
+        onCancel()
+        return
+      }
+      if (e.key === 'Enter') {
+        // preventDefault stops the autoFocus'd confirm button's own native
+        // Enter-activation from ALSO firing — without it onConfirm runs twice
+        // (idempotent today, but a latent footgun).
+        e.preventDefault()
+        onConfirm()
+        return
+      }
+      // Focus trap: keep Tab within the sheet so an aria-modal dialog can't move
+      // focus to background controls.
+      if (e.key === 'Tab' && sheetRef.current) {
+        const f = sheetRef.current.querySelectorAll<HTMLElement>('button')
+        if (f.length === 0) return
+        const first = f[0]
+        const last = f[f.length - 1]
+        const active = document.activeElement
+        if (!sheetRef.current.contains(active)) {
+          e.preventDefault()
+          first.focus()
+        } else if (e.shiftKey && active === first) {
+          e.preventDefault()
+          last.focus()
+        } else if (!e.shiftKey && active === last) {
+          e.preventDefault()
+          first.focus()
+        }
+      }
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
@@ -87,6 +117,7 @@ function ConfirmSheet({
       onClick={onCancel}
     >
       <div
+        ref={sheetRef}
         className="dlg-sheet bg-surface text-ink rounded-[16px] shadow-[0_20px_60px_rgba(0,0,0,0.28)] w-full max-w-md p-6 space-y-3 border border-border-hair"
         onClick={(e) => e.stopPropagation()}
         role="alertdialog"

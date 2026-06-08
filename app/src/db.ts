@@ -498,36 +498,49 @@ export async function addCollectionItem(
   sectionId: string,
   patch: Partial<Task> & { title: string }
 ): Promise<Task> {
-  const c = await db.collections.get(collectionId)
   const today = new Date().toISOString().slice(0, 10)
-  const projectId = c?.projectId ?? ''
-  const maxSeq = (
-    await db.tasks.where('projectId').equals(projectId).toArray()
-  ).reduce((m, t) => Math.max(m, t.sequence ?? 0), 0)
-  // Build the task: spread patch for caller overrides (e.g. title, priority),
-  // then force the three container fields so patch can never violate the
-  // "exactly one container" invariant (sprintId=null, collectionId+sectionId pinned).
-  const base: Task = {
-    id: uid(),
-    projectId,
-    sequence: maxSeq + 1,
-    assigneeId: null,
-    sprintId: null,
-    status: 'todo',
-    priority: 'normal',
-    startDate: today,
-    dueDate: null,
-    estimate: null,
-    createdAt: Date.now(),
-    dependsOn: [],
-    collectionStatusId: c?.statuses[0]?.id ?? null,
-    collectionId,
-    sectionId,
-    ...patch,
-  }
-  const task: Task = { ...base, sprintId: null, collectionId, sectionId }
-  await db.tasks.add(task)
-  return task
+  // One transaction so the maxSeq read + add can't interleave with another add:
+  // two rapid "add item" clicks would otherwise read the same maxSeq and produce
+  // duplicate per-project sequences.
+  return db.transaction('rw', db.collections, db.tasks, async () => {
+    const c = await db.collections.get(collectionId)
+    const projectId = c?.projectId ?? ''
+    const maxSeq = (
+      await db.tasks.where('projectId').equals(projectId).toArray()
+    ).reduce((m, t) => Math.max(m, t.sequence ?? 0), 0)
+    // Build the task: spread patch for caller overrides (e.g. title, priority),
+    // then RE-PIN the derived fields so patch can never override the computed
+    // sequence / project ownership or violate the "exactly one container"
+    // invariant (sprintId=null, collectionId+sectionId pinned).
+    const base: Task = {
+      id: uid(),
+      projectId,
+      sequence: maxSeq + 1,
+      assigneeId: null,
+      sprintId: null,
+      status: 'todo',
+      priority: 'normal',
+      startDate: today,
+      dueDate: null,
+      estimate: null,
+      createdAt: Date.now(),
+      dependsOn: [],
+      collectionStatusId: c?.statuses[0]?.id ?? null,
+      collectionId,
+      sectionId,
+      ...patch,
+    }
+    const task: Task = {
+      ...base,
+      projectId,
+      sequence: maxSeq + 1,
+      sprintId: null,
+      collectionId,
+      sectionId,
+    }
+    await db.tasks.add(task)
+    return task
+  })
 }
 
 /** Next sequence number within a sprint. Sequences are never reused. */
@@ -536,6 +549,45 @@ export async function nextSequence(sprintId: string): Promise<number> {
   let max = 0
   for (const t of all) if ((t.sequence ?? 0) > max) max = t.sequence ?? 0
   return max + 1
+}
+
+/**
+ * Atomically allocate a sequence and insert a new leaf task into a sprint.
+ * The `nextSequence` read and the `add` MUST share one rw transaction — IndexedDB
+ * serialises overlapping readwrite transactions, so two rapid "Add task" submits
+ * each see the other's committed row and never collide on `sequence` (a collision
+ * would corrupt prereq-by-number resolution). All UI sprint-task creation goes
+ * through here (List AddTaskRow + Board composer) so the guarantee holds everywhere.
+ */
+export async function addSprintTask(input: {
+  projectId: string
+  sprintId: string
+  title: string
+  startDate: string
+  assigneeId?: string | null
+  status?: Status
+  priority?: Priority
+}): Promise<Task> {
+  return db.transaction('rw', db.tasks, async () => {
+    const task: Task = {
+      id: uid(),
+      projectId: input.projectId,
+      sequence: await nextSequence(input.sprintId),
+      title: input.title,
+      assigneeId: input.assigneeId ?? null,
+      sprintId: input.sprintId,
+      status: input.status ?? 'todo',
+      priority: input.priority ?? 'normal',
+      // Default start = sprint start. User can override after creation.
+      startDate: input.startDate,
+      dueDate: null,
+      estimate: null,
+      createdAt: Date.now(),
+      dependsOn: [],
+    }
+    await db.tasks.add(task)
+    return task
+  })
 }
 
 /**
@@ -1035,14 +1087,18 @@ export async function recomputeDates(taskId: string): Promise<void> {
   await db.transaction('rw', db.tasks, db.members, async () => {
     const members = await db.members.toArray()
     const memberById = new Map(members.map((m) => [m.id, m]))
+    // Read the table ONCE. The dependency graph (`dependsOn`) never changes
+    // during a recompute — only dates do — so we keep `byId` fresh in-memory
+    // after each write instead of re-materialising the whole table every queue
+    // step (which was O(chain × N) full-table reads inside one transaction).
+    const all = await db.tasks.toArray()
+    const byId = new Map(all.map((t) => [t.id, t]))
     const visited = new Set<string>()
     const queue: string[] = [taskId]
     while (queue.length) {
       const id = queue.shift()!
       if (visited.has(id)) continue
       visited.add(id)
-      const all = await db.tasks.toArray()
-      const byId = new Map(all.map((t) => [t.id, t]))
       const task = byId.get(id)
       if (!task) continue
       const next = computeStartEnd(task, byId, memberById)
@@ -1050,6 +1106,9 @@ export async function recomputeDates(taskId: string): Promise<void> {
         next.startDate !== task.startDate ||
         next.dueDate !== task.dueDate
       ) {
+        // Keep the in-memory snapshot current so dependents downstream in this
+        // same walk compute against the freshly-written dates.
+        byId.set(id, { ...task, startDate: next.startDate, dueDate: next.dueDate })
         await db.tasks.update(id, {
           startDate: next.startDate,
           dueDate: next.dueDate,
@@ -1116,37 +1175,42 @@ export async function recomputeAllDates(): Promise<number> {
 export async function moveUnfinishedToNextSprint(
   sourceSprintId: string
 ): Promise<{ movedCount: number; targetSprintId: string | null }> {
-  const sprints = await db.sprints.orderBy('startDate').toArray()
-  const sourceIdx = sprints.findIndex((s) => s.id === sourceSprintId)
-  if (sourceIdx === -1) return { movedCount: 0, targetSprintId: null }
-  const target = sprints[sourceIdx + 1]
-  if (!target) return { movedCount: 0, targetSprintId: null }
+  // One transaction so the move is atomic: a renumber/move that throws (or a tab
+  // close) midway must NOT leave the source sprint half-emptied with inconsistent
+  // sequences. recomputeDates nests safely — its scope (tasks+members) is a subset.
+  return db.transaction('rw', db.tasks, db.members, db.sprints, async () => {
+    const sprints = await db.sprints.orderBy('startDate').toArray()
+    const sourceIdx = sprints.findIndex((s) => s.id === sourceSprintId)
+    if (sourceIdx === -1) return { movedCount: 0, targetSprintId: null }
+    const target = sprints[sourceIdx + 1]
+    if (!target) return { movedCount: 0, targetSprintId: null }
 
-  const unfinished = await db.tasks
-    .where('sprintId')
-    .equals(sourceSprintId)
-    .filter((t) => t.status !== 'done')
-    .toArray()
+    const unfinished = await db.tasks
+      .where('sprintId')
+      .equals(sourceSprintId)
+      .filter((t) => t.status !== 'done')
+      .toArray()
 
-  for (const t of unfinished) {
-    // Sequence is per-sprint, so a moved task must be renumbered into the
-    // target — otherwise it keeps its source number and collides with an
-    // existing task there. Awaited in-loop so each call sees the prior insert.
-    const patch: Partial<Task> = {
-      sprintId: target.id,
-      sequence: await nextSequence(target.id),
+    for (const t of unfinished) {
+      // Sequence is per-sprint, so a moved task must be renumbered into the
+      // target — otherwise it keeps its source number and collides with an
+      // existing task there. Awaited in-loop so each call sees the prior insert.
+      const patch: Partial<Task> = {
+        sprintId: target.id,
+        sequence: await nextSequence(target.id),
+      }
+      // Pull stale starts forward so the task lands inside the new sprint.
+      if (!t.startDate || t.startDate < target.startDate) {
+        patch.startDate = target.startDate
+      }
+      await db.tasks.update(t.id, patch)
     }
-    // Pull stale starts forward so the task lands inside the new sprint.
-    if (!t.startDate || t.startDate < target.startDate) {
-      patch.startDate = target.startDate
-    }
-    await db.tasks.update(t.id, patch)
-  }
-  // Recompute after the bulk move so prereq chains settle in their new
-  // home (and assignee off-days reapply).
-  for (const t of unfinished) await recomputeDates(t.id)
+    // Recompute after the bulk move so prereq chains settle in their new
+    // home (and assignee off-days reapply).
+    for (const t of unfinished) await recomputeDates(t.id)
 
-  return { movedCount: unfinished.length, targetSprintId: target.id }
+    return { movedCount: unfinished.length, targetSprintId: target.id }
+  })
 }
 
 export async function setMemberDaysOff(
@@ -1162,10 +1226,15 @@ export async function setMemberDaysOff(
   const clean = Array.from(byDate.values()).sort((a, b) =>
     a.date.localeCompare(b.date)
   )
-  await db.members.update(memberId, { daysOff: clean })
-  const owned = await db.tasks.where('assigneeId').equals(memberId).toArray()
-  for (const t of owned) await recomputeDates(t.id)
-  return clean
+  // Atomic: persist the new off-days AND recompute every owned task's dates in
+  // one transaction, so the page closing mid-loop can't leave stored dates stale
+  // relative to the just-saved off-days. recomputeDates nests (subset scope).
+  return db.transaction('rw', db.members, db.tasks, async () => {
+    await db.members.update(memberId, { daysOff: clean })
+    const owned = await db.tasks.where('assigneeId').equals(memberId).toArray()
+    for (const t of owned) await recomputeDates(t.id)
+    return clean
+  })
 }
 
 /**
@@ -1442,6 +1511,25 @@ export function isTaskBlocked(task: Task, byId: Map<string, Task>): boolean {
   })
 }
 
+/**
+ * True if another member in the same project already has this name
+ * (case-insensitive, trimmed). `exceptId` skips the row being renamed so
+ * re-saving an unchanged name isn't flagged as its own duplicate. Keeps the
+ * assignee dropdown unambiguous (no two identically-named, same-coloured avatars).
+ */
+export async function memberNameExists(
+  projectId: string,
+  name: string,
+  exceptId?: string
+): Promise<boolean> {
+  const target = name.trim().toLowerCase()
+  if (!target) return false
+  const members = await db.members.where('projectId').equals(projectId).toArray()
+  return members.some(
+    (m) => m.id !== exceptId && m.name.trim().toLowerCase() === target
+  )
+}
+
 // Cascade-safe member delete: orphaned tasks become Unassigned (assigneeId=null)
 // rather than disappearing from the UI.
 export async function deleteMember(memberId: string) {
@@ -1489,7 +1577,23 @@ export async function importAll(data: ExportPayload) {
   if (!data || ![1, 2, 3].includes(data.version)) {
     throw new Error('Unsupported export version')
   }
-  await db.transaction(
+  // Validate shape BEFORE the transaction clears anything. A payload can carry
+  // a valid `version` yet have missing/non-array collections (truncated backup,
+  // hand-edited JSON, or a foreign file that happens to set `version`). The
+  // `as ExportPayload` cast at the call site is no runtime guarantee — without
+  // this guard the clears below succeed and the later `.map()` throws, leaving
+  // the user with a wiped DB and a cryptic "x.map is not a function".
+  if (
+    !Array.isArray(data.members) ||
+    !Array.isArray(data.sprints) ||
+    !Array.isArray(data.tasks) ||
+    (data.projects !== undefined && !Array.isArray(data.projects)) ||
+    (data.collections !== undefined && !Array.isArray(data.collections))
+  ) {
+    throw new Error('Not a valid plan-up backup')
+  }
+  try {
+   await db.transaction(
     'rw',
     [db.projects, db.members, db.sprints, db.collections, db.tasks],
     async () => {
@@ -1568,13 +1672,34 @@ export async function importAll(data: ExportPayload) {
       })
       await db.tasks.bulkAdd(tasks)
     }
-  )
+   )
+  } catch (err) {
+    // Dexie aborts + rolls back the transaction on any failure, so the clears
+    // above are undone and the user's existing data survives. Translate its raw
+    // BulkError / ConstraintError (duplicate or conflicting ids in the payload)
+    // into a message the import dialog can show plainly, not Dexie internals.
+    const name = err instanceof Error ? err.name : ''
+    if (name === 'BulkError' || name === 'ConstraintError') {
+      throw new Error('Backup file contains duplicate or conflicting records.', {
+        cause: err,
+      })
+    }
+    throw err
+  }
 }
 
 // Module-level promise lock prevents StrictMode double-mount from seeding twice.
 let seedPromise: Promise<void> | null = null
 export function seedIfEmpty(): Promise<void> {
-  if (!seedPromise) seedPromise = doSeed()
+  if (!seedPromise) {
+    // On failure, release the lock so a later call (e.g. after a transient
+    // IndexedDB hiccup clears) can retry — otherwise a single rejected seed is
+    // cached forever and the app can never seed without a full reload.
+    seedPromise = doSeed().catch((e) => {
+      seedPromise = null
+      throw e
+    })
+  }
   return seedPromise
 }
 /** Test-only: reset the per-module seed lock so a freshly cleared DB can re-seed. */

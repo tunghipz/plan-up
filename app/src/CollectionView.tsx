@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { ChevronDown, X, Plus, GripVertical, Layers, Pencil } from 'lucide-react'
@@ -25,6 +25,10 @@ import { AddGroupButton } from './AddGroupButton'
 
 const COLLAPSE_KEY = (collectionId: string) =>
   `plan-up:collCollapsed:${collectionId}`
+
+// Stable empty array so a section with no items doesn't hand SectionCard a fresh
+// `[]` identity each render (keeps future memoization honest).
+const EMPTY_ITEMS: Task[] = []
 
 /**
  * Column widths shared by the column-header row and each item row — mirrors the
@@ -84,13 +88,26 @@ export function CollectionView({
 
   const [addingTable, setAddingTable] = useState(false)
 
+  const statusById = useMemo(
+    () => new Map((collection?.statuses ?? []).map((s) => [s.id, s])),
+    [collection]
+  )
+  // Group items by section ONCE per data change instead of re-filtering the full
+  // item list for every section on every render — that was O(sections × items)
+  // per keystroke, since item titles persist on every keystroke.
+  const itemsBySectionMap = useMemo(() => {
+    const m = new Map<string, Task[]>()
+    for (const t of items) {
+      const k = t.sectionId ?? ''
+      const arr = m.get(k)
+      arr ? arr.push(t) : m.set(k, [t])
+    }
+    return m
+  }, [items])
+
   if (!collection) {
     return <div className="p-6 text-ink-muted">Loading…</div>
   }
-
-  const statusById = new Map(collection.statuses.map((s) => [s.id, s]))
-  const itemsBySection = (sectionId: string) =>
-    items.filter((t) => t.sectionId === sectionId)
 
   // Identity (name + summary), Statuses, and the List/Calendar toggle all live in
   // App's top context bar now — see CollectionBarIdentity / StatusEditor below and
@@ -106,7 +123,7 @@ export function CollectionView({
               collectionId={collectionId}
               canDelete={collection.sections.length > 1}
               section={sec}
-              items={itemsBySection(sec.id)}
+              items={itemsBySectionMap.get(sec.id) ?? EMPTY_ITEMS}
               statusById={statusById}
               statuses={collection.statuses}
             />

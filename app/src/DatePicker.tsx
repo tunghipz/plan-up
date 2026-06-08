@@ -250,16 +250,20 @@ function CalendarPopover({
     .slice()
     .sort((a, b) => (a.date < b.date ? -1 : 1))
   const WIDTH = 248
+  // Rough fallback used only on the very first pin (before the popover has laid
+  // out); thereafter we measure the real rendered height so the flip-up math
+  // can't clip the footer/header that the estimate omits.
   const HEIGHT = 320 + offs.length * 22
 
   useLayoutEffect(() => {
     const pin = () => {
       const r = anchorRef.current?.getBoundingClientRect()
       if (!r) return
+      const h = popRef.current?.offsetHeight || HEIGHT
       let left = Math.min(r.left, window.innerWidth - 8 - WIDTH)
       left = Math.max(8, left)
       let top = r.bottom + 6
-      if (top + HEIGHT > window.innerHeight - 8) top = Math.max(8, r.top - HEIGHT - 6)
+      if (top + h > window.innerHeight - 8) top = Math.max(8, r.top - h - 6)
       setPos({ top, left })
     }
     pin()
@@ -317,13 +321,23 @@ function CalendarPopover({
         </div>
       )}
       <div className="flex items-center justify-between mt-2.5 pt-2.5 border-t border-border-hair">
-        <button
-          type="button"
-          onClick={() => { onChange(todayISO()); onClose() }}
-          className="text-[12.5px] font-medium text-accent rounded-[7px] px-2 py-1 hover:bg-surface-hover transition"
-        >
-          Today
-        </button>
+        {(() => {
+          // "Today" must respect the same min/max clamp the grid enforces —
+          // otherwise it's a backdoor to set a date outside the allowed range
+          // (e.g. a days-off picker bounded to the sprint).
+          const today = todayISO()
+          const disabled = (!!min && today < min) || (!!max && today > max)
+          return (
+            <button
+              type="button"
+              disabled={disabled}
+              onClick={() => { onChange(today); onClose() }}
+              className="text-[12.5px] font-medium text-accent rounded-[7px] px-2 py-1 hover:bg-surface-hover transition disabled:opacity-40 disabled:hover:bg-transparent disabled:cursor-not-allowed"
+            >
+              Today
+            </button>
+          )
+        })()}
         <button
           type="button"
           onClick={() => { onChange(null); onClose() }}

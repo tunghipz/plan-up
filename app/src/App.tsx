@@ -43,7 +43,7 @@ import { BoardView } from './BoardView'
 import { GanttView } from './GanttView'
 import { ProjectSettingsView } from './ProjectSettingsView'
 import { DateField } from './DatePicker'
-import { formatSprintRange, useDarkMode } from './lib'
+import { formatSprintRange, useDarkMode, safeStorage } from './lib'
 
 const CURRENT_PROJECT_KEY = 'plan-up:currentProjectId'
 const VIEW_KEY = 'plan-up:view'
@@ -54,47 +54,47 @@ function App() {
   const [seedError, setSeedError] = useState<string | null>(null)
   const [seeded, setSeeded] = useState(false)
   const [currentProjectId, setCurrentProjectIdState] = useState<string | null>(
-    () => localStorage.getItem(CURRENT_PROJECT_KEY)
+    () => safeStorage.get(CURRENT_PROJECT_KEY)
   )
   const setCurrentProjectId = (id: string | null) => {
     setCurrentProjectIdState(id)
-    if (id) localStorage.setItem(CURRENT_PROJECT_KEY, id)
-    else localStorage.removeItem(CURRENT_PROJECT_KEY)
+    if (id) safeStorage.set(CURRENT_PROJECT_KEY, id)
+    else safeStorage.remove(CURRENT_PROJECT_KEY)
   }
   const [currentSprintId, setCurrentSprintId] = useState<string | null>(null)
   // Container đang xem: 'sprint' (mặc định) hoặc 'collection'.
   const SELKIND_KEY = 'plan-up:selKind'
   const SELCOLL_KEY = 'plan-up:selCollectionId'
   const [selKind, setSelKindState] = useState<'sprint' | 'collection'>(
-    () => (localStorage.getItem(SELKIND_KEY) === 'collection' ? 'collection' : 'sprint')
+    () => (safeStorage.get(SELKIND_KEY) === 'collection' ? 'collection' : 'sprint')
   )
   const [currentCollectionId, setCurrentCollectionIdState] = useState<string | null>(
-    () => localStorage.getItem(SELCOLL_KEY)
+    () => safeStorage.get(SELCOLL_KEY)
   )
   const selectSprint = (id: string) => {
-    setCurrentSprintId(id); setSelKindState('sprint'); localStorage.setItem(SELKIND_KEY, 'sprint')
+    setCurrentSprintId(id); setSelKindState('sprint'); safeStorage.set(SELKIND_KEY, 'sprint')
   }
   const selectCollection = (id: string) => {
-    setCurrentCollectionIdState(id); localStorage.setItem(SELCOLL_KEY, id)
-    setSelKindState('collection'); localStorage.setItem(SELKIND_KEY, 'collection')
+    setCurrentCollectionIdState(id); safeStorage.set(SELCOLL_KEY, id)
+    setSelKindState('collection'); safeStorage.set(SELKIND_KEY, 'collection')
   }
   const [view, setViewState] = useState<ViewMode>(() => {
-    const v = localStorage.getItem(VIEW_KEY)
+    const v = safeStorage.get(VIEW_KEY)
     return v === 'board' ? 'board' : v === 'timeline' ? 'timeline' : 'list'
   })
   const setView = (v: ViewMode) => {
     setViewState(v)
-    localStorage.setItem(VIEW_KEY, v)
+    safeStorage.set(VIEW_KEY, v)
   }
   // Collection view (List/Calendar) — lifted here so the single adaptive top-bar
   // toggle can drive it; persisted separately from the sprint view.
   const COLLVIEW_KEY = 'plan-up:collectionView'
   const [collectionView, setCollectionViewState] = useState<CollectionViewMode>(
-    () => (localStorage.getItem(COLLVIEW_KEY) === 'calendar' ? 'calendar' : 'list')
+    () => (safeStorage.get(COLLVIEW_KEY) === 'calendar' ? 'calendar' : 'list')
   )
   const setCollectionView = (v: CollectionViewMode) => {
     setCollectionViewState(v)
-    localStorage.setItem(COLLVIEW_KEY, v)
+    safeStorage.set(COLLVIEW_KEY, v)
   }
   const [showNewSprint, setShowNewSprint] = useState(false)
   const [showNewProject, setShowNewProject] = useState(false)
@@ -104,19 +104,19 @@ function App() {
   const SPRINTS_COLLAPSED_KEY = 'plan-up:sidebarSprintsCollapsed'
   const COLLS_COLLAPSED_KEY = 'plan-up:sidebarCollectionsCollapsed'
   const [sprintsCollapsed, setSprintsCollapsed] = useState(
-    () => localStorage.getItem(SPRINTS_COLLAPSED_KEY) === '1'
+    () => safeStorage.get(SPRINTS_COLLAPSED_KEY) === '1'
   )
   const [collectionsCollapsed, setCollectionsCollapsed] = useState(
-    () => localStorage.getItem(COLLS_COLLAPSED_KEY) === '1'
+    () => safeStorage.get(COLLS_COLLAPSED_KEY) === '1'
   )
   const toggleSprintsCollapsed = () =>
     setSprintsCollapsed((p) => {
-      localStorage.setItem(SPRINTS_COLLAPSED_KEY, p ? '0' : '1')
+      safeStorage.set(SPRINTS_COLLAPSED_KEY, p ? '0' : '1')
       return !p
     })
   const toggleCollectionsCollapsed = () =>
     setCollectionsCollapsed((p) => {
-      localStorage.setItem(COLLS_COLLAPSED_KEY, p ? '0' : '1')
+      safeStorage.set(COLLS_COLLAPSED_KEY, p ? '0' : '1')
       return !p
     })
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -131,11 +131,11 @@ function App() {
   const SIDEBAR_MAX = 460
   const RAIL_W = 58
   const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
-    const s = Number(localStorage.getItem('plan-up:sidebarWidth'))
+    const s = Number(safeStorage.get('plan-up:sidebarWidth'))
     return s >= SIDEBAR_MIN && s <= SIDEBAR_MAX ? s : 248
   })
   useEffect(() => {
-    localStorage.setItem('plan-up:sidebarWidth', String(sidebarWidth))
+    safeStorage.set('plan-up:sidebarWidth', String(sidebarWidth))
   }, [sidebarWidth])
   const startSidebarResize = (e: React.MouseEvent) => {
     e.preventDefault()
@@ -266,6 +266,24 @@ function App() {
     }
   }, [sprints, currentSprintId])
 
+  // Guard the collection selection the same way the sprint one is guarded: if
+  // selKind is 'collection' but that collection no longer exists (deleted
+  // elsewhere, a project switch, or a stale persisted id from another project),
+  // fall back to the sprint view so the UI never points at a dangling selection.
+  useEffect(() => {
+    if (!collections) return
+    if (
+      selKind === 'collection' &&
+      currentCollectionId &&
+      !collections.some((c) => c.id === currentCollectionId)
+    ) {
+      setSelKindState('sprint')
+      safeStorage.set(SELKIND_KEY, 'sprint')
+      setCurrentCollectionIdState(null)
+      safeStorage.remove(SELCOLL_KEY)
+    }
+  }, [collections, selKind, currentCollectionId])
+
   // Keyboard shortcuts: / focus search, n new sprint, esc clears search
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -353,6 +371,15 @@ function App() {
       const text = await file.text()
       const data = JSON.parse(text) as ExportPayload
       await importAll(data)
+      // Imported data replaces everything — the old selection ids now point at
+      // wiped rows. Reset to a clean slate; the project/sprint effects reselect
+      // valid targets (projects[0] → its latest sprint) once the queries refire.
+      setSelKindState('sprint')
+      safeStorage.set(SELKIND_KEY, 'sprint')
+      setCurrentCollectionIdState(null)
+      safeStorage.remove(SELCOLL_KEY)
+      setCurrentSprintId(null)
+      setCurrentProjectId(null)
       alert('Import successful.')
     } catch (err) {
       alert(`Import failed: ${err instanceof Error ? err.message : String(err)}`)
@@ -628,7 +655,7 @@ function App() {
                           currentCollectionId === c.id
                         ) {
                           setSelKindState('sprint')
-                          localStorage.setItem(SELKIND_KEY, 'sprint')
+                          safeStorage.set(SELKIND_KEY, 'sprint')
                         }
                       }}
                       title="Delete collection"

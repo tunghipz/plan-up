@@ -8,6 +8,7 @@ import {
   deleteProject,
   updateProject,
   deleteMember,
+  memberNameExists,
   type Project,
   type Member,
 } from './db'
@@ -60,8 +61,11 @@ export function ProjectSettingsView({
     void updateProject(project.id, { name: n })
   }
   const commitDesc = () => {
-    if (desc === (project.description ?? '')) return
-    void updateProject(project.id, { description: desc })
+    // Trim so an all-whitespace description normalises to empty ("no description")
+    // rather than persisting invisible spaces.
+    const d = desc.trim()
+    if (d === (project.description ?? '')) return
+    void updateProject(project.id, { description: d })
   }
 
   const removeProject = async () => {
@@ -196,9 +200,15 @@ function MemberRow({ member }: { member: Member }) {
   const [title, setTitle] = useState(member.title ?? '')
   useEffect(() => setTitle(member.title ?? ''), [member.id, member.title])
 
-  const commit = () => {
+  const commit = async () => {
     const n = name.trim()
     if (!n || n === member.name) {
+      setName(member.name)
+      return
+    }
+    // Reject a rename that collides with another member in this project (revert,
+    // matching how an empty name reverts) so the roster stays unambiguous.
+    if (await memberNameExists(member.projectId, n, member.id)) {
       setName(member.name)
       return
     }
@@ -280,10 +290,17 @@ function MemberRow({ member }: { member: Member }) {
 /** Simple add-member row (self-contained; not the Sprint-view toggle variant). */
 function AddMember({ projectId }: { projectId: string }) {
   const [name, setName] = useState('')
+  const [err, setErr] = useState('')
   const ref = useRef<HTMLInputElement>(null)
   const submit = async () => {
     const n = name.trim()
     if (!n) return
+    // Block duplicate names within the project — two same-named members get the
+    // same auto avatar/colour and are indistinguishable in assignee dropdowns.
+    if (await memberNameExists(projectId, n)) {
+      setErr(`“${n}” is already a member`)
+      return
+    }
     await db.members.add({
       id: uid(),
       projectId,
@@ -292,20 +309,30 @@ function AddMember({ projectId }: { projectId: string }) {
       daysOff: [],
     })
     setName('')
+    setErr('')
     ref.current?.focus()
   }
   return (
-    <div className="flex items-center gap-2 mt-1.5 py-2 px-3 rounded-[10px] border border-dashed border-border">
-      <UserPlus size={15} className="text-ink-faint shrink-0" />
-      <input
-        ref={ref}
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-        onKeyDown={(e) => e.key === 'Enter' && submit()}
-        placeholder="Add member (press Enter)"
-        className="flex-1 text-sm bg-transparent outline-none placeholder:text-ink-faint"
-        aria-label="Add member"
-      />
+    <div className="mt-1.5">
+      <div className="flex items-center gap-2 py-2 px-3 rounded-[10px] border border-dashed border-border">
+        <UserPlus size={15} className="text-ink-faint shrink-0" />
+        <input
+          ref={ref}
+          value={name}
+          onChange={(e) => {
+            setName(e.target.value)
+            if (err) setErr('')
+          }}
+          onKeyDown={(e) => {
+          // Don't submit on the Enter that commits an IME composition.
+          if (e.key === 'Enter' && !e.nativeEvent.isComposing) submit()
+        }}
+          placeholder="Add member (press Enter)"
+          className="flex-1 text-sm bg-transparent outline-none placeholder:text-ink-faint"
+          aria-label="Add member"
+        />
+      </div>
+      {err && <p className="mt-1 px-3 text-[12px] text-red-500">{err}</p>}
     </div>
   )
 }

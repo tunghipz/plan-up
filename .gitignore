@@ -32,3 +32,4 @@ coverage/
 
 # Local design demo HTMLs (not for repo)
 demo/
+.gstack/

@@ -370,7 +370,7 @@ export function SprintView({
 
   return (
     <SprintRangeContext.Provider value={{ start: sprintStartDate, end: sprintEndDate }}>
-    <div className="space-y-4 max-w-5xl">
+    <div className="space-y-4">
       {isEmpty && <EmptyState onAddMember={() => setShowAddMember(true)} />}
 
       {isFilteredEmpty && (

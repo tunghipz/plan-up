@@ -930,7 +930,7 @@ function CapacityBanner({
 }) {
   if (total === 0) {
     return (
-      <div className="px-6 pt-5 pb-2 max-w-5xl">
+      <div className="px-6 pt-5 pb-2">
         <div className="bg-surface rounded-[14px] px-5 py-4 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_6px_16px_rgba(0,0,0,0.04)]">
           <div className="text-[15px] font-semibold tracking-[-0.01em] text-ink">
             Sprint capacity
@@ -944,7 +944,7 @@ function CapacityBanner({
   }
   const pct = (n: number) => `${(n / total) * 100}%`
   return (
-    <div className="px-6 pt-5 pb-2 max-w-5xl">
+    <div className="px-6 pt-5 pb-2">
       <div className="bg-surface rounded-[14px] px-5 py-4 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_6px_16px_rgba(0,0,0,0.04)]">
         <div className="flex items-baseline justify-between gap-3">
           <div className="text-[15px] font-semibold tracking-[-0.01em] text-ink">

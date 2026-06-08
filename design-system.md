@@ -125,7 +125,7 @@ Icon rail + sprint panel dùng `background: var(--color-vibrancy)` + `backdrop-f
 
 ### 4.4 Max-width & spacing
 
-- Main content `max-w-5xl`.
+- **Sprint List view + capacity banner = fluid full-width** (fill cột `main`, chỉ chừa `px-6`). Thẻ member + thanh capacity **tự co giãn** theo bề rộng cửa sổ / sidebar resize — không cap `max-w` (đổi 2026-06-08; trước đây `max-w-5xl` căn trái để lại khoảng trống phải). Board giữ `max-w-6xl`, Collection `max-w-5xl mx-auto` (đọc-tài-liệu, hẹp hơn có chủ đích).
 - Card padding: row `px-[18px] py-[11px]`, header `px-[18px] py-[13px]`.
 - Between cards `space-y-4` (16px). Generous hơn bản cũ — Apple thoáng.
 

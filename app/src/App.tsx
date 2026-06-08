@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
   Download,
@@ -959,14 +959,20 @@ function CapacityBanner({
         </div>
         <div className="mt-2.5 flex h-2.5 w-full overflow-hidden rounded-full bg-[var(--color-canvas-sunk)]">
           {done > 0 && (
-            <span className="h-full bg-status-done" style={{ width: pct(done) }} />
+            <span
+              className="capacity-seg h-full bg-status-done"
+              style={{ width: pct(done) }}
+            />
           )}
           {inFlight > 0 && (
-            <span className="h-full bg-accent" style={{ width: pct(inFlight) }} />
+            <span
+              className="capacity-seg h-full bg-accent"
+              style={{ width: pct(inFlight) }}
+            />
           )}
           {open > 0 && (
             <span
-              className="h-full bg-border-strong"
+              className="capacity-seg h-full bg-border-strong"
               style={{ width: pct(open) }}
             />
           )}
@@ -1067,11 +1073,11 @@ function NewSprintDialog({
 
   return (
     <div
-      className="fixed inset-0 bg-black/25 backdrop-blur-md flex items-center justify-center p-4 z-50"
+      className="dlg-scrim fixed inset-0 bg-black/25 backdrop-blur-md flex items-center justify-center p-4 z-50"
       onClick={onClose}
     >
       <div
-        className="bg-surface text-ink rounded-[16px] shadow-[0_20px_60px_rgba(0,0,0,0.28)] w-full max-w-md p-6 space-y-4 border border-border-hair"
+        className="dlg-sheet bg-surface text-ink rounded-[16px] shadow-[0_20px_60px_rgba(0,0,0,0.28)] w-full max-w-md p-6 space-y-4 border border-border-hair"
         onClick={(e) => e.stopPropagation()}
       >
         <h2 className="text-[19px] font-bold tracking-[-0.014em]">New Sprint</h2>
@@ -1132,11 +1138,11 @@ function NewProjectDialog({
   }
   return (
     <div
-      className="fixed inset-0 bg-black/25 backdrop-blur-md flex items-center justify-center p-4 z-50"
+      className="dlg-scrim fixed inset-0 bg-black/25 backdrop-blur-md flex items-center justify-center p-4 z-50"
       onClick={onClose}
     >
       <div
-        className="bg-surface text-ink rounded-[16px] shadow-[0_20px_60px_rgba(0,0,0,0.28)] w-full max-w-md p-6 space-y-4 border border-border-hair"
+        className="dlg-sheet bg-surface text-ink rounded-[16px] shadow-[0_20px_60px_rgba(0,0,0,0.28)] w-full max-w-md p-6 space-y-4 border border-border-hair"
         onClick={(e) => e.stopPropagation()}
       >
         <h2 className="text-[19px] font-bold tracking-[-0.014em]">New Project</h2>
@@ -1194,11 +1200,11 @@ function NewCollectionDialog({
   }
   return (
     <div
-      className="fixed inset-0 bg-black/25 backdrop-blur-md flex items-center justify-center p-4 z-50"
+      className="dlg-scrim fixed inset-0 bg-black/25 backdrop-blur-md flex items-center justify-center p-4 z-50"
       onClick={onClose}
     >
       <div
-        className="bg-surface text-ink rounded-[16px] shadow-[0_20px_60px_rgba(0,0,0,0.28)] w-full max-w-md p-6 space-y-4 border border-border-hair"
+        className="dlg-sheet bg-surface text-ink rounded-[16px] shadow-[0_20px_60px_rgba(0,0,0,0.28)] w-full max-w-md p-6 space-y-4 border border-border-hair"
         onClick={(e) => e.stopPropagation()}
       >
         <h2 className="text-[19px] font-bold tracking-[-0.014em]">
@@ -1253,18 +1259,36 @@ function ViewToggle<T extends string>({
   options: { value: T; label: string; Icon: typeof List }[]
   onChange: (v: T) => void
 }) {
+  // Sliding white indicator (macOS segmented control): measure the active
+  // segment after layout and glide the pill to it, instead of swapping a
+  // per-button background. Re-measures on value/options change.
+  const ref = useRef<HTMLDivElement>(null)
+  const [ind, setInd] = useState<{ left: number; width: number } | null>(null)
+  useLayoutEffect(() => {
+    const el = ref.current?.querySelector<HTMLElement>(`[data-seg="${value}"]`)
+    if (el) setInd({ left: el.offsetLeft, width: el.offsetWidth })
+  }, [value, options])
   return (
-    <div className="inline-flex items-center gap-0.5 p-0.5 rounded-[9px] bg-fill">
+    <div
+      ref={ref}
+      className="relative inline-flex items-center gap-0.5 p-0.5 rounded-[9px] bg-fill"
+    >
+      {ind && (
+        <span
+          aria-hidden
+          className="absolute top-0.5 bottom-0.5 rounded-[7px] bg-surface shadow-[0_1px_3px_rgba(0,0,0,0.12),0_0_0_0.5px_rgba(0,0,0,0.04)] transition-[left,width] duration-[280ms] ease-[cubic-bezier(.32,.72,0,1)]"
+          style={{ left: ind.left, width: ind.width }}
+        />
+      )}
       {options.map(({ value: v, label, Icon }) => {
         const active = value === v
         return (
           <button
             key={v}
+            data-seg={v}
             onClick={() => onChange(v)}
-            className={`flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded-[7px] transition ${
-              active
-                ? 'bg-surface text-ink shadow-[0_1px_3px_rgba(0,0,0,0.12),0_0_0_0.5px_rgba(0,0,0,0.04)]'
-                : 'text-ink-muted hover:text-ink'
+            className={`relative z-10 flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded-[7px] transition-colors ${
+              active ? 'text-ink' : 'text-ink-muted hover:text-ink'
             }`}
             title={`${label} view`}
             aria-pressed={active}

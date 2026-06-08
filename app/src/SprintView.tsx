@@ -1991,10 +1991,25 @@ function StatusDot({
   onCycle: () => void
 }) {
   const meta = STATUS_META[status]
+  // Pop the glyph (and draw the check when done) on any status change. The
+  // `.status-pop` class is added for one animation cycle then removed so it can
+  // re-fire on the next toggle; it also scopes the check-draw (index.css §6.5).
+  const [popping, setPopping] = useState(false)
+  const prev = useRef(status)
+  useEffect(() => {
+    if (prev.current !== status) {
+      prev.current = status
+      setPopping(true)
+      const t = setTimeout(() => setPopping(false), 340)
+      return () => clearTimeout(t)
+    }
+  }, [status])
   return (
     <button
       onClick={onCycle}
-      className="w-4 h-4 shrink-0 transition hover:scale-110 flex items-center justify-center"
+      className={`w-4 h-4 shrink-0 transition hover:scale-110 flex items-center justify-center ${
+        popping ? 'status-pop' : ''
+      }`}
       style={{ color: meta.varName }}
       title={`${meta.label} — click to cycle`}
       aria-label={`Status: ${meta.label}`}
@@ -2051,6 +2066,7 @@ export function StatusIcon({ status }: { status: Status }) {
     <svg viewBox="0 0 16 16" className="w-full h-full" aria-hidden="true">
       <circle cx="8" cy="8" r="7" fill="currentColor" />
       <path
+        className="status-check"
         d="M 4.5 8 L 7 10.5 L 11.5 6"
         stroke="white"
         strokeWidth="1.6"

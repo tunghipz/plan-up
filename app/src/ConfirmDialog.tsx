@@ -83,11 +83,11 @@ function ConfirmSheet({
 
   return (
     <div
-      className="fixed inset-0 bg-black/25 backdrop-blur-md flex items-center justify-center p-4 z-[60]"
+      className="dlg-scrim fixed inset-0 bg-black/25 backdrop-blur-md flex items-center justify-center p-4 z-[60]"
       onClick={onCancel}
     >
       <div
-        className="bg-surface text-ink rounded-[16px] shadow-[0_20px_60px_rgba(0,0,0,0.28)] w-full max-w-md p-6 space-y-3 border border-border-hair"
+        className="dlg-sheet bg-surface text-ink rounded-[16px] shadow-[0_20px_60px_rgba(0,0,0,0.28)] w-full max-w-md p-6 space-y-3 border border-border-hair"
         onClick={(e) => e.stopPropagation()}
         role="alertdialog"
         aria-modal="true"

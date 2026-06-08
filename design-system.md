@@ -238,6 +238,24 @@ Delete member / delete task / import (replace). Không confirm cho toggle status
 - **Cupertino confirm sheet** (mặc định cho cascade nặng / cross-cutting): scrim `bg-black/25 backdrop-blur-md` + sheet trắng `rounded-[16px]`, nút Cancel (ghost) + nút hành động (đỏ nếu destructive). Dùng qua **`useConfirm()`** (provider `ConfirmDialog.tsx` bọc `<App>`): `if (!(await confirm({title, message, confirmLabel, destructive}))) return`. Drop-in thay cho `confirm()`.
 - **Inline confirm** (cho hành động cục bộ trong 1 card/row — vd xoá table/status của collection): thanh nền đỏ nhạt Delete/Cancel ngay tại chỗ, không bật modal.
 
+### 6.5 Motion — calm micro-interactions (≤300ms)
+
+Motion phải **calm, nhanh, có mục đích** — §8.3 cấm animation > 300ms. Hai easing dùng chung (khai báo ở `index.css`, đừng tự chế thêm):
+
+- **move** `cubic-bezier(.32,.72,0,1)` — trượt/đổi vị trí (settings drawer, segmented indicator, capacity bar glide).
+- **spring** `cubic-bezier(.34,1.56,.64,1)` — pop nảy nhẹ (status complete, sheet enter, prereq chip). Overshoot nhỏ, không bounce dài.
+
+Bốn micro-motion chuẩn (đều honour `prefers-reduced-motion: reduce` → tắt):
+
+| # | Đâu | Motion | Class |
+|---|---|---|---|
+| 1 | StatusDot toggle | Glyph pop (spring 0.32s) + dấu check **vẽ ra** (stroke-dashoffset 0.26s). Check-draw **scope trong `.status-pop`** → BoardView's StatusIcon tĩnh. | `.status-pop`, `.status-check` |
+| 2 | Capacity bar | 3 đoạn done/in-progress/open **trượt width** 0.35s khi task mix đổi. | `.capacity-seg` |
+| 3 | Dialog / confirm sheet | Scrim fade 0.22s + sheet scale 0.96→1 (spring 0.26s). **Enter-only** (sheet unmount khi đóng). | `.dlg-scrim`, `.dlg-sheet` |
+| 4 | Segmented control | Pill trắng **trượt** (đo `useLayoutEffect`) thay vì swap bg từng nút. | `ViewToggle` indicator |
+
+**Cấm:** crossfade khi đổi view, animate insert/remove cả list row (jank + cãi "calm"). Microinteraction lẻ tẻ rải rác (§8 anti-pattern) — motion phải phục vụ 1 hành động cụ thể.
+
 ## 7. State & data rules *(giữ nguyên)*
 - `useLiveQuery` cho mọi DB read. Không tự subscribe.
 - Không cần optimistic (Dexie local sub-ms).

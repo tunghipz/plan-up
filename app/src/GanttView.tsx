@@ -363,11 +363,14 @@ export function GanttView({
         className="overflow-x-auto rounded-[14px] bg-surface shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_22px_rgba(0,0,0,0.05)]"
       >
         <div className="relative" style={{ width: innerW }}>
-          {/* Today line — continuous, behind events */}
+          {/* Today — a soft accent column wash (Apple-Calendar style), behind
+              events. The sticky header's opaque bg-surface hides the wash over
+              the header band, so the header's accent date pill carries "today"
+              up top while the wash marks the column down through the lanes. */}
           {todayIdx >= 0 && (
             <div
-              className="absolute top-0 bottom-0 w-px bg-accent/60 z-0 pointer-events-none"
-              style={{ left: MGUT + todayIdx * dayW }}
+              className="absolute top-0 bottom-0 bg-accent-tint z-0 pointer-events-none"
+              style={{ left: MGUT + todayIdx * dayW, width: dayW }}
               aria-hidden
             />
           )}
@@ -382,12 +385,15 @@ export function GanttView({
                 key={date}
                 className={`flex flex-col items-center justify-center py-2.5 ${
                   seamSet.has(i) ? 'border-l border-border' : ''
-                } ${date === today ? 'text-accent' : ''}`}
+                }`}
                 style={{ width: dayW }}
+                {...(date === today ? { 'aria-current': 'date' as const } : {})}
               >
                 <span
                   className={`text-[13.5px] font-semibold tab-data leading-none ${
-                    date === today ? 'text-accent' : 'text-ink-muted'
+                    date === today
+                      ? 'text-white bg-accent rounded-full inline-flex items-center justify-center h-[21px] px-2'
+                      : 'text-ink-muted'
                   }`}
                 >
                   {formatShortDate(date)}

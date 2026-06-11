@@ -82,14 +82,12 @@ export function BoardView({
   sprintStartDate,
   sprintEndDate,
   tasks,
-  search,
 }: {
   projectId: string
   sprintId: string
   sprintStartDate: string
   sprintEndDate: string
   tasks: Task[]
-  search: string
 }) {
   const members = useLiveQuery(
     () => db.members.where('projectId').equals(projectId).toArray(),
@@ -101,12 +99,6 @@ export function BoardView({
     for (const x of members ?? []) m.set(x.id, x)
     return m
   }, [members])
-
-  const filtered = useMemo(() => {
-    if (!search.trim()) return tasks
-    const q = search.toLowerCase()
-    return tasks.filter((t) => t.title.toLowerCase().includes(q))
-  }, [tasks, search])
 
   // Parent → children (across all tasks). A parent is a container: its card shows a
   // derived status (rolled up from children), consistent with List/Timeline.
@@ -230,11 +222,11 @@ export function BoardView({
       return a.sequence - b.sequence
     }
     const out: Record<Status, Task[]> = { todo: [], in_progress: [], done: [] }
-    for (const t of filtered) out[effectiveStatus(t)].push(t)
+    for (const t of tasks) out[effectiveStatus(t)].push(t)
     for (const s of STATUS_ORDER) out[s].sort((a, b) => cmp(a, b, boardSort[s]))
     return out
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filtered, childrenByParent, boardSort, timeKeyById, membersById])
+  }, [tasks, childrenByParent, boardSort, timeKeyById, membersById])
 
   // Per-card display data (status / group roll-up / parent title), precomputed once
   // per data change. Crucial for drag perf: the `group` object keeps a STABLE ref

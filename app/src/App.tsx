@@ -33,6 +33,7 @@ import {
   type Project,
   type Sprint,
   type Task,
+  type Member,
   type Collection,
   type ExportPayload,
 } from './db'
@@ -120,10 +121,12 @@ function App() {
       return !p
     })
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [search, setSearch] = useState('')
+  const [paletteOpen, setPaletteOpen] = useState(false)
   const [dark, setDark] = useDarkMode()
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const searchRef = useRef<HTMLInputElement>(null)
+  // Scroll container for the sprint views — search-palette jump-to scrolls it to
+  // the picked task (we never use scrollIntoView; it breaks this container).
+  const scrollRef = useRef<HTMLDivElement>(null)
 
   // Resizable sprint panel. Width persisted across sessions; the icon rail
   // (58px) sits to its left, so a drag maps to clientX - 58, clamped.
@@ -234,6 +237,16 @@ function App() {
     [currentSprintId]
   )
 
+  // Members of the current project — used by the search palette to show each
+  // result's assignee. (The views load their own copy too; this is cheap/local.)
+  const paletteMembers = useLiveQuery<Member[]>(
+    () =>
+      currentProjectId
+        ? db.members.where('projectId').equals(currentProjectId).toArray()
+        : Promise.resolve([] as Member[]),
+    [currentProjectId]
+  )
+
   // Per-sprint task counts for the sidebar panel.
   const projectTasks = useLiveQuery<Task[]>(
     () =>
@@ -284,7 +297,25 @@ function App() {
     }
   }, [collections, selKind, currentCollectionId])
 
-  // Keyboard shortcuts: / focus search, n new sprint, esc clears search
+  // Search-palette jump-to: close the palette, ensure we're in List view (the
+  // only sprint view that hosts the row highlight), then scroll the container to
+  // the picked task and flash it. Never scrollIntoView (breaks the container);
+  // measure the row vs the container and call scrollTo.
+  const jumpToTask = (taskId: string) => {
+    setPaletteOpen(false)
+    setView('list')
+    setTimeout(() => {
+      const c = scrollRef.current
+      const el = c?.querySelector<HTMLElement>(`[data-task-id="${taskId}"]`)
+      if (!c || !el) return
+      const top = c.scrollTop + (el.getBoundingClientRect().top - c.getBoundingClientRect().top) - 80
+      c.scrollTo({ top: top < 0 ? 0 : top, behavior: 'smooth' })
+      el.setAttribute('data-flash', '1')
+      window.setTimeout(() => el.removeAttribute('data-flash'), 1300)
+    }, 70)
+  }
+
+  // Keyboard shortcuts: / or ⌘K open the search palette, n new sprint, esc closes.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null
@@ -292,23 +323,29 @@ function App() {
         t &&
         (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)
 
+      const sprintActive = selKind === 'sprint' && !!currentSprintId
+
+      // ⌘K / Ctrl+K — open palette from anywhere (works even while typing).
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        if (settingsOpen || !sprintActive) return
+        e.preventDefault()
+        setPaletteOpen(true)
+        return
+      }
+
       if (e.key === 'Escape') {
-        // Settings takes priority over clearing search.
-        if (settingsOpen) {
-          setSettingsOpen(false)
+        if (paletteOpen) {
+          setPaletteOpen(false)
           return
         }
-        if (search) {
-          setSearch('')
-          ;(t as HTMLInputElement)?.blur?.()
-        }
+        if (settingsOpen) setSettingsOpen(false)
         return
       }
       if (inField) return
       if (e.key === '/') {
-        if (settingsOpen) return // search box is hidden while in settings
+        if (settingsOpen || !sprintActive) return // no palette over settings / no sprint
         e.preventDefault()
-        searchRef.current?.focus()
+        setPaletteOpen(true)
       } else if (e.key === 'n' && !e.metaKey && !e.ctrlKey) {
         if (settingsOpen) return // don't stack a dialog over settings
         e.preventDefault()
@@ -320,7 +357,7 @@ function App() {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [search, dark, setDark, settingsOpen])
+  }, [paletteOpen, dark, setDark, settingsOpen, selKind, currentSprintId])
 
   if (seedError) {
     return (
@@ -744,23 +781,18 @@ function App() {
               <ViewToggle value={view} options={SPRINT_VIEWS} onChange={setView} />
             )}
             <div className="w-px h-5 bg-border-hair mx-1" />
-            <div className="relative">
-              <Search
-                size={14}
-                strokeWidth={1.75}
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-faint pointer-events-none"
-              />
-              <input
-                ref={searchRef}
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search"
-                className="text-sm bg-fill border border-transparent rounded-full pl-9 pr-9 py-1.5 w-52 focus:outline-none focus:bg-surface focus:ring-2 focus:ring-accent/40 text-ink transition"
-              />
-              <kbd className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] text-ink-faint pointer-events-none">
-                /
-              </kbd>
-            </div>
+            {/* Search = command palette (Spotlight). Sprint-only (search never
+                applied to collections). Trigger: this icon, "/", or ⌘K. */}
+            {selKind === 'sprint' && currentSprint && (
+              <button
+                onClick={() => setPaletteOpen(true)}
+                title="Search tasks (/ or ⌘K)"
+                aria-label="Search tasks"
+                className="inline-flex items-center justify-center w-8 h-8 rounded-md text-ink-faint hover:text-ink hover:bg-surface-hover transition"
+              >
+                <Search size={15} strokeWidth={1.9} />
+              </button>
+            )}
             <button
               onClick={handleExport}
               className="text-xs flex items-center gap-1.5 px-2 py-1.5 text-accent hover:bg-accent-soft rounded-md transition"
@@ -785,7 +817,7 @@ function App() {
           </div>
         </header>
 
-        <div className="flex-1 overflow-auto">
+        <div ref={scrollRef} className="flex-1 overflow-auto">
           {selKind === 'sprint' && currentSprint && (
             <CapacityBanner
               total={capacity.total}
@@ -837,7 +869,6 @@ function App() {
                   sprintStartDate={currentSprint.startDate}
                   sprintEndDate={currentSprint.endDate}
                   tasks={tasks}
-                  search={search}
                 />
               ) : view === 'timeline' ? (
                 <GanttView
@@ -845,7 +876,6 @@ function App() {
                   sprintStartDate={currentSprint.startDate}
                   sprintEndDate={currentSprint.endDate}
                   tasks={tasks}
-                  search={search}
                   onOpenInList={() => setView('list')}
                 />
               ) : (
@@ -855,7 +885,6 @@ function App() {
                   sprintStartDate={currentSprint.startDate}
                   sprintEndDate={currentSprint.endDate}
                   tasks={tasks}
-                  search={search}
                 />
               )
             ) : (
@@ -928,6 +957,172 @@ function App() {
         />
       )}
 
+      {paletteOpen && currentSprint && (
+        <SearchPalette
+          tasks={tasks ?? []}
+          members={paletteMembers ?? []}
+          onSelect={jumpToTask}
+          onClose={() => setPaletteOpen(false)}
+        />
+      )}
+
+    </div>
+  )
+}
+
+/**
+ * Command palette (Spotlight) — search the current sprint's tasks by title and
+ * jump to one. Replaces the old toolbar search input (design-docs/search-and-
+ * keyboard.md). Uses the shared dlg-scrim/dlg-sheet motion (§6.5). Picking a
+ * result hands the task id back to App, which scrolls+flashes its row.
+ */
+function SearchPalette({
+  tasks,
+  members,
+  onSelect,
+  onClose,
+}: {
+  tasks: Task[]
+  members: Member[]
+  onSelect: (taskId: string) => void
+  onClose: () => void
+}) {
+  const [q, setQ] = useState('')
+  const [sel, setSel] = useState(0)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    inputRef.current?.focus()
+  }, [])
+
+  const memberById = useMemo(
+    () => new Map(members.map((m) => [m.id, m])),
+    [members]
+  )
+  const results = useMemo(() => {
+    const query = q.trim().toLowerCase()
+    const list = query
+      ? tasks.filter((t) => t.title.toLowerCase().includes(query))
+      : tasks
+    // Stable, predictable order: by sequence.
+    return [...list].sort((a, b) => a.sequence - b.sequence).slice(0, 50)
+  }, [q, tasks])
+
+  // Keep the selection in range as the result set changes.
+  useEffect(() => {
+    setSel((s) => (s >= results.length ? 0 : s))
+  }, [results.length])
+
+  const DOT: Record<string, string> = {
+    todo: 'bg-status-todo',
+    in_progress: 'bg-status-progress',
+    done: 'bg-status-done',
+  }
+
+  const onKey = (e: React.KeyboardEvent) => {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      setSel((s) => Math.min(s + 1, results.length - 1))
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      setSel((s) => Math.max(s - 1, 0))
+    } else if (e.key === 'Enter') {
+      e.preventDefault()
+      const t = results[sel]
+      if (t) onSelect(t.id)
+    }
+    // Escape is handled by the global key handler (closes the palette).
+  }
+
+  const renderTitle = (title: string) => {
+    const query = q.trim()
+    if (!query) return title
+    const i = title.toLowerCase().indexOf(query.toLowerCase())
+    if (i < 0) return title
+    return (
+      <>
+        {title.slice(0, i)}
+        <mark className="bg-accent-tint text-ink rounded-[3px]">
+          {title.slice(i, i + query.length)}
+        </mark>
+        {title.slice(i + query.length)}
+      </>
+    )
+  }
+
+  return (
+    <div
+      className="dlg-scrim fixed inset-0 bg-black/25 backdrop-blur-md flex items-start justify-center pt-[12vh] p-4 z-50"
+      onClick={onClose}
+    >
+      <div
+        role="dialog"
+        aria-label="Search tasks"
+        className="dlg-sheet bg-surface text-ink rounded-[16px] shadow-[0_20px_60px_rgba(0,0,0,0.28)] w-full max-w-xl border border-border-hair overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center gap-3 px-4 py-3.5 border-b border-border">
+          <Search size={18} strokeWidth={1.75} className="text-ink-faint shrink-0" />
+          <input
+            ref={inputRef}
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            onKeyDown={onKey}
+            placeholder="Tìm task trong sprint…"
+            className="flex-1 bg-transparent outline-none text-[16px] text-ink placeholder:text-ink-faint"
+          />
+          <kbd className="text-[11px] text-ink-faint border border-border rounded px-1.5 py-0.5">
+            esc
+          </kbd>
+        </div>
+        <div className="max-h-[320px] overflow-auto px-2 py-1.5">
+          {results.length === 0 ? (
+            <div className="px-4 py-7 text-center text-sm text-ink-faint">
+              {q.trim() ? 'Không có task nào khớp.' : 'Sprint này chưa có task.'}
+            </div>
+          ) : (
+            results.map((t, i) => {
+              const assignee = t.assigneeId ? memberById.get(t.assigneeId) : null
+              return (
+                <button
+                  key={t.id}
+                  onClick={() => onSelect(t.id)}
+                  onMouseEnter={() => setSel(i)}
+                  className={`w-full text-left flex items-center gap-3 px-2.5 py-2 rounded-lg transition ${
+                    i === sel ? 'bg-accent-soft' : ''
+                  }`}
+                >
+                  <span
+                    className={`w-3 h-3 rounded-full shrink-0 ${DOT[t.status] ?? 'bg-status-todo'}`}
+                    aria-hidden
+                  />
+                  <span
+                    className={`flex-1 min-w-0 truncate text-sm ${
+                      t.status === 'done' ? 'text-ink-faint line-through' : 'text-ink'
+                    }`}
+                  >
+                    {renderTitle(t.title)}
+                  </span>
+                  <span className="text-xs text-ink-faint tab-data shrink-0">
+                    #{t.sequence}
+                  </span>
+                  {assignee ? (
+                    <span
+                      className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-semibold text-white shrink-0"
+                      style={{ background: assignee.color ?? colorForName(assignee.name) }}
+                      title={assignee.name}
+                    >
+                      {assignee.name.slice(0, 1).toUpperCase()}
+                    </span>
+                  ) : (
+                    <span className="w-5 shrink-0 text-center text-ink-faint text-xs">—</span>
+                  )}
+                </button>
+              )
+            })
+          )}
+        </div>
+      </div>
     </div>
   )
 }

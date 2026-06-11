@@ -209,6 +209,21 @@ h1, h2, h3, .display-tight {
   .dlg-scrim, .dlg-sheet { animation: none !important; transition: none !important; }
 }
 
+/* Search-palette jump-to — when a palette result is picked, App scrolls the
+ * list to that row and sets data-flash for ~1.3s. A calm accent ring + soft fill
+ * pulse marks "this is the one" without yanking attention (design-system §6.5).
+ * Reduced-motion: hold a static highlight instead of pulsing. */
+@keyframes task-flash {
+  0%, 22% { background: var(--color-accent-soft); box-shadow: inset 0 0 0 2px var(--color-accent); }
+  100% { background: transparent; box-shadow: inset 0 0 0 0 transparent; }
+}
+.task-row[data-flash] {
+  animation: task-flash 1.25s cubic-bezier(0.32, 0.72, 0, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .task-row[data-flash] { animation: none; background: var(--color-accent-soft); }
+}
+
 /* Prereq cycle popover — animated path-trace (design-docs/dependencies.md).
  * Chips pop in left→right following the loop; the closing node (where the loop
  * returns to the edited task) rings red and pulses once. Per-chip stagger comes

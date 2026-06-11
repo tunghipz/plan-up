@@ -222,7 +222,9 @@ Hành động **thêm một group-card mới** vào list card-per-group — Coll
 ## 6. Interaction rules *(giữ nguyên)*
 
 ### 6.1 Keyboard shortcuts
-`/` focus search · `n` new sprint · `Esc` clear search · `⌘⇧D`/`Ctrl⇧D` toggle dark. Phím đơn chỉ khi không trong input; combo cho global; mỗi shortcut mới phải tránh conflict OS + có hint.
+`/` **mở search palette** · `⌘K`/`Ctrl K` mở search palette · `n` new sprint · `Esc` đóng palette (rồi mới tới settings) · `⌘⇧D`/`Ctrl⇧D` toggle dark. Phím đơn (`/`, `n`) chỉ khi không trong input; combo (`⌘K`) global; mỗi shortcut mới phải tránh conflict OS + có hint.
+
+**Search = command palette (Spotlight), KHÔNG phải input trong toolbar.** Toolbar chỉ giữ **icon kính lúp** (calm chrome — bỏ input 208px vì chật khi có Roll over + segmented 3 mục). Bấm icon / `/` / `⌘K` → overlay giữa màn (`dlg-scrim`+`dlg-sheet`, §6.5), tìm task sprint hiện tại theo title. Hành vi **nhảy-đến** (chọn → cuộn list tới task + nháy highlight), không lọc-tại-chỗ. Chi tiết: [`design-docs/search-and-keyboard.md`](design-docs/search-and-keyboard.md).
 
 ### 6.2 Persistence
 IndexedDB: data. localStorage: chỉ UI pref (`plan-up:dark`, collapse, `plan-up:sidebarWidth`, `plan-up:view`, `plan-up:currentProjectId`). URL: chưa dùng.

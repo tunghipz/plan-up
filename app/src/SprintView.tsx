@@ -280,14 +280,12 @@ export function SprintView({
   sprintStartDate,
   sprintEndDate,
   tasks,
-  search,
 }: {
   projectId: string
   sprintId: string
   sprintStartDate: string
   sprintEndDate: string
   tasks: Task[]
-  search: string
 }) {
   const members = useLiveQuery(
     () => db.members.where('projectId').equals(projectId).toArray(),
@@ -331,14 +329,8 @@ export function SprintView({
     })
   }
 
-  const filteredTasks = useMemo(() => {
-    if (!search.trim()) return tasks
-    const q = search.toLowerCase()
-    return tasks.filter((t) => t.title.toLowerCase().includes(q))
-  }, [tasks, search])
-
-  // Dependency picker + blocked check need an unfiltered lookup so a task's
-  // prereq is still resolvable even when the user filters the view.
+  // Dependency picker + blocked check need a full lookup so a task's prereq is
+  // always resolvable.
   const tasksById = useMemo(() => new Map(tasks.map((t) => [t.id, t])), [tasks])
 
   const { groups, emptyMembers, unassigned } = useMemo(() => {
@@ -346,7 +338,7 @@ export function SprintView({
     const byMember = new Map<string, Task[]>()
     for (const m of ms) byMember.set(m.id, [])
     const orphan: Task[] = []
-    for (const t of filteredTasks) {
+    for (const t of tasks) {
       const owner = ms.some((m) => m.id === t.assigneeId) ? t.assigneeId : null
       if (owner) byMember.get(owner)!.push(t)
       else orphan.push(t)
@@ -362,23 +354,16 @@ export function SprintView({
       emptyMembers: empty,
       unassigned: orphan,
     }
-  }, [members, filteredTasks, sort])
+  }, [members, tasks, sort])
 
   if (!members) return <p className="text-ink-muted py-12 text-center">Loading…</p>
 
   const isEmpty = tasks.length === 0 && members.length === 0
-  const isFilteredEmpty = filteredTasks.length === 0 && search.trim() !== ''
 
   return (
     <SprintRangeContext.Provider value={{ start: sprintStartDate, end: sprintEndDate }}>
     <div className="space-y-4">
       {isEmpty && <EmptyState onAddMember={() => setShowAddMember(true)} />}
-
-      {isFilteredEmpty && (
-        <div className="bg-surface border border-border rounded-lg p-6 text-center text-sm text-ink-muted">
-          No tasks match "{search}".
-        </div>
-      )}
 
       {groups.map(({ member, tasks: t }) => (
         <MemberCard
@@ -1781,6 +1766,7 @@ function TaskRow({
   return (
     <div
       {...rowProps}
+      data-task-id={task.id}
       className={`task-row group/row relative flex items-center gap-3 px-4 py-2 text-sm transition ${
         selected ? 'bg-accent-soft' : 'hover:bg-surface-hover'
       } ${dragging ? 'opacity-40' : ''}`}

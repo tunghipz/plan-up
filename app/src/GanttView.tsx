@@ -66,14 +66,12 @@ export function GanttView({
   sprintStartDate,
   sprintEndDate,
   tasks,
-  search,
   onOpenInList,
 }: {
   projectId: string
   sprintStartDate: string
   sprintEndDate: string
   tasks: Task[]
-  search: string
   /** Jump to the List view (the bar popover's "Open in List"). */
   onOpenInList?: () => void
 }) {
@@ -105,12 +103,6 @@ export function GanttView({
     return s
   }, [workdays])
 
-  const filteredTasks = useMemo(() => {
-    if (!search.trim()) return tasks
-    const q = search.toLowerCase()
-    return tasks.filter((t) => t.title.toLowerCase().includes(q))
-  }, [tasks, search])
-
   const tasksById = useMemo(() => new Map(tasks.map((t) => [t.id, t])), [tasks])
   // Parent → children (across all tasks). A parent group has no own dates; its
   // Timeline bar is a summary spanning its children (mirrors the List roll-up).
@@ -131,8 +123,7 @@ export function GanttView({
   // The `groups` memo below depends on `dayW`, which changes on every
   // ResizeObserver tick / window resize; without this the entire scheduler
   // re-ran for every task on each resize frame. Mirrors BoardView's planById.
-  // Covers every task (not just filteredTasks) so a parent's roll-up still sees
-  // children that a search filtered out of view.
+  // Covers every task so a parent's roll-up always sees all its children.
   const planById = useMemo(() => {
     const m = new Map<string, ReturnType<typeof computeWorkingPlan>>()
     for (const t of tasksById.values()) m.set(t.id, computeWorkingPlan(t, tasksById, memberById))
@@ -164,7 +155,7 @@ export function GanttView({
     const ms = members ?? []
     const byMember = new Map<string, Task[]>()
     for (const m of ms) byMember.set(m.id, [])
-    for (const t of filteredTasks) {
+    for (const t of tasks) {
       if (t.assigneeId && byMember.has(t.assigneeId)) byMember.get(t.assigneeId)!.push(t)
     }
     // NOTE (intentional): the Timeline is an assignee-swimlane view, so tasks
@@ -322,7 +313,7 @@ export function GanttView({
         const laterN = offWindow.length - earlierN
         return { member: m, evs, rows, offWindow, earlierN, laterN, noDates, offBands }
       })
-  }, [members, filteredTasks, workdays, planById, childrenByParent, N, firstDay, lastDay, dayW])
+  }, [members, tasks, workdays, planById, childrenByParent, N, firstDay, lastDay, dayW])
 
   if (!members) return <p className="text-ink-muted py-12 text-center">Loading…</p>
   if (N === 0)
@@ -334,7 +325,7 @@ export function GanttView({
   if (groups.length === 0)
     return (
       <div className="py-16 text-center text-sm text-ink-muted">
-        {search.trim() ? `No tasks match "${search}".` : 'No assigned tasks in this sprint yet.'}
+        No assigned tasks in this sprint yet.
       </div>
     )
 

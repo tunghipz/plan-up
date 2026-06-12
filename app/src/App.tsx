@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
   Download,
@@ -46,7 +47,13 @@ import { BoardView } from './BoardView'
 import { GanttView } from './GanttView'
 import { ProjectSettingsView } from './ProjectSettingsView'
 import { DateField } from './DatePicker'
-import { formatSprintRange, useDarkMode, safeStorage } from './lib'
+import {
+  formatSprintRange,
+  formatShortDate,
+  isOverdue,
+  useDarkMode,
+  safeStorage,
+} from './lib'
 
 const CURRENT_PROJECT_KEY = 'plan-up:currentProjectId'
 const VIEW_KEY = 'plan-up:view'
@@ -433,22 +440,25 @@ function App() {
     const idx = sprints.findIndex((s) => s.id === currentSprint.id)
     return idx >= 0 && idx < sprints.length - 1 ? sprints[idx + 1] : null
   }, [sprints, currentSprint])
-  const unfinishedCount = useMemo(
-    () => (tasks ?? []).filter((t) => t.status !== 'done').length,
+  // Unfinished tasks = the exact set that rolls over (matches
+  // moveUnfinishedToNextSprint). Sorted by sequence for a stable preview list.
+  const unfinishedTasks = useMemo(
+    () =>
+      (tasks ?? [])
+        .filter((t) => t.status !== 'done')
+        .sort((a, b) => a.sequence - b.sequence),
     [tasks]
   )
+  const unfinishedCount = unfinishedTasks.length
 
-  const rollover = async () => {
-    if (!currentSprint || !nextSprint || unfinishedCount === 0) return
-    const ok = await confirm({
-      title: 'Roll over unfinished tasks?',
-      message: `Move ${unfinishedCount} unfinished task${
-        unfinishedCount === 1 ? '' : 's'
-      } from “${currentSprint.name}” to “${nextSprint.name}”.`,
-      confirmLabel: 'Move',
-      destructive: false,
-    })
-    if (!ok) return
+  // Roll over is a preview popover anchored to its button (not a center modal):
+  // the user sees WHAT moves before committing. See sprint-rollover.md.
+  const [rollOpen, setRollOpen] = useState(false)
+  const rollBtnRef = useRef<HTMLButtonElement>(null)
+
+  const doRollover = async () => {
+    if (!currentSprint) return
+    setRollOpen(false)
     const result = await moveUnfinishedToNextSprint(currentSprint.id)
     if (result.targetSprintId) {
       setCurrentSprintId(result.targetSprintId)
@@ -767,17 +777,34 @@ function App() {
               <span className="text-ink-faint">No sprint selected</span>
             )}
             {selKind === 'sprint' && currentSprint && nextSprint && unfinishedCount > 0 && (
-              <button
-                onClick={rollover}
-                className="text-xs flex items-center gap-1 text-accent rounded-md px-2 py-1 hover:bg-accent-soft transition ml-1"
-                title={`Move ${unfinishedCount} unfinished task${
-                  unfinishedCount === 1 ? '' : 's'
-                } to "${nextSprint.name}"`}
-              >
-                <ArrowRightCircle size={13} strokeWidth={1.75} />
-                <span>Roll over</span>
-                <span className="text-ink-faint">{unfinishedCount}</span>
-              </button>
+              <div className="relative ml-1">
+                <button
+                  ref={rollBtnRef}
+                  onClick={() => setRollOpen((o) => !o)}
+                  aria-expanded={rollOpen}
+                  className={`text-xs flex items-center gap-1 text-accent rounded-md px-2 py-1 hover:bg-accent-soft transition ${
+                    rollOpen ? 'bg-accent-soft' : ''
+                  }`}
+                  title={`Move ${unfinishedCount} unfinished task${
+                    unfinishedCount === 1 ? '' : 's'
+                  } to "${nextSprint.name}"`}
+                >
+                  <ArrowRightCircle size={13} strokeWidth={1.75} />
+                  <span>Roll over</span>
+                  <span className="text-ink-faint">{unfinishedCount}</span>
+                </button>
+                {rollOpen && (
+                  <RolloverPopover
+                    anchorRef={rollBtnRef}
+                    tasks={unfinishedTasks}
+                    members={paletteMembers ?? []}
+                    fromName={currentSprint.name}
+                    toName={nextSprint.name}
+                    onMove={doRollover}
+                    onClose={() => setRollOpen(false)}
+                  />
+                )}
+              </div>
             )}
           </div>
           <div className="ml-auto flex items-center gap-1.5">
@@ -1574,6 +1601,181 @@ const COLLECTION_VIEWS: { value: CollectionViewMode; label: string; Icon: typeof
   { value: 'list', label: 'List', Icon: List },
   { value: 'calendar', label: 'Calendar', Icon: Calendar },
 ]
+
+/**
+ * Roll over preview popover (design-system §5.5 portal pattern). Anchored to the
+ * Roll over button; previews the exact unfinished tasks that will move into the
+ * next sprint, then commits on Move. Portal + fixed position (the main column is
+ * overflow-hidden and would clip an in-flow popover); re-pins on scroll/resize,
+ * flips up near the viewport edge; outside-click / Esc to dismiss. See
+ * sprint-rollover.md. Move-all — no per-task selection (matches the DB move).
+ */
+const ROLL_PRIORITY: Record<string, { label: string; bg: string; fg: string }> = {
+  urgent: { label: 'Urgent', bg: 'rgba(255,59,48,0.12)', fg: 'color-mix(in srgb, var(--color-priority-urgent) 100%, #000 22%)' },
+  high: { label: 'High', bg: 'rgba(255,149,0,0.15)', fg: 'color-mix(in srgb, var(--color-priority-high) 100%, #000 22%)' },
+}
+function RolloverPopover({
+  anchorRef,
+  tasks,
+  members,
+  fromName,
+  toName,
+  onMove,
+  onClose,
+}: {
+  anchorRef: React.RefObject<HTMLButtonElement | null>
+  tasks: Task[]
+  members: Member[]
+  fromName: string
+  toName: string
+  onMove: () => void
+  onClose: () => void
+}) {
+  const popRef = useRef<HTMLDivElement>(null)
+  const [pos, setPos] = useState<{ top: number; left: number }>({ top: -9999, left: -9999 })
+  const WIDTH = 360
+  const memberOf = (id: string | null) =>
+    id ? members.find((m) => m.id === id) ?? null : null
+
+  useLayoutEffect(() => {
+    const pin = () => {
+      const r = anchorRef.current?.getBoundingClientRect()
+      if (!r) return
+      const h = popRef.current?.offsetHeight || 320
+      let left = Math.min(r.left, window.innerWidth - 8 - WIDTH)
+      left = Math.max(8, left)
+      let top = r.bottom + 8
+      if (top + h > window.innerHeight - 8) top = Math.max(8, r.top - h - 8)
+      setPos({ top, left })
+    }
+    pin()
+    window.addEventListener('scroll', pin, true)
+    window.addEventListener('resize', pin)
+    return () => {
+      window.removeEventListener('scroll', pin, true)
+      window.removeEventListener('resize', pin)
+    }
+  }, [anchorRef, tasks.length])
+
+  useEffect(() => {
+    const onDoc = (e: MouseEvent) => {
+      const t = e.target as Node
+      if (
+        popRef.current && !popRef.current.contains(t) &&
+        anchorRef.current && !anchorRef.current.contains(t)
+      ) {
+        onClose()
+      }
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        anchorRef.current?.focus?.()
+        onClose()
+      }
+    }
+    document.addEventListener('mousedown', onDoc)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDoc)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [anchorRef, onClose])
+
+  return createPortal(
+    <div
+      ref={popRef}
+      onClick={(e) => e.stopPropagation()}
+      style={{ position: 'fixed', top: pos.top, left: pos.left, width: WIDTH }}
+      className="dlg-sheet z-50 bg-surface text-ink rounded-[14px] shadow-[0_12px_40px_rgba(0,0,0,0.18),0_0_0_0.5px_rgba(0,0,0,0.06)] overflow-hidden"
+      role="dialog"
+      aria-label="Roll over unfinished tasks"
+    >
+      <div className="px-4 pt-3.5 pb-2.5">
+        <div className="flex items-center gap-1.5 text-[14px] font-bold tracking-[-0.01em]">
+          <span>Roll over</span>
+          <ArrowRightCircle size={13} className="text-ink-faint" aria-hidden />
+          <span className="truncate">{toName}</span>
+        </div>
+        <div className="text-xs text-ink-muted mt-0.5">
+          {tasks.length} unfinished task{tasks.length === 1 ? '' : 's'} from “{fromName}”
+        </div>
+      </div>
+      <div className="max-h-[240px] overflow-auto px-2 pb-1">
+        {tasks.map((t) => {
+          const m = memberOf(t.assigneeId)
+          const overdue = isOverdue(t.dueDate, false)
+          const pri = ROLL_PRIORITY[t.priority]
+          return (
+            <div
+              key={t.id}
+              className="flex items-center gap-2.5 px-2 py-1.5 rounded-[9px]"
+            >
+              {/* status: todo = empty ring, in_progress = half pie */}
+              {t.status === 'in_progress' ? (
+                <span
+                  className="w-4 h-4 rounded-full shrink-0 border-2 border-accent"
+                  style={{ background: 'conic-gradient(var(--color-accent) 50%, transparent 0)' }}
+                  aria-hidden
+                />
+              ) : (
+                <span className="w-4 h-4 rounded-full shrink-0 border-2 border-border-strong" aria-hidden />
+              )}
+              <span className="text-[11.5px] text-ink-faint tab-data w-[22px] shrink-0">#{t.sequence}</span>
+              {pri && (
+                <span
+                  className="inline-flex items-center text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0"
+                  style={{ background: pri.bg, color: pri.fg }}
+                >
+                  {pri.label}
+                </span>
+              )}
+              <span className="flex-1 min-w-0 text-[13.5px] truncate">{t.title}</span>
+              {m ? (
+                <span
+                  className="w-5 h-5 rounded-full shrink-0 grid place-items-center text-[10px] font-semibold text-white"
+                  style={{ background: colorForName(m.name) }}
+                  title={m.name}
+                >
+                  {m.name.charAt(0).toUpperCase()}
+                </span>
+              ) : (
+                <span
+                  className="w-5 h-5 rounded-full shrink-0 grid place-items-center text-[10px] text-ink-faint border border-dashed border-border-strong"
+                  title="Unassigned"
+                  aria-label="Unassigned"
+                >
+                  ·
+                </span>
+              )}
+              <span
+                className={`text-[11.5px] tab-data shrink-0 min-w-[42px] text-right ${
+                  overdue ? 'text-red-500 font-medium' : 'text-ink-muted'
+                }`}
+              >
+                {t.dueDate ? formatShortDate(t.dueDate) : '—'}
+              </span>
+            </div>
+          )
+        })}
+      </div>
+      <div className="flex items-center justify-end gap-2 px-4 py-2.5 border-t border-border-hair">
+        <button
+          onClick={onClose}
+          className="px-3 py-1.5 text-[13.5px] font-medium text-ink-muted hover:bg-surface-hover rounded-[8px] transition"
+        >
+          Cancel
+        </button>
+        <button
+          onClick={onMove}
+          className="px-3.5 py-1.5 text-[13.5px] font-medium bg-accent hover:bg-accent-hover text-white rounded-[8px] transition"
+        >
+          Move {tasks.length}
+        </button>
+      </div>
+    </div>,
+    document.body
+  )
+}
 
 /**
  * Sprint goal-note banner (design-system §5.11 idiom). A thin chrome strip

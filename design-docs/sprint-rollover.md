@@ -1,8 +1,8 @@
 # Sprint rollover
 
 **Status:** Implemented
-**Last updated:** 2026-06-03
-**Code:** `app/src/App.tsx` (`rollover`, Roll over button), `app/src/db.ts`
+**Last updated:** 2026-06-12
+**Code:** `app/src/App.tsx` (`RolloverPopover`, Roll over button), `app/src/db.ts`
 (`moveUnfinishedToNextSprint`, `dedupeSprints`)
 
 ## Purpose
@@ -12,8 +12,21 @@ without manual re-entry.
 ## User-facing behavior
 - The **Roll over** button (header) appears only when: a current sprint exists, a next
   sprint exists, and there are unfinished tasks. It shows the unfinished count.
-- Click → confirm *"Move X unfinished task(s) from "A" to "B"?"* → all not-done tasks move
-  to the next sprint (chronologically the smallest `startDate` greater than source's).
+- Click → **anchored popover** (`RolloverPopover`, not a center modal) that **previews the
+  exact tasks that will move** — a read-only scrollable list (status dot · `#seq` ·
+  priority tag · title · assignee avatar · due date, overdue dates in red). Header
+  *"Roll over → {next sprint}"*, sub *"N unfinished tasks from {current}"*; footer
+  **Cancel** / **Move N**.
+- **Move** → all not-done tasks move to the next sprint (chronologically the smallest
+  `startDate` greater than source's); the popover closes and selection follows to the
+  target sprint. It's move-all (no per-task selection) — matches `moveUnfinishedToNextSprint`.
+- Popover follows the date-picker portal pattern (§5.5): `createPortal` + fixed position
+  pinned to the button rect (re-pins on scroll/resize, flips up if it would overflow the
+  viewport), outside-click / **Esc** to dismiss. Lives in a portal because the main column
+  is `overflow-hidden` and would clip an in-flow popover. Float shadow §4.2.
+- *Decision 2026-06-12*: replaced the center confirm sheet (`useConfirm`) with this
+  preview popover so the user sees **what** rolls over before committing — confirm-by-preview
+  instead of confirm-by-text. The old sheet lives in git history.
 
 ## Data
 Mutates moved `Task` rows: `sprintId`, `sequence`, sometimes `startDate`.

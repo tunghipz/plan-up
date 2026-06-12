@@ -1,7 +1,7 @@
 # Data model
 
 **Status:** Implemented
-**Last updated:** 2026-06-06
+**Last updated:** 2026-06-12
 **Code:** `app/src/db.ts`
 
 ## Purpose
@@ -10,7 +10,8 @@ discipline that lets the schema evolve without losing local data.
 
 ## Entities
 
-Four IndexedDB tables (Dexie database name **`plan-up`**):
+Six IndexedDB tables (Dexie database name **`plan-up`**): `projects`, `members`,
+`sprints`, `tasks`, `collections`, `events`.
 
 ### `Project` (`db.ts:19`)
 `id` · `name` · `createdAt` (number) · `description?` (string) · `color?` (hex)
@@ -66,6 +67,21 @@ Four IndexedDB tables (Dexie database name **`plan-up`**):
 `id` · `name` · `color` (hex from COLLECTION_PALETTE)
 - User-defined status per collection (not shared across collections). Embedded in `Collection.statuses`.
 
+### `ActivityEvent` (`db.ts`, table `events`)
+`id` · `projectId` · `sprintId` · `taskId` (`string|null`) · `taskSeq` (`number|null`) ·
+`taskTitle` (`string|null`) · `kind` · `field?` (`LoggableField`) · `from` (`string|null`) ·
+`to` (`string|null`) · `ts` (number)
+- **Append-only, uncapped** sprint activity log (see
+  [sprint-activity-log.md](./sprint-activity-log.md)) — the audit-trail counterpart to the
+  cap-5 per-task `Task.changeLog`. Unlike the changeLog it lives in its **own table**, so
+  events survive task deletion and aggregate sprint-wide. Collection tasks (no sprint) are
+  never logged.
+- `kind`: `'created' | 'edit' | 'rolled_over' | 'sprint_started'`. `field`/`from`/`to` are
+  only meaningful for `'edit'` and reuse the `ChangeLogEntry` grammar (assignee freezes the
+  member NAME; `dependsOn` freezes a seq-range label). `taskSeq`/`taskTitle` are **frozen at
+  write time** so the log stays readable after renumbering or deletion.
+- Indexes: `id, sprintId, ts, projectId`.
+
 ### Value types
 - `ChangeLogEntry`: `{ field: LoggableField; from: string|null; to: string|null;
   ts: number }` over 8 loggable fields (title, status, priority, assigneeId, startDate,
@@ -83,7 +99,7 @@ All dates are stored as `yyyy-mm-dd` strings.
 
 ## Schema versioning
 
-Dexie `version().stores()` + an upgrade callback per bump. Current version: **9**.
+Dexie `version().stores()` + an upgrade callback per bump. Current version: **10**.
 
 | Ver | Change |
 | --- | --- |
@@ -96,6 +112,7 @@ Dexie `version().stores()` + an upgrade callback per bump. Current version: **9*
 | 7 | Add `projects` table; backfill `projectId` on members/sprints/tasks (default "My Project"). |
 | 8 | `sequence` becomes **per-sprint** (was per-project); each sprint renumbered 1..N by `createdAt`. |
 | 9 | Add `collections` table; tasks gain `collectionId` index + `sectionId`/`collectionStatusId` (non-indexed); `sprintId` becomes nullable. Backfill `collectionId = null` on all existing tasks. |
+| 10 | Add `events` table (sprint activity log). No data backfill — history starts at v10. |
 
 Current indexes:
 - `projects`: `id, name, createdAt`
@@ -103,6 +120,7 @@ Current indexes:
 - `sprints`: `id, startDate, projectId`
 - `tasks`: `id, sprintId, assigneeId, status, createdAt, projectId, collectionId`
 - `collections`: `id, projectId, order`
+- `events`: `id, sprintId, ts, projectId`
 
 ## Rules & edge cases
 - **Bump the version + add an upgrade callback whenever a field/index changes.** Never

@@ -59,6 +59,7 @@ Non-obvious behaviors, defaults, persistence keys.
 | [member-title.md](./member-title.md) | Optional per-member role label (free-text), shown in settings + sprint header |
 | [tasks.md](./tasks.md) | Task CRUD, fields, inline editing |
 | [task-change-log.md](./task-change-log.md) | Per-task change log — last 5 user edits, hover 🕒 tooltip |
+| [sprint-activity-log.md](./sprint-activity-log.md) | Sprint-wide activity log page (timeline + by-member), 🕒 toolbar entry; append-only `events` store (audit-trail expansion of the per-task log) |
 | [task-groups.md](./task-groups.md) | Group tasks under a parent task (nested, roll-up + collapse) |
 | [scheduling.md](./scheduling.md) | Auto-scheduling engine (effort, prereqs, workdays) |
 | [conflict-warning.md](./conflict-warning.md) | Warn when a member is double-booked (same start/end/prereq) |

@@ -38,6 +38,7 @@ npm run lint       # eslint .
 - **Task groups & row actions** — hover a row → a checkbox appears; select tasks and a floating bar (English labels) offers **Group** (group several of one member under a new head — children nest, collapse + roll-up `done/total`), **Ungroup**, **Chain prereqs** (link the selection top-to-bottom — each depends on the one above, keeping existing prereqs, ≥2 required), **Clear prereqs** (wipe `dependsOn` on the selection), and **Delete** (delete the selection). The selection bar is the only delete affordance — there's no per-row kebab. Parents are containers, excluded from member counts
 - **Schedule conflict warning** — when one member is double-booked (two sized tasks whose computed time ranges **overlap**, or that share a start time, end time, or a prerequisite) each row gets an amber ⚠ + the member header shows an `N trùng lịch` badge. Back-to-back tasks (touching endpoints) don't count
 - **Status** — Reminders-style circle (todo / in-progress / done) + soft-tint pill
+- **Sprint activity log** — a 🕒 button on the sprint toolbar opens a full-page **activity log** aggregating *every* recorded change across the sprint into one timeline (the audit-trail counterpart to the per-task tooltip — uncapped, in its own append-only `events` table that survives task deletion). Two views: **Timeline** (grouped by day, newest-first) and **By member** (grouped by the task's current assignee — single-user, so a label not an actor). Logs task **created**, field **edits** (status / priority / assignee / dates / effort / prereqs, reusing the change-log grammar with semantic color on the new value), **rolled-over** carry-ins, and **sprint started**; scheduler recomputes stay unlogged. History starts when the feature shipped (no backfill). See [`design-docs/sprint-activity-log.md`](./design-docs/sprint-activity-log.md)
 - **Task change log** — a faint 🕒 right after each task's title (List + Board) whose hover tooltip shows the **5 most recent** user edits, newest-first (`Status: To do → Done · 2h ago`). Records edits to title / status / priority / assignee / start / due / effort / **prereqs** (a prereq change logs `Prereqs: — → 1-2` **plus** the old→new dates it shifted on that task, e.g. `Start: May 4 → May 6`). Otherwise the scheduler's auto-recomputed dates aren't logged — the log captures *what you did*, and the one recomputed date it does record is the direct result of your own prereq edit. Title keystroke-bursts coalesce into one entry; assignee names are frozen so history survives a member being deleted. Stored on the task (non-indexed, no schema bump). See [`design-docs/task-change-log.md`](./design-docs/task-change-log.md)
 - **Date picker** — a custom **Cupertino calendar** (replaces the native `<input type=date>` everywhere): Monday-first month grid, today ring, selected fill, weekends dimmed but still selectable, keyboard `← → ↑ ↓ / Enter / Esc`, Today / Clear, light+dark themed. **Planner-aware**: task date cells **highlight the sprint** (range shaded, opens on the sprint month — *shade only*, any date stays selectable since a task can run past its sprint), and the **assignee's in-sprint days-off** are marked with orange dots (half-day = half dot) and **listed with their time detail** below the grid (`Jun 6 · AM off · 08:00–12:00`, `Jun 10 · Off all day`). The member **days-off** picker hard-clamps entry to the sprint range. An empty date can render a discoverable **dashed `＋ Start / ＋ Due` pill** instead of a bare dash (always-on in Collections; hover-revealed on unlocked cells in the sprint List / Board, never on scheduler-locked dates).
 - **Auto-scheduling** — set effort + prereqs, dates compute automatically (skips weekends + per-member off-days, supports half-day off)
@@ -67,7 +68,7 @@ Read `design-system.md` **before** building any new component.
 
 ## Data model
 
-Five IndexedDB tables in `app/src/db.ts`:
+Six IndexedDB tables in `app/src/db.ts`:
 
 | Table         | Fields                                                                            |
 | ------------- | --------------------------------------------------------------------------------- |
@@ -76,8 +77,9 @@ Five IndexedDB tables in `app/src/db.ts`:
 | `sprints`     | id, projectId, name, startDate, endDate, note?                                    |
 | `collections` | id, projectId, name, order, sections (`{id, name, color?}[]`), statuses (`{id, name, color}[]`), createdAt |
 | `tasks`       | id, projectId, sequence, title, assigneeId, sprintId, status, priority, dependsOn, startDate, dueDate, estimate, parentId?, boardOrder?, listOrder?, changeLog?, collectionId?, sectionId?, collectionStatusId?, … |
+| `events`      | id, projectId, sprintId, taskId, taskSeq, taskTitle, kind, field?, from, to, ts (append-only sprint activity log) |
 
-A task lives in **exactly one** container — `sprintId` (sprint task) **xor** `collectionId` (collection item), the other `null`. Schema version bumps via Dexie's `version().stores()` + upgrade callback (currently v9 — adds the `collections` table + the `collectionId` index on tasks).
+A task lives in **exactly one** container — `sprintId` (sprint task) **xor** `collectionId` (collection item), the other `null`. Schema version bumps via Dexie's `version().stores()` + upgrade callback (currently v10 — adds the `events` table for the sprint activity log).
 
 ## Philosophy
 

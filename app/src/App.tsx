@@ -18,6 +18,7 @@ import {
   Lock,
   NotebookPen,
   ChevronDown,
+  History,
 } from 'lucide-react'
 import {
   db,
@@ -30,6 +31,7 @@ import {
   setSprintNote,
   recomputeAllDates,
   moveUnfinishedToNextSprint,
+  logEvent,
   createProject,
   createCollection,
   deleteCollection,
@@ -45,6 +47,7 @@ import { useConfirm } from './ConfirmDialog'
 import { SprintView } from './SprintView'
 import { BoardView } from './BoardView'
 import { GanttView } from './GanttView'
+import { ActivityLog } from './ActivityLog'
 import { ProjectSettingsView } from './ProjectSettingsView'
 import { DateField } from './DatePicker'
 import {
@@ -82,9 +85,11 @@ function App() {
     () => safeStorage.get(SELCOLL_KEY)
   )
   const selectSprint = (id: string) => {
+    setShowActivity(false)
     setCurrentSprintId(id); setSelKindState('sprint'); safeStorage.set(SELKIND_KEY, 'sprint')
   }
   const selectCollection = (id: string) => {
+    setShowActivity(false)
     setCurrentCollectionIdState(id); safeStorage.set(SELCOLL_KEY, id)
     setSelKindState('collection'); safeStorage.set(SELKIND_KEY, 'collection')
   }
@@ -96,6 +101,10 @@ function App() {
     setViewState(v)
     safeStorage.set(VIEW_KEY, v)
   }
+  // Sprint activity log is a full-page overlay of the main column (not a persisted
+  // view mode — it's a transient drill-in, reset when the sprint changes). See
+  // design-docs/sprint-activity-log.md.
+  const [showActivity, setShowActivity] = useState(false)
   // Collection view (List/Calendar) — lifted here so the single adaptive top-bar
   // toggle can drive it; persisted separately from the sprint view.
   const COLLVIEW_KEY = 'plan-up:collectionView'
@@ -833,6 +842,23 @@ function App() {
                 <Search size={15} strokeWidth={1.9} />
               </button>
             )}
+            {/* Sprint activity log — toggle a full-page drill-in. Calm grey at
+                rest (accent is a signal, not chrome); accent only while open. */}
+            {selKind === 'sprint' && currentSprint && (
+              <button
+                onClick={() => setShowActivity((s) => !s)}
+                aria-pressed={showActivity}
+                title="Sprint activity log"
+                aria-label="Sprint activity log"
+                className={`inline-flex items-center justify-center w-8 h-8 rounded-md transition ${
+                  showActivity
+                    ? 'text-accent bg-accent-soft'
+                    : 'text-ink-faint hover:text-ink hover:bg-surface-hover'
+                }`}
+              >
+                <History size={15} strokeWidth={1.9} />
+              </button>
+            )}
             <button
               onClick={handleExport}
               className="text-xs flex items-center gap-1.5 px-2 py-1.5 text-accent hover:bg-accent-soft rounded-md transition"
@@ -865,6 +891,19 @@ function App() {
         )}
 
         <div ref={scrollRef} className="flex-1 overflow-auto">
+          {selKind === 'sprint' && currentSprint && showActivity ? (
+            <div className="px-6 pb-12 pt-4">
+              <ActivityLog
+                sprintId={currentSprint.id}
+                sprintName={currentSprint.name}
+                sprintRange={formatSprintRange(currentSprint.startDate, currentSprint.endDate)}
+                tasks={tasks ?? []}
+                members={paletteMembers ?? []}
+                onBack={() => setShowActivity(false)}
+              />
+            </div>
+          ) : (
+          <>
           {selKind === 'sprint' && currentSprint && (
             <CapacityBanner
               total={capacity.total}
@@ -938,6 +977,8 @@ function App() {
               <p className="text-ink-muted py-12 text-center">Loading…</p>
             )}
           </main>
+          </>
+          )}
         </div>
       </div>
 
@@ -1340,6 +1381,17 @@ function NewSprintDialog({
       ...(noteTrimmed ? { note: noteTrimmed } : {}),
     }
     await db.sprints.add(sprint)
+    await logEvent({
+      projectId,
+      sprintId: sprint.id,
+      taskId: null,
+      taskSeq: null,
+      taskTitle: null,
+      kind: 'sprint_started',
+      from: null,
+      to: null,
+      ts: Date.now(),
+    })
     onCreate(sprint)
   }
 

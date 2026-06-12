@@ -45,6 +45,40 @@ export interface ChangeLogEntry {
 }
 
 /**
+ * Kind of a sprint activity event (design-docs/sprint-activity-log.md, storage A).
+ * - `created` — a task was added to the sprint
+ * - `edit` — one field changed (reuses the changeLog `field`/`from`/`to` grammar)
+ * - `rolled_over` — a task carried over from a previous sprint (`from` = its name)
+ * - `sprint_started` — the sprint was created (task-less, sprint-level)
+ */
+export type ActivityKind = 'created' | 'edit' | 'rolled_over' | 'sprint_started'
+
+/**
+ * One row in the append-only, uncapped sprint activity store. Unlike the per-task
+ * `changeLog` (a cap-5 memory jog living ON the task), events survive task deletion
+ * and aggregate sprint-wide. Display fields (`taskSeq`/`taskTitle`) are FROZEN at
+ * write time so the log stays readable after renumbering or deletion — same
+ * survives-deletion principle as the changeLog's frozen assignee name.
+ */
+export interface ActivityEvent {
+  id: string
+  projectId: string
+  /** The sprint this event belongs to. Collection tasks (no sprint) are never logged. */
+  sprintId: string
+  /** null for sprint-level events (`sprint_started`). */
+  taskId: string | null
+  taskSeq: number | null
+  taskTitle: string | null
+  kind: ActivityKind
+  /** present iff `kind === 'edit'`. */
+  field?: LoggableField
+  from: string | null
+  to: string | null
+  /** epoch ms, captured at write time. */
+  ts: number
+}
+
+/**
  * A day off for a member.
  * - `half` omitted → entire day off (contributes 0 to effort)
  * - `half: 'am'` → morning off, afternoon worked (contributes 0.5)
@@ -190,6 +224,7 @@ class PlanDB extends Dexie {
   sprints!: Table<Sprint, string>
   tasks!: Table<Task, string>
   collections!: Table<Collection, string>
+  events!: Table<ActivityEvent, string>
 
   constructor() {
     super('plan-up')
@@ -325,6 +360,18 @@ class PlanDB extends Dexie {
             if (t.collectionId === undefined) t.collectionId = null
           })
       })
+    // v10 (2026-06-12): sprint activity log (design-docs/sprint-activity-log.md).
+    // New append-only `events` table, indexed by sprintId (+ ts for ordering,
+    // projectId for project-scoped wipes). No data backfill — history starts now;
+    // pre-existing tasks have no recorded events.
+    this.version(10).stores({
+      projects: 'id, name, createdAt',
+      members: 'id, name, projectId',
+      sprints: 'id, startDate, projectId',
+      collections: 'id, projectId, order',
+      tasks: 'id, sprintId, assigneeId, status, createdAt, projectId, collectionId',
+      events: 'id, sprintId, ts, projectId',
+    })
   }
 }
 
@@ -580,7 +627,7 @@ export async function addSprintTask(input: {
   status?: Status
   priority?: Priority
 }): Promise<Task> {
-  return db.transaction('rw', db.tasks, async () => {
+  return db.transaction('rw', db.tasks, db.events, async () => {
     const task: Task = {
       id: uid(),
       projectId: input.projectId,
@@ -598,6 +645,18 @@ export async function addSprintTask(input: {
       dependsOn: [],
     }
     await db.tasks.add(task)
+    // Record creation on the sprint activity log.
+    await logEvent({
+      projectId: task.projectId,
+      sprintId: input.sprintId,
+      taskId: task.id,
+      taskSeq: task.sequence,
+      taskTitle: task.title,
+      kind: 'created',
+      from: null,
+      to: null,
+      ts: task.createdAt,
+    })
     return task
   })
 }
@@ -1043,6 +1102,58 @@ export function appendChangeLog(
   return log.slice(0, CHANGELOG_CAP)
 }
 
+// ──────────────────────────────────────────────────────────────────────────
+// Sprint activity log (design-docs/sprint-activity-log.md, storage model A).
+// Append-only `events` store written from the SAME user-edit write sites as the
+// changeLog. Scheduler recomputes (raw db.tasks.update) are never logged — same
+// premise as the changeLog. Collection tasks (no sprintId) are never logged.
+// ──────────────────────────────────────────────────────────────────────────
+
+/** Append one activity event (id auto-assigned). */
+export async function logEvent(e: Omit<ActivityEvent, 'id'>): Promise<void> {
+  await db.events.add({ id: uid(), ...e })
+}
+
+/** A sprint's activity, newest-first (ts desc). */
+export async function sprintEvents(sprintId: string): Promise<ActivityEvent[]> {
+  const rows = await db.events.where('sprintId').equals(sprintId).toArray()
+  return rows.sort((a, b) => b.ts - a.ts)
+}
+
+/**
+ * Mirror the just-built changeLog `entries` into the activity store. Sprint-only.
+ * `title` coalesces within TITLE_COALESCE_MS (like the changeLog) so a keystroke
+ * burst is one event, not one per character. MUST run inside a transaction whose
+ * scope includes db.events. Display fields are frozen at write time.
+ */
+async function logTaskEdits(task: Task, entries: ChangeLogEntry[]): Promise<void> {
+  if (!task.sprintId) return
+  for (const e of entries) {
+    if (e.field === 'title') {
+      const prior = (await db.events.where('sprintId').equals(task.sprintId).toArray())
+        .filter((ev) => ev.taskId === task.id && ev.kind === 'edit' && ev.field === 'title')
+        .sort((a, b) => b.ts - a.ts)[0]
+      if (prior && e.ts - prior.ts <= TITLE_COALESCE_MS) {
+        await db.events.update(prior.id, { to: e.to, ts: e.ts })
+        continue
+      }
+    }
+    await db.events.add({
+      id: uid(),
+      projectId: task.projectId,
+      sprintId: task.sprintId,
+      taskId: task.id,
+      taskSeq: task.sequence ?? null,
+      taskTitle: task.title,
+      kind: 'edit',
+      field: e.field,
+      from: e.from,
+      to: e.to,
+      ts: e.ts,
+    })
+  }
+}
+
 /**
  * Canonical USER-edit path for a task. Diffs `patch` against LOGGABLE_FIELDS,
  * records one entry per actually-changed field, and writes patch + changeLog in
@@ -1053,7 +1164,7 @@ export async function updateTask(
   id: string,
   patch: Partial<Task>
 ): Promise<void> {
-  await db.transaction('rw', db.tasks, db.members, async () => {
+  await db.transaction('rw', db.tasks, db.members, db.events, async () => {
     const task = await db.tasks.get(id)
     if (!task) return
     // Only load members when an assignee label needs freezing (title fires per
@@ -1077,6 +1188,8 @@ export async function updateTask(
     const updates: Partial<Task> = { ...patch }
     if (entries.length) updates.changeLog = appendChangeLog(task, entries)
     await db.tasks.update(id, updates)
+    // Mirror into the sprint activity log (sprint tasks only; no-op otherwise).
+    if (entries.length) await logTaskEdits(task, entries)
   })
 }
 
@@ -1095,7 +1208,11 @@ export async function logStatusChange(
   to: Status
 ): Promise<void> {
   if (from === to) return
-  await db.transaction('rw', db.tasks, async () => {
+  // db.events is safe in scope here: all Board callers invoke logStatusChange
+  // OUTSIDE any open transaction (the sorted-column path calls it in `.then()`
+  // after its reindex commits), so this opens its own top-level transaction —
+  // it is never nested inside a narrower db.tasks-only parent.
+  await db.transaction('rw', db.tasks, db.events, async () => {
     const task = await db.tasks.get(id)
     if (!task) return
     const entry: ChangeLogEntry = { field: 'status', from, to, ts: Date.now() }
@@ -1103,6 +1220,7 @@ export async function logStatusChange(
       status: to,
       changeLog: appendChangeLog(task, [entry]),
     })
+    await logTaskEdits(task, [entry])
   })
 }
 
@@ -1205,10 +1323,11 @@ export async function moveUnfinishedToNextSprint(
   // One transaction so the move is atomic: a renumber/move that throws (or a tab
   // close) midway must NOT leave the source sprint half-emptied with inconsistent
   // sequences. recomputeDates nests safely — its scope (tasks+members) is a subset.
-  return db.transaction('rw', db.tasks, db.members, db.sprints, async () => {
+  return db.transaction('rw', db.tasks, db.members, db.sprints, db.events, async () => {
     const sprints = await db.sprints.orderBy('startDate').toArray()
     const sourceIdx = sprints.findIndex((s) => s.id === sourceSprintId)
     if (sourceIdx === -1) return { movedCount: 0, targetSprintId: null }
+    const source = sprints[sourceIdx]
     const target = sprints[sourceIdx + 1]
     if (!target) return { movedCount: 0, targetSprintId: null }
 
@@ -1218,6 +1337,7 @@ export async function moveUnfinishedToNextSprint(
       .filter((t) => t.status !== 'done')
       .toArray()
 
+    const rolledAt = Date.now()
     for (const t of unfinished) {
       // Sequence is per-sprint, so a moved task must be renumbered into the
       // target — otherwise it keeps its source number and collides with an
@@ -1231,6 +1351,18 @@ export async function moveUnfinishedToNextSprint(
         patch.startDate = target.startDate
       }
       await db.tasks.update(t.id, patch)
+      // Record the carry-over on the TARGET sprint's activity log.
+      await logEvent({
+        projectId: t.projectId,
+        sprintId: target.id,
+        taskId: t.id,
+        taskSeq: patch.sequence ?? null,
+        taskTitle: t.title,
+        kind: 'rolled_over',
+        from: source.name,
+        to: target.name,
+        ts: rolledAt,
+      })
     }
     // Recompute after the bulk move so prereq chains settle in their new
     // home (and assignee off-days reapply).
@@ -1520,6 +1652,8 @@ export async function setDependencies(
         ts,
       })
       await db.tasks.update(taskId, { changeLog: appendChangeLog(after, entries) })
+      // Mirror prereq + caused date shifts into the sprint activity log.
+      await logTaskEdits(task, entries)
     }
   }
   return clean
@@ -1570,7 +1704,7 @@ export async function deleteMember(memberId: string) {
 }
 
 export interface ExportPayload {
-  version: 1 | 2 | 3
+  version: 1 | 2 | 3 | 4
   exportedAt: string
   /** v2 introduces multi-project. v1 payloads have no `projects` field. */
   projects?: Project[]
@@ -1579,29 +1713,33 @@ export interface ExportPayload {
   /** v3 introduces collections (task ngoài sprint). */
   collections?: Collection[]
   tasks: Task[]
+  /** v4 introduces the sprint activity log. Older payloads have no `events`. */
+  events?: ActivityEvent[]
 }
 
 export async function exportAll(): Promise<ExportPayload> {
-  const [projects, members, sprints, collections, tasks] = await Promise.all([
+  const [projects, members, sprints, collections, tasks, events] = await Promise.all([
     db.projects.toArray(),
     db.members.toArray(),
     db.sprints.toArray(),
     db.collections.toArray(),
     db.tasks.toArray(),
+    db.events.toArray(),
   ])
   return {
-    version: 3,
+    version: 4,
     exportedAt: new Date().toISOString(),
     projects,
     members,
     sprints,
     collections,
     tasks,
+    events,
   }
 }
 
 export async function importAll(data: ExportPayload) {
-  if (!data || ![1, 2, 3].includes(data.version)) {
+  if (!data || ![1, 2, 3, 4].includes(data.version)) {
     throw new Error('Unsupported export version')
   }
   // Validate shape BEFORE the transaction clears anything. A payload can carry
@@ -1615,15 +1753,17 @@ export async function importAll(data: ExportPayload) {
     !Array.isArray(data.sprints) ||
     !Array.isArray(data.tasks) ||
     (data.projects !== undefined && !Array.isArray(data.projects)) ||
-    (data.collections !== undefined && !Array.isArray(data.collections))
+    (data.collections !== undefined && !Array.isArray(data.collections)) ||
+    (data.events !== undefined && !Array.isArray(data.events))
   ) {
     throw new Error('Not a valid plan-up backup')
   }
   try {
    await db.transaction(
     'rw',
-    [db.projects, db.members, db.sprints, db.collections, db.tasks],
+    [db.projects, db.members, db.sprints, db.collections, db.tasks, db.events],
     async () => {
+      await db.events.clear()
       await db.tasks.clear()
       await db.sprints.clear()
       await db.members.clear()
@@ -1662,7 +1802,7 @@ export async function importAll(data: ExportPayload) {
       }))
       await db.sprints.bulkAdd(sprints)
 
-      if (data.version === 3 && Array.isArray(data.collections)) {
+      if (data.version >= 3 && Array.isArray(data.collections)) {
         await db.collections.bulkAdd(
           data.collections.map((c) => ({ ...c, projectId: pidOf(c) }))
         )
@@ -1698,6 +1838,13 @@ export async function importAll(data: ExportPayload) {
         }
       })
       await db.tasks.bulkAdd(tasks)
+
+      // v4+ carries the sprint activity log. Older payloads have none — the log
+      // simply starts empty after importing them. Event rows reference real ids
+      // (taskId/sprintId/projectId) which are preserved above for v2+ payloads.
+      if (data.version >= 4 && Array.isArray(data.events) && data.events.length) {
+        await db.events.bulkAdd(data.events)
+      }
     }
    )
   } catch (err) {

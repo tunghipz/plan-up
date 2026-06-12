@@ -74,8 +74,8 @@ Khi user nói **"push git"** / "push" / "đẩy lên", chạy lần lượt:
 
 ## Data model
 
-4 IndexedDB tables in `app/src/db.ts`: `projects`, `members`, `sprints`, `tasks`.
-Chi tiết đầy đủ (fields, schema versioning v1..v8, indexes) ở
+6 IndexedDB tables in `app/src/db.ts`: `projects`, `members`, `sprints`, `tasks`, `collections`, `events`.
+Chi tiết đầy đủ (fields, schema versioning v1..v10, indexes) ở
 [`design-docs/data-model.md`](design-docs/data-model.md).
 
 Schema versioning qua Dexie's `version().stores()` — bump version + thêm upgrade callback khi đổi schema.

@@ -162,7 +162,7 @@ describe('export/import collections', () => {
     const c = await createCollection('p1', 'Live-ops')
     await addCollectionItem(c.id, c.sections[0].id, { title: 'Đập trứng' })
     const payload = await exportAll()
-    expect(payload.version).toBe(3)
+    expect(payload.version).toBe(4)
     expect(payload.collections?.length).toBe(1)
     await clearAll()
     await importAll(payload)

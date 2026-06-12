@@ -52,9 +52,9 @@ Non-obvious behaviors, defaults, persistence keys.
 | [app-shell-and-navigation.md](./app-shell-and-navigation.md) | Layout, icon rail, resizable sprint panel, capacity stats |
 | [projects.md](./projects.md) | Multi-project create/switch/delete |
 | [project-member-settings.md](./project-member-settings.md) | Gear → settings page: edit project info (name/description/color) + members + delete |
-| [sprints.md](./sprints.md) | Sprint CRUD, biweekly defaults, per-sprint sequence |
+| [sprints.md](./sprints.md) | Sprint CRUD, biweekly defaults, per-sprint sequence, locked `Sprint N` name + optional goal note |
 | [collections.md](./collections.md) | Task ngoài sprint — collection tự đặt tên, nhiều bảng (sections), view List (giống sprint, tap-to-edit) + Calendar liền mạch, status do user tự tạo per-collection |
-| [sprint-rollover.md](./sprint-rollover.md) | Move unfinished tasks to next sprint |
+| [sprint-rollover.md](./sprint-rollover.md) | Move unfinished tasks to next sprint — preview popover |
 | [members-and-days-off.md](./members-and-days-off.md) | Member labels, colors, off-days |
 | [member-title.md](./member-title.md) | Optional per-member role label (free-text), shown in settings + sprint header |
 | [tasks.md](./tasks.md) | Task CRUD, fields, inline editing |

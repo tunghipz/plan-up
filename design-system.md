@@ -198,7 +198,8 @@ Prop drilling `App → SprintView → MemberCard → AddTaskRow`. Default tốn 
 
 ### 5.7 Inline edit là default
 - Title/assignee/date/priority/status inline. Không modal cho task detail. Cần thêm field → expand row inline.
-- **Rename = single-click + ✎ hover** (không double-click ẩn). Tên sprint / collection / table: click 1 lần vào tên → ô input inline; hover hiện icon ✎ nhạt báo "sửa được". Đồng bộ với task title (luôn-sửa-được). Bỏ pattern double-click + gạch chân chấm.
+- **Rename = single-click + ✎ hover** (không double-click ẩn). Tên **collection / table**: click 1 lần vào tên → ô input inline; hover hiện icon ✎ nhạt báo "sửa được". Đồng bộ với task title (luôn-sửa-được). Bỏ pattern double-click + gạch chân chấm.
+- **Ngoại lệ — tên sprint KHOÁ (2026-06-12):** sprint name tự động `Sprint N`, **không** rename (không input, không ✎). Free-text context đi vào **note tuỳ chọn** (goal banner dưới header, §5.11 idiom). Lý do: tên tuỳ tiện làm trôi thứ tự `Sprint N` mà rollover/dedupe dựa vào. Xem [`design-docs/sprints.md`](design-docs/sprints.md).
 
 ### 5.8 Column system — mọi task row align *(widths cập nhật theo Cupertino)*
 Có column header → mọi row dùng cùng `COL` widths trong `SprintView.tsx`. Gap `gap-[13px]`, padding `px-[18px] py-[11px]`. Khi đổi 1 cột → đổi header + mọi consumer cùng commit. Date cells dùng chung `DatePickCell`. Hide column header khi sprint 0 task.

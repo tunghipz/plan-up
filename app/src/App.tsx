@@ -1733,7 +1733,7 @@ function RolloverPopover({
               {m ? (
                 <span
                   className="w-5 h-5 rounded-full shrink-0 grid place-items-center text-[10px] font-semibold text-white"
-                  style={{ background: colorForName(m.name) }}
+                  style={{ background: m.color ?? colorForName(m.name) }}
                   title={m.name}
                 >
                   {m.name.charAt(0).toUpperCase()}

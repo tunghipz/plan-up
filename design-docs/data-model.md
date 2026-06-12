@@ -25,7 +25,11 @@ Four IndexedDB tables (Dexie database name **`plan-up`**):
 - `daysOff` are extra non-working days on top of weekends (see [scheduling.md](./scheduling.md)).
 
 ### `Sprint` (`db.ts:37`)
-`id` · `projectId` · `name` · `startDate` · `endDate` (both `yyyy-mm-dd`)
+`id` · `projectId` · `name` · `startDate` · `endDate` (both `yyyy-mm-dd`) · `note?` (string)
+- `name` is **automatic and locked** (`Sprint N`) — no rename UI; see [sprints.md](./sprints.md).
+- `note?` is an **optional, non-indexed** sprint-goal string edited via the header goal
+  banner. Like `Project.description` it needs **no Dexie version bump**; rows without it
+  read as empty.
 
 ### `Task` (`db.ts:45`)
 `id` · `projectId` · `sequence` (number, per-sprint) · `title` · `assigneeId` (`string|null`) ·

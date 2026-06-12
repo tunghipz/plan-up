@@ -14,7 +14,8 @@ import {
   Plus,
   Settings,
   X,
-  Pencil,
+  Lock,
+  NotebookPen,
   ChevronDown,
 } from 'lucide-react'
 import {
@@ -25,6 +26,7 @@ import {
   importAll,
   seedIfEmpty,
   dedupeSprints,
+  setSprintNote,
   recomputeAllDates,
   moveUnfinishedToNextSprint,
   createProject,
@@ -613,7 +615,17 @@ function App() {
                       aria-hidden
                     />
                     <span className="flex-1 min-w-0">
-                      <span className={`block truncate font-medium ${isActive ? '' : ''}`}>{s.name}</span>
+                      <span className="flex items-center gap-1.5 min-w-0">
+                        <span className="truncate font-medium">{s.name}</span>
+                        {s.note && (
+                          <NotebookPen
+                            size={11}
+                            strokeWidth={2}
+                            className={`shrink-0 ${isActive ? 'text-white/80' : 'text-ink-faint'}`}
+                            aria-label="Has note"
+                          />
+                        )}
+                      </span>
                       <span className={`block text-[11.5px] leading-tight mt-0.5 tab-data ${isActive ? 'text-white/80' : 'text-ink-faint'}`}>
                         {formatSprintRange(s.startDate, s.endDate)}
                         {c && c.total > 0 &&
@@ -739,10 +751,11 @@ function App() {
               <CollectionBarIdentity collection={currentCollection} />
             ) : currentSprint ? (
               <>
-                <SprintNameEditor
-                  key={currentSprint.id}
-                  sprint={currentSprint}
-                />
+                {/* Sprint name is automatic + locked (no rename). Context lives
+                    in the optional goal note below the header. See sprints.md. */}
+                <span className="font-semibold text-ink display-tight truncate">
+                  {currentSprint.name}
+                </span>
                 <span className="inline-flex items-center text-xs text-ink-muted shrink-0 tab-data bg-fill rounded-full px-2.5 py-1">
                   {formatSprintRange(
                     currentSprint.startDate,
@@ -816,6 +829,13 @@ function App() {
             />
           </div>
         </header>
+
+        {/* Goal note banner — chrome strip under the header, sprint-only.
+            Editable inline; collapses to a calm dashed "+ Add sprint note"
+            slot when empty (§5.11 idiom). See sprints.md. */}
+        {selKind === 'sprint' && currentSprint && (
+          <SprintNoteBanner key={currentSprint.id} sprint={currentSprint} />
+        )}
 
         <div ref={scrollRef} className="flex-1 overflow-auto">
           {selKind === 'sprint' && currentSprint && (
@@ -1275,19 +1295,22 @@ function NewSprintDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const [name, setName] = useState(defaults.name)
+  // Name is automatic + locked (Sprint N) — not editable. The optional note
+  // carries the "what is this sprint about". See sprints.md.
+  const name = defaults.name
   const [startDate, setStartDate] = useState(defaults.startDate)
   const [endDate, setEndDate] = useState(defaults.endDate)
+  const [note, setNote] = useState('')
 
   const submit = async () => {
-    const trimmed = name.trim()
-    if (!trimmed) return
+    const noteTrimmed = note.trim()
     const sprint: Sprint = {
       id: uid(),
       projectId,
-      name: trimmed,
+      name,
       startDate,
       endDate,
+      ...(noteTrimmed ? { note: noteTrimmed } : {}),
     }
     await db.sprints.add(sprint)
     onCreate(sprint)
@@ -1303,17 +1326,17 @@ function NewSprintDialog({
         onClick={(e) => e.stopPropagation()}
       >
         <h2 className="text-[19px] font-bold tracking-[-0.014em]">New Sprint</h2>
-        <label className="block">
+        <div className="block">
           <span className="text-xs text-ink-muted">Name</span>
-          <input
-            autoFocus
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && submit()}
-            placeholder="Sprint 44 (15/6 - 28/6)"
-            className="mt-1 w-full px-3 py-2 border border-border bg-surface rounded-[8px] text-sm focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent transition"
-          />
-        </label>
+          {/* Locked: names are automatic (Sprint N), not editable. */}
+          <div className="mt-1 w-full flex items-center gap-2 px-3 py-2 bg-fill rounded-[8px] text-sm">
+            <span className="font-semibold text-ink">{name}</span>
+            <Lock size={13} className="ml-auto text-ink-faint" aria-label="Locked" />
+          </div>
+          <p className="mt-1.5 text-[11.5px] text-ink-faint leading-snug">
+            Sprint names are automatic — add a note below to describe it.
+          </p>
+        </div>
         <div className="grid grid-cols-2 gap-3">
           <label className="block">
             <span className="text-xs text-ink-muted">Start</span>
@@ -1324,6 +1347,24 @@ function NewSprintDialog({
             <DateField value={endDate} onChange={setEndDate} />
           </label>
         </div>
+        <label className="block">
+          <span className="text-xs text-ink-muted">Note — optional</span>
+          <textarea
+            autoFocus
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            onKeyDown={(e) => {
+              // Multi-line: ⌘/Ctrl+Enter submits; plain Enter is a newline.
+              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault()
+                void submit()
+              }
+            }}
+            rows={2}
+            placeholder="What's the focus of this sprint?"
+            className="mt-1 w-full px-3 py-2 border border-border bg-surface rounded-[8px] text-sm leading-relaxed resize-y focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent transition"
+          />
+        </label>
         <div className="flex justify-end gap-2 pt-2">
           <button
             onClick={onClose}
@@ -1535,74 +1576,96 @@ const COLLECTION_VIEWS: { value: CollectionViewMode; label: string; Icon: typeof
 ]
 
 /**
- * Inline-rename sprint name. Double-click or click pencil → editable input.
- * Enter commits, Esc cancels, blur commits. Same pattern as SprintView's
- * MemberGroupHeader rename.
+ * Sprint goal-note banner (design-system §5.11 idiom). A thin chrome strip
+ * under the header. Has a note → editable text (click to edit; ⌘/Ctrl+Enter or
+ * blur commits, Esc cancels). No note → calm dashed "+ Add sprint note" slot
+ * that turns accent on hover. Replaces the old inline rename — sprint names are
+ * locked now; this carries the free-text context. See sprints.md.
  */
-function SprintNameEditor({ sprint }: { sprint: Sprint }) {
+function SprintNoteBanner({ sprint }: { sprint: Sprint }) {
   const [editing, setEditing] = useState(false)
-  const [draft, setDraft] = useState(sprint.name)
-  const inputRef = useRef<HTMLInputElement>(null)
+  const [draft, setDraft] = useState(sprint.note ?? '')
+  const taRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
     if (editing) {
-      setDraft(sprint.name)
+      setDraft(sprint.note ?? '')
       requestAnimationFrame(() => {
-        inputRef.current?.focus()
-        inputRef.current?.select()
+        taRef.current?.focus()
+        taRef.current?.select()
       })
     }
-  }, [editing, sprint.name])
+  }, [editing, sprint.note])
 
   const commit = async () => {
-    const n = draft.trim()
     setEditing(false)
-    if (n && n !== sprint.name) {
-      await db.sprints.update(sprint.id, { name: n })
+    if (draft.trim() !== (sprint.note ?? '')) {
+      await setSprintNote(sprint.id, draft)
     }
   }
   const cancel = () => {
-    setDraft(sprint.name)
+    setDraft(sprint.note ?? '')
     setEditing(false)
   }
 
   if (editing) {
     return (
-      <input
-        ref={inputRef}
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') {
-            e.preventDefault()
-            void commit()
-          } else if (e.key === 'Escape') {
-            e.preventDefault()
-            cancel()
-          }
-        }}
-        onBlur={() => void commit()}
-        className="editable font-semibold text-ink display-tight bg-transparent min-w-0 max-w-[260px]"
-        aria-label="Rename sprint"
-      />
+      <div className="shrink-0 bg-surface border-b border-border-hair px-5 py-2.5">
+        <textarea
+          ref={taRef}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+              e.preventDefault()
+              void commit()
+            } else if (e.key === 'Escape') {
+              e.preventDefault()
+              cancel()
+            }
+          }}
+          onBlur={() => void commit()}
+          rows={2}
+          placeholder="What's the focus of this sprint?"
+          className="w-full px-2.5 py-1.5 text-[13.5px] leading-relaxed text-ink bg-surface border border-accent rounded-[8px] resize-y focus:outline-none focus:ring-2 focus:ring-accent/40 transition"
+          aria-label="Sprint note"
+        />
+      </div>
     )
   }
+
+  if (!sprint.note) {
+    return (
+      <div className="shrink-0 bg-surface border-b border-border-hair px-5 py-2">
+        <button
+          onClick={() => setEditing(true)}
+          className="w-full flex items-center justify-center gap-1.5 py-1.5 text-[12.5px] font-semibold text-ink-muted border border-dashed border-border rounded-[10px] transition hover:text-accent hover:border-accent/40 hover:bg-accent-soft"
+        >
+          <NotebookPen size={14} strokeWidth={2} />
+          Add sprint note
+        </button>
+      </div>
+    )
+  }
+
   return (
-    <span
-      className="group/sprintname inline-flex items-center gap-1.5 min-w-0 font-semibold text-ink display-tight cursor-text"
-      onClick={(e) => {
-        e.stopPropagation()
-        setEditing(true)
-      }}
-      title="Click to rename"
-    >
-      <span className="truncate">{sprint.name}</span>
-      <Pencil
-        size={13}
-        className="text-ink-faint opacity-0 group-hover/sprintname:opacity-60 transition shrink-0"
-        aria-hidden
-      />
-    </span>
+    <div className="shrink-0 bg-surface border-b border-border-hair px-5 py-2.5">
+      <div
+        className="group/note flex items-start gap-2.5 cursor-text rounded-[8px] -mx-1.5 px-1.5 py-1 hover:bg-surface-hover transition"
+        onClick={() => setEditing(true)}
+        title="Click to edit note"
+      >
+        <NotebookPen
+          size={15}
+          strokeWidth={1.9}
+          className="text-accent shrink-0 mt-0.5"
+          aria-hidden
+        />
+        <span className="flex-1 min-w-0 text-[13.5px] leading-relaxed text-ink whitespace-pre-wrap break-words">
+          {sprint.note}
+        </span>
+      </div>
+    </div>
   )
 }
 

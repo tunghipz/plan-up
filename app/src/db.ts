@@ -95,6 +95,9 @@ export interface Sprint {
   name: string
   startDate: string
   endDate: string
+  /** Optional, non-indexed sprint-goal note (edited via header goal banner).
+   * Needs no Dexie version bump — rows without it read as empty. */
+  note?: string
 }
 
 export interface Section {
@@ -541,6 +544,15 @@ export async function addCollectionItem(
     await db.tasks.add(task)
     return task
   })
+}
+
+/** Set (or clear) a sprint's optional goal note. Trimmed empty → field removed. */
+export async function setSprintNote(
+  sprintId: string,
+  note: string
+): Promise<void> {
+  const trimmed = note.trim()
+  await db.sprints.update(sprintId, { note: trimmed || undefined })
 }
 
 /** Next sequence number within a sprint. Sequences are never reused. */

@@ -16,7 +16,9 @@ context lives in an **optional note** instead.
   fields are **Start**, **End**, and an optional **note**. Enter or **Create** to save; it
   becomes the current sprint.
 - **Select:** click a row in the sprint panel (active row = accent bg, shows date range +
-  task count; a small note glyph appears when the sprint has a note).
+  task count; a small note glyph appears **trailing at the row's right edge** when the sprint
+  has a note — kept off the title so the name stays clean; faint at rest, white/80 on the
+  selected accent row).
 - **Name is not editable.** There is no rename affordance anywhere — the header title is
   plain locked text. (Removed the old `SprintNameEditor` inline rename.)
 - **Note (optional):** a sprint-goal line shown in a thin **goal banner** beneath the

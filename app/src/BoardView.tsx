@@ -12,7 +12,6 @@ import {
   type Status,
   type Task,
 } from './db'
-import { ChangeLogTooltip } from './ChangeLogTooltip'
 import { formatShortDate, dayDiff } from './lib'
 import { SprintRangeContext } from './DatePicker'
 import {
@@ -1066,11 +1065,6 @@ const BoardCard = memo(function BoardCard({
         >
           {isParent && <LayersGlyph />}
           {task.title || <span className="text-ink-faint italic">Untitled</span>}
-          {!isParent && (
-            <span className="inline-flex align-middle ml-1">
-              <ChangeLogTooltip entries={task.changeLog} />
-            </span>
-          )}
         </div>
       </div>
       {group && (

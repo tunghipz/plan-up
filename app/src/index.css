@@ -165,6 +165,23 @@ h1, h2, h3, .display-tight {
 }
 .welcome-hint { animation: welcome-pulse 2.2s ease-in-out infinite; }
 
+/* Update-available pill (design-docs/version-and-updates.md): a calm breathing
+ * glow that draws the eye without flashing. Tracks --color-accent (light/dark). */
+@keyframes update-breathe {
+  0%, 100% {
+    box-shadow: 0 4px 12px color-mix(in srgb, var(--color-accent) 32%, transparent),
+                0 0 0 0 color-mix(in srgb, var(--color-accent) 0%, transparent);
+  }
+  50% {
+    box-shadow: 0 6px 20px color-mix(in srgb, var(--color-accent) 50%, transparent),
+                0 0 0 4px color-mix(in srgb, var(--color-accent) 14%, transparent);
+  }
+}
+.update-pill { animation: update-breathe 2.6s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .update-pill { animation: none; }
+}
+
 /* ── Micro-motion (design-system §6.5) ──────────────────────────────────────
  * Calm, ≤300ms, Cupertino. Two shared easings:
  *   move   = cubic-bezier(.32,.72,0,1)  (drawer / segmented / bar glide)

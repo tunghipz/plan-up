@@ -151,7 +151,7 @@ collection-item (`sprintId = null`) tự động không bị đụng tới. Khô
 ### Schema versioning (v9)
 - Thêm table `collections` (index `id, projectId, order`); `sections` nhúng.
 - `tasks`: thêm index `collectionId`; `sectionId` / `collectionStatusId` là field non-indexed (như
-  `changeLog`/`boardOrder`, không cần đổi index cho chúng).
+  `boardOrder`/`listOrder`, không cần đổi index cho chúng).
 - **Upgrade callback:** task cũ backfill `collectionId = null` (giữ nguyên là sprint task). Không
   mất dữ liệu.
 - Export/import: thêm `collections` vào payload; bump `ExportPayload.version`. Import file cũ vẫn work.

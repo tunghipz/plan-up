@@ -42,7 +42,6 @@ import {
   type Task,
   type Status,
 } from './db'
-import { ChangeLogTooltip } from './ChangeLogTooltip'
 import { Avatar, MemberDaysOffButton } from './members'
 import { DatePickCell, SprintRangeContext } from './DatePicker'
 import { useConfirm } from './ConfirmDialog'
@@ -1838,7 +1837,6 @@ function TaskRow({
         welcomeHint={isWelcome}
         priority={task.priority}
         indent={isChild}
-        trailing={<ChangeLogTooltip entries={task.changeLog} />}
       />
 
       {showAssignee && (

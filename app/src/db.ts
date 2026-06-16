@@ -5,10 +5,10 @@ export type Status = 'todo' | 'in_progress' | 'done'
 export type Priority = 'urgent' | 'high' | 'normal' | 'low' | 'none'
 
 /**
- * Fields whose user-initiated edits are recorded in `Task.changeLog`.
+ * Fields whose user-initiated edits are recorded in the sprint activity log.
  * `dependsOn` is part of the union but NOT in LOGGABLE_FIELDS: it never arrives
  * via an updateTask patch — it flows through setDependencies, which logs it
- * itself (with sequence-range labels). See design-docs/task-change-log.md.
+ * itself (with sequence-range labels). See design-docs/sprint-activity-log.md.
  */
 export type LoggableField =
   | 'title'
@@ -31,10 +31,12 @@ export const LOGGABLE_FIELDS: readonly LoggableField[] = [
 ]
 
 /**
- * One recorded change. `from`/`to` store the RAW value for stable fields
- * (formatted at render by ChangeLogTooltip); only `assigneeId` freezes the
+ * One recorded edit — the activity log's internal entry shape (built by
+ * updateTask/logStatusChange/setDependencies, then mirrored into an
+ * `ActivityEvent` of kind 'edit' via logTaskEdits). `from`/`to` store the RAW
+ * value for stable fields (formatted at render); only `assigneeId` freezes the
  * resolved member NAME at write time so history survives the member being
- * deleted. See design-docs/task-change-log.md.
+ * deleted. See design-docs/sprint-activity-log.md.
  */
 export interface ChangeLogEntry {
   field: LoggableField
@@ -54,11 +56,11 @@ export interface ChangeLogEntry {
 export type ActivityKind = 'created' | 'edit' | 'rolled_over' | 'sprint_started'
 
 /**
- * One row in the append-only, uncapped sprint activity store. Unlike the per-task
- * `changeLog` (a cap-5 memory jog living ON the task), events survive task deletion
+ * One row in the append-only, uncapped sprint activity store — the app's sole
+ * edit-history surface (the per-task `Task.changeLog` it once complemented was
+ * removed in v11). Events live in their own table, so they survive task deletion
  * and aggregate sprint-wide. Display fields (`taskSeq`/`taskTitle`) are FROZEN at
- * write time so the log stays readable after renumbering or deletion — same
- * survives-deletion principle as the changeLog's frozen assignee name.
+ * write time so the log stays readable after renumbering or deletion.
  */
 export interface ActivityEvent {
   id: string
@@ -200,13 +202,6 @@ export interface Task {
    * and never touches `sequence`. See design-docs/list-view.md.
    */
   listOrder?: number
-  /**
-   * The 5 most recent user-initiated field changes, newest-first (ring buffer).
-   * Non-indexed → no Dexie version bump; rows without it read as []. Written only
-   * through updateTask / logStatusChange (never the scheduler). See
-   * design-docs/task-change-log.md.
-   */
-  changeLog?: ChangeLogEntry[]
   /**
    * Collection chứa task này (khi task nằm ngoài sprint). Bất biến: đúng MỘT
    * trong {sprintId, collectionId} khác null. Indexed để query theo collection.
@@ -372,6 +367,18 @@ class PlanDB extends Dexie {
       tasks: 'id, sprintId, assigneeId, status, createdAt, projectId, collectionId',
       events: 'id, sprintId, ts, projectId',
     })
+
+    // v11 — per-task change log removed (design-docs/task-change-log.md). Strip
+    // the dead, non-indexed `changeLog` field from existing task rows. No index
+    // change, so this is an upgrade-only bump (the v10 stores carry forward).
+    this.version(11).upgrade((tx) =>
+      tx
+        .table('tasks')
+        .toCollection()
+        .modify((t: Record<string, unknown>) => {
+          delete t.changeLog
+        })
+    )
   }
 }
 
@@ -1038,16 +1045,15 @@ export function computeStartEnd(
 }
 
 // ──────────────────────────────────────────────────────────────────────────
-// Change log (design-docs/task-change-log.md)
+// Edit tracking → sprint activity log (design-docs/sprint-activity-log.md).
 //
-//   user edit ──▶ updateTask / logStatusChange ──▶ appendChangeLog ──▶ write
-//                 (the ONLY log writers)            (coalesce + cap 5)
-//   scheduler  ──▶ raw db.tasks.update ─────────────────────────────▶ write
-//                 (recomputeDates, rollover, …)     NO log — premise #2
+//   user edit ──▶ updateTask / logStatusChange / setDependencies
+//                 ──▶ diff into ChangeLogEntry[] ──▶ logTaskEdits ──▶ events
+//   scheduler  ──▶ raw db.tasks.update ─────────────────────────▶ NO log
+//                 (recomputeDates, rollover, …)   — premise #2
 // ──────────────────────────────────────────────────────────────────────────
 
-const CHANGELOG_CAP = 5
-/** Window in which consecutive TITLE keystrokes collapse into one entry. */
+/** Window in which consecutive TITLE keystrokes collapse into one event. */
 const TITLE_COALESCE_MS = 2 * 60 * 1000
 
 /** Value-based equality for a loggable field (all 7 are scalars or null). */
@@ -1069,44 +1075,11 @@ function changeLogValue(
   return String(raw)
 }
 
-/**
- * Pure: fold `entries` (newest last) into `task.changeLog`, applying title-only
- * coalescing and capping to the 5 most recent. Exported for unit tests.
- *
- * Coalesce: a new `title` entry whose predecessor at the head is also `title`
- * AND within TITLE_COALESCE_MS updates that entry's `to`+`ts` (keeping its
- * original `from`); if that makes `from === to` (typed back to origin), the
- * entry is dropped. No other field coalesces — each edit is a distinct entry,
- * so e.g. todo→in_progress→done is preserved as two transitions.
- */
-export function appendChangeLog(
-  task: Pick<Task, 'changeLog'>,
-  entries: ChangeLogEntry[]
-): ChangeLogEntry[] {
-  const log = task.changeLog ? [...task.changeLog] : []
-  for (const e of entries) {
-    const head = log[0]
-    if (
-      e.field === 'title' &&
-      head &&
-      head.field === 'title' &&
-      e.ts - head.ts <= TITLE_COALESCE_MS
-    ) {
-      const merged: ChangeLogEntry = { ...head, to: e.to, ts: e.ts }
-      if (merged.from === merged.to) log.shift() // reverted to origin → drop
-      else log[0] = merged
-    } else {
-      log.unshift(e)
-    }
-  }
-  return log.slice(0, CHANGELOG_CAP)
-}
-
 // ──────────────────────────────────────────────────────────────────────────
 // Sprint activity log (design-docs/sprint-activity-log.md, storage model A).
-// Append-only `events` store written from the SAME user-edit write sites as the
-// changeLog. Scheduler recomputes (raw db.tasks.update) are never logged — same
-// premise as the changeLog. Collection tasks (no sprintId) are never logged.
+// Append-only `events` store written from user-edit write sites. Scheduler
+// recomputes (raw db.tasks.update) are never logged — premise #2. Collection
+// tasks (no sprintId) are never logged.
 // ──────────────────────────────────────────────────────────────────────────
 
 /** Append one activity event (id auto-assigned). */
@@ -1185,10 +1158,8 @@ export async function updateTask(
         ts: now,
       })
     }
-    const updates: Partial<Task> = { ...patch }
-    if (entries.length) updates.changeLog = appendChangeLog(task, entries)
-    await db.tasks.update(id, updates)
-    // Mirror into the sprint activity log (sprint tasks only; no-op otherwise).
+    await db.tasks.update(id, patch)
+    // Record into the sprint activity log (sprint tasks only; no-op otherwise).
     if (entries.length) await logTaskEdits(task, entries)
   })
 }
@@ -1216,10 +1187,7 @@ export async function logStatusChange(
     const task = await db.tasks.get(id)
     if (!task) return
     const entry: ChangeLogEntry = { field: 'status', from, to, ts: Date.now() }
-    await db.tasks.update(id, {
-      status: to,
-      changeLog: appendChangeLog(task, [entry]),
-    })
+    await db.tasks.update(id, { status: to })
     await logTaskEdits(task, [entry])
   })
 }
@@ -1651,8 +1619,7 @@ export async function setDependencies(
         to: label(clean),
         ts,
       })
-      await db.tasks.update(taskId, { changeLog: appendChangeLog(after, entries) })
-      // Mirror prereq + caused date shifts into the sprint activity log.
+      // Record prereq + caused date shifts into the sprint activity log.
       await logTaskEdits(task, entries)
     }
   }
@@ -1828,9 +1795,6 @@ export async function importAll(data: ExportPayload) {
           projectId: pid,
           startDate: t.startDate ?? null,
           dependsOn: Array.isArray(t.dependsOn) ? t.dependsOn : [],
-          // Clamp untrusted import to the same cap the write-path enforces, so a
-          // hand-edited export can't smuggle an unbounded changeLog. (#changelog)
-          changeLog: Array.isArray(t.changeLog) ? t.changeLog.slice(0, 5) : [],
           sequence: seq,
           collectionId: t.collectionId ?? null,
           sectionId: t.sectionId ?? null,

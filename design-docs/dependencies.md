@@ -60,8 +60,8 @@ chain them, remove the back-edge first (here: clear 6's dependency on 7).
 ## Bulk actions (multi-select)
 The selection toolbar (`SelectionBar` in `SprintView.tsx`, shown when ≥1 task is selected)
 offers two prereq actions alongside Group / Ungroup / Delete. Both reuse `setDependencies`
-per task, so cycle/self/duplicate filtering, change-log entries, and date recompute all come
-for free. Single click, **no confirmation** (the change log records old→new as the safety net).
+per task, so cycle/self/duplicate filtering, activity-log entries, and date recompute all come
+for free. Single click, **no confirmation** (the sprint activity log records old→new as the safety net).
 
 - **Chain prereqs** — enabled only with **≥2** selected (else disabled, tooltip "Select ≥2
   tasks to chain"). Orders the selected tasks **top-to-bottom by their displayed order** and,

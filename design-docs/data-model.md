@@ -36,13 +36,11 @@ Six IndexedDB tables (Dexie database name **`plan-up`**): `projects`, `members`,
 `id` · `projectId` · `sequence` (number, per-sprint) · `title` · `assigneeId` (`string|null`) ·
 `sprintId` (`string | null`) · `status` · `priority` · `startDate` (`string|null`) · `dueDate` (`string|null`) ·
 `estimate` (`number|null`, effort in days) · `createdAt` · `dependsOn: string[]` (task IDs) ·
-`changeLog?: ChangeLogEntry[]` · `boardOrder?: number` · `listOrder?: number` ·
+`boardOrder?: number` · `listOrder?: number` ·
 `collectionId?: string | null` · `sectionId?: string | null` · `collectionStatusId?: string | null`
-- `changeLog` is an **optional, non-indexed** field holding the **5 most recent**
-  user-initiated field changes (newest-first ring buffer). Like `description`/`color` it
-  needs **no Dexie version bump**; rows without it read as `[]`. Written only through
-  `updateTask()` / `logStatusChange()`, never by the scheduler. See
-  [task-change-log.md](./task-change-log.md).
+- The per-task `changeLog?: ChangeLogEntry[]` field was **removed in v11** (the per-task
+  change log feature is gone — see [task-change-log.md](./task-change-log.md)). Edit history
+  now lives sprint-wide in the `events` table (`ActivityEvent`, below).
 - `boardOrder` / `listOrder` are **optional, non-indexed** fractional ordering fields —
   manual drag position on the **Board** (per status column) and in the **List** (default
   order, within a member card) respectively. Both fall back to `sequence` when unset, are
@@ -72,10 +70,10 @@ Six IndexedDB tables (Dexie database name **`plan-up`**): `projects`, `members`,
 `taskTitle` (`string|null`) · `kind` · `field?` (`LoggableField`) · `from` (`string|null`) ·
 `to` (`string|null`) · `ts` (number)
 - **Append-only, uncapped** sprint activity log (see
-  [sprint-activity-log.md](./sprint-activity-log.md)) — the audit-trail counterpart to the
-  cap-5 per-task `Task.changeLog`. Unlike the changeLog it lives in its **own table**, so
-  events survive task deletion and aggregate sprint-wide. Collection tasks (no sprint) are
-  never logged.
+  [sprint-activity-log.md](./sprint-activity-log.md)) — the **sole** edit-history surface
+  (the per-task `Task.changeLog` it once complemented was removed in v11). Lives in its
+  **own table**, so events survive task deletion and aggregate sprint-wide. Collection tasks
+  (no sprint) are never logged.
 - `kind`: `'created' | 'edit' | 'rolled_over' | 'sprint_started'`. `field`/`from`/`to` are
   only meaningful for `'edit'` and reuse the `ChangeLogEntry` grammar (assignee freezes the
   member NAME; `dependsOn` freezes a seq-range label). `taskSeq`/`taskTitle` are **frozen at
@@ -85,11 +83,13 @@ Six IndexedDB tables (Dexie database name **`plan-up`**): `projects`, `members`,
 ### Value types
 - `ChangeLogEntry`: `{ field: LoggableField; from: string|null; to: string|null;
   ts: number }` over 8 loggable fields (title, status, priority, assigneeId, startDate,
-  dueDate, estimate, dependsOn). `from`/`to` store the **raw** value for stable fields
-  (formatted at render); `assigneeId` freezes the resolved member **name** and `dependsOn`
-  freezes a **sequence-range** label at write time (the former survives member deletion,
-  the latter survives per-sprint sequence renumbering). `dependsOn` is logged by
-  `setDependencies`; the other 7 by `updateTask`. See [task-change-log.md](./task-change-log.md).
+  dueDate, estimate, dependsOn). Now the **activity log's internal edit-entry shape** (the
+  per-task change log that originally named it was removed in v11): each entry is built by
+  `updateTask` / `logStatusChange` (the 7 patch fields) or `setDependencies` (`dependsOn`),
+  then mirrored into an `ActivityEvent` of `kind: 'edit'` via `logTaskEdits`. `from`/`to`
+  store the **raw** value for stable fields (formatted at render); `assigneeId` freezes the
+  resolved member **name** and `dependsOn` freezes a **sequence-range** label at write time
+  (the former survives member deletion, the latter survives sequence renumbering).
 - `DayOff` (`db.ts:14`): `{ date: string; half?: 'am' | 'pm' }`. No `half` → whole day off
   (0 working days); `half` → 0.5 day. AM vs PM is human-readable only; both contribute 0.5.
 - `Status` (`db.ts:3`): `'todo' | 'in_progress' | 'done'`.
@@ -99,7 +99,7 @@ All dates are stored as `yyyy-mm-dd` strings.
 
 ## Schema versioning
 
-Dexie `version().stores()` + an upgrade callback per bump. Current version: **10**.
+Dexie `version().stores()` + an upgrade callback per bump. Current version: **11**.
 
 | Ver | Change |
 | --- | --- |
@@ -113,6 +113,7 @@ Dexie `version().stores()` + an upgrade callback per bump. Current version: **10
 | 8 | `sequence` becomes **per-sprint** (was per-project); each sprint renumbered 1..N by `createdAt`. |
 | 9 | Add `collections` table; tasks gain `collectionId` index + `sectionId`/`collectionStatusId` (non-indexed); `sprintId` becomes nullable. Backfill `collectionId = null` on all existing tasks. |
 | 10 | Add `events` table (sprint activity log). No data backfill — history starts at v10. |
+| 11 | Remove the per-task `Task.changeLog` field (per-task change log removed). Upgrade strips the dead property from existing task rows; no index change. |
 
 Current indexes:
 - `projects`: `id, name, createdAt`

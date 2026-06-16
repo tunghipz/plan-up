@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
-  ChevronLeft,
+  X,
   FilePlus2,
   CheckCircle2,
   Circle,
@@ -296,18 +296,16 @@ function MemberGroupView({
 
 export function ActivityLog({
   sprintId,
-  sprintName,
   sprintRange,
   tasks,
   members,
-  onBack,
+  onClose,
 }: {
   sprintId: string
-  sprintName: string
   sprintRange: string
   tasks: Task[]
   members: Member[]
-  onBack: () => void
+  onClose: () => void
 }) {
   const [view, setView] = useState<ActViewMode>('timeline')
   const events = useLiveQuery(() => sprintEvents(sprintId), [sprintId]) ?? []
@@ -315,22 +313,30 @@ export function ActivityLog({
   const tasksById = useMemo(() => new Map(tasks.map((t) => [t.id, t])), [tasks])
   const membersById = useMemo(() => new Map(members.map((m) => [m.id, m])), [members])
 
+  // Drawer body (App.tsx owns the positioned shell + backdrop, mirroring the
+  // ProjectSettingsView/settings-drawer pairing). Header matches the 54px
+  // settings header; body is the scrolling inset-cards-on-canvas region.
   return (
-    <div className="max-w-[760px] mx-auto pt-2">
-      <button
-        onClick={onBack}
-        className="inline-flex items-center gap-0.5 text-[13px] font-medium text-accent hover:underline mb-1"
-      >
-        <ChevronLeft size={15} strokeWidth={2} /> {sprintName}
-      </button>
-      <div className="flex items-center justify-between gap-4 mb-4">
-        <div className="flex items-baseline gap-2.5">
-          <h1 className="text-[21px] font-bold tracking-[-0.022em] text-ink">Activity log</h1>
-          <span className="text-[13px] text-ink-muted tabular-nums">
-            {sprintRange} · {events.length} event{events.length === 1 ? '' : 's'}
-          </span>
-        </div>
-        <div className="inline-flex bg-fill rounded-[9px] p-0.5 shrink-0">
+    <div className="flex h-full flex-col min-w-0 overflow-hidden">
+      <header className="h-[54px] shrink-0 border-b border-border-hair bg-surface flex items-center px-5 gap-2.5">
+        <h1 className="text-[15px] font-semibold text-ink tracking-[-0.01em] shrink-0">
+          Activity log
+        </h1>
+        <span className="text-[12px] text-ink-faint tabular-nums truncate min-w-0">
+          {sprintRange} · {events.length} event{events.length === 1 ? '' : 's'}
+        </span>
+        <button
+          onClick={onClose}
+          className="ml-auto inline-flex items-center justify-center w-7 h-7 rounded-md text-ink-faint hover:text-ink hover:bg-surface-hover transition shrink-0"
+          title="Close activity log (Esc)"
+          aria-label="Close activity log"
+        >
+          <X size={16} />
+        </button>
+      </header>
+
+      <div className="flex-1 overflow-auto bg-canvas px-5 py-4">
+        <div className="inline-flex bg-fill rounded-[9px] p-0.5 mb-4">
           {(
             [
               ['timeline', 'Timeline'],
@@ -350,17 +356,17 @@ export function ActivityLog({
             </button>
           ))}
         </div>
-      </div>
 
-      {events.length === 0 ? (
-        <p className="text-center text-ink-faint text-[14px] py-16">
-          No activity yet in this sprint.
-        </p>
-      ) : view === 'timeline' ? (
-        <TimelineView events={events} />
-      ) : (
-        <MemberGroupView events={events} tasksById={tasksById} membersById={membersById} />
-      )}
+        {events.length === 0 ? (
+          <p className="text-center text-ink-faint text-[14px] py-16">
+            No activity yet in this sprint.
+          </p>
+        ) : view === 'timeline' ? (
+          <TimelineView events={events} />
+        ) : (
+          <MemberGroupView events={events} tasksById={tasksById} membersById={membersById} />
+        )}
+      </div>
     </div>
   )
 }

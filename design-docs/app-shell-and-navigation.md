@@ -46,6 +46,16 @@ computed from the current sprint's **leaf** tasks (parents excluded — see task
   count shows next to the label when > 0). The `+` button `stopPropagation`s so it never
   toggles. Collapse state persists per section in `localStorage`.
 
+- **Sidebar version footer (2026-06-16):** a calm `plan-up · v{version}` line pinned to the
+  **bottom** of the resizable sidebar (`mt-auto`, hairline `border-t`, `text-[11px]`
+  `text-ink-faint` tabular-nums) — shown in both the project-selected and empty states.
+  Version is the **app release version from `package.json`**, injected at build time via Vite
+  `define` (`__APP_VERSION__`), so there's one source of truth (no hardcoded string). It's
+  reference info you rarely need, so it stays faint and never accent-tinted (accent is a
+  signal, not chrome — design-system §2.1). When a **newer build is detected** the same line
+  morphs in place into a glowing "Update" pill (`<VersionFooter />`) — see
+  [version-and-updates.md](./version-and-updates.md).
+
 ## Rules & edge cases
 - **localStorage keys:** `plan-up:currentProjectId`, `plan-up:view`,
   `plan-up:sidebarWidth`, `plan-up:dark`, `plan-up:collapsed:<sprintId>`,

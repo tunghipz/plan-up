@@ -68,14 +68,15 @@ Khi user nói **"push git"** / "push" / "đẩy lên", chạy lần lượt:
 
 1. **Update README** — đồng bộ `README.md` với các tính năng/đổi mới chưa phản ánh.
 2. **Update document liên quan** — rà & cập nhật mọi doc liên quan tới thay đổi cho khớp code mới nhất: `design-docs/<feature>.md` (bump *Last updated*), `design.md`, `design-system.md`, `design-docs/data-model.md`, `design-docs/README.md` (index) nếu có động tới. Đảm bảo doc là nguồn sự thật mới nhất, không lệch với code.
-3. **Init dự án (sanity gate)** — từ `app/`: `npx tsc --noEmit && npm run build && npx vitest run`. Phải pass hết mới đi tiếp; fail thì dừng, báo user, không push.
-4. **Commit** — commit mọi thay đổi đang chờ (docs + code) với message rõ ràng + trailer.
-5. **Push git** — `git push` lên remote (branch hiện tại).
+3. **Bump version (BẮT BUỘC mỗi lần push)** — từ `app/`: `npm version patch --no-git-tag-version` (vd `0.0.0` → `0.0.1`). Tăng **patch** mặc định; chỉ tăng **minor**/**major** (`npm version minor|major --no-git-tag-version`) khi user nói rõ. `--no-git-tag-version` để chỉ sửa `package.json` (không tự tạo commit/tag) — version mới sẽ đi cùng commit ở bước 5. Version này hiện ở footer sidebar (`__APP_VERSION__`, xem `app-shell-and-navigation.md`).
+4. **Init dự án (sanity gate)** — từ `app/`: `npx tsc --noEmit && npm run build && npx vitest run`. Phải pass hết mới đi tiếp; fail thì dừng, báo user, không push.
+5. **Commit** — commit mọi thay đổi đang chờ (docs + code + `package.json` version) với message rõ ràng + trailer.
+6. **Push git** — `git push` lên remote (branch hiện tại).
 
 ## Data model
 
 6 IndexedDB tables in `app/src/db.ts`: `projects`, `members`, `sprints`, `tasks`, `collections`, `events`.
-Chi tiết đầy đủ (fields, schema versioning v1..v10, indexes) ở
+Chi tiết đầy đủ (fields, schema versioning v1..v11, indexes) ở
 [`design-docs/data-model.md`](design-docs/data-model.md).
 
 Schema versioning qua Dexie's `version().stores()` — bump version + thêm upgrade callback khi đổi schema.

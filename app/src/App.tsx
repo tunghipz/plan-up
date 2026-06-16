@@ -16,7 +16,7 @@ import {
   Settings,
   X,
   Lock,
-  NotebookPen,
+  StickyNote,
   ChevronDown,
   History,
 } from 'lucide-react'
@@ -48,6 +48,7 @@ import { SprintView } from './SprintView'
 import { BoardView } from './BoardView'
 import { GanttView } from './GanttView'
 import { ActivityLog } from './ActivityLog'
+import { VersionFooter } from './VersionFooter'
 import { ProjectSettingsView } from './ProjectSettingsView'
 import { DateField } from './DatePicker'
 import {
@@ -641,12 +642,12 @@ function App() {
                     />
                     <span className="flex-1 min-w-0">
                       <span className="flex items-center gap-1.5 min-w-0">
-                        <span className="truncate font-medium">{s.name}</span>
+                        <span className="flex-1 min-w-0 truncate font-medium">{s.name}</span>
                         {s.note && (
-                          <NotebookPen
-                            size={11}
+                          <StickyNote
+                            size={13}
                             strokeWidth={2}
-                            className={`shrink-0 ${isActive ? 'text-white/80' : 'text-ink-faint'}`}
+                            className={`shrink-0 ${isActive ? 'text-white/70' : 'text-ink-faint'}`}
                             aria-label="Has note"
                           />
                         )}
@@ -755,6 +756,10 @@ function App() {
             Select a project →
           </div>
         )}
+        {/* Version footer — calm `plan-up · v{version}` at rest; morphs into a
+            glowing "Update" pill when a newer build is live. See
+            design-docs/version-and-updates.md. */}
+        <VersionFooter />
         {/* Drag handle — resize the panel; persists across sessions */}
         <div
           onMouseDown={startSidebarResize}
@@ -848,7 +853,7 @@ function App() {
                 <Search size={15} strokeWidth={1.9} />
               </button>
             )}
-            {/* Sprint activity log — toggle a full-page drill-in. Calm grey at
+            {/* Sprint activity log — toggle the right-side drawer. Calm grey at
                 rest (accent is a signal, not chrome); accent only while open. */}
             {selKind === 'sprint' && currentSprint && (
               <button
@@ -897,19 +902,6 @@ function App() {
         )}
 
         <div ref={scrollRef} className="flex-1 overflow-auto">
-          {selKind === 'sprint' && currentSprint && showActivity ? (
-            <div className="px-6 pb-12 pt-4">
-              <ActivityLog
-                sprintId={currentSprint.id}
-                sprintName={currentSprint.name}
-                sprintRange={formatSprintRange(currentSprint.startDate, currentSprint.endDate)}
-                tasks={tasks ?? []}
-                members={paletteMembers ?? []}
-                onBack={() => setShowActivity(false)}
-              />
-            </div>
-          ) : (
-          <>
           {selKind === 'sprint' && currentSprint && (
             <CapacityBanner
               total={capacity.total}
@@ -983,8 +975,6 @@ function App() {
               <p className="text-ink-muted py-12 text-center">Loading…</p>
             )}
           </main>
-          </>
-          )}
         </div>
       </div>
 
@@ -1011,6 +1001,38 @@ function App() {
             <ProjectSettingsView
               project={currentProject}
               onClose={() => setSettingsOpen(false)}
+            />
+          </div>
+        </>
+      )}
+
+      {/* Sprint activity log — right-side drawer over a dimmed backdrop, mirroring
+          the settings drawer idiom. Both stay mounted while a sprint is selected so
+          the slide animates; `inert` keeps focus/keyboard out when closed. */}
+      {selKind === 'sprint' && currentSprint && (
+        <>
+          <div
+            className={`fixed inset-0 z-40 bg-black/25 backdrop-blur-md transition-opacity duration-200 ${
+              showActivity ? 'opacity-100' : 'opacity-0 pointer-events-none'
+            }`}
+            onClick={() => setShowActivity(false)}
+            aria-hidden
+          />
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Sprint activity log"
+            inert={!showActivity}
+            className={`fixed top-0 right-0 z-50 h-full w-[440px] max-w-[90vw] bg-surface border-l border-border-hair shadow-[-12px_0_50px_rgba(0,0,0,0.18)] transition-transform duration-300 ease-[cubic-bezier(.32,.72,0,1)] ${
+              showActivity ? 'translate-x-0' : 'translate-x-full'
+            }`}
+          >
+            <ActivityLog
+              sprintId={currentSprint.id}
+              sprintRange={formatSprintRange(currentSprint.startDate, currentSprint.endDate)}
+              tasks={tasks ?? []}
+              members={paletteMembers ?? []}
+              onClose={() => setShowActivity(false)}
             />
           </div>
         </>
@@ -1902,7 +1924,7 @@ function SprintNoteBanner({ sprint }: { sprint: Sprint }) {
           onClick={() => setEditing(true)}
           className="w-full flex items-center justify-center gap-1.5 py-1.5 text-[12.5px] font-semibold text-ink-muted border border-dashed border-border rounded-[10px] transition hover:text-accent hover:border-accent/40 hover:bg-accent-soft"
         >
-          <NotebookPen size={14} strokeWidth={2} />
+          <StickyNote size={14} strokeWidth={2} />
           Add sprint note
         </button>
       </div>
@@ -1916,7 +1938,7 @@ function SprintNoteBanner({ sprint }: { sprint: Sprint }) {
         onClick={() => setEditing(true)}
         title="Click to edit note"
       >
-        <NotebookPen
+        <StickyNote
           size={15}
           strokeWidth={1.9}
           className="text-accent shrink-0 mt-0.5"

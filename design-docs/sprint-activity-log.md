@@ -5,10 +5,11 @@
 **Code:** `app/src/db.ts` (`ActivityEvent`, `events` table v10, `logEvent`,
 `sprintEvents`, `logTaskEdits` + wiring in `addSprintTask`/`updateTask`/
 `logStatusChange`/`setDependencies`/`moveUnfinishedToNextSprint`),
-`app/src/ActivityLog.tsx` (page), `app/src/App.tsx` (🕒 toolbar button +
-`showActivity` overlay + `sprint_started` log on sprint create)
+`app/src/ActivityLog.tsx` (drawer body), `app/src/App.tsx` (🕒 toolbar button +
+`showActivity` **right-side drawer** + `sprint_started` log on sprint create)
 **Tests:** `app/src/activity-log.test.ts` (11 cases)
-**Demo:** `demo/sprint-activity-log.html` (Cupertino, light/dark, Timeline + By-member)
+**Demo:** `demo/sprint-activity-log.html` (Cupertino, light/dark, Timeline + By-member);
+`demo/activity-log-popup-options.html` (3 popup directions explored — drawer chosen)
 
 > **Storage decision: A (dedicated `events` table) — chosen & implemented.**
 > See [Data](#data). Option B (extend `Task.changeLog`) was rejected: it loses
@@ -27,25 +28,19 @@ This feature adds a **Sprint activity log**: a single chronological page that ag
 the scattered per-task history into a readable sprint narrative for stand-ups, end-of-sprint
 review, and "where did the week go" self-audit.
 
-### Relationship to the per-task change log (important)
+### Sole history surface (was: per-task change log)
 
-This is a **deliberate scope shift** from `task-change-log.md`, which states it is "a memory
-jog, not an audit trail — the cap at 5 is the whole point." The activity log moves toward
-an **audit-trail** posture:
+This **replaced** the per-task change log (`task-change-log.md`, **removed 2026-06-16**) as
+the app's only edit-history surface. That feature was a cap-5 "memory jog" 🕒 tooltip per
+task row; the two overlapped, so the per-task one was retired and this took over fully:
 
-- **No cap.** The page shows the full sprint history, not the last 5 per task.
-- **More event types.** Beyond the 8 field-edits the change log records today, the activity
-  log adds **lifecycle events** (created, completed, rolled over, assigned, sprint started)
-  — see [Data](#data). These are **not logged anywhere today** and require new write-path
-  logging.
-- **Same vocabulary.** Field-edit events reuse the exact `ChangeLogEntry` rendering grammar
-  (old → new, semantic color on the new value, `+ 3–4` for added prereqs/assignee) so the
-  two surfaces stay visually consistent.
-
-The two surfaces coexist: the 🕒 tooltip stays the fast per-row glance; the activity log is
-the sprint-wide read. Decision (2026-06-12): the change-log's cap-5 ring buffer is **not**
-enough to back this page faithfully — a full event store is needed (see
-[Open questions](#future--open-questions)).
+- **No cap.** Shows the full sprint history, not the last 5 per task.
+- **More event types.** Beyond field-edits, it records **lifecycle events** (created, rolled
+  over, sprint started) — see [Data](#data).
+- **Inherited grammar.** Field-edit events reuse the `ChangeLogEntry` edit-entry shape
+  (old → new, semantic color on the new value, `+ …` for added prereqs/assignee). That shape
+  — built by `updateTask`/`logStatusChange`/`setDependencies` and mirrored via `logTaskEdits`
+  — is now this feature's internal vocabulary, not shared with any other surface.
 
 ### DNA fit (design-system §9 checklist)
 
@@ -75,12 +70,24 @@ an icon-only button is the smallest footprint.
 - Per-sprint only (matches the request "log của sprint đó"); there is no global/all-sprint
   view in this iteration.
 
-### The page
+### The surface — right-side drawer
 
-A full main-column page (replaces the List/Board area; the sprint panel + icon rail stay):
+A **right-side drawer** (440px, `max-w-[90vw]`) slides in over a dimmed + blurred
+backdrop, **mirroring the project-settings drawer idiom** (same width, slide easing
+`cubic-bezier(.32,.72,0,1)`, `inert` when closed, Esc / backdrop-click / 🕒-toggle to
+dismiss). The sprint stays visible behind it — activity log is *reference* content you
+read **against** the board, not a place you navigate to.
 
-- **Header** — back affordance `‹ Sprint N`, title "Activity log", sub `{range} · {N}
-  hoạt động` (SF tabular-nums).
+> **Why a drawer (2026-06-16 redesign).** The original was a full main-column page that
+> *replaced* the List/Board. Three directions were prototyped in
+> `demo/activity-log-popup-options.html` — (A) centered modal, (B) right drawer,
+> (C) anchored popover. The drawer won: activity is reference/inspect content (keep the
+> sprint in view), and it reuses the settings-drawer mechanics verbatim (slide, `inert`,
+> backdrop) so it costs almost nothing to ship and stays visually consistent.
+
+- **Header** (54px, matches the settings drawer) — title "Activity log", inline sub
+  `{range} · {N} events` (SF tabular-nums), and a close **✕** at the right (Esc also closes).
+- **Body** — scrollable, inset-grouped cards on canvas. A segmented control at the top:
 - **Segmented control** — two organizations:
   1. **Timeline** (default) — one vertical stream, grouped by **day** (Hôm nay / Hôm qua /
      weekday + date), newest-first. Each event is one row: `[event icon] · #seq task title
@@ -111,8 +118,9 @@ A full main-column page (replaces the List/Board area; the sprint panel + icon r
 | rolled over | rotate | "Chuyển sang từ Sprint N-1" |
 | sprint started | rocket | "Sprint N bắt đầu" (sprint-level, no task ref) |
 
-Status/priority semantic colors and the `+`/strikethrough treatment match
-`ChangeLogTooltip.tsx` exactly.
+Status/priority semantic colors and the `+`/strikethrough treatment use the shared
+status/priority tokens — the same grammar the removed per-task `ChangeLogTooltip` once used,
+now rendered by `ActivityLog.tsx`.
 
 ## Data
 
@@ -167,28 +175,34 @@ interface ActivityEvent {
 ## Implementation
 
 - **`db.ts`** — `logEvent(e)` appends a row; `sprintEvents(sprintId)` reads a sprint's
-  events newest-first (`ts` desc). `logTaskEdits(task, entries)` mirrors the changeLog
-  entries just built into events (sprint tasks only; **title coalesces within
-  `TITLE_COALESCE_MS`** so a keystroke burst is one event). Wired at: `addSprintTask`
-  (`created`), `updateTask` (`edit`, in the same txn as the changeLog write — scope gains
-  `db.events`), `logStatusChange` (board status — safe to widen its txn because all Board
-  callers invoke it OUTSIDE any open transaction), `setDependencies` (prereq + caused date
-  shifts), `moveUnfinishedToNextSprint` (`rolled_over` on the target sprint). Scheduler
-  recomputes (`recomputeDates`/`recomputeAllDates`, raw `db.tasks.update`) stay **unlogged**.
-- **`ActivityLog.tsx`** — the page. `useLiveQuery(sprintEvents)`. Reimplements the
-  changeLog value formatters against `lib.ts` label maps + `formatShortDate`/
-  `formatRelativeTime`/`formatTimestamp` (the `ChangeLogTooltip` helpers aren't exported)
-  so text matches the tooltip. Two render paths: `TimelineView` (day-grouped) and
-  `MemberGroupView` (groups by the task's **current** assignee via the live `tasks` prop;
-  sprint-level events excluded; deleted-task → "Unassigned").
+  events newest-first (`ts` desc). `logTaskEdits(task, entries)` records the diffed edit
+  entries (`ChangeLogEntry[]`, now an internal shape — see
+  [task-change-log.md](./task-change-log.md)) as `'edit'` events (sprint tasks only; **title
+  coalesces within `TITLE_COALESCE_MS`** so a keystroke burst is one event). Wired at:
+  `addSprintTask` (`created`), `updateTask` (`edit` — its txn scope includes `db.events`),
+  `logStatusChange` (board status — safe to widen its txn because all Board callers invoke it
+  OUTSIDE any open transaction), `setDependencies` (prereq + caused date shifts),
+  `moveUnfinishedToNextSprint` (`rolled_over` on the target sprint). Scheduler recomputes
+  (`recomputeDates`/`recomputeAllDates`, raw `db.tasks.update`) stay **unlogged**.
+- **`ActivityLog.tsx`** — the drawer body. `useLiveQuery(sprintEvents)`. Formats values
+  against `lib.ts` label maps + `formatShortDate`/`formatRelativeTime`/`formatTimestamp`. Two
+  render paths: `TimelineView` (day-grouped) and `MemberGroupView` (groups by the task's
+  **current** assignee via the live `tasks` prop; sprint-level events excluded; deleted-task →
+  "Unassigned").
 - **`App.tsx`** — a 🕒 `History` toolbar button (sprint-only, calm grey at rest, accent
-  while open) toggles `showActivity`, a transient full-page overlay of the main column
-  (NOT a persisted view mode; reset on sprint/collection switch). Closed by re-clicking the
-  🕒 button **or `Escape`** (the global key handler closes the overlay right after the
-  palette and before settings — see [search-and-keyboard.md](./search-and-keyboard.md)).
-  `sprint_started` is
-  logged in the New-Sprint dialog's `submit`. UI strings are English (matches the rest of
-  the app; the Vietnamese demo was flavor only).
+  while open) toggles `showActivity`, a transient **right-side drawer** (NOT a persisted
+  view mode; reset on sprint/collection switch via `selectSprint`/`selectCollection`). The
+  drawer + its dimmed backdrop stay mounted while a sprint is selected so the slide
+  animates; `inert={!showActivity}` keeps focus/keyboard out when closed. Dismissed by
+  re-clicking the 🕒 button, clicking the backdrop, the header ✕, **or `Escape`** (the
+  global key handler closes the drawer right after the palette and before settings — see
+  [search-and-keyboard.md](./search-and-keyboard.md)). `sprint_started` is logged in the
+  New-Sprint dialog's `submit`. UI strings are English (matches the rest of the app; the
+  Vietnamese demo was flavor only).
+- **`ActivityLog.tsx`** renders the **drawer body** (not a positioned page): a 54px header
+  (title + range·count + ✕ `onClose`) over a `flex-1 overflow-auto bg-canvas` scroll area
+  holding the segmented control + Timeline/By-member content. App.tsx owns the positioned
+  drawer shell + backdrop (mirroring `ProjectSettingsView` inside the settings drawer).
 
 ## Rules & edge cases
 

@@ -1,7 +1,7 @@
 # App shell & navigation
 
 **Status:** Implemented
-**Last updated:** 2026-06-08 (capacity → hybrid stacked bar; removed dead star button)
+**Last updated:** 2026-06-16 (project tiles: aria-label + aria-current for screen readers)
 **Code:** `app/src/App.tsx`
 
 ## Purpose
@@ -12,6 +12,9 @@ capacity banner above the active view.
 Left → right:
 1. **Icon rail** (58px, vibrancy) — one squircle tile per project (initial + brand color),
    active project ringed in accent; `+` opens New Project; dark-mode toggle pinned bottom.
+   Each project tile carries `aria-label={p.name}` (so the accessible name is the full
+   project name, not the single visible initial) and `aria-current="true"` on the active
+   one — screen readers announce e.g. "My Project, current, button" instead of just "M".
 2. **Sprint panel** (vibrancy, **resizable**) — project name + sprint/task counts, the
    sprint list (active row = accent bg), `+`/`n` to add a sprint. **Drag the right edge**
    to resize.

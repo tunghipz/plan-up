@@ -518,6 +518,8 @@ function App() {
               key={p.id}
               onClick={() => setCurrentProjectId(p.id)}
               title={p.name}
+              aria-label={p.name}
+              aria-current={isActive ? 'true' : undefined}
               className={`w-[36px] h-[36px] rounded-[10px] flex items-center justify-center text-white text-[15px] font-semibold transition ${
                 isActive
                   ? 'shadow-[0_0_0_2.5px_var(--color-accent),0_2px_5px_rgba(0,0,0,0.14)]'

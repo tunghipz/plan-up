@@ -46,7 +46,7 @@ npm run lint       # eslint .
 - **Inline rename** — single-click a collection / table name (a hover ✎ hints it) to edit inline (sprint names are **locked** — not renamable; member rename/delete live in the settings page)
 - **In-DNA confirms** — no native `window.confirm()`: destructive actions (delete project/member/tasks, delete collection, import-replace) use a Cupertino confirm **sheet**; in-card actions (delete a collection table/status) use an inline red Delete/Cancel strip
 - **Cupertino UI** — Apple "design language": SF Pro + tabular figures · system blue `#0071E3` accent · grey canvas + white cards · large soft-rounded corners · vibrancy sidebars · depth over borders · **calm micro-motion ≤300ms** (status-complete pop + check-draw, capacity-bar glide, dialog scale-fade-in, a sliding segmented control) — all honour `prefers-reduced-motion` (design-system §6.5)
-- **Keyboard-first**: `/` focus search · `n` new sprint · `⌘⇧D` toggle dark mode
+- **Keyboard-first**: `/` or `⌘K` open search · `n` new sprint · `⌘⇧D` toggle dark mode · `Esc` closes the open overlay (search palette → activity log → settings, in that priority)
 - **Export / Import JSON** — local-first backup, no sync. Import **validates the file's shape before touching your data** — a truncated/foreign/hand-edited file (or one with duplicate ids) is rejected with a plain message and your existing data is left intact, never half-wiped
 - **Dark mode** — Apple dark (canvas `#1C1C1E`, accent `#0A84FF`)
 - **Brand mark** — a progress-ring-on-squircle favicon in System Blue, dark-aware (swaps to `#0A84FF` via `prefers-color-scheme`) — the same ring as the member progress indicator

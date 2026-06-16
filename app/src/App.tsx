@@ -356,6 +356,10 @@ function App() {
           setPaletteOpen(false)
           return
         }
+        if (showActivity) {
+          setShowActivity(false)
+          return
+        }
         if (settingsOpen) setSettingsOpen(false)
         return
       }
@@ -375,7 +379,7 @@ function App() {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [paletteOpen, dark, setDark, settingsOpen, selKind, currentSprintId])
+  }, [paletteOpen, dark, setDark, settingsOpen, showActivity, selKind, currentSprintId])
 
   if (seedError) {
     return (
@@ -997,6 +1001,7 @@ function App() {
             role="dialog"
             aria-modal="true"
             aria-label="Project settings"
+            inert={!settingsOpen}
             className={`fixed top-0 right-0 z-50 h-full w-[440px] max-w-[90vw] bg-surface border-l border-border-hair shadow-[-12px_0_50px_rgba(0,0,0,0.18)] transition-transform duration-300 ease-[cubic-bezier(.32,.72,0,1)] ${
               settingsOpen ? 'translate-x-0' : 'translate-x-full'
             }`}

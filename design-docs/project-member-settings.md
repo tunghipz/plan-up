@@ -1,7 +1,7 @@
 # Project & member settings
 
 **Status:** Implemented
-**Last updated:** 2026-06-04
+**Last updated:** 2026-06-16
 **Code:** `app/src/ProjectSettingsView.tsx`, `app/src/members.tsx` (shared member
 components), `app/src/App.tsx` (gear button + `settingsOpen` state), `app/src/SprintView.tsx`
 (imports the shared components), `app/src/db.ts` (`updateProject`, `PALETTE`)
@@ -71,6 +71,11 @@ Sprint header and this settings page).
   `translate-x-full` → `translate-x-0`, eased slide). Both stay mounted whenever a project
   exists so the open/close transform animates; the view toggle + capacity banner are **no
   longer hidden** (they sit dimmed behind the backdrop).
+  - **A11y while closed:** because the drawer stays mounted (just slid off-screen at
+    `translate-x-full`), it carries **`inert={!settingsOpen}`** so its content — including
+    the destructive **Delete project** button — is removed from the tab order and the
+    accessibility tree when closed. Without `inert` a screen reader would announce the whole
+    panel and `Tab` would land on hidden controls.
   - **Key handler ordering:** put `if (settingsOpen) { setSettingsOpen(false); return }`
     at the **top** of the global `Escape` branch (before the search-clear `return`), so
     Escape closes settings even when the search box has text. Gate `n` and `/` with an

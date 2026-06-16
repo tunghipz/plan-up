@@ -1,7 +1,7 @@
 # Search & keyboard
 
 **Status:** Implemented
-**Last updated:** 2026-06-11
+**Last updated:** 2026-06-16
 **Code:** `app/src/App.tsx` (`SearchPalette`, key handler, scroll-to-task), `SprintView.tsx`
 (`data-task-id`, flash highlight)
 
@@ -30,7 +30,7 @@ idiom, matching the Cupertino DNA (calm chrome, depth).
 | `/` | Open search palette |
 | `⌘K` / `Ctrl+K` | Open search palette |
 | `n` | New sprint dialog |
-| `Escape` | Close palette (else close settings) |
+| `Escape` | Close palette → else activity log → else settings (in that priority) |
 | `⌘/Ctrl + Shift + D` | Toggle dark mode |
 
 Single-key shortcuts (`/`, `n`) are ignored while typing in an `input`/`textarea`/contentEditable;

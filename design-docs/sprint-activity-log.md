@@ -1,7 +1,7 @@
 # Sprint activity log
 
 **Status:** Implemented
-**Last updated:** 2026-06-12
+**Last updated:** 2026-06-16
 **Code:** `app/src/db.ts` (`ActivityEvent`, `events` table v10, `logEvent`,
 `sprintEvents`, `logTaskEdits` + wiring in `addSprintTask`/`updateTask`/
 `logStatusChange`/`setDependencies`/`moveUnfinishedToNextSprint`),
@@ -183,7 +183,10 @@ interface ActivityEvent {
   sprint-level events excluded; deleted-task → "Unassigned").
 - **`App.tsx`** — a 🕒 `History` toolbar button (sprint-only, calm grey at rest, accent
   while open) toggles `showActivity`, a transient full-page overlay of the main column
-  (NOT a persisted view mode; reset on sprint/collection switch). `sprint_started` is
+  (NOT a persisted view mode; reset on sprint/collection switch). Closed by re-clicking the
+  🕒 button **or `Escape`** (the global key handler closes the overlay right after the
+  palette and before settings — see [search-and-keyboard.md](./search-and-keyboard.md)).
+  `sprint_started` is
   logged in the New-Sprint dialog's `submit`. UI strings are English (matches the rest of
   the app; the Vietnamese demo was flavor only).
 

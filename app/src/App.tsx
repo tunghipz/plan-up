@@ -50,13 +50,15 @@ import { GanttView } from './GanttView'
 import { ActivityLog } from './ActivityLog'
 import { VersionFooter } from './VersionFooter'
 import { ProjectSettingsView } from './ProjectSettingsView'
-import { DateField } from './DatePicker'
 import {
   formatSprintRange,
   formatShortDate,
   isOverdue,
   useDarkMode,
   safeStorage,
+  defaultSprintDates,
+  upcomingMondays,
+  snapToMonday,
 } from './lib'
 
 const CURRENT_PROJECT_KEY = 'plan-up:currentProjectId'
@@ -1352,6 +1354,65 @@ function LegendDot({
   )
 }
 
+/**
+ * Horizontal strip of selectable Mondays for sprint creation. Because the spec
+ * locks a sprint start to a Monday, a month calendar would be ~25/30 dead cells;
+ * the strip shows only valid options. See design-docs/sprint-cadence.md.
+ */
+function MondayStrip({
+  mondays,
+  value,
+  thisWeekMonday,
+  onSelect,
+}: {
+  mondays: string[]
+  value: string
+  thisWeekMonday: string
+  onSelect: (iso: string) => void
+}) {
+  return (
+    <div className="mt-1 flex gap-2 overflow-x-auto pb-1.5 px-0.5" role="radiogroup" aria-label="Sprint start (Monday)">
+      {mondays.map((iso) => {
+        const [, mm, dd] = iso.split('-').map(Number)
+        const selected = iso === value
+        const isThisWeek = iso === thisWeekMonday
+        return (
+          <button
+            key={iso}
+            type="button"
+            role="radio"
+            aria-checked={selected}
+            onClick={() => onSelect(iso)}
+            className={`flex-none min-w-[60px] text-center rounded-[11px] border px-2.5 py-2 transition tabular-nums ${
+              selected
+                ? 'bg-accent border-accent text-white'
+                : 'bg-surface border-border hover:border-border-strong'
+            }`}
+          >
+            <div className={`text-[10px] font-semibold ${selected ? 'text-white/80' : 'text-ink-faint'}`}>
+              Mon
+            </div>
+            <div className="text-[17px] font-bold tracking-[-0.02em] leading-tight">{dd}</div>
+            <div className={`text-[10px] ${selected ? 'text-white/80' : 'text-ink-faint'}`}>
+              {MONTH_ABBR[mm - 1]}
+            </div>
+            {isThisWeek && (
+              <span className={`block text-[9px] font-bold mt-0.5 ${selected ? 'text-white/90' : 'text-accent'}`}>
+                this week
+              </span>
+            )}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+const MONTH_ABBR = [
+  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+]
+
 function NewSprintDialog({
   projectId,
   lastSprint,
@@ -1365,22 +1426,23 @@ function NewSprintDialog({
   onClose: () => void
   onCreate: (s: Sprint) => void
 }) {
-  // Defaults are computed once on mount — opening the dialog twice without
-  // creating a sprint shouldn't change the suggestion.
-  const defaults = useMemo(() => {
-    // Start the day after the last sprint ended (back-to-back biweekly).
-    let startISO: string
-    if (lastSprint) {
-      const s = new Date(lastSprint.endDate + 'T00:00:00Z')
-      s.setUTCDate(s.getUTCDate() + 1)
-      startISO = s.toISOString().slice(0, 10)
-    } else {
-      startISO = new Date().toISOString().slice(0, 10)
-    }
-    const e = new Date(startISO + 'T00:00:00Z')
-    e.setUTCDate(e.getUTCDate() + 13)
-    const endISO = e.toISOString().slice(0, 10)
+  // Today as a local-component yyyy-mm-dd (NOT the UTC slice — that renders the
+  // previous day in UTC-negative zones). Computed once on mount.
+  const todayStr = useMemo(() => {
+    const d = new Date()
+    const p = (n: number) => String(n).padStart(2, '0')
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
+  // Defaults are computed once on mount — opening the dialog twice without
+  // creating a sprint shouldn't change the suggestion. Start locks to a Monday
+  // and length is a fixed 2 weeks (see design-docs/sprint-cadence.md).
+  const defaults = useMemo(() => {
+    const { startDate, endDate } = defaultSprintDates(
+      lastSprint?.endDate ?? null,
+      todayStr
+    )
     // Increment "Sprint N" from the last sprint name when possible;
     // otherwise count up by sprint total.
     let nextNum = sprintCount + 1
@@ -1388,15 +1450,26 @@ function NewSprintDialog({
       const m = lastSprint.name.match(/Sprint\s+(\d+)/i)
       if (m) nextNum = parseInt(m[1], 10) + 1
     }
-    return { name: `Sprint ${nextNum}`, startDate: startISO, endDate: endISO }
+    return { name: `Sprint ${nextNum}`, startDate, endDate }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Name is automatic + locked (Sprint N) — not editable. The optional note
   // carries the "what is this sprint about". See sprints.md.
   const name = defaults.name
+  // Start is the only real choice and must be a Monday — picked from a strip of
+  // upcoming Mondays anchored at the default. End is fully derived (start + 13).
   const [startDate, setStartDate] = useState(defaults.startDate)
-  const [endDate, setEndDate] = useState(defaults.endDate)
+  const mondays = useMemo(
+    () => upcomingMondays(defaults.startDate, 9),
+    [defaults.startDate]
+  )
+  const thisWeekMonday = useMemo(() => snapToMonday(todayStr), [todayStr])
+  const endDate = useMemo(() => {
+    const e = new Date(startDate + 'T00:00:00Z')
+    e.setUTCDate(e.getUTCDate() + 13)
+    return e.toISOString().slice(0, 10)
+  }, [startDate])
   const [note, setNote] = useState('')
 
   const submit = async () => {
@@ -1445,15 +1518,30 @@ function NewSprintDialog({
             Sprint names are automatic — add a note below to describe it.
           </p>
         </div>
-        <div className="grid grid-cols-2 gap-3">
-          <label className="block">
-            <span className="text-xs text-ink-muted">Start</span>
-            <DateField value={startDate} onChange={setStartDate} />
-          </label>
-          <label className="block">
-            <span className="text-xs text-ink-muted">End</span>
-            <DateField value={endDate} onChange={setEndDate} />
-          </label>
+        <div className="block">
+          <span className="text-xs text-ink-muted">Start · pick a Monday</span>
+          <MondayStrip
+            mondays={mondays}
+            value={startDate}
+            thisWeekMonday={thisWeekMonday}
+            onSelect={setStartDate}
+          />
+          {/* End is derived (start + 13 = a Sunday) — read-only range, not a picker. */}
+          <div className="mt-2 flex items-center gap-2.5 px-3 py-2 bg-accent-soft rounded-[8px] text-sm">
+            <span className="text-ink-faint" aria-hidden="true">
+              →
+            </span>
+            <span className="font-semibold tabular-nums">
+              {formatShortDate(endDate)}
+            </span>
+            <span className="ml-auto text-[11px] font-semibold text-accent bg-surface rounded-full px-2 py-0.5">
+              2 weeks
+            </span>
+          </div>
+          <p className="mt-1.5 text-[11.5px] text-ink-faint leading-snug tabular-nums">
+            {formatSprintRange(startDate, endDate)} · ends on a Sunday, next sprint
+            starts the following Monday.
+          </p>
         </div>
         <label className="block">
           <span className="text-xs text-ink-muted">Note — optional</span>

@@ -183,7 +183,7 @@ Một **khối mảnh** trên đầu view (không phải 3 thẻ số rời): ti
 Prop drilling `App → SprintView → MemberCard → AddTaskRow`. Default tốn 1 click override mỗi lần = tax.
 
 ### 5.4 Date — Apple-native `MMM d` *(ĐỔI so với bản cũ)*
-- Hiển thị **"MMM d"** (vd `May 19`, `Jun 1`); range `MMM d – MMM d`; có năm khi cần `MMM d, yyyy`. SF tabular-nums.
+- Hiển thị **"MMM d"** (vd `May 19`, `Jun 1`); sprint range `MMM d → MMM d` (mũi tên, có tháng 2 đầu, vd `May 18 → May 31`); có năm khi cần `MMM d, yyyy`. SF tabular-nums.
 - **Lý do đổi từ `dd/mm/yy`**: feel native Apple, tên tháng dễ đọc; vẫn nhất quán (luôn cùng format). Tháng viết tắt locale-independent (en).
 - Overdue (past + not done) → `--color-overdue` đỏ + `font-semibold`. Empty → mặc định dấu "—" nhạt.
 - **Empty = quiet dashed pill (opt-in).** `DatePickCell` có prop `emptyHint` → ô trống render **pill viền đứt** `＋ {hint}` (hover thành accent) thay cho "—", để "đọc ra bấm được" (idiom days-off). `emptyHintHover` → pill chỉ hiện khi hover row (`group/row`) — dùng cho hàng dày như sprint List để không nhiễu. **Không** áp cho ô `locked` (scheduler tính). Collection rows luôn hiện pill; sprint List chỉ hover + chỉ ô unlocked.

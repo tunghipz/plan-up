@@ -123,13 +123,70 @@ export function formatSeqRanges(seqs: number[]): string {
 }
 
 /** `MMM d – d` when same month, else `MMM d – MMM d`. */
+/** Sprint range as `MMM d → MMM d` (arrow, month on both sides) — e.g.
+ * "May 18 → May 31". The month repeats even within one month so the start→end
+ * direction reads at a glance. Locale-independent (fixed month abbreviations). */
 export function formatSprintRange(start: string, end: string): string {
-  const a = new Date(start)
-  const b = new Date(end)
-  if (a.getMonth() === b.getMonth() && a.getFullYear() === b.getFullYear()) {
-    return `${MON[a.getMonth()]} ${a.getDate()} – ${b.getDate()}`
+  return `${formatShortDate(start)} → ${formatShortDate(end)}`
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Sprint cadence — Monday-locked start + fixed 2-week duration.
+// Single source of truth for default sprint dates, shared by NewSprintDialog
+// and db.seedFresh so the "every sprint starts Monday" invariant can't drift.
+// Dates are parsed at UTC midnight (`T00:00:00Z` + getUTC*) to dodge the local
+// DST / midnight off-by-one. ISO week starts Monday. See sprint-cadence.md.
+// ──────────────────────────────────────────────────────────────────────────
+const SPRINT_LEN_DAYS = 14 // start + 13 → a 14-day, Mon→Sun sprint
+
+/** Snap a `yyyy-mm-dd` back to the Monday of its ISO week (Monday unchanged). */
+export function snapToMonday(dateStr: string): string {
+  const d = new Date(dateStr + 'T00:00:00Z')
+  const delta = (d.getUTCDay() + 6) % 7 // Mon=0 … Sun=6
+  d.setUTCDate(d.getUTCDate() - delta)
+  return d.toISOString().slice(0, 10)
+}
+
+/** First Monday on or after a `yyyy-mm-dd` (returns it unchanged if Monday). */
+export function nextMondayOnOrAfter(dateStr: string): string {
+  const d = new Date(dateStr + 'T00:00:00Z')
+  const delta = (8 - d.getUTCDay()) % 7 // days until next Monday; 0 if Monday
+  d.setUTCDate(d.getUTCDate() + delta)
+  return d.toISOString().slice(0, 10)
+}
+
+/**
+ * Default `{ startDate, endDate }` for a new 2-week sprint, start locked to a
+ * Monday. With a prior sprint → the first Monday after its end (back-to-back;
+ * forward-snapped so a legacy mid-week end never overlaps). Otherwise → the
+ * current week's Monday. End is always start + 13 days (a Sunday).
+ */
+export function defaultSprintDates(
+  lastEndDate: string | null,
+  todayStr: string
+): { startDate: string; endDate: string } {
+  let startDate: string
+  if (lastEndDate) {
+    const d = new Date(lastEndDate + 'T00:00:00Z')
+    d.setUTCDate(d.getUTCDate() + 1) // day after the last sprint ends
+    startDate = nextMondayOnOrAfter(d.toISOString().slice(0, 10))
+  } else {
+    startDate = snapToMonday(todayStr)
   }
-  return `${formatShortDate(start)} – ${formatShortDate(end)}`
+  const e = new Date(startDate + 'T00:00:00Z')
+  e.setUTCDate(e.getUTCDate() + (SPRINT_LEN_DAYS - 1))
+  return { startDate, endDate: e.toISOString().slice(0, 10) }
+}
+
+/** `n` consecutive Mondays starting at `fromMonday` (`yyyy-mm-dd`), a week apart. */
+export function upcomingMondays(fromMonday: string, n: number): string[] {
+  const out: string[] = []
+  const d = new Date(fromMonday + 'T00:00:00Z')
+  for (let i = 0; i < n; i++) {
+    out.push(d.toISOString().slice(0, 10))
+    d.setUTCDate(d.getUTCDate() + 7)
+  }
+  return out
 }
 
 // ──────────────────────────────────────────────────────────────────────────

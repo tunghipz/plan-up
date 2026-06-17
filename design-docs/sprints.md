@@ -33,9 +33,14 @@ boringly consistent; the **note** carries the "what is this sprint about" that n
 to (badly) carry. One-click speed: name needs zero input on create.
 
 ## Biweekly defaults (`NewSprintDialog`)
-Computed once on open:
-- **Start** = day after the last sprint's `endDate` (back-to-back), else today.
-- **End** = start + 13 days (14-day sprint).
+Start is **locked to a Monday** and length is a **fixed 2 weeks** (ClickUp-style) — see
+[sprint-cadence.md](./sprint-cadence.md). Computed once on open via
+`defaultSprintDates()` (`lib.ts`):
+- **Start** = first Monday after the last sprint's `endDate` (back-to-back; forward-snaps
+  a legacy mid-week end), else the **current week's Monday**. Picked from a **Monday-strip**
+  of upcoming Mondays — not a free date field.
+- **End** = derived `start + 13` days (always a Sunday); shown read-only as a range line +
+  "2 weeks" badge, no picker.
 - **Name** = increment the trailing number of the last sprint's name (`Sprint N`), else
   `Sprint <count+1>`. Shown locked (not editable).
 
@@ -44,7 +49,8 @@ Computed once on open:
 - `note?` is an **optional, non-indexed** string → **no Dexie version bump** (same pattern
   as `Project.description`; rows without it read as empty). Written only through
   `setSprintNote()`; trimmed empty → field cleared.
-- Date range rendered with `formatSprintRange` → `MMM d – d` (same month) or `MMM d – MMM d`.
+- Date range rendered with `formatSprintRange` → `MMM d → MMM d` (arrow, month on both
+  sides, e.g. `May 18 → May 31`).
 
 ## Migration of legacy custom names
 Existing sprints that were manually renamed **keep their stored name** (displayed as-is) —

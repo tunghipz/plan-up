@@ -6,7 +6,17 @@ import {
   formatRelativeTime,
   formatTimestamp,
   formatShortDate,
+  formatSprintRange,
 } from './lib'
+
+describe('formatSprintRange', () => {
+  it('uses an arrow with the month on both sides, same month', () => {
+    expect(formatSprintRange('2026-05-18', '2026-05-31')).toBe('May 18 → May 31')
+  })
+  it('uses an arrow across months', () => {
+    expect(formatSprintRange('2026-06-29', '2026-07-12')).toBe('Jun 29 → Jul 12')
+  })
+})
 
 describe('formatRelativeTime', () => {
   const now = new Date('2026-06-05T12:00:00').getTime()

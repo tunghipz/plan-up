@@ -1,5 +1,5 @@
 import Dexie, { type Table } from 'dexie'
-import { formatSeqRanges } from './lib'
+import { formatSeqRanges, defaultSprintDates } from './lib'
 
 export type Status = 'todo' | 'in_progress' | 'done'
 export type Priority = 'urgent' | 'high' | 'normal' | 'low' | 'none'
@@ -1934,15 +1934,18 @@ async function seedFresh(projectId: string) {
   }))
   await db.members.bulkAdd(members)
 
-  const today = new Date()
-  const end = new Date(today)
-  end.setDate(end.getDate() + 13)
+  // Seeded Sprint 1 must honor the Monday-locked, 2-week cadence too — the
+  // dialog isn't the only creation path. See design-docs/sprint-cadence.md.
+  const now = new Date()
+  const p = (n: number) => String(n).padStart(2, '0')
+  const todayStr = `${now.getFullYear()}-${p(now.getMonth() + 1)}-${p(now.getDate())}`
+  const { startDate, endDate } = defaultSprintDates(null, todayStr)
   const sprint: Sprint = {
     id: uid(),
     projectId,
     name: 'Sprint 1',
-    startDate: today.toISOString().slice(0, 10),
-    endDate: end.toISOString().slice(0, 10),
+    startDate,
+    endDate,
   }
   await db.sprints.add(sprint)
 
@@ -1955,7 +1958,7 @@ async function seedFresh(projectId: string) {
     sprintId: sprint.id,
     status: 'in_progress',
     priority: 'normal',
-    startDate: today.toISOString().slice(0, 10),
+    startDate, // sprint start (a Monday) — keeps the welcome task inside the sprint
     dueDate: null,
     estimate: null,
     createdAt: Date.now(),

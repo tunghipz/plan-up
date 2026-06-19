@@ -2,8 +2,6 @@
 
 **Status:** Implemented
 **Last updated:** 2026-06-19
-ink-muted, lists indented beneath — plus the muted type icon: Sprints = `FolderSync`,
-Collections = `Layers`; **icon-rail tiles now depress on press** — see [Motion](#motion))
 **Code:** `app/src/App.tsx`
 
 ## Purpose

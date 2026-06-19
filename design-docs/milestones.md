@@ -16,8 +16,7 @@ In the List view, a leaf task whose **Effort = 0** is shown as a milestone:
 - A small **`◆ Milestone`** pill sits after the task title (accent-tinted, like the
   priority chip), so it's labelled in plain words — discoverable without prior knowledge.
 - The **Start and End columns collapse into a single milestone date** (a milestone is
-  one point in time, so a `Start → End` span is meaningless). A `◆` diamond precedes the
-  date — the universal Gantt convention (OmniPlan / MS Project / Asana).
+  one point in time, so a `Start → End` span is meaningless).
 - The **Effort cell still shows `0` and stays editable** — changing it to a non-zero
   value turns the row back into a normal task (and the two date columns return).
 
@@ -34,8 +33,8 @@ the existing `Task.estimate` field (see [data-model.md](./data-model.md)).
 - Title pill: passed via `TitleTextarea`'s existing `trailing` slot (`<MilestoneTag />`).
 - Collapsed date: when `isMilestone`, the two `COL.start` + `COL.due` cells are replaced
   by one `w-[236px]` cell (= `w-28` + `gap-3` + `w-28`, so the Status column stays put)
-  holding a `◆` glyph + a single editable `DatePickCell` bound to `startDate`.
-- The diamond is a CSS rotated square (`rotate-45`), not a glyph font — crisp at any size.
+  holding a single editable `DatePickCell` bound to `startDate`.
+- The pill's diamond is a CSS rotated square (`rotate-45`), not a glyph font — crisp at any size.
 
 ## Rules & edge cases
 - **Only leaf tasks.** Parent/group rows roll up their children's effort, so the

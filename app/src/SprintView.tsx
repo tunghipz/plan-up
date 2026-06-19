@@ -1873,13 +1873,9 @@ function TaskRow({
 
       {isMilestone ? (
         // A milestone is one point in time: collapse Start+End into a single
-        // editable date (◆), spanning both date columns so Status stays aligned.
+        // editable date, spanning both date columns so Status stays aligned.
         // Width = w-28 + gap-3 + w-28 = 112 + 12 + 112. See design-docs/milestones.md.
-        <div className="w-[236px] flex justify-center items-center gap-1.5 shrink-0">
-          <span
-            className="w-[9px] h-[9px] rotate-45 rounded-[1.5px] bg-accent shrink-0"
-            aria-hidden
-          />
+        <div className="w-[236px] flex justify-center items-center shrink-0">
           <DatePickCell
             value={liveStart}
             time={startTime}

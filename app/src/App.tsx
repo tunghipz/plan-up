@@ -336,11 +336,11 @@ function App() {
       )
   }, [])
 
-  const projects = useLiveQuery<Project[]>(
-    () =>
-      seeded
-        ? db.projects.orderBy('createdAt').toArray()
-        : Promise.resolve([] as Project[]),
+  // `undefined` (not `[]`) until seeded — an empty array reads as "no projects
+  // exist" and would null the restored `currentProjectId` during the load
+  // window, then fall back to projects[0]. `undefined` = "still loading".
+  const projects = useLiveQuery<Project[] | undefined>(
+    () => (seeded ? db.projects.orderBy('createdAt').toArray() : undefined),
     [seeded]
   )
 

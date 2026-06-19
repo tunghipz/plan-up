@@ -1,10 +1,12 @@
 # Sprint activity log
 
 **Status:** Implemented
-**Last updated:** 2026-06-19 (motion pass — segmented control now slides a measured
-pill like the main `ViewToggle` (§6.5 #4); rows do a one-shot entrance stagger when the
-drawer opens — see [Motion](#motion))
+**Last updated:** 2026-06-19 (per-sprint retention cap — newest 500 events kept, older
+pruned on write; earlier: motion pass — segmented control slides a measured pill like the
+main `ViewToggle` (§6.5 #4), rows do a one-shot entrance stagger when the drawer opens —
+see [Motion](#motion))
 **Code:** `app/src/db.ts` (`ActivityEvent`, `events` table v10, `logEvent`,
+`MAX_EVENTS_PER_SPRINT`, `pruneSprintEvents`,
 `sprintEvents`, `logTaskEdits` + wiring in `addSprintTask`/`updateTask`/
 `logStatusChange`/`setDependencies`/`moveUnfinishedToNextSprint`),
 `app/src/ActivityLog.tsx` (drawer body), `app/src/App.tsx` (🕒 toolbar button +
@@ -36,7 +38,10 @@ This **replaced** the per-task change log (`task-change-log.md`, **removed 2026-
 the app's only edit-history surface. That feature was a cap-5 "memory jog" 🕒 tooltip per
 task row; the two overlapped, so the per-task one was retired and this took over fully:
 
-- **No cap.** Shows the full sprint history, not the last 5 per task.
+- **Sprint-wide, not per-task-5.** Shows the whole sprint's recent history, not the last 5
+  per task — but **capped at the newest 500 events per sprint** (older rows pruned on write;
+  `MAX_EVENTS_PER_SPRINT` in `db.ts`) so the store can't grow unbounded. See
+  [Rules & edge cases](#rules--edge-cases).
 - **More event types.** Beyond field-edits, it records **lifecycle events** (created, rolled
   over, sprint started) — see [Data](#data).
 - **Inherited grammar.** Field-edit events reuse the `ChangeLogEntry` edit-entry shape
@@ -239,13 +244,18 @@ interface ActivityEvent {
   (it shows *this* sprint's activity).
 - **Scheduler recomputes are not logged** (premise carried from the change log); only the
   user action that caused a shift is, with the prereq-caused date shift annotated `↳`.
+- **Per-sprint cap (500)** — the store keeps only the newest `MAX_EVENTS_PER_SPRINT` (= 500)
+  events per sprint. Every write site (`logEvent`, `logTaskEdits`) calls `pruneSprintEvents`
+  after appending, which deletes the oldest rows past the cap **for that sprint only** (other
+  sprints are untouched). Pruning is by `ts` (newest-first); destructive — pruned history is
+  gone, not just hidden. An over-cap sprint self-heals on its next logged write.
 - **Empty state** — "No activity yet in this sprint."
 
 ## Future / open questions
 
 - **Storage model** — settled: **A** (dedicated `events` table, Dexie v10, export v4). Done.
-- **Retention** — append-only store grows unbounded; do we cap per sprint, or rely on
-  sprints being short-lived? (Lean: uncapped per sprint, revisit if export size hurts.)
+- **Retention** — settled: **capped at the newest 500 events per sprint**, pruned on write
+  (`MAX_EVENTS_PER_SPRINT`). See [Rules & edge cases](#rules--edge-cases).
 - **Keyboard shortcut** to open the log (none assigned yet — must avoid OS/`/`/`n`/`⌘K`
   conflicts per §6.1).
 - **Filters** — prototyped (by category) then **cut** for calm; revisit if the stream gets

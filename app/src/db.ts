@@ -63,7 +63,8 @@ export type ActivityKind =
   | 'sprint_unarchived'
 
 /**
- * One row in the append-only, uncapped sprint activity store — the app's sole
+ * One row in the append-only sprint activity store (capped per sprint at
+ * MAX_EVENTS_PER_SPRINT — older rows pruned on write) — the app's sole
  * edit-history surface (the per-task `Task.changeLog` it once complemented was
  * removed in v11). Events live in their own table, so they survive task deletion
  * and aggregate sprint-wide. Display fields (`taskSeq`/`taskTitle`) are FROZEN at
@@ -1199,9 +1200,30 @@ function changeLogValue(
 // tasks (no sprintId) are never logged.
 // ──────────────────────────────────────────────────────────────────────────
 
-/** Append one activity event (id auto-assigned). */
+/**
+ * Per-sprint cap on the activity store: only the newest N events of each sprint
+ * are kept; older ones are pruned on write. Bounds unbounded growth (the log is
+ * a recent-history surface, not permanent audit). See sprint-activity-log.md.
+ */
+export const MAX_EVENTS_PER_SPRINT = 500
+
+/**
+ * Trim a sprint's events to the newest MAX_EVENTS_PER_SPRINT rows. No-op when
+ * under the cap. Must run inside an rw transaction whose scope includes
+ * db.events (every caller already holds one).
+ */
+async function pruneSprintEvents(sprintId: string): Promise<void> {
+  const rows = await db.events.where('sprintId').equals(sprintId).toArray()
+  if (rows.length <= MAX_EVENTS_PER_SPRINT) return
+  // newest-first, then drop everything past the cap (the oldest).
+  rows.sort((a, b) => b.ts - a.ts)
+  await db.events.bulkDelete(rows.slice(MAX_EVENTS_PER_SPRINT).map((e) => e.id))
+}
+
+/** Append one activity event (id auto-assigned), then prune the sprint to the cap. */
 export async function logEvent(e: Omit<ActivityEvent, 'id'>): Promise<void> {
   await db.events.add({ id: uid(), ...e })
+  await pruneSprintEvents(e.sprintId)
 }
 
 /** A sprint's activity, newest-first (ts desc). */
@@ -1242,6 +1264,7 @@ async function logTaskEdits(task: Task, entries: ChangeLogEntry[]): Promise<void
       ts: e.ts,
     })
   }
+  await pruneSprintEvents(task.sprintId)
 }
 
 /**

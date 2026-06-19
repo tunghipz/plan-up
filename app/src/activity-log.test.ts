@@ -13,6 +13,7 @@ import {
   recomputeAllDates,
   logEvent,
   sprintEvents,
+  MAX_EVENTS_PER_SPRINT,
   exportAll,
   importAll,
   type Member,
@@ -187,5 +188,38 @@ describe('activity log — export / import round-trip', () => {
     const after = await db.events.toArray()
     expect(after).toHaveLength(before.length)
     expect(after[0].kind).toBe('created')
+  })
+})
+
+// Per-sprint cap: the event store keeps only the newest MAX_EVENTS_PER_SPRINT
+// rows for each sprint, pruning older ones on write. See sprint-activity-log.md.
+describe('activity log — per-sprint cap', () => {
+  const ev = (sprintId: string, ts: number) =>
+    logEvent({
+      projectId: P, sprintId, taskId: null, taskSeq: null, taskTitle: null,
+      kind: 'sprint_started', from: null, to: null, ts,
+    })
+
+  it('keeps only the newest MAX_EVENTS_PER_SPRINT events, pruning the oldest', async () => {
+    await seedSprints()
+    const N = MAX_EVENTS_PER_SPRINT + 5
+    for (let ts = 0; ts < N; ts++) await ev(S1, ts)
+
+    const rows = await sprintEvents(S1)
+    expect(rows).toHaveLength(MAX_EVENTS_PER_SPRINT)
+    // Newest-first: ts N-1 at the top, oldest kept is ts 5 (0..4 pruned).
+    expect(rows[0].ts).toBe(N - 1)
+    expect(rows[rows.length - 1].ts).toBe(5)
+    expect(rows.some((r) => r.ts < 5)).toBe(false)
+  })
+
+  it('caps each sprint independently', async () => {
+    await seedSprints()
+    for (let ts = 0; ts < MAX_EVENTS_PER_SPRINT + 10; ts++) await ev(S1, ts)
+    await ev(S2, 1)
+    await ev(S2, 2)
+
+    expect(await sprintEvents(S1)).toHaveLength(MAX_EVENTS_PER_SPRINT)
+    expect(await sprintEvents(S2)).toHaveLength(2)
   })
 })

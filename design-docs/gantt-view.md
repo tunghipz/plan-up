@@ -1,7 +1,7 @@
 # Timeline view (calendar swimlanes)
 
 **Status:** Implemented
-**Last updated:** 2026-06-08
+**Last updated:** 2026-06-19
 
 > **Bar click → detail popover (2026-06-08):** event blocks were inert (chỉ `title`
 > tooltip). Nay **bấm bar** mở popover Cupertino (portal + float-shadow) hiển thị
@@ -52,6 +52,9 @@ thing List and Board can't show. Read-only: a pure projection of the auto-schedu
   - **Lane-packed** — non-overlapping tasks for one member share a row; overlapping ones
     stack. Member height grows only as needed.
   - A block whose task **continues past the window's right edge** shows a `›` caret.
+- **Milestones (effort 0)** render as a **diamond** on their date (status-coloured) with a
+  label, not a span — the Gantt convention. A milestone on a non-working day falls back to
+  the `no dates` bucket. See [milestones.md](./milestones.md).
 - **Day-off** renders as a faint **diagonal-hatch** band in the member's lane (full day =
   whole column, half = its AM or PM half), from `member.daysOff` — **member-level**, so it
   shows even when no task spans it. Where a **task bar crosses a day-off**, the bar stays one

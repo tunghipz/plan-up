@@ -2,7 +2,9 @@
 
 **Status:** Implemented
 **Last updated:** 2026-06-19
-**Code:** `app/src/SprintView.tsx` (`TaskRow`, `MilestoneTag`), `app/src/db.ts` (`Task.estimate`)
+**Code:** `app/src/SprintView.tsx` (`TaskRow`, `MilestoneTag`, member overdue count),
+`app/src/BoardView.tsx` (`BoardCard` milestone chip), `app/src/GanttView.tsx` (diamond marker),
+`app/src/db.ts` (`Task.estimate`)
 
 ## Purpose
 A task with **`estimate === 0`** isn't really a chunk of work — it's a **milestone**:
@@ -23,6 +25,17 @@ In the List view, a leaf task whose **Effort = 0** is shown as a milestone:
 
 This is distinct from **Effort = `—`** (`estimate === null`), which means *not estimated*
 and still shows the ⚠ "not estimated" warning — see [list-view.md](./list-view.md).
+
+**Overdue.** A milestone has no due span, so its overdue check uses the milestone date
+(its start). A past, unfinished milestone shows its date in **red** and counts toward the
+member header's overdue tally / next-due, like any task.
+
+**Other views.**
+- **Board** ([board-view.md](./board-view.md)) — the card shows a `◆ {date}` chip in accent
+  (red when past-due & unfinished) in place of the Due chip.
+- **Timeline** ([gantt-view.md](./gantt-view.md)) — the milestone renders as a **diamond**
+  on its date (status-coloured) with a label, instead of falling into "no dates". A
+  milestone on a non-working day falls back to "no dates".
 
 ## Data
 No schema change. A milestone is **derived**, not stored: `task.estimate === 0`.
@@ -46,5 +59,5 @@ the existing `Task.estimate` field (see [data-model.md](./data-model.md)).
   spans them; normal rows keep both columns.
 
 ## Future / open questions
-- Mirror the diamond marker in the **Timeline / Gantt view** (`gantt-view.md`) so
-  milestones show as diamonds on the lane instead of zero-width blocks.
+- Milestone marker in the **Calendar** (collections) view, if collections ever adopt
+  effort-0 semantics (today collections are non-scheduled, so this is N/A).

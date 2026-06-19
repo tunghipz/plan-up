@@ -1,7 +1,7 @@
 # Board view
 
 **Status:** Implemented
-**Last updated:** 2026-06-05
+**Last updated:** 2026-06-19
 **Code:** `app/src/BoardView.tsx`
 
 ## Purpose
@@ -27,6 +27,8 @@ Read-mostly; deep editing stays in the list view.
   `computeWorkingPlan` — same source as List/Timeline, never a stale stored date), color-coded
   by urgency: done → green; overdue → red; within 3 days → orange; else faint. Soft-tinted via
   tokens (dark-safe).
+- **Milestones (effort 0)** show a `◆ {date}` chip (accent, red when past-due & unfinished)
+  in place of the Due chip — a checkpoint, not a span. See [milestones.md](./milestones.md).
 - **Quick-edit (hover toolbar)** — hovering a leaf card reveals a small top-right toolbar
   with two actions, keeping the card clean otherwise:
   - **Assign** (person icon) — opens the member dropdown (reuses the List `assigneeId`

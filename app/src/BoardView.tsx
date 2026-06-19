@@ -988,6 +988,22 @@ const BoardCard = memo(function BoardCard({
     }
   })()
 
+  // Milestone (effort 0) — a checkpoint, not a span. Shows a ◆ + its date chip in
+  // accent (red when past-due & unfinished) instead of a Due chip. See milestones.md.
+  const isMilestone = !isParent && task.estimate === 0
+  const milestone = (() => {
+    if (!isMilestone || !plan?.startDate) return null
+    const sd = plan.startDate
+    const od = displayStatus !== 'done' && dayDiff(sd) < 0
+    const c = od ? 'var(--color-priority-urgent)' : 'var(--color-accent)'
+    return {
+      bg: `color-mix(in srgb, ${c} 13%, transparent)`,
+      fg: `color-mix(in srgb, ${c} 100%, #000 25%)`,
+      label: plan.startTime ? `${formatShortDate(sd)}, ${plan.startTime}` : formatShortDate(sd),
+      title: `Milestone ${sd}${plan.startTime ? ' ' + plan.startTime : ''}`,
+    }
+  })()
+
   return (
     <article
       data-id={task.id}
@@ -1116,7 +1132,16 @@ const BoardCard = memo(function BoardCard({
             {prio.label}
           </span>
         )}
-        {due && (
+        {milestone ? (
+          <span
+            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-semibold tab-data"
+            style={{ background: milestone.bg, color: milestone.fg }}
+            title={milestone.title}
+          >
+            <span className="w-[7px] h-[7px] rotate-45 rounded-[1.5px]" style={{ background: 'currentColor' }} aria-hidden />
+            {milestone.label}
+          </span>
+        ) : due ? (
           <span
             className="inline-flex items-center px-2 py-0.5 rounded-full font-medium tab-data"
             style={{ background: due.bg, color: due.fg }}
@@ -1124,7 +1149,7 @@ const BoardCard = memo(function BoardCard({
           >
             {due.label}
           </span>
-        )}
+        ) : null}
         <div className="ml-auto">
           {member ? (
             <Avatar member={member} size={24} ring={false} aria-label={member.name} />

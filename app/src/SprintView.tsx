@@ -666,7 +666,10 @@ function MemberCard({
     let nextDue: string | null = null
     for (const t of leafTasks) {
       if (t.status === 'done') continue
-      const due = computeWorkingPlan(t, tasksById, memberById).dueDate
+      const plan = computeWorkingPlan(t, tasksById, memberById)
+      // Milestones (effort 0) have no due span — their deadline is the milestone
+      // date (start), so they count toward overdue / next-due like any task.
+      const due = t.estimate === 0 ? plan.startDate : plan.dueDate
       if (!due) continue
       if (isOverdue(due, false)) overdue++
       else if (!nextDue || due < nextDue) nextDue = due
@@ -1772,10 +1775,12 @@ function TaskRow({
     startTime,
     endTime,
   } = computeWorkingPlan(task, tasksById, memberById)
-  const overdue = isOverdue(liveDue, task.status === 'done')
   // Effort 0 = milestone (a checkpoint, not a span). Distinct from estimate null
   // (= not estimated). See design-docs/milestones.md.
   const isMilestone = task.estimate === 0
+  // A milestone has no due span, so its overdue check uses the milestone date
+  // (its start) — otherwise a past, unfinished milestone never reads as overdue.
+  const overdue = isOverdue(isMilestone ? liveStart : liveDue, task.status === 'done')
 
   return (
     <div

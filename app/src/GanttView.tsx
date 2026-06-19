@@ -59,6 +59,8 @@ type Ev = {
   contRight: boolean
   lane: number
   isParent: boolean
+  /** Effort-0 task → a point marker (diamond) on its date, not a span. */
+  isMilestone?: boolean
 }
 
 export function GanttView({
@@ -213,6 +215,36 @@ export function GanttView({
             endTime = plan.endTime
             status = task.status as keyof typeof STATUS_META
           }
+          // Milestone (effort 0) = a point in time, not a span. Place a diamond
+          // marker on its date instead of dropping it into "no dates". See
+          // design-docs/milestones.md.
+          if (!isParent && task.estimate === 0 && sd) {
+            if (sd > lastDay) {
+              offWindow.push({ task, date: sd, status, dir: 'later' })
+              continue
+            }
+            if (sd < firstDay) {
+              offWindow.push({ task, date: sd, status, dir: 'earlier' })
+              continue
+            }
+            const mIdx = workdays.indexOf(sd)
+            if (mIdx < 0) {
+              noDates.push(task) // milestone landed on a non-working day
+              continue
+            }
+            evs.push({
+              task,
+              status,
+              left: mIdx * dayW + (startTime === '13:00' ? dayW / 2 : 0),
+              width: 30,
+              contLeft: false,
+              contRight: false,
+              lane: 0,
+              isParent: false,
+              isMilestone: true,
+            })
+            continue
+          }
           if (!sd || !dd) {
             noDates.push(task)
             continue
@@ -346,6 +378,13 @@ export function GanttView({
             style={{ background: HATCH_OFF }}
           />
           Day off
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <span
+            className="inline-block w-[11px] h-[11px] rotate-45 rounded-[2px] bg-accent"
+            aria-hidden
+          />
+          Milestone
         </span>
       </div>
 
@@ -504,6 +543,39 @@ export function GanttView({
                               style={{ color: softFg(v), maxWidth: e.width - 16 }}
                             >
                               ▾ #{e.task.sequence} {e.task.title}
+                            </span>
+                          </div>
+                        )
+                      }
+                      // Milestone → a diamond at its date + a label to the right
+                      // (a point, not a span). Gantt convention. See milestones.md.
+                      if (e.isMilestone) {
+                        return (
+                          <div
+                            key={e.task.id}
+                            onClick={(ev) =>
+                              setOpenBar({
+                                task: e.task,
+                                status: e.status,
+                                rect: (
+                                  ev.currentTarget as HTMLElement
+                                ).getBoundingClientRect(),
+                              })
+                            }
+                            className="absolute flex items-center gap-1.5 cursor-pointer hover:brightness-95 transition"
+                            style={{ left: e.left + 2, top: box.top, height: EVH }}
+                            title={`Milestone · ${e.task.title}`}
+                          >
+                            <span
+                              className="w-[12px] h-[12px] rotate-45 rounded-[2px] shrink-0 shadow-[0_1px_2px_rgba(0,0,0,0.15)]"
+                              style={{ background: v }}
+                              aria-hidden
+                            />
+                            <span
+                              className="text-[11.5px] font-semibold whitespace-nowrap"
+                              style={{ color: softFg(v) }}
+                            >
+                              #{e.task.sequence} {e.task.title}
                             </span>
                           </div>
                         )

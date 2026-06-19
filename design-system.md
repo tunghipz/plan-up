@@ -250,14 +250,17 @@ Motion phải **calm, nhanh, có mục đích** — §8.3 cấm animation > 300m
 - **move** `cubic-bezier(.32,.72,0,1)` — trượt/đổi vị trí (settings drawer, segmented indicator, capacity bar glide).
 - **spring** `cubic-bezier(.34,1.56,.64,1)` — pop nảy nhẹ (status complete, sheet enter, prereq chip). Overshoot nhỏ, không bounce dài.
 
-Bốn micro-motion chuẩn (đều honour `prefers-reduced-motion: reduce` → tắt):
+Năm micro-motion chuẩn (đều honour `prefers-reduced-motion: reduce` → tắt):
 
 | # | Đâu | Motion | Class |
 |---|---|---|---|
 | 1 | StatusDot toggle | Glyph pop (spring 0.32s) + dấu check **vẽ ra** (stroke-dashoffset 0.26s). Check-draw **scope trong `.status-pop`** → BoardView's StatusIcon tĩnh. | `.status-pop`, `.status-check` |
 | 2 | Capacity bar | 3 đoạn done/in-progress/open **trượt width** 0.35s khi task mix đổi. | `.capacity-seg` |
 | 3 | Dialog / confirm sheet | Scrim fade 0.22s + sheet scale 0.96→1 (spring 0.26s). **Enter-only** (sheet unmount khi đóng). | `.dlg-scrim`, `.dlg-sheet` |
-| 4 | Segmented control | Pill trắng **trượt** (đo `useLayoutEffect`) thay vì swap bg từng nút. | `ViewToggle` indicator |
+| 4 | Segmented control | Pill trắng **trượt** (đo `useLayoutEffect`) thay vì swap bg từng nút. Dùng ở **cả** main-column `ViewToggle` **và** Activity-log drawer (Timeline/By-member) — cùng 1 control idiom. | `ViewToggle` indicator |
+| 5 | Icon-rail tile press | Squircle app-icon **lún xuống** khi bấm (`scale 0.92`, bật lại spring ≤120ms) — dock-icon idiom. Chỉ press; hover + accent ring giữ nguyên. | `.tile-press` |
+
+**Một-lần (one-shot), không phải micro-motion lặp:** Activity-log drawer mở → các event row **fade + rise 6px** so le nhẹ (move 0.34s, capped, clear sau ~650ms). Keyed vào lần **mở** (prop `open`), **không** animate mỗi insert. Class `.act-enter`/`.act-row`. *Optional polish — sát ranh giới "đừng animate row" nên chỉ dùng như entrance, không phải per-insert.*
 
 **Cấm:** crossfade khi đổi view, animate insert/remove cả list row (jank + cãi "calm"). Microinteraction lẻ tẻ rải rác (§8 anti-pattern) — motion phải phục vụ 1 hành động cụ thể.
 

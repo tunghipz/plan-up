@@ -2,8 +2,8 @@
 
 **Status:** Implemented
 **Last updated:** 2026-06-19 (section headers promoted to **titles** — 15.5px semibold
-ink-muted, lists indented beneath — plus the muted type icon: Sprints = `Repeat`,
-Collections = `Layers`)
+ink-muted, lists indented beneath — plus the muted type icon: Sprints = `FolderSync`,
+Collections = `Layers`; **icon-rail tiles now depress on press** — see [Motion](#motion))
 **Code:** `app/src/App.tsx`
 
 ## Purpose
@@ -48,9 +48,12 @@ computed from the current sprint's **leaf** tasks (parents excluded — see task
   count shows next to the label when > 0). The `+` button `stopPropagation`s so it never
   toggles. Collapse state persists per section in `localStorage`.
   - **Type icon (2026-06-19):** between the caret and the label each header carries a muted
-    `16px` lucide icon marking it as a *kind* of container — **Sprints = `Repeat`** (the
-    Monday-locked biweekly cadence), **Collections = `Layers`** (a stack of standing groups).
-    Two distinct silhouettes (no generic folder) so the peer sections separate at a glance.
+    `16px` lucide icon marking it as a *kind* of container — **Sprints = `FolderSync`** (a
+    folder of recurring, Monday-locked biweekly time-boxes — the sync arrows carry the cadence
+    meaning the earlier `Repeat` glyph held, now in folder/container form), **Collections =
+    `Layers`** (a stack of standing groups). Two distinct silhouettes — a *folder* vs a *stack*,
+    and the sync arrows keep Sprints from reading as a generic container next to Collections —
+    so the peer sections separate at a glance.
     Kept `text-ink-faint`, **never accent** — wayfinding, not decoration (design-system §2.1).
     These are the only per-section icons; row-level icons stay reserved for state/actions to
     avoid icon slop.
@@ -72,6 +75,19 @@ computed from the current sprint's **leaf** tasks (parents excluded — see task
   signal, not chrome — design-system §2.1). When a **newer build is detected** the same line
   morphs in place into a glowing "Update" pill (`<VersionFooter />`) — see
   [version-and-updates.md](./version-and-updates.md).
+
+## Motion
+- **Icon-rail tile press (2026-06-19):** every rail button — project tiles, the `+` New
+  Project tile, and the dark-mode toggle — **depresses on press** (`active:scale-[0.92]`,
+  springing back on the shared **spring** easing `cubic-bezier(.34,1.56,.64,1)` via the
+  `.tile-press` class in `index.css`). The rail is a dock of app-icon squircles; like
+  macOS/iOS home icons, tapping one should feel physical. Hover (opacity → 1) and the
+  accent selection ring are unchanged; this only adds the tactile *press*. Honours
+  `prefers-reduced-motion` (no scale). Calm, ≤120ms, serves the real act of selecting a
+  project — explored in `demo/sidebar-activitylog-motion.html` (verdict: ship). Sprint rows
+  intentionally **do not** get a press effect — they already glide their accent fill on
+  select, and adding a second motion there would be the scattered-microinteraction
+  anti-pattern (§6.5 / §8.3).
 
 ## Rules & edge cases
 - **localStorage keys:** `plan-up:currentProjectId`, `plan-up:view`,

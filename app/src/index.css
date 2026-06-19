@@ -290,6 +290,43 @@ h1, h2, h3, .display-tight {
   animation: prereq-arrow-in 0.2s ease var(--d, 0s) both;
 }
 
+/* Icon-rail tile press (design-docs/app-shell-and-navigation.md §Motion). The
+ * rail is a dock of app-icon squircles; tapping one depresses it like a macOS/iOS
+ * home icon, springing back. Press only — hover/active-ring are owned by the
+ * button's own classes. Calm (≤120ms), reduced-motion safe. */
+.tile-press {
+  transition: transform 0.12s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.tile-press:active {
+  transform: scale(0.92);
+}
+@media (prefers-reduced-motion: reduce) {
+  .tile-press:active { transform: none; }
+}
+
+/* Activity-log entrance — one-shot stagger when the drawer OPENS (design-docs/
+ * sprint-activity-log.md §Motion). The drawer stays mounted and slides in, so the
+ * `.act-enter` class is toggled on for ~650ms when `open` flips true; that turns the
+ * animation rule on (restarting it) for the already-painted rows, then clears so the
+ * next open re-triggers. NOT a per-insert animation (§6.5 bans that) — keyed only to
+ * the open transition, and tab switches outside the window don't re-animate. */
+@keyframes act-row-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+.act-enter .act-row {
+  animation: act-row-in 0.34s cubic-bezier(0.32, 0.72, 0, 1) both;
+}
+/* capped stagger — cascades within each day/member card, then flat */
+.act-enter .act-row:nth-child(2) { animation-delay: 0.044s; }
+.act-enter .act-row:nth-child(3) { animation-delay: 0.088s; }
+.act-enter .act-row:nth-child(4) { animation-delay: 0.132s; }
+.act-enter .act-row:nth-child(5) { animation-delay: 0.176s; }
+.act-enter .act-row:nth-child(n + 6) { animation-delay: 0.22s; }
+@media (prefers-reduced-motion: reduce) {
+  .act-enter .act-row { animation: none !important; }
+}
+
 /* Sprint state glyph — calm "live" pulse on the in-progress halo (sprints.md). */
 @keyframes sprint-live {
   0%, 100% { opacity: 0.16; transform: scale(1); }

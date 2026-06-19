@@ -22,7 +22,7 @@ import {
   History,
   Archive,
   ArchiveRestore,
-  Repeat,
+  FolderSync,
   Layers,
 } from 'lucide-react'
 import {
@@ -700,7 +700,7 @@ function App() {
               title={p.name}
               aria-label={p.name}
               aria-current={isActive ? 'true' : undefined}
-              className={`w-[36px] h-[36px] rounded-[10px] flex items-center justify-center text-white text-[15px] font-semibold transition ${
+              className={`tile-press w-[36px] h-[36px] rounded-[10px] flex items-center justify-center text-white text-[15px] font-semibold transition ${
                 isActive
                   ? 'shadow-[0_0_0_2.5px_var(--color-accent),0_2px_5px_rgba(0,0,0,0.14)]'
                   : 'opacity-80 hover:opacity-100'
@@ -717,7 +717,7 @@ function App() {
         <button
           onClick={() => setShowNewProject(true)}
           title="New project"
-          className="w-[36px] h-[36px] rounded-[10px] text-ink-faint hover:text-accent hover:bg-surface-hover flex items-center justify-center transition"
+          className="tile-press w-[36px] h-[36px] rounded-[10px] text-ink-faint hover:text-accent hover:bg-surface-hover flex items-center justify-center transition"
         >
           <Plus size={18} strokeWidth={2} />
         </button>
@@ -725,7 +725,7 @@ function App() {
         <button
           onClick={() => setDark(!dark)}
           title={dark ? 'Switch to light' : 'Switch to dark'}
-          className="w-[36px] h-[36px] rounded-[10px] text-ink-faint hover:text-ink hover:bg-surface-hover flex items-center justify-center transition"
+          className="tile-press w-[36px] h-[36px] rounded-[10px] text-ink-faint hover:text-ink hover:bg-surface-hover flex items-center justify-center transition"
         >
           {dark ? <Sun size={16} /> : <Moon size={16} />}
         </button>
@@ -777,7 +777,7 @@ function App() {
                   className={`shrink-0 text-ink-faint transition-transform ${sprintsCollapsed ? '-rotate-90' : ''}`}
                   aria-hidden
                 />
-                <Repeat size={16} className="shrink-0 text-ink-faint" aria-hidden />
+                <FolderSync size={16} className="shrink-0 text-ink-faint" aria-hidden />
                 Sprints
                 {activeSprints.length > 0 && (
                   <span className="text-[13px] tabular-nums font-medium text-ink-faint/70">
@@ -1200,6 +1200,7 @@ function App() {
             }`}
           >
             <ActivityLog
+              open={showActivity}
               sprintId={currentSprint.id}
               sprintRange={formatSprintRange(currentSprint.startDate, currentSprint.endDate)}
               tasks={tasks ?? []}

@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect, useLayoutEffect, useRef } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
   X,
@@ -189,7 +189,7 @@ const CARD =
 
 function EventRow({ e }: { e: ActivityEvent }) {
   return (
-    <div className="flex items-center gap-3 px-[18px] py-[11px] border-t border-border first:border-t-0 hover:bg-surface-hover transition-colors">
+    <div className="act-row flex items-center gap-3 px-[18px] py-[11px] border-t border-border first:border-t-0 hover:bg-surface-hover transition-colors">
       <EventIcon e={e} />
       <div className="min-w-0 flex-1 text-[14.5px] leading-snug">
         <TaskRef e={e} />
@@ -303,12 +303,14 @@ function MemberGroupView({
 }
 
 export function ActivityLog({
+  open,
   sprintId,
   sprintRange,
   tasks,
   members,
   onClose,
 }: {
+  open: boolean
   sprintId: string
   sprintRange: string
   tasks: Task[]
@@ -320,6 +322,27 @@ export function ActivityLog({
 
   const tasksById = useMemo(() => new Map(tasks.map((t) => [t.id, t])), [tasks])
   const membersById = useMemo(() => new Map(members.map((m) => [m.id, m])), [members])
+
+  // One-shot entrance stagger keyed to the OPEN transition (the drawer stays
+  // mounted and slides in, so this can't key off mount). Toggling `.act-enter`
+  // on for ~650ms restarts the row animation; it clears so the next open
+  // re-triggers, and tab switches outside the window don't re-animate. (§6.5)
+  const [entering, setEntering] = useState(false)
+  useEffect(() => {
+    if (!open) return
+    setEntering(true)
+    const id = setTimeout(() => setEntering(false), 650)
+    return () => clearTimeout(id)
+  }, [open])
+
+  // Segmented control = sliding white pill (mirrors the main ViewToggle, §6.5 #4):
+  // measure the active segment after layout and glide the pill to it.
+  const segRef = useRef<HTMLDivElement>(null)
+  const [ind, setInd] = useState<{ left: number; width: number } | null>(null)
+  useLayoutEffect(() => {
+    const el = segRef.current?.querySelector<HTMLElement>(`[data-seg="${view}"]`)
+    if (el) setInd({ left: el.offsetLeft, width: el.offsetWidth })
+  }, [view])
 
   // Drawer body (App.tsx owns the positioned shell + backdrop, mirroring the
   // ProjectSettingsView/settings-drawer pairing). Header matches the 54px
@@ -343,8 +366,18 @@ export function ActivityLog({
         </button>
       </header>
 
-      <div className="flex-1 overflow-auto bg-canvas px-5 py-4">
-        <div className="inline-flex bg-fill rounded-[9px] p-0.5 mb-4">
+      <div className={`flex-1 overflow-auto bg-canvas px-5 py-4 ${entering ? 'act-enter' : ''}`}>
+        <div
+          ref={segRef}
+          className="relative inline-flex items-center bg-fill rounded-[9px] p-0.5 mb-4"
+        >
+          {ind && (
+            <span
+              aria-hidden
+              className="absolute top-0.5 bottom-0.5 rounded-[7px] bg-surface shadow-[0_1px_3px_rgba(0,0,0,0.12),0_0_0_0.5px_rgba(0,0,0,0.04)] transition-[left,width] duration-[280ms] ease-[cubic-bezier(.32,.72,0,1)]"
+              style={{ left: ind.left, width: ind.width }}
+            />
+          )}
           {(
             [
               ['timeline', 'Timeline'],
@@ -353,11 +386,13 @@ export function ActivityLog({
           ).map(([k, label]) => (
             <button
               key={k}
+              data-seg={k}
               onClick={() => setView(k)}
-              className={`text-[13px] px-3.5 py-1 rounded-[7px] transition-colors ${
+              aria-pressed={view === k}
+              className={`relative z-10 text-[13px] px-3.5 py-1 rounded-[7px] transition-colors ${
                 view === k
-                  ? 'bg-surface text-ink font-semibold shadow-[0_1px_3px_rgba(0,0,0,0.12),0_0_0_0.5px_rgba(0,0,0,0.04)]'
-                  : 'text-ink-muted font-medium'
+                  ? 'text-ink font-semibold'
+                  : 'text-ink-muted font-medium hover:text-ink'
               }`}
             >
               {label}

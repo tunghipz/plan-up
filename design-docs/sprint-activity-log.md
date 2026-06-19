@@ -1,7 +1,9 @@
 # Sprint activity log
 
 **Status:** Implemented
-**Last updated:** 2026-06-16
+**Last updated:** 2026-06-19 (motion pass — segmented control now slides a measured
+pill like the main `ViewToggle` (§6.5 #4); rows do a one-shot entrance stagger when the
+drawer opens — see [Motion](#motion))
 **Code:** `app/src/db.ts` (`ActivityEvent`, `events` table v10, `logEvent`,
 `sprintEvents`, `logTaskEdits` + wiring in `addSprintTask`/`updateTask`/
 `logStatusChange`/`setDependencies`/`moveUnfinishedToNextSprint`),
@@ -102,6 +104,27 @@ read **against** the board, not a place you navigate to.
 - Each event's time shows **relative** in Timeline (`14:32` within a day group) with the
   absolute timestamp as the `title` attr; By-member shows `{date} {time}` since rows cross
   days.
+
+### Motion
+
+Two calm touches (design-system §6.5 — ≤300ms, shared easings, reduced-motion safe):
+
+1. **Segmented control = sliding pill.** The Timeline / By-member toggle slides a single
+   white pill to the active segment (measured via `useLayoutEffect`, `transition-[left,width]`
+   on the **move** easing `cubic-bezier(.32,.72,0,1)`) instead of swapping a per-button
+   background. This is **not new motion** — it makes the drawer's segmented control conform to
+   the §6.5 #4 standard the main-column `ViewToggle` already follows, so the two read as the
+   same control. The pill **jumps without animating on first paint** (no entrance slide), then
+   glides on every switch.
+2. **One-shot entrance stagger.** When the drawer **opens** (`open` flips false→true — the
+   drawer stays mounted and slides in, so this keys off the prop, not mount), the event rows
+   fade + rise 6px in a short cascade (`act-row-in`, 0.34s move easing, ~44ms per row, capped).
+   It is a **one-shot** keyed to the open transition via a transient `act-enter` class that
+   clears after ~650ms — deliberately **not** a per-insert animation (§6.5 bans animating list
+   insert/remove). Switching tabs after the entrance window does **not** re-animate. Honours
+   `prefers-reduced-motion` (rows appear instantly). Marked *optional polish* in the motion
+   study (`demo/sidebar-activitylog-motion.html`) — it brushes the "don't animate rows" line
+   but is defensible as an entrance, not an insert.
 
 ### Event rendering (reuses change-log grammar)
 

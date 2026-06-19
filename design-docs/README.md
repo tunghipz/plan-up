@@ -66,6 +66,7 @@ Non-obvious behaviors, defaults, persistence keys.
 | [sprint-activity-log.md](./sprint-activity-log.md) | Sprint-wide activity log — 🕒 toolbar entry opens a right-side drawer (timeline + by-member); append-only `events` store, the app's sole edit-history surface |
 | [task-groups.md](./task-groups.md) | Group tasks under a parent task (nested, roll-up + collapse) |
 | [scheduling.md](./scheduling.md) | Auto-scheduling engine (effort, prereqs, workdays) |
+| [milestones.md](./milestones.md) | Effort-0 tasks shown as milestones — `◆ Milestone` pill + single collapsed date (List view) |
 | [conflict-warning.md](./conflict-warning.md) | Warn when a member is double-booked (same start/end/prereq) |
 | [dependencies.md](./dependencies.md) | Prerequisites, cycle prevention, blocked state |
 | [status-and-priority.md](./status-and-priority.md) | Status circle/pill, priority chip |

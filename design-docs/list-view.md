@@ -25,6 +25,9 @@ inset-grouped cards, fully editable inline.
   `seq asc` first run).
 - Member cards omit the **Assignee** column (everyone in the group is the same person);
   the Unassigned card keeps it.
+- A task with **Effort = 0** renders as a **milestone**: a `◆ Milestone` pill after the
+  title and a single collapsed milestone date (instead of a `Start → End` span). This is
+  distinct from Effort `—` (*not estimated*, ⚠). See [milestones.md](./milestones.md).
 
 ## Drag-to-reorder
 A hover-revealed **grip** (`GripVertical`, leftmost gutter, `cursor-grab`) lets you drag a

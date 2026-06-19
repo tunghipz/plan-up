@@ -1082,6 +1082,23 @@ function PriorityChip({ priority }: { priority: string }) {
   )
 }
 
+/**
+ * Milestone tag — an Effort-0 task is a zero-duration checkpoint, not a chunk of
+ * work. Rendered as a soft accent pill (with a ◆ diamond) after the title via
+ * TitleTextarea's `trailing` slot. See design-docs/milestones.md.
+ */
+function MilestoneTag() {
+  return (
+    <span
+      className="inline-flex items-center gap-1 shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold bg-accent-soft text-accent mt-[2px] select-none"
+      title="Milestone — a zero-effort checkpoint (no duration)"
+    >
+      <span className="w-[7px] h-[7px] rotate-45 rounded-[1.5px] bg-accent" aria-hidden />
+      Milestone
+    </span>
+  )
+}
+
 function TitleTextarea({
   value,
   onChange,
@@ -1756,6 +1773,9 @@ function TaskRow({
     endTime,
   } = computeWorkingPlan(task, tasksById, memberById)
   const overdue = isOverdue(liveDue, task.status === 'done')
+  // Effort 0 = milestone (a checkpoint, not a span). Distinct from estimate null
+  // (= not estimated). See design-docs/milestones.md.
+  const isMilestone = task.estimate === 0
 
   return (
     <div
@@ -1832,6 +1852,7 @@ function TaskRow({
         welcomeHint={isWelcome}
         priority={task.priority}
         indent={isChild}
+        trailing={isMilestone ? <MilestoneTag /> : undefined}
       />
 
       {showAssignee && (
@@ -1850,44 +1871,72 @@ function TaskRow({
         />
       </div>
 
-      <div className={COL.start}>
-        <DatePickCell
-          value={liveStart}
-          time={startTime}
-          locked={task.dependsOn.length > 0}
-          emptyHint={task.dependsOn.length > 0 ? undefined : 'Start'}
-          emptyHintHover
-          onChange={async (v) => {
-            await update({ startDate: v })
-            // Manual start change recomputes end when effort drives it.
-            await recomputeDates(task.id)
-          }}
-          ariaLabel="Start date"
-          daysOff={assignee?.daysOff}
-        />
-      </div>
+      {isMilestone ? (
+        // A milestone is one point in time: collapse Start+End into a single
+        // editable date (◆), spanning both date columns so Status stays aligned.
+        // Width = w-28 + gap-3 + w-28 = 112 + 12 + 112. See design-docs/milestones.md.
+        <div className="w-[236px] flex justify-center items-center gap-1.5 shrink-0">
+          <span
+            className="w-[9px] h-[9px] rotate-45 rounded-[1.5px] bg-accent shrink-0"
+            aria-hidden
+          />
+          <DatePickCell
+            value={liveStart}
+            time={startTime}
+            locked={task.dependsOn.length > 0}
+            emptyHint={task.dependsOn.length > 0 ? undefined : 'Date'}
+            emptyHintHover
+            highlight={overdue ? 'overdue' : null}
+            onChange={async (v) => {
+              await update({ startDate: v })
+              await recomputeDates(task.id)
+            }}
+            ariaLabel="Milestone date"
+            daysOff={assignee?.daysOff}
+          />
+        </div>
+      ) : (
+        <>
+          <div className={COL.start}>
+            <DatePickCell
+              value={liveStart}
+              time={startTime}
+              locked={task.dependsOn.length > 0}
+              emptyHint={task.dependsOn.length > 0 ? undefined : 'Start'}
+              emptyHintHover
+              onChange={async (v) => {
+                await update({ startDate: v })
+                // Manual start change recomputes end when effort drives it.
+                await recomputeDates(task.id)
+              }}
+              ariaLabel="Start date"
+              daysOff={assignee?.daysOff}
+            />
+          </div>
 
-      <div className={COL.due}>
-        <DatePickCell
-          value={liveDue}
-          time={endTime}
-          locked={
-            task.dependsOn.length > 0 ||
-            (task.estimate !== null && task.estimate > 0)
-          }
-          emptyHint={
-            task.dependsOn.length > 0 ||
-            (task.estimate !== null && task.estimate > 0)
-              ? undefined
-              : 'Due'
-          }
-          emptyHintHover
-          highlight={overdue ? 'overdue' : null}
-          onChange={(v) => update({ dueDate: v })}
-          ariaLabel="Due date"
-          daysOff={assignee?.daysOff}
-        />
-      </div>
+          <div className={COL.due}>
+            <DatePickCell
+              value={liveDue}
+              time={endTime}
+              locked={
+                task.dependsOn.length > 0 ||
+                (task.estimate !== null && task.estimate > 0)
+              }
+              emptyHint={
+                task.dependsOn.length > 0 ||
+                (task.estimate !== null && task.estimate > 0)
+                  ? undefined
+                  : 'Due'
+              }
+              emptyHintHover
+              highlight={overdue ? 'overdue' : null}
+              onChange={(v) => update({ dueDate: v })}
+              ariaLabel="Due date"
+              daysOff={assignee?.daysOff}
+            />
+          </div>
+        </>
+      )}
 
       <div className={COL.status}>
         <StatusPicker status={task.status} onChange={(s) => update({ status: s })} />

@@ -324,9 +324,10 @@ export function AvatarPicker({ member }: { member: Member }) {
             ))}
           </div>
 
-          {/* Panel */}
+          {/* Panel — distinct keys so React remounts instead of reusing the
+              <input> across tabs (controlled text → uncontrolled file). */}
           {tab === 'emoji' ? (
-            <div>
+            <div key="emoji-panel">
               <input
                 type="text"
                 value={emojiQuery}
@@ -360,7 +361,7 @@ export function AvatarPicker({ member }: { member: Member }) {
               )}
             </div>
           ) : (
-            <div>
+            <div key="photo-panel">
               <input
                 ref={fileRef}
                 type="file"

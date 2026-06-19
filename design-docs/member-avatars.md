@@ -58,7 +58,12 @@ Layout = **Segmented** (chosen from a 3-way prototype, see *History*):
 ## Image handling — `resizeImageToDataURL(file, size=128)`
 Client-side, so the DB and the shareable export file stay small (a multi-MB photo
 → a few KB):
-- Center-crops to a square and draws onto a `size×size` canvas.
+- Decodes via `createImageBitmap(file, { imageOrientation: 'from-image' })` so
+  **EXIF orientation is honored** — phone photos carry an orientation tag and
+  would otherwise render sideways. (Also avoids the object-URL the old `<img>`
+  path needed.)
+- Center-crops the orientation-corrected bitmap to a square and draws onto a
+  `size×size` canvas.
 - Exports `toDataURL('image/webp', 0.85)`. webp encoding **silently returns a PNG**
   on unsupported browsers (it does not throw), so it checks the
   `data:image/webp` prefix and re-encodes to JPEG if absent.

@@ -51,7 +51,7 @@ export function dayDiff(dateStr: string): number {
 }
 
 // (dd/mm/yy padding helper removed in v2 — dates now render as `MMM d`.)
-const MON = [
+export const MON = [
   'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
   'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
 ]
@@ -139,6 +139,21 @@ export function formatSprintRange(start: string, end: string): string {
 // ──────────────────────────────────────────────────────────────────────────
 const SPRINT_LEN_DAYS = 14 // start + 13 → a 14-day, Mon→Sun sprint
 
+/** Today as a local-component `yyyy-mm-dd` (NOT the UTC slice — that renders the
+ * previous day in UTC-negative zones). The one place "local today" is computed. */
+export function todayLocalISO(): string {
+  const d = new Date()
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+}
+
+/** End date of a sprint that starts on `startDate` — always `start + 13` (a Sunday). */
+export function sprintEndForStart(startDate: string): string {
+  const e = new Date(startDate + 'T00:00:00Z')
+  e.setUTCDate(e.getUTCDate() + (SPRINT_LEN_DAYS - 1))
+  return e.toISOString().slice(0, 10)
+}
+
 /** Snap a `yyyy-mm-dd` back to the Monday of its ISO week (Monday unchanged). */
 export function snapToMonday(dateStr: string): string {
   const d = new Date(dateStr + 'T00:00:00Z')
@@ -165,17 +180,19 @@ export function defaultSprintDates(
   lastEndDate: string | null,
   todayStr: string
 ): { startDate: string; endDate: string } {
+  const thisWeek = snapToMonday(todayStr)
   let startDate: string
   if (lastEndDate) {
     const d = new Date(lastEndDate + 'T00:00:00Z')
     d.setUTCDate(d.getUTCDate() + 1) // day after the last sprint ends
-    startDate = nextMondayOnOrAfter(d.toISOString().slice(0, 10))
+    const afterLast = nextMondayOnOrAfter(d.toISOString().slice(0, 10))
+    // Clamp to the current week so a stale/long-ago last sprint never defaults
+    // the new one into the past (ISO strings compare chronologically).
+    startDate = afterLast > thisWeek ? afterLast : thisWeek
   } else {
-    startDate = snapToMonday(todayStr)
+    startDate = thisWeek
   }
-  const e = new Date(startDate + 'T00:00:00Z')
-  e.setUTCDate(e.getUTCDate() + (SPRINT_LEN_DAYS - 1))
-  return { startDate, endDate: e.toISOString().slice(0, 10) }
+  return { startDate, endDate: sprintEndForStart(startDate) }
 }
 
 /** `n` consecutive Mondays starting at `fromMonday` (`yyyy-mm-dd`), a week apart. */

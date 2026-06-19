@@ -59,6 +59,9 @@ import {
   defaultSprintDates,
   upcomingMondays,
   snapToMonday,
+  sprintEndForStart,
+  todayLocalISO,
+  MON,
 } from './lib'
 
 const CURRENT_PROJECT_KEY = 'plan-up:currentProjectId'
@@ -654,7 +657,7 @@ function App() {
                           />
                         )}
                       </span>
-                      <span className={`block text-[11.5px] leading-tight mt-0.5 tab-data ${isActive ? 'text-white/80' : 'text-ink-faint'}`}>
+                      <span className={`block truncate text-[11.5px] leading-tight mt-0.5 tab-data ${isActive ? 'text-white/80' : 'text-ink-faint'}`}>
                         {formatSprintRange(s.startDate, s.endDate)}
                         {c && c.total > 0 &&
                           ` · ${c.total} task${c.total === 1 ? '' : 's'}`}
@@ -1370,8 +1373,39 @@ function MondayStrip({
   thisWeekMonday: string
   onSelect: (iso: string) => void
 }) {
+  // Real radiogroup keyboard contract: one tab stop (the checked chip), arrow
+  // keys + Home/End move the selection and focus. See design-system interaction.
+  const ref = useRef<HTMLDivElement>(null)
+  const idx = mondays.indexOf(value)
+  const move = (next: number) => {
+    const i = Math.max(0, Math.min(mondays.length - 1, next))
+    onSelect(mondays[i])
+    ref.current
+      ?.querySelectorAll<HTMLButtonElement>('[role="radio"]')
+      [i]?.focus()
+  }
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    switch (e.key) {
+      case 'ArrowLeft':
+      case 'ArrowUp':
+        e.preventDefault(); move(idx - 1); break
+      case 'ArrowRight':
+      case 'ArrowDown':
+        e.preventDefault(); move(idx + 1); break
+      case 'Home':
+        e.preventDefault(); move(0); break
+      case 'End':
+        e.preventDefault(); move(mondays.length - 1); break
+    }
+  }
   return (
-    <div className="mt-1 flex gap-2 overflow-x-auto pb-1.5 px-0.5" role="radiogroup" aria-label="Sprint start (Monday)">
+    <div
+      ref={ref}
+      onKeyDown={onKeyDown}
+      className="mt-1 flex gap-2 overflow-x-auto pb-1.5 px-0.5"
+      role="radiogroup"
+      aria-label="Sprint start (Monday)"
+    >
       {mondays.map((iso) => {
         const [, mm, dd] = iso.split('-').map(Number)
         const selected = iso === value
@@ -1382,8 +1416,9 @@ function MondayStrip({
             type="button"
             role="radio"
             aria-checked={selected}
+            tabIndex={selected ? 0 : -1}
             onClick={() => onSelect(iso)}
-            className={`flex-none min-w-[60px] text-center rounded-[11px] border px-2.5 py-2 transition tabular-nums ${
+            className={`flex-none min-w-[60px] text-center rounded-[11px] border px-2.5 py-2 transition tabular-nums focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 ${
               selected
                 ? 'bg-accent border-accent text-white'
                 : 'bg-surface border-border hover:border-border-strong'
@@ -1394,7 +1429,7 @@ function MondayStrip({
             </div>
             <div className="text-[17px] font-bold tracking-[-0.02em] leading-tight">{dd}</div>
             <div className={`text-[10px] ${selected ? 'text-white/80' : 'text-ink-faint'}`}>
-              {MONTH_ABBR[mm - 1]}
+              {MON[mm - 1]}
             </div>
             {isThisWeek && (
               <span className={`block text-[9px] font-bold mt-0.5 ${selected ? 'text-white/90' : 'text-accent'}`}>
@@ -1407,11 +1442,6 @@ function MondayStrip({
     </div>
   )
 }
-
-const MONTH_ABBR = [
-  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
-]
 
 function NewSprintDialog({
   projectId,
@@ -1426,14 +1456,9 @@ function NewSprintDialog({
   onClose: () => void
   onCreate: (s: Sprint) => void
 }) {
-  // Today as a local-component yyyy-mm-dd (NOT the UTC slice — that renders the
-  // previous day in UTC-negative zones). Computed once on mount.
-  const todayStr = useMemo(() => {
-    const d = new Date()
-    const p = (n: number) => String(n).padStart(2, '0')
-    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  // Computed once on mount — the dialog is mounted fresh per open, so the
+  // suggestion shouldn't shift while it's open.
+  const todayStr = useMemo(() => todayLocalISO(), [])
 
   // Defaults are computed once on mount — opening the dialog twice without
   // creating a sprint shouldn't change the suggestion. Start locks to a Monday
@@ -1465,11 +1490,7 @@ function NewSprintDialog({
     [defaults.startDate]
   )
   const thisWeekMonday = useMemo(() => snapToMonday(todayStr), [todayStr])
-  const endDate = useMemo(() => {
-    const e = new Date(startDate + 'T00:00:00Z')
-    e.setUTCDate(e.getUTCDate() + 13)
-    return e.toISOString().slice(0, 10)
-  }, [startDate])
+  const endDate = useMemo(() => sprintEndForStart(startDate), [startDate])
   const [note, setNote] = useState('')
 
   const submit = async () => {

@@ -122,20 +122,24 @@ decision in [sprints.md](./sprints.md)).
 >    Monday invariant. (Caught in CEO review — was the doc's one real gap.)
 
 ## Implementation (built)
-- `lib.ts`: add `snapToMonday(iso)` + `defaultSprintDates(lastSprint?)` (the shared
-  helper above). Unit-test both (Mon→Mon identity, mid-week→that week's Monday, legacy
-  mid-week end → forward-snap, year boundary).
+- `lib.ts` shared helpers (single source of truth): `snapToMonday`,
+  `nextMondayOnOrAfter`, `defaultSprintDates`, `upcomingMondays`, plus
+  `sprintEndForStart` (start + 13) and `todayLocalISO` (the one "local today"
+  computation, reused by the dialog and `seedFresh`). `MON` (month abbreviations) is
+  exported and reused — no duplicate arrays. Unit-tested in `sprint-cadence.test.ts`
+  (identity, mid-week snap, forward-snap, **stale-clamp**, year boundary, end-derivation).
 - **New `MondayStrip` component** (sprint-create only): a horizontal, scrollable row of
-  Monday chips built from `upcomingMondays(n)` (default current-week Monday + the next
-  ~8). Each chip = weekday/day/month; selected = accent fill; the default Monday gets a
-  `"this week"` badge. Native focusable chips → no custom calendar keyboard handling.
-  **The `DatePicker` month calendar is NOT touched** — pattern 2 sidesteps the
-  `selectableWeekday` extension and its disabled-day keyboard problem (the CEO-review
-  finding #2 dissolves). Task/board/days-off pickers keep the month calendar as-is.
-- `App.tsx` `NewSprintDialog`: default dates via `defaultSprintDates(lastSprint)`, render
-  the `MondayStrip` for Start, drop the End `DateField`, show the derived range line.
-- `db.ts` `seedFresh()`: replace the inline `today / today+13` with
-  `defaultSprintDates()` so the seeded Sprint 1 is Monday-aligned too.
+  Monday chips from `upcomingMondays(n)`. Each chip = weekday/day/month; selected = accent
+  fill; the current week's Monday gets a `"this week"` badge. **Proper radiogroup keyboard
+  contract** — roving `tabIndex` (only the checked chip is in the tab order), `← ↑` / `→ ↓`
+  move the selection and focus, `Home` / `End` jump to ends. **The `DatePicker` month
+  calendar is NOT touched** — pattern 2 sidesteps the disabled-day keyboard problem
+  entirely; task/board/days-off pickers keep the month calendar as-is.
+- `App.tsx` `NewSprintDialog`: default dates via `defaultSprintDates(lastSprint?.endDate,
+  todayLocalISO())`, render the `MondayStrip` for Start, derive end via `sprintEndForStart`,
+  show the read-only range line.
+- `db.ts` `seedFresh()`: dates via `defaultSprintDates(null, todayLocalISO())` so the
+  seeded Sprint 1 is Monday-aligned too.
 
 ## Rules & edge cases
 - **Legacy sprints** with non-Monday starts keep their stored dates (display only). The
@@ -145,6 +149,11 @@ decision in [sprints.md](./sprints.md)).
   If we later add date editing, decide then whether the Monday-lock applies.
 - **First sprint mid-week:** the snap means a project's first sprint may start a few
   days "ago" (the current week's Monday). Acceptable and matches ClickUp's feel.
+- **Stale / long-ago last sprint → clamp to this week.** `defaultSprintDates` clamps the
+  back-to-back start to `max(nextMondayAfterLast, thisWeekMonday)`, so resuming after a
+  break never defaults a new sprint into the past (and the strip's "this week" Monday stays
+  reachable). Continuous chains are unaffected (the back-to-back Monday is already ≥ this
+  week). Tested. (Caught in tech-lead review of 752ebe2.)
 - **Off-by-week:** because end is derived, a user can never accidentally create a 9- or
   20-day sprint — the source of the "drift" the locked `Sprint N` numbering dislikes.
 - **Legacy mid-week chains leave a gap.** For an existing project whose latest sprint

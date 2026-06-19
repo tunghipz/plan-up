@@ -4,6 +4,7 @@ import {
   nextMondayOnOrAfter,
   defaultSprintDates,
   upcomingMondays,
+  sprintEndForStart,
 } from './lib'
 
 // All dates ISO `yyyy-mm-dd`. June 2026 Mondays: 1, 8, 15, 22, 29.
@@ -64,6 +65,30 @@ describe('defaultSprintDates', () => {
     const r = defaultSprintDates(null, '2026-06-17')
     expect(new Date(r.endDate + 'T00:00:00Z').getUTCDay()).toBe(0) // Sunday
     expect(new Date(r.startDate + 'T00:00:00Z').getUTCDay()).toBe(1) // Monday
+  })
+  it('clamps to the current week when the last sprint already ended (no past default)', () => {
+    // last sprint ended Sun Jun 7; today is Jun 17. The back-to-back slot (Jun 8)
+    // is in the past, so the default clamps forward to this week's Monday.
+    expect(defaultSprintDates('2026-06-07', '2026-06-17')).toEqual({
+      startDate: '2026-06-15',
+      endDate: '2026-06-28',
+    })
+  })
+  it('clamps a long-ago last sprint forward to the current week Monday', () => {
+    expect(defaultSprintDates('2026-01-12', '2026-06-17')).toEqual({
+      startDate: '2026-06-15',
+      endDate: '2026-06-28',
+    })
+  })
+})
+
+describe('sprintEndForStart', () => {
+  it('returns start + 13 days (a Sunday)', () => {
+    expect(sprintEndForStart('2026-06-15')).toBe('2026-06-28')
+    expect(new Date(sprintEndForStart('2026-06-15') + 'T00:00:00Z').getUTCDay()).toBe(0)
+  })
+  it('crosses a month boundary', () => {
+    expect(sprintEndForStart('2026-06-29')).toBe('2026-07-12')
   })
 })
 

@@ -1,5 +1,5 @@
 import Dexie, { type Table } from 'dexie'
-import { formatSeqRanges, defaultSprintDates } from './lib'
+import { formatSeqRanges, defaultSprintDates, todayLocalISO } from './lib'
 
 export type Status = 'todo' | 'in_progress' | 'done'
 export type Priority = 'urgent' | 'high' | 'normal' | 'low' | 'none'
@@ -1936,10 +1936,7 @@ async function seedFresh(projectId: string) {
 
   // Seeded Sprint 1 must honor the Monday-locked, 2-week cadence too — the
   // dialog isn't the only creation path. See design-docs/sprint-cadence.md.
-  const now = new Date()
-  const p = (n: number) => String(n).padStart(2, '0')
-  const todayStr = `${now.getFullYear()}-${p(now.getMonth() + 1)}-${p(now.getDate())}`
-  const { startDate, endDate } = defaultSprintDates(null, todayStr)
+  const { startDate, endDate } = defaultSprintDates(null, todayLocalISO())
   const sprint: Sprint = {
     id: uid(),
     projectId,

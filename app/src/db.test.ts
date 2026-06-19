@@ -39,6 +39,10 @@ import {
   orderBetween,
   setListOrder,
   renormalizeListOrder,
+  compareMembersByOrder,
+  nextMemberOrder,
+  setMemberOrder,
+  renormalizeMemberOrder,
   type Task,
   type Member,
 } from './db'
@@ -1152,6 +1156,80 @@ describe('List drag-reorder', () => {
       // sequence untouched
       expect((await db.tasks.get('a'))!.sequence).toBe(1)
       expect((await db.tasks.get('c'))!.sequence).toBe(3)
+    })
+  })
+})
+
+// Manual member-lane order (per project). Drives List card order + Board
+// `member` sort. See design-docs/member-lane-order.md.
+describe('member lane order', () => {
+  const mk = (id: string, name: string, order?: number): Member => ({
+    id, projectId: P, name, color: '#000', daysOff: [], order,
+  })
+
+  describe('compareMembersByOrder (pure)', () => {
+    it('sorts by order ascending', () => {
+      const a = mk('a', 'A', 2)
+      const b = mk('b', 'B', 0)
+      const c = mk('c', 'C', 1)
+      expect([a, b, c].sort(compareMembersByOrder).map((m) => m.id)).toEqual([
+        'b', 'c', 'a',
+      ])
+    })
+    it('treats a missing order as 0', () => {
+      const a = mk('a', 'A', 1)
+      const b = mk('b', 'B') // undefined → 0, sorts before order 1
+      expect([a, b].sort(compareMembersByOrder).map((m) => m.id)).toEqual([
+        'b', 'a',
+      ])
+    })
+    it('breaks ties by name then id (stable for equal orders)', () => {
+      const a = mk('z-id', 'Sam', 0)
+      const b = mk('a-id', 'Alex', 0)
+      const c = mk('m-id', 'Sam', 0)
+      // Alex < Sam by name; the two Sams break by id (m-id < z-id).
+      expect([a, b, c].sort(compareMembersByOrder).map((m) => m.id)).toEqual([
+        'a-id', 'm-id', 'z-id',
+      ])
+    })
+  })
+
+  describe('nextMemberOrder', () => {
+    it('returns 0 when the project has no members', async () => {
+      expect(await nextMemberOrder(P)).toBe(0)
+    })
+    it('returns max order + 1, scoped to the project', async () => {
+      await db.members.bulkAdd([mk('a', 'A', 0), mk('b', 'B', 4)])
+      await db.members.add({ ...mk('x', 'X', 99), projectId: 'other' })
+      expect(await nextMemberOrder(P)).toBe(5)
+    })
+    it('ignores members with a missing order (treats them as below 0)', async () => {
+      await db.members.add(mk('a', 'A')) // no order
+      expect(await nextMemberOrder(P)).toBe(0)
+    })
+  })
+
+  describe('setMemberOrder', () => {
+    it('writes the order field, leaving other fields intact', async () => {
+      await db.members.add(mk('a', 'Avery', 0))
+      await setMemberOrder('a', 2.5)
+      const m = (await db.members.get('a'))!
+      expect(m.order).toBe(2.5)
+      expect(m.name).toBe('Avery')
+    })
+  })
+
+  describe('renormalizeMemberOrder', () => {
+    it('assigns clean integer order in the given display order', async () => {
+      await db.members.bulkAdd([
+        mk('a', 'A', 1),
+        mk('b', 'B', 1.5),
+        mk('c', 'C', 1.5000000000000002),
+      ])
+      await renormalizeMemberOrder(['c', 'a', 'b'])
+      expect((await db.members.get('c'))!.order).toBe(0)
+      expect((await db.members.get('a'))!.order).toBe(1)
+      expect((await db.members.get('b'))!.order).toBe(2)
     })
   })
 })

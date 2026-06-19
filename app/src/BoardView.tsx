@@ -201,14 +201,15 @@ export function BoardView({
         return a.sequence - b.sequence
       }
       if (cs.mode === 'member') {
-        // by assignee name (the avatar the card shows); unassigned sinks last
-        const ma = a.assigneeId ? membersById.get(a.assigneeId)?.name.toLowerCase() ?? null : null
-        const mb = b.assigneeId ? membersById.get(b.assigneeId)?.name.toLowerCase() ?? null : null
-        if (ma === null && mb === null) return a.sequence - b.sequence
-        if (ma === null) return 1
-        if (mb === null) return -1
-        if (ma < mb) return -1 * mul
-        if (ma > mb) return 1 * mul
+        // by the assignee's manual lane order (same order as the List view);
+        // unassigned always sinks last regardless of dir
+        const ma = a.assigneeId ? membersById.get(a.assigneeId) ?? null : null
+        const mb = b.assigneeId ? membersById.get(b.assigneeId) ?? null : null
+        if (!ma && !mb) return a.sequence - b.sequence
+        if (!ma) return 1
+        if (!mb) return -1
+        const d = (ma.order ?? 0) - (mb.order ?? 0)
+        if (d !== 0) return d * mul
         return a.sequence - b.sequence
       }
       // time: by computed due key; no-due always sinks last regardless of dir

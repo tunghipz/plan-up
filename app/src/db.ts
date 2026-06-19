@@ -139,6 +139,14 @@ export interface Member {
    */
   avatarImage?: string
   avatarEmoji?: string
+  /**
+   * Manual lane order (per project): sorts member cards in the List view
+   * (drag-to-reorder) and the Board view's `member` sort. Fractional, like
+   * `Task.listOrder`. Optional + non-indexed (no Dexie index change); backfilled
+   * to `0..N-1` per project in v12. Absent rows sort as 0 (tiebreak name → id).
+   * See design-docs/member-lane-order.md.
+   */
+  order?: number
 }
 
 export interface Sprint {
@@ -398,6 +406,25 @@ class PlanDB extends Dexie {
           delete t.changeLog
         })
     )
+    // v12 (2026-06-19): manual member-lane order (design-docs/member-lane-order.md).
+    // Add non-indexed `Member.order`; backfill per project to 0..N-1 in the current
+    // `toArray()` order so the first render is identical to today's implicit order.
+    // No index change → upgrade-only bump (v10 stores carry forward).
+    this.version(12).upgrade(async (tx) => {
+      const members = await tx.table<Member>('members').toArray()
+      const byProject = new Map<string, Member[]>()
+      for (const m of members) {
+        const arr = byProject.get(m.projectId) ?? []
+        arr.push(m)
+        byProject.set(m.projectId, arr)
+      }
+      for (const arr of byProject.values()) {
+        let i = 0
+        for (const m of arr) {
+          await tx.table('members').update(m.id, { order: i++ })
+        }
+      }
+    })
   }
 }
 
@@ -746,6 +773,47 @@ export async function renormalizeListOrder(orderedIds: string[]): Promise<void> 
   await db.transaction('rw', db.tasks, async () => {
     for (let i = 0; i < orderedIds.length; i++) {
       await db.tasks.update(orderedIds[i], { listOrder: i })
+    }
+  })
+}
+
+/**
+ * Total order for member lanes (per project). Sorts by `Member.order` ascending;
+ * an absent order counts as 0 so an un-migrated/imported project stays stable.
+ * Tiebreaks by name then id so equal orders are deterministic across renders.
+ * Single source of truth shared by the List view and the Board `member` sort.
+ * See design-docs/member-lane-order.md.
+ */
+export function compareMembersByOrder(a: Member, b: Member): number {
+  const d = (a.order ?? 0) - (b.order ?? 0)
+  if (d !== 0) return d
+  const n = a.name.localeCompare(b.name)
+  if (n !== 0) return n
+  return a.id.localeCompare(b.id)
+}
+
+/** Next lane order for a new member in a project: max existing order + 1 (0 if none). */
+export async function nextMemberOrder(projectId: string): Promise<number> {
+  const members = await db.members.where('projectId').equals(projectId).toArray()
+  let max = -1
+  for (const m of members) if ((m.order ?? -1) > max) max = m.order ?? -1
+  return max + 1
+}
+
+/** Persist one member's manual lane order (raw — like `setListOrder`). */
+export async function setMemberOrder(memberId: string, order: number): Promise<void> {
+  await db.members.update(memberId, { order })
+}
+
+/**
+ * Rewrite a project's member `order` to clean integer spacing (0..N-1) in the
+ * given display order, in one transaction. Fallback for `orderBetween` when
+ * repeated midpoint inserts exhaust float precision (mirrors `renormalizeListOrder`).
+ */
+export async function renormalizeMemberOrder(orderedIds: string[]): Promise<void> {
+  await db.transaction('rw', db.members, async () => {
+    for (let i = 0; i < orderedIds.length; i++) {
+      await db.members.update(orderedIds[i], { order: i })
     }
   })
 }

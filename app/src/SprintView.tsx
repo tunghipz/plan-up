@@ -32,6 +32,10 @@ import {
   orderBetween,
   setListOrder,
   renormalizeListOrder,
+  compareMembersByOrder,
+  nextMemberOrder,
+  setMemberOrder,
+  renormalizeMemberOrder,
   findCyclePath,
   recomputeDates,
   updateTask,
@@ -332,8 +336,25 @@ export function SprintView({
   // always resolvable.
   const tasksById = useMemo(() => new Map(tasks.map((t) => [t.id, t])), [tasks])
 
+  // ── Member-lane drag-to-reorder (per project) ───────────────────────────
+  // Mirrors the row drag in TaskRows: state lives here, scoped to this view.
+  // Only the filled lanes (groups) are draggable. See member-lane-order.md.
+  const [dragMemberId, setDragMemberId] = useState<string | null>(null)
+  const [laneOver, setLaneOver] = useState<{
+    id: string
+    pos: 'before' | 'after'
+  } | null>(null)
+  const laneRaf = useRef(0)
+  const lanePending = useRef<{
+    id: string
+    el: HTMLElement
+    clientY: number
+  } | null>(null)
+
   const { groups, emptyMembers, unassigned } = useMemo(() => {
-    const ms = members ?? []
+    // Lanes follow the manual per-project order (drag-to-reorder); both the
+    // filled lanes and the empty-members section derive from this sorted list.
+    const ms = (members ?? []).slice().sort(compareMembersByOrder)
     const byMember = new Map<string, Task[]>()
     for (const m of ms) byMember.set(m.id, [])
     const orphan: Task[] = []
@@ -359,6 +380,91 @@ export function SprintView({
 
   const isEmpty = tasks.length === 0 && members.length === 0
 
+  // The ordered draggable lanes (filled member cards). Empty members and the
+  // Unassigned card are not draggable.
+  const laneMembers = groups.map((g) => g.member)
+  const laneOrder = (m: Member) => m.order ?? 0
+
+  const endLaneDrag = () => {
+    setDragMemberId(null)
+    setLaneOver(null)
+    if (laneRaf.current) {
+      cancelAnimationFrame(laneRaf.current)
+      laneRaf.current = 0
+    }
+  }
+  const hoverLane = (targetId: string, el: HTMLElement, clientY: number) => {
+    if (!dragMemberId || targetId === dragMemberId) {
+      if (laneOver) setLaneOver(null)
+      return
+    }
+    lanePending.current = { id: targetId, el, clientY }
+    if (laneRaf.current) return
+    laneRaf.current = requestAnimationFrame(() => {
+      laneRaf.current = 0
+      const h = lanePending.current
+      if (!h || !dragMemberId) return
+      const r = h.el.getBoundingClientRect()
+      const pos: 'before' | 'after' =
+        h.clientY - r.top > r.height / 2 ? 'after' : 'before'
+      setLaneOver((prev) =>
+        prev && prev.id === h.id && prev.pos === pos ? prev : { id: h.id, pos }
+      )
+    })
+  }
+  const dropOnLane = (targetId: string, el: HTMLElement, clientY: number) => {
+    const id = dragMemberId
+    endLaneDrag()
+    if (!id || targetId === id) return
+    const arr = laneMembers
+    const dragged = arr.find((m) => m.id === id)
+    if (!dragged || !arr.some((m) => m.id === targetId)) return
+    const r = el.getBoundingClientRect()
+    const pos: 'before' | 'after' =
+      clientY - r.top > r.height / 2 ? 'after' : 'before'
+    const fromIndex = arr.findIndex((m) => m.id === id)
+    const rest = arr.filter((m) => m.id !== id)
+    let insertAt = rest.findIndex((m) => m.id === targetId)
+    if (insertAt < 0) return
+    if (pos === 'after') insertAt += 1
+    const before = rest[insertAt - 1] ?? null
+    const after = rest[insertAt] ?? null
+    // No-op if it lands back in its own gap.
+    const left = arr[fromIndex - 1] ?? null
+    const right = arr[fromIndex + 1] ?? null
+    if (
+      (before?.id ?? null) === (left?.id ?? null) &&
+      (after?.id ?? null) === (right?.id ?? null)
+    )
+      return
+    const beforeOrder = before ? laneOrder(before) : null
+    const afterOrder = after ? laneOrder(after) : null
+    const newOrder = orderBetween(beforeOrder, afterOrder)
+    // Renormalize the lane when float precision is exhausted (same guard as the
+    // row drag), otherwise two lanes would collide on an equal order.
+    const collides =
+      (beforeOrder != null && newOrder <= beforeOrder) ||
+      (afterOrder != null && newOrder >= afterOrder)
+    if (collides) {
+      const orderedIds = rest.map((m) => m.id)
+      orderedIds.splice(insertAt, 0, id)
+      void renormalizeMemberOrder(orderedIds)
+    } else if (newOrder !== dragged.order) {
+      void setMemberOrder(id, newOrder)
+    }
+  }
+  const laneDragFor = (m: Member): RowDrag => ({
+    id: m.id,
+    enabled: laneMembers.length > 1,
+    active: dragMemberId !== null,
+    dragging: dragMemberId === m.id,
+    over: laneOver?.id === m.id ? laneOver.pos : null,
+    onStart: () => setDragMemberId(m.id),
+    onOver: (el, clientY) => hoverLane(m.id, el, clientY),
+    onDrop: (el, clientY) => dropOnLane(m.id, el, clientY),
+    onEnd: endLaneDrag,
+  })
+
   return (
     <SprintRangeContext.Provider value={{ start: sprintStartDate, end: sprintEndDate }}>
     <div className="space-y-4">
@@ -382,6 +488,7 @@ export function SprintView({
           setSort={setSort}
           selectedIds={selectedIds}
           onToggleSelect={toggleSelect}
+          drag={laneDragFor(member)}
         />
       ))}
 
@@ -606,6 +713,11 @@ function EmptyState({ onAddMember }: { onAddMember: () => void }) {
   )
 }
 
+// Lane grip: same affordance as the row grip but revealed on card hover and
+// centred in the (relative) GroupHeader. See design-docs/member-lane-order.md.
+const LANE_GRIP_CLASS =
+  'absolute left-0.5 top-1/2 -translate-y-1/2 z-20 grid place-items-center w-4 h-6 text-ink-faint/70 hover:text-ink-muted opacity-0 group-hover/card:opacity-100 transition-opacity cursor-grab active:cursor-grabbing touch-none'
+
 function MemberCard({
   projectId,
   member,
@@ -622,6 +734,7 @@ function MemberCard({
   setSort,
   selectedIds,
   onToggleSelect,
+  drag,
 }: {
   projectId: string
   member: Member
@@ -640,6 +753,8 @@ function MemberCard({
   >
   selectedIds: Set<string>
   onToggleSelect: (id: string) => void
+  /** Lane drag-to-reorder wiring (absent → card is not draggable). */
+  drag?: RowDrag
 }) {
   // Leaf-based counting: a parent (a task with children in this list) is a
   // container, excluded from done/total/overdue so its work isn't double-counted
@@ -679,8 +794,15 @@ function MemberCard({
     const conflictTips = computeMemberConflicts(leafTasks, tasksById, memberById)
     return { total, done, pct, overdue, nextDue, conflictTips }
   }, [tasks, parentIds, tasksById, memberById])
+  const { grip, rowProps, dragging } = useDragHandle(drag, LANE_GRIP_CLASS)
   return (
-    <Card>
+    <Card className={`relative ${dragging ? 'opacity-40' : ''}`} {...rowProps}>
+      {drag?.over === 'before' && (
+        <div className="absolute left-3 right-3 top-0 h-0.5 rounded-full bg-accent pointer-events-none z-30" />
+      )}
+      {drag?.over === 'after' && (
+        <div className="absolute left-3 right-3 bottom-0 h-0.5 rounded-full bg-accent pointer-events-none z-30" />
+      )}
       <GroupHeader
         avatar={<AvatarRing member={member} pct={pct} />}
         name={member.name}
@@ -691,6 +813,7 @@ function MemberCard({
         conflictCount={conflictTips.size}
         collapsed={collapsed}
         onToggleCollapse={onToggleCollapse}
+        grip={grip}
         extras={
           <MemberDaysOffButton
             member={member}
@@ -846,10 +969,17 @@ function CollapsedMembers({
   )
 }
 
-function Card({ children }: { children: React.ReactNode }) {
-  // `group/card` enables hover-reveal of delete button inside GroupHeader.
+function Card({
+  children,
+  className = '',
+  ...rest
+}: { children: React.ReactNode; className?: string } & React.HTMLAttributes<HTMLDivElement>) {
+  // `group/card` enables hover-reveal of the grip + delete button in GroupHeader.
   return (
-    <div className="group/card bg-surface rounded-[14px] overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_22px_rgba(0,0,0,0.05)]">
+    <div
+      className={`group/card bg-surface rounded-[14px] overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_22px_rgba(0,0,0,0.05)] ${className}`}
+      {...rest}
+    >
       {children}
     </div>
   )
@@ -867,6 +997,7 @@ function GroupHeader({
   collapsed,
   onToggleCollapse,
   extras,
+  grip,
 }: {
   avatar: React.ReactNode
   name: string
@@ -884,19 +1015,22 @@ function GroupHeader({
   onToggleCollapse?: () => void
   /** Extra action buttons rendered in the action group (e.g. days-off). */
   extras?: React.ReactNode
+  /** Optional drag grip (lane reorder), rendered absolutely at the left edge. */
+  grip?: React.ReactNode
 }) {
   const collapsible = onToggleCollapse !== undefined
   // Rename + delete live on the project settings page, not here — the list-view
   // header is read-mostly (see design-docs/project-member-settings.md).
   return (
     <div
-      className={`flex items-center gap-2.5 px-[18px] py-[13px] ${
+      className={`relative flex items-center gap-2.5 px-[18px] py-[13px] ${
         collapsed ? '' : 'border-b border-border'
       } ${collapsible ? 'cursor-pointer transition hover:bg-surface-hover' : ''}`}
       onClick={collapsible ? onToggleCollapse : undefined}
       role={collapsible ? 'button' : undefined}
       aria-expanded={collapsible ? !collapsed : undefined}
     >
+      {grip}
       {collapsible && (
         <ChevronDown
           size={14}
@@ -1305,7 +1439,12 @@ type RowDrag = {
  * never start one. The whole row is the drag image. Returns the grip, the
  * drop-slot indicator line, and the props to spread on the row element.
  */
-function useDragHandle(drag?: RowDrag) {
+function useDragHandle(
+  drag?: RowDrag,
+  // Grip positioning/reveal classes. Defaults suit a task row (revealed on
+  // `group/row` hover); member lanes pass a `group/card`-scoped variant.
+  gripClassName = 'absolute left-0.5 top-1/2 -translate-y-1/2 z-20 grid place-items-center w-4 h-6 text-ink-faint/70 hover:text-ink-muted opacity-0 group-hover/row:opacity-100 transition-opacity cursor-grab active:cursor-grabbing touch-none'
+) {
   const armedRef = useRef(false)
   const enabled = !!drag?.enabled
   const grip = enabled ? (
@@ -1323,7 +1462,7 @@ function useDragHandle(drag?: RowDrag) {
         window.addEventListener('pointerup', off)
       }}
       onClick={(e) => e.stopPropagation()}
-      className="absolute left-0.5 top-1/2 -translate-y-1/2 z-20 grid place-items-center w-4 h-6 text-ink-faint/70 hover:text-ink-muted opacity-0 group-hover/row:opacity-100 transition-opacity cursor-grab active:cursor-grabbing touch-none"
+      className={gripClassName}
     >
       <GripVertical size={14} />
     </button>
@@ -2556,6 +2695,7 @@ function AddMemberRow({
       name: n,
       color: colorForName(n),
       daysOff: [],
+      order: await nextMemberOrder(projectId),
     })
     setName('')
     inputRef.current?.focus()

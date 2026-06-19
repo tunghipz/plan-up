@@ -22,8 +22,11 @@ Six IndexedDB tables (Dexie database name **`plan-up`**): `projects`, `members`,
 
 ### `Member` (`db.ts:25`)
 `id` · `projectId` · `name` · `color` (hex) · `daysOff: DayOff[]` · `title?` (string)
-· `avatarImage?` (string) · `avatarEmoji?` (string)
+· `avatarImage?` (string) · `avatarEmoji?` (string) · `order` (number)
 - A member is just a **label** — no auth, no login. The user creates them.
+- `order` is the **manual lane order** (per project) used to sort member cards in the
+  List view (drag-to-reorder) and the Board view's `member` sort. Non-indexed; backfilled
+  in **v12** to `0..N-1` per project. See [member-lane-order.md](./member-lane-order.md).
 - `daysOff` are extra non-working days on top of weekends (see [scheduling.md](./scheduling.md)).
 - `title?` is an **optional, non-indexed** free-text role label (see [member-title.md](./member-title.md)).
 - `avatarImage?` / `avatarEmoji?` are **optional, non-indexed** avatar fields — like
@@ -110,7 +113,7 @@ All dates are stored as `yyyy-mm-dd` strings.
 
 ## Schema versioning
 
-Dexie `version().stores()` + an upgrade callback per bump. Current version: **11**.
+Dexie `version().stores()` + an upgrade callback per bump. Current version: **12**.
 
 | Ver | Change |
 | --- | --- |
@@ -125,6 +128,7 @@ Dexie `version().stores()` + an upgrade callback per bump. Current version: **11
 | 9 | Add `collections` table; tasks gain `collectionId` index + `sectionId`/`collectionStatusId` (non-indexed); `sprintId` becomes nullable. Backfill `collectionId = null` on all existing tasks. |
 | 10 | Add `events` table (sprint activity log). No data backfill — history starts at v10. |
 | 11 | Remove the per-task `Task.changeLog` field (per-task change log removed). Upgrade strips the dead property from existing task rows; no index change. |
+| 12 | Add `Member.order` (non-indexed manual lane order); backfill per project to `0..N-1` in current `toArray()` order. See [member-lane-order.md](./member-lane-order.md). |
 
 Current indexes:
 - `projects`: `id, name, createdAt`

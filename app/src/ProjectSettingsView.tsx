@@ -10,6 +10,7 @@ import {
   deleteMember,
   exportProject,
   memberNameExists,
+  nextMemberOrder,
   type Project,
   type Member,
 } from './db'
@@ -339,6 +340,7 @@ function AddMember({ projectId }: { projectId: string }) {
       name: n,
       color: colorForName(n),
       daysOff: [],
+      order: await nextMemberOrder(projectId),
     })
     setName('')
     setErr('')

@@ -364,6 +364,7 @@ function CalendarPopover({
 export function DatePickCell({
   value,
   highlight = null,
+  accent = false,
   locked = false,
   time,
   onChange,
@@ -375,6 +376,8 @@ export function DatePickCell({
 }: {
   value: string | null
   highlight?: 'overdue' | null
+  /** Emphasize the date as a key marker (accent color + bold) — e.g. milestones. */
+  accent?: boolean
   locked?: boolean
   /**
    * Optional fixed time-of-day shown after the date (e.g. "08:00" / "17:00").
@@ -410,7 +413,9 @@ export function DatePickCell({
   const valueCls = value
     ? highlight === 'overdue'
       ? 'text-red-500 font-medium'
-      : 'text-ink-muted'
+      : accent
+        ? 'text-accent font-semibold'
+        : 'text-ink-muted'
     : 'text-ink-faint'
 
   return (

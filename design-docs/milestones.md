@@ -16,7 +16,8 @@ In the List view, a leaf task whose **Effort = 0** is shown as a milestone:
 - A small **`◆ Milestone`** pill sits after the task title (accent-tinted, like the
   priority chip), so it's labelled in plain words — discoverable without prior knowledge.
 - The **Start and End columns collapse into a single milestone date** (a milestone is
-  one point in time, so a `Start → End` span is meaningless).
+  one point in time, so a `Start → End` span is meaningless). The date is shown
+  **date-only** (no time-of-day) in **accent color + bold** to read as a key marker.
 - The **Effort cell still shows `0` and stays editable** — changing it to a non-zero
   value turns the row back into a normal task (and the two date columns return).
 

@@ -1878,6 +1878,7 @@ function TaskRow({
         <div className="w-[236px] flex justify-center items-center shrink-0">
           <DatePickCell
             value={liveStart}
+            time={startTime}
             locked={task.dependsOn.length > 0}
             emptyHint={task.dependsOn.length > 0 ? undefined : 'Date'}
             emptyHintHover

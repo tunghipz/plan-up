@@ -1,7 +1,7 @@
 # App shell & navigation
 
 **Status:** Implemented
-**Last updated:** 2026-06-19 (section headers promoted to **titles** — 15.5px semibold
+**Last updated:** 2026-06-19
 ink-muted, lists indented beneath — plus the muted type icon: Sprints = `FolderSync`,
 Collections = `Layers`; **icon-rail tiles now depress on press** — see [Motion](#motion))
 **Code:** `app/src/App.tsx`
@@ -90,8 +90,18 @@ computed from the current sprint's **leaf** tasks (parents excluded — see task
   anti-pattern (§6.5 / §8.3).
 
 ## Rules & edge cases
-- **localStorage keys:** `plan-up:currentProjectId`, `plan-up:view`,
+- **localStorage keys:** `plan-up:currentProjectId`, `plan-up:currentSprintId`,
+  `plan-up:selKind`, `plan-up:selCollectionId`, `plan-up:view`, `plan-up:collectionView`,
   `plan-up:sidebarWidth`, `plan-up:dark`, `plan-up:collapsed:<sprintId>`,
   `plan-up:sidebarSprintsCollapsed`, `plan-up:sidebarCollectionsCollapsed`.
-- Current **sprint** is *not* persisted across sessions — on load it defaults to the
-  latest sprint (by `startDate`) in the current project; resets when the project changes.
+- **Restore the last screen on reload/relaunch:** project, sprint, container kind
+  (sprint vs collection), collection, and view (list/board/timeline + collection's
+  list/calendar) are all persisted, so a reload lands back exactly where the user was.
+  The selected **sprint** (`currentSprintId`) is validated against the current project's
+  sprints on load; if it's stale (deleted/archived or belongs to another project) it
+  falls back to the latest non-archived sprint (`sprintToSelect`). Switching projects
+  re-resolves the sprint the same way.
+- **Loading vs empty:** the `sprints`/`collections` live queries return `undefined`
+  (not `[]`) until seeded + a project is chosen. An empty array means "this project has
+  zero sprints" and would wipe the restored selection during the load window; `undefined`
+  means "still loading" and every consumer treats it as such (`sprints ?? []`, `!sprints`).

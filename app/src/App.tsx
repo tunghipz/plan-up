@@ -85,6 +85,7 @@ import {
 } from './lib'
 
 const CURRENT_PROJECT_KEY = 'plan-up:currentProjectId'
+const CURRENT_SPRINT_KEY = 'plan-up:currentSprintId'
 const VIEW_KEY = 'plan-up:view'
 type ViewMode = 'list' | 'board' | 'timeline'
 type CollectionViewMode = 'list' | 'calendar'
@@ -156,7 +157,12 @@ function App() {
     if (id) safeStorage.set(CURRENT_PROJECT_KEY, id)
     else safeStorage.remove(CURRENT_PROJECT_KEY)
   }
-  const [currentSprintId, setCurrentSprintId] = useState<string | null>(null)
+  // Persisted so a reload/relaunch lands back on the same sprint (not always the
+  // latest). The selection effect below validates the restored id against the
+  // current project's sprints and falls back to `sprintToSelect` if it's stale.
+  const [currentSprintId, setCurrentSprintId] = useState<string | null>(
+    () => safeStorage.get(CURRENT_SPRINT_KEY)
+  )
   // Container đang xem: 'sprint' (mặc định) hoặc 'collection'.
   const SELKIND_KEY = 'plan-up:selKind'
   const SELCOLL_KEY = 'plan-up:selCollectionId'
@@ -353,22 +359,27 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projects])
 
-  const sprints = useLiveQuery<Sprint[]>(
+  // While not-ready (pre-seed / no project chosen yet) the querier returns
+  // `undefined`, NOT `[]` — an empty array reads as "this project has zero
+  // sprints" and would wipe a restored selection (`currentSprintId`/collection)
+  // during the load window. `undefined` means "still loading"; every consumer
+  // already treats it that way (`sprints ?? []`, `!sprints`, `sprints?.`).
+  const sprints = useLiveQuery<Sprint[] | undefined>(
     () =>
       seeded && currentProjectId
         ? db.sprints
             .where('projectId')
             .equals(currentProjectId)
             .sortBy('startDate')
-        : Promise.resolve([] as Sprint[]),
+        : undefined,
     [seeded, currentProjectId]
   )
 
-  const collections = useLiveQuery<Collection[]>(
+  const collections = useLiveQuery<Collection[] | undefined>(
     () =>
       seeded && currentProjectId
         ? db.collections.where('projectId').equals(currentProjectId).sortBy('order')
-        : Promise.resolve([] as Collection[]),
+        : undefined,
     [seeded, currentProjectId]
   )
   const currentCollection =
@@ -424,6 +435,13 @@ function App() {
       setCurrentSprintId(sprintToSelect(sprints))
     }
   }, [sprints, currentSprintId])
+
+  // Persist the selected sprint on every change so a reload restores it. Covers
+  // all setter call sites (selection, rollover, archive, delete) in one place.
+  useEffect(() => {
+    if (currentSprintId) safeStorage.set(CURRENT_SPRINT_KEY, currentSprintId)
+    else safeStorage.remove(CURRENT_SPRINT_KEY)
+  }, [currentSprintId])
 
   // Guard the collection selection the same way the sprint one is guarded: if
   // selKind is 'collection' but that collection no longer exists (deleted

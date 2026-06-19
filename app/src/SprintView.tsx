@@ -1436,12 +1436,14 @@ type RowDrag = {
 }
 
 /**
- * Wires native HTML5 drag to a row. The row is always `draggable` (when the
- * feature is on) but a drag only *starts* if it was initiated from the grip —
- * tracked via a synchronous ref set on the grip's pointerdown, so there's no
- * state-update race on the first drag and text selection / clicks elsewhere
- * never start one. The whole row is the drag image. Returns the grip, the
- * drop-slot indicator line, and the props to spread on the row element.
+ * Wires native HTML5 drag to a row. The row is `draggable` ONLY while the grip
+ * is held: the grip's pointerdown finds the row (via the `data-drag-row` marker)
+ * and flips `el.draggable = true` synchronously, resetting it on release/dragend.
+ * At rest the row is not draggable, so its text (task title) stays selectable —
+ * a permanently-`draggable` ancestor blocks text selection in WebKit/Safari. The
+ * `armedRef` (also set on grip pointerdown) is a belt-and-braces guard so only a
+ * grip-initiated dragstart counts. The whole row is the drag image. Returns the
+ * grip, the drop-slot indicator line, and the props to spread on the row element.
  */
 function useDragHandle(
   drag?: RowDrag,
@@ -1458,9 +1460,16 @@ function useDragHandle(
       onPointerDown={(e) => {
         e.stopPropagation()
         armedRef.current = true
-        // If they press the grip but never drag (just a click), disarm on release.
+        // The row is NOT draggable at rest, so its text (task title) stays
+        // selectable — a `draggable` ancestor blocks text selection in WebKit/
+        // Safari. Arm draggability imperatively (synchronously, before the
+        // browser's drag decision on the following mousemove) only while the grip
+        // is held; disarm on release whether or not a drag actually happened.
+        const row = (e.currentTarget as HTMLElement).closest<HTMLElement>('[data-drag-row]')
+        if (row) row.draggable = true
         const off = () => {
           armedRef.current = false
+          if (row) row.draggable = false
           window.removeEventListener('pointerup', off)
         }
         window.addEventListener('pointerup', off)
@@ -1483,9 +1492,13 @@ function useDragHandle(
     </>
   ) : null
 
-  const rowProps: React.HTMLAttributes<HTMLDivElement> = enabled
+  const rowProps: React.HTMLAttributes<HTMLDivElement> & {
+    'data-drag-row'?: string
+  } = enabled
     ? {
-        draggable: true,
+        // Marker the grip's pointerdown finds via closest() to flip `draggable`.
+        // No static `draggable: true` — that would break text selection (WebKit).
+        'data-drag-row': '',
         onDragStart: (e) => {
           // Only a grip-initiated drag counts; anything else (text selection,
           // dragging an inline control) is cancelled.
@@ -1508,8 +1521,9 @@ function useDragHandle(
           e.preventDefault()
           drag!.onDrop(e.currentTarget, e.clientY)
         },
-        onDragEnd: () => {
+        onDragEnd: (e) => {
           armedRef.current = false
+          e.currentTarget.draggable = false
           drag!.onEnd()
         },
       }

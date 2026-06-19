@@ -2,9 +2,10 @@
 
 **Status:** Implemented
 **Last updated:** 2026-06-19
-**Code:** `app/src/db.ts` (`Member.order`, `setMemberOrder`, `renormalizeMemberOrder`,
-`orderBetween`, `addMember`, Dexie v12 upgrade), `app/src/SprintView.tsx`
-(`MemberCard` grip + lane drag), `app/src/BoardView.tsx` (member sort)
+**Code:** `app/src/db.ts` (`Member.order`, `compareMembersByOrder`, `setMemberOrder`,
+`renormalizeMemberOrder`, `orderBetween`, Dexie v12 upgrade), `app/src/SprintView.tsx`
+(`MemberCard` grip + lane drag), `app/src/BoardView.tsx` (member sort),
+`app/src/GanttView.tsx` (swimlane order)
 
 ## Purpose
 Let the user manually arrange the order of **member lanes** (the per-member cards in
@@ -17,8 +18,9 @@ shared across the whole project.
   drag a card up/down to reorder lanes; a drop-indicator line shows where it will land.
 - The order is **per project**: reordering lanes in one sprint applies to **every**
   sprint of that project (members are project-level entities).
-- The order also drives **Board view**: when a column's sort mode is `member`, cards are
-  grouped by this custom member order (not alphabetical name).
+- The order also drives the **Board view** (`member` sort mode groups cards by this order,
+  not alphabetical name) and the **Timeline/Gantt** view (member swimlanes follow it). It is
+  the single member order shared by every view.
 - Out of scope (v1): the **Unassigned** card (no member) and the collapsed
   **"members with no tasks"** section are **not** draggable. Empty members still *follow*
   the custom order in their section (sorted by `order`), they just can't be dragged.
@@ -41,6 +43,8 @@ shared across the whole project.
     filled lanes and the empty-members section then honour the order.
   - `BoardView` `cmp` for `mode === 'member'`: compare by `membersById.get(id)?.order`
     instead of `name.toLowerCase()` (unassigned still sinks last).
+  - `GanttView` `groups` memo: sort the member list by `compareMembersByOrder` before
+    building swimlanes, so the Timeline matches the List order.
 - **Drag UI (List only):** a grip on the `MemberCard` header, pointer-armed (only the grip
   starts a drag — clicking the header still toggles collapse), mirroring `TaskRow`'s grip.
   Drag state lives in the `SprintView` lane container; on drop, compute the new `order` from

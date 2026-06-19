@@ -8,7 +8,13 @@ import {
 } from 'react'
 import { createPortal } from 'react-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { db, computeWorkingPlan, type Task, type Member } from './db'
+import {
+  db,
+  computeWorkingPlan,
+  compareMembersByOrder,
+  type Task,
+  type Member,
+} from './db'
 import { Avatar } from './members'
 import { STATUS_META, derivedGroupStatus } from './SprintView'
 import { sprintWorkdays, formatShortDate } from './lib'
@@ -154,7 +160,9 @@ export function GanttView({
   const dayW = availW > 0 && N > 0 ? Math.max(MIN_DAY, (availW - MGUT) / N) : MIN_DAY
 
   const groups = useMemo(() => {
-    const ms = members ?? []
+    // Swimlanes follow the manual per-project member order, same as the List
+    // view's lanes (drag-to-reorder). See design-docs/member-lane-order.md.
+    const ms = (members ?? []).slice().sort(compareMembersByOrder)
     const byMember = new Map<string, Task[]>()
     for (const m of ms) byMember.set(m.id, [])
     for (const t of tasks) {

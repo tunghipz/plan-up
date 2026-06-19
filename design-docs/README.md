@@ -60,6 +60,7 @@ Non-obvious behaviors, defaults, persistence keys.
 | [sprint-rollover.md](./sprint-rollover.md) | Move unfinished tasks to next sprint — preview popover |
 | [members-and-days-off.md](./members-and-days-off.md) | Member labels, colors, off-days |
 | [member-title.md](./member-title.md) | Optional per-member role label (free-text), shown in settings + sprint header |
+| [member-avatars.md](./member-avatars.md) | Custom member avatar — upload photo (resized) or pick emoji; edited in Project Settings; falls back to colored initial |
 | [tasks.md](./tasks.md) | Task CRUD, fields, inline editing |
 | [task-change-log.md](./task-change-log.md) | **Removed (2026-06-16)** — per-task 🕒 change-log tooltip, superseded by the sprint activity log |
 | [sprint-activity-log.md](./sprint-activity-log.md) | Sprint-wide activity log — 🕒 toolbar entry opens a right-side drawer (timeline + by-member); append-only `events` store, the app's sole edit-history surface |

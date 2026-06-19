@@ -21,9 +21,16 @@ Six IndexedDB tables (Dexie database name **`plan-up`**): `projects`, `members`,
   `colorForName(name)` and an empty description.
 
 ### `Member` (`db.ts:25`)
-`id` · `projectId` · `name` · `color` (hex) · `daysOff: DayOff[]`
+`id` · `projectId` · `name` · `color` (hex) · `daysOff: DayOff[]` · `title?` (string)
+· `avatarImage?` (string) · `avatarEmoji?` (string)
 - A member is just a **label** — no auth, no login. The user creates them.
 - `daysOff` are extra non-working days on top of weekends (see [scheduling.md](./scheduling.md)).
+- `title?` is an **optional, non-indexed** free-text role label (see [member-title.md](./member-title.md)).
+- `avatarImage?` / `avatarEmoji?` are **optional, non-indexed** avatar fields — like
+  `title?` they need **no Dexie version bump**. `avatarImage` is a resized (≤128px square)
+  image data-URL; `avatarEmoji` is a single emoji grapheme. They are **mutually exclusive**
+  (setting one clears the other). Render falls back image → emoji → colored initial. See
+  [member-avatars.md](./member-avatars.md).
 
 ### `Sprint` (`db.ts:37`)
 `id` · `projectId` · `name` · `startDate` · `endDate` (both `yyyy-mm-dd`) · `note?` (string)

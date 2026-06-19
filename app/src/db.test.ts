@@ -21,6 +21,7 @@ import {
   nextBusinessDay,
   isWeekend,
   setMemberDaysOff,
+  setMemberAvatar,
   computeWorkingTimes,
   moveUnfinishedToNextSprint,
   createProject,
@@ -1152,5 +1153,55 @@ describe('List drag-reorder', () => {
       expect((await db.tasks.get('a'))!.sequence).toBe(1)
       expect((await db.tasks.get('c'))!.sequence).toBe(3)
     })
+  })
+})
+
+// setMemberAvatar writes the optional avatar fields and keeps image/emoji
+// mutually exclusive (the two tiers can never both be set). See
+// design-docs/member-avatars.md.
+describe('setMemberAvatar', () => {
+  const M = 'avatar-member'
+  beforeEach(async () => {
+    await db.members.add({
+      id: M, projectId: P, name: 'Avery', color: '#0071e3', daysOff: [],
+    })
+  })
+
+  it('sets an emoji avatar', async () => {
+    await setMemberAvatar(M, { avatarEmoji: '🦊' })
+    const m = await db.members.get(M)
+    expect(m!.avatarEmoji).toBe('🦊')
+    expect(m!.avatarImage ?? null).toBe(null)
+  })
+
+  it('sets an image avatar and clears any existing emoji', async () => {
+    await setMemberAvatar(M, { avatarEmoji: '🦊' })
+    await setMemberAvatar(M, { avatarImage: 'data:image/webp;base64,AAAA' })
+    const m = await db.members.get(M)
+    expect(m!.avatarImage).toBe('data:image/webp;base64,AAAA')
+    expect(m!.avatarEmoji ?? null).toBe(null)
+  })
+
+  it('sets an emoji and clears any existing image', async () => {
+    await setMemberAvatar(M, { avatarImage: 'data:image/webp;base64,AAAA' })
+    await setMemberAvatar(M, { avatarEmoji: '🚀' })
+    const m = await db.members.get(M)
+    expect(m!.avatarEmoji).toBe('🚀')
+    expect(m!.avatarImage ?? null).toBe(null)
+  })
+
+  it('clears both fields when removing the avatar', async () => {
+    await setMemberAvatar(M, { avatarEmoji: '🦊' })
+    await setMemberAvatar(M, { avatarImage: null, avatarEmoji: null })
+    const m = await db.members.get(M)
+    expect(m!.avatarImage ?? null).toBe(null)
+    expect(m!.avatarEmoji ?? null).toBe(null)
+  })
+
+  it('leaves other member fields untouched', async () => {
+    await setMemberAvatar(M, { avatarEmoji: '🦊' })
+    const m = await db.members.get(M)
+    expect(m!.name).toBe('Avery')
+    expect(m!.color).toBe('#0071e3')
   })
 })

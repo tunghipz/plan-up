@@ -7,7 +7,30 @@ import {
   formatTimestamp,
   formatShortDate,
   formatSprintRange,
+  firstGrapheme,
 } from './lib'
+
+// firstGrapheme returns the first user-perceived character, so a member's emoji
+// avatar keeps ZWJ sequences / flags / skin-tone modifiers intact instead of
+// truncating them into mojibake. See design-docs/member-avatars.md.
+describe('firstGrapheme', () => {
+  it('returns the single character for plain ASCII', () => {
+    expect(firstGrapheme('AB')).toBe('A')
+  })
+
+  it('keeps a ZWJ emoji family as one grapheme', () => {
+    expect(firstGrapheme('👨‍👩‍👧 hello')).toBe('👨‍👩‍👧')
+  })
+
+  it('keeps a flag (regional indicator pair) as one grapheme', () => {
+    expect(firstGrapheme('🇻🇳x')).toBe('🇻🇳')
+  })
+
+  it('trims leading whitespace and returns empty for blank input', () => {
+    expect(firstGrapheme('   ')).toBe('')
+    expect(firstGrapheme('')).toBe('')
+  })
+})
 
 describe('formatSprintRange', () => {
   it('uses an arrow with the month on both sides, same month', () => {

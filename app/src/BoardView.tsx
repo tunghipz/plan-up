@@ -13,6 +13,7 @@ import {
   type Task,
 } from './db'
 import { formatShortDate, dayDiff } from './lib'
+import { Avatar } from './members'
 import { SprintRangeContext } from './DatePicker'
 import {
   STATUS_META,
@@ -1126,14 +1127,7 @@ const BoardCard = memo(function BoardCard({
         )}
         <div className="ml-auto">
           {member ? (
-            <span
-              className="inline-flex items-center justify-center w-6 h-6 rounded-full text-white text-[10px] font-semibold"
-              style={{ background: member.color }}
-              title={member.name}
-              aria-label={member.name}
-            >
-              {member.name.trim().charAt(0).toUpperCase()}
-            </span>
+            <Avatar member={member} size={24} ring={false} aria-label={member.name} />
           ) : (
             <span
               className="inline-flex items-center justify-center w-6 h-6 rounded-full border border-dashed border-border-strong text-ink-faint text-[10px]"

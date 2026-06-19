@@ -15,7 +15,7 @@ import {
 } from './db'
 import { downloadJson, slugify } from './lib'
 import {
-  Avatar,
+  AvatarPicker,
   ColorSwatchRow,
   MemberColorDot,
   MemberDaysOffButton,
@@ -267,7 +267,7 @@ function MemberRow({ member }: { member: Member }) {
 
   return (
     <div className="group/card flex items-center gap-3 py-2 px-3 rounded-[10px] hover:bg-surface-hover transition">
-      <Avatar member={member} />
+      <AvatarPicker member={member} />
       <div className="flex flex-col min-w-0 flex-1">
         <input
           value={name}

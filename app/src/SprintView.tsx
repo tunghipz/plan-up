@@ -950,12 +950,7 @@ function AvatarRing({ member, pct }: { member: Member; pct: number }) {
       }}
       title={`${pct}% done`}
     >
-      <span
-        className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold text-white"
-        style={{ background: member.color }}
-      >
-        {member.name.slice(0, 1).toUpperCase()}
-      </span>
+      <Avatar member={member} size={28} ring={false} />
     </span>
   )
 }
@@ -2183,13 +2178,13 @@ function AssigneePicker({
   return (
     <label className="relative inline-flex" title={assignee?.name ?? 'Unassigned'}>
       {assignee ? (
-        <span
-          className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-semibold text-white cursor-pointer ring-1 ring-transparent hover:ring-accent/40"
-          style={{ background: assignee.color }}
+        <Avatar
+          member={assignee}
+          size={24}
+          ring={false}
+          className="cursor-pointer ring-1 ring-transparent hover:ring-accent/40"
           onClick={() => ref.current?.focus()}
-        >
-          {assignee.name.slice(0, 1).toUpperCase()}
-        </span>
+        />
       ) : (
         <span
           className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] text-ink-faint border border-dashed border-border-strong cursor-pointer hover:border-accent"

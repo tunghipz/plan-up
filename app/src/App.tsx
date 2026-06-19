@@ -63,6 +63,7 @@ import { GanttView } from './GanttView'
 import { ActivityLog } from './ActivityLog'
 import { VersionFooter } from './VersionFooter'
 import { ProjectSettingsView } from './ProjectSettingsView'
+import { Avatar } from './members'
 import {
   formatSprintRange,
   formatShortDate,
@@ -1566,13 +1567,7 @@ function SearchPalette({
                     #{t.sequence}
                   </span>
                   {assignee ? (
-                    <span
-                      className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-semibold text-white shrink-0"
-                      style={{ background: assignee.color ?? colorForName(assignee.name) }}
-                      title={assignee.name}
-                    >
-                      {assignee.name.slice(0, 1).toUpperCase()}
-                    </span>
+                    <Avatar member={assignee} size={20} ring={false} />
                   ) : (
                     <span className="w-5 shrink-0 text-center text-ink-faint text-xs">—</span>
                   )}
@@ -2253,13 +2248,7 @@ function RolloverPopover({
               )}
               <span className="flex-1 min-w-0 text-[13.5px] truncate">{t.title}</span>
               {m ? (
-                <span
-                  className="w-5 h-5 rounded-full shrink-0 grid place-items-center text-[10px] font-semibold text-white"
-                  style={{ background: m.color ?? colorForName(m.name) }}
-                  title={m.name}
-                >
-                  {m.name.charAt(0).toUpperCase()}
-                </span>
+                <Avatar member={m} size={20} ring={false} />
               ) : (
                 <span
                   className="w-5 h-5 rounded-full shrink-0 grid place-items-center text-[10px] text-ink-faint border border-dashed border-border-strong"

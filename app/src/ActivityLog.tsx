@@ -19,6 +19,7 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import { sprintEvents, type ActivityEvent, type LoggableField, type Member, type Task } from './db'
+import { Avatar } from './members'
 import {
   STATUS_LABEL,
   PRIORITY_LABEL,
@@ -274,12 +275,7 @@ function MemberGroupView({
           <div key={key} className={CARD}>
             <div className="flex items-center gap-2.5 px-[18px] py-[13px] border-b border-border">
               {m ? (
-                <span
-                  className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold text-white"
-                  style={{ background: m.color }}
-                >
-                  {m.name.slice(0, 1).toUpperCase()}
-                </span>
+                <Avatar member={m} size={28} ring={false} />
               ) : (
                 <span className="w-7 h-7 rounded-full flex items-center justify-center text-xs text-ink-faint border border-dashed border-border-strong">
                   —

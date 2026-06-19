@@ -50,6 +50,22 @@ export function dayDiff(dateStr: string): number {
   return Math.round((b.getTime() - a.getTime()) / MS)
 }
 
+/**
+ * First user-perceived character (grapheme) of a string, after trimming.
+ * Uses `Intl.Segmenter` so an emoji avatar keeps ZWJ sequences (👨‍👩‍👧), flags,
+ * and skin-tone modifiers intact — a naive `[0]` / `maxLength=2` would split them
+ * into mojibake. Returns '' for blank input. See design-docs/member-avatars.md.
+ */
+export function firstGrapheme(str: string): string {
+  const s = (str ?? '').trim()
+  if (!s) return ''
+  if (typeof Intl !== 'undefined' && 'Segmenter' in Intl) {
+    const seg = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
+    for (const part of seg.segment(s)) return part.segment
+  }
+  return Array.from(s)[0] ?? ''
+}
+
 // (dd/mm/yy padding helper removed in v2 — dates now render as `MMM d`.)
 export const MON = [
   'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',

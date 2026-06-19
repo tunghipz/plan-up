@@ -130,6 +130,15 @@ export interface Member {
    * See design-docs/member-title.md.
    */
   title?: string
+  /**
+   * Optional custom avatar. `avatarImage` is a resized (≤128px square) image
+   * data-URL; `avatarEmoji` is a single emoji grapheme. Mutually exclusive
+   * (`setMemberAvatar` clears the other). Both optional + non-indexed → no Dexie
+   * version bump (same as `title`). Render falls back image → emoji → colored
+   * initial. See design-docs/member-avatars.md.
+   */
+  avatarImage?: string
+  avatarEmoji?: string
 }
 
 export interface Sprint {
@@ -1403,6 +1412,77 @@ export async function setMemberDaysOff(
     const owned = await db.tasks.where('assigneeId').equals(memberId).toArray()
     for (const t of owned) await recomputeDates(t.id)
     return clean
+  })
+}
+
+/**
+ * Set (or clear) a member's avatar. Image and emoji are mutually exclusive: when
+ * one is set the other is cleared. Pass `null` to clear a field (back to the
+ * colored-initial fallback). See design-docs/member-avatars.md.
+ */
+export async function setMemberAvatar(
+  memberId: string,
+  patch: { avatarImage?: string | null; avatarEmoji?: string | null }
+): Promise<void> {
+  const next: Partial<Member> = {}
+  if (patch.avatarImage != null) {
+    next.avatarImage = patch.avatarImage
+    next.avatarEmoji = undefined // setting an image clears any emoji
+  } else if (patch.avatarEmoji != null) {
+    next.avatarEmoji = patch.avatarEmoji
+    next.avatarImage = undefined // setting an emoji clears any image
+  } else {
+    // both null/undefined → explicit clear of whatever was set
+    next.avatarImage = undefined
+    next.avatarEmoji = undefined
+  }
+  await db.members.update(memberId, next)
+}
+
+/**
+ * Resize an image file to a centered square data-URL for use as an avatar.
+ * Client-side (canvas) so the DB and per-project export file stay small — a
+ * multi-MB photo becomes a few KB. Prefers webp; webp encoding silently returns
+ * a PNG on browsers that can't encode it (it does not throw), so we check the
+ * result prefix and re-encode to JPEG. Rejects non-raster/oversized/undecodable
+ * input. GIF flattens to its first frame. See design-docs/member-avatars.md.
+ */
+export function resizeImageToDataURL(file: File, size = 128): Promise<string> {
+  return new Promise((resolve, reject) => {
+    if (!/^image\/(png|jpeg|webp|gif)$/.test(file.type)) {
+      reject(new Error('Unsupported format — use PNG, JPEG, WebP or GIF.'))
+      return
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      reject(new Error('Image too large (max 10MB).'))
+      return
+    }
+    const url = URL.createObjectURL(file)
+    const img = new Image()
+    img.onload = () => {
+      URL.revokeObjectURL(url)
+      const canvas = document.createElement('canvas')
+      canvas.width = canvas.height = size
+      const ctx = canvas.getContext('2d')
+      if (!ctx) {
+        reject(new Error('Canvas not available.'))
+        return
+      }
+      const s = Math.min(img.width, img.height)
+      const sx = (img.width - s) / 2
+      const sy = (img.height - s) / 2
+      ctx.drawImage(img, sx, sy, s, s, 0, 0, size, size)
+      let out = canvas.toDataURL('image/webp', 0.85)
+      if (!out.startsWith('data:image/webp')) {
+        out = canvas.toDataURL('image/jpeg', 0.85) // silent-PNG fallback
+      }
+      resolve(out)
+    }
+    img.onerror = () => {
+      URL.revokeObjectURL(url)
+      reject(new Error('Could not decode image.'))
+    }
+    img.src = url
   })
 }
 

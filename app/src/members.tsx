@@ -1,25 +1,310 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Calendar, X } from 'lucide-react'
-import { db, setMemberDaysOff, PALETTE, type Member } from './db'
+import { Calendar, X, Upload, Trash2 } from 'lucide-react'
+import {
+  db,
+  setMemberDaysOff,
+  setMemberAvatar,
+  resizeImageToDataURL,
+  colorForName,
+  PALETTE,
+  type Member,
+} from './db'
 import { DateField } from './DatePicker'
-import { formatShortDate } from './lib'
+import { formatShortDate, firstGrapheme } from './lib'
 
 /**
  * Shared member controls used by both the Sprint group header and the
  * project settings page, so the two surfaces can never drift.
  */
 
-/** Plain colored avatar (initial). */
-export function Avatar({ member }: { member: Member }) {
+/**
+ * The member avatar — the single render point for a member's face across every
+ * surface (sprint header, board, gantt, settings, assignee chips). Resolves in
+ * three tiers: uploaded image → emoji → colored initial. Size is in px so the
+ * same component serves the 28px header and the 20px assignee chip.
+ * See design-docs/member-avatars.md.
+ */
+export function Avatar({
+  member,
+  size = 28,
+  ring = true,
+  className = '',
+  ...rest
+}: {
+  member: Member
+  size?: number
+  /** The macOS canvas ring (default). Off for dense inline chips. */
+  ring?: boolean
+  className?: string
+} & React.HTMLAttributes<HTMLSpanElement>) {
+  const ringCls = ring
+    ? 'ring-2 ring-canvas shadow-[0_0_0_1px_rgba(9,30,66,0.13)]'
+    : ''
+  const base = `rounded-full inline-flex items-center justify-center text-white font-semibold shrink-0 overflow-hidden select-none ${ringCls} ${className}`
+  if (member.avatarImage) {
+    return (
+      <span
+        className={base}
+        style={{ width: size, height: size }}
+        title={member.name}
+        {...rest}
+      >
+        <img
+          src={member.avatarImage}
+          alt={member.name}
+          className="w-full h-full object-cover"
+          draggable={false}
+        />
+      </span>
+    )
+  }
   return (
     <span
-      className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold text-white shrink-0 ring-2 ring-canvas shadow-[0_0_0_1px_rgba(9,30,66,0.13)]"
-      style={{ background: member.color }}
+      className={base}
+      style={{
+        width: size,
+        height: size,
+        background: member.color || colorForName(member.name),
+        fontSize: Math.max(9, Math.round(size * 0.42)),
+      }}
       title={member.name}
+      {...rest}
     >
-      {member.name.slice(0, 1).toUpperCase()}
+      {member.avatarEmoji ? (
+        <span style={{ fontSize: Math.round(size * 0.6), lineHeight: 1 }}>
+          {member.avatarEmoji}
+        </span>
+      ) : (
+        member.name.slice(0, 1).toUpperCase()
+      )}
     </span>
+  )
+}
+
+/** A small set of suggested emoji for the picker (calm, no full grid library). */
+const SUGGESTED_EMOJI = [
+  '🦊', '🐙', '🚀', '🐧', '🦉', '🐢', '🌶️', '🍑',
+  '🐝', '🦄', '🐳', '🍕', '⚡', '🌸', '🦁', '🤖',
+]
+
+function fmtBytes(n: number): string {
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
+  return `${(n / 1024 / 1024).toFixed(1)} MB`
+}
+/** Approximate decoded byte size of a base64 data-URL. */
+function dataUrlBytes(d: string): number {
+  return Math.round((d.length - (d.indexOf(',') + 1)) * 0.75)
+}
+
+/**
+ * Avatar editor for the project settings member row. The member's Avatar is the
+ * trigger; clicking opens a small popover with a `Photo | Emoji` segmented
+ * control (Cupertino DNA), one panel at a time, plus Remove. Lives only here —
+ * one place to edit a member, no drifting affordances. Absolute popover (no
+ * portal): the Members card has no overflow clip. See design-docs/member-avatars.md.
+ */
+export function AvatarPicker({ member }: { member: Member }) {
+  const [open, setOpen] = useState(false)
+  const [tab, setTab] = useState<'photo' | 'emoji'>(
+    member.avatarImage ? 'photo' : 'emoji'
+  )
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [savings, setSavings] = useState<string | null>(null)
+  const ref = useRef<HTMLDivElement>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  // Reset the active tab to the member's current state each time it opens.
+  useEffect(() => {
+    if (open) {
+      setTab(member.avatarImage ? 'photo' : 'emoji')
+      setError(null)
+    }
+  }, [open, member.avatarImage])
+
+  const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0]
+    e.target.value = '' // allow re-picking the same file
+    if (!f) return
+    setBusy(true)
+    setError(null)
+    setSavings(null)
+    try {
+      const data = await resizeImageToDataURL(f, 128)
+      await setMemberAvatar(member.id, { avatarImage: data })
+      setSavings(`${fmtBytes(f.size)} → ${fmtBytes(dataUrlBytes(data))} · 128px`)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not use that image.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const hasAvatar = !!(member.avatarImage || member.avatarEmoji)
+
+  return (
+    <div ref={ref} className="relative shrink-0">
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation()
+          setOpen((v) => !v)
+        }}
+        aria-label="Change avatar"
+        title="Change avatar"
+        className="relative block rounded-full transition hover:scale-105 group/avatar"
+      >
+        <Avatar member={member} />
+        <span
+          aria-hidden
+          className="absolute -right-0.5 -bottom-0.5 w-3.5 h-3.5 rounded-full bg-accent text-white grid place-items-center ring-2 ring-surface opacity-0 group-hover/avatar:opacity-100 transition"
+        >
+          <span className="text-[8px] leading-none">✎</span>
+        </span>
+      </button>
+
+      {open && (
+        <div
+          onClick={(e) => e.stopPropagation()}
+          className="absolute left-0 top-[calc(100%+8px)] z-30 w-[264px] bg-surface border border-border-hair rounded-[14px] shadow-[0_10px_36px_rgba(0,0,0,0.18)] p-3.5"
+        >
+          {/* Preview row */}
+          <div className="flex items-center gap-2.5 mb-3">
+            <Avatar member={member} size={44} />
+            <div className="min-w-0">
+              <div className="text-[13.5px] font-medium text-ink truncate">
+                {member.name}
+              </div>
+              {member.title && (
+                <div className="text-[11.5px] text-ink-faint truncate">
+                  {member.title}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Segmented Photo | Emoji */}
+          <div className="flex items-center bg-fill rounded-[9px] p-0.5 mb-3">
+            {(
+              [
+                ['photo', 'Photo'],
+                ['emoji', 'Emoji'],
+              ] as ['photo' | 'emoji', string][]
+            ).map(([k, label]) => (
+              <button
+                key={k}
+                type="button"
+                onClick={() => setTab(k)}
+                aria-pressed={tab === k}
+                className={`flex-1 text-[12.5px] py-1 rounded-[7px] transition ${
+                  tab === k
+                    ? 'bg-surface text-ink font-semibold shadow-[0_1px_3px_rgba(0,0,0,0.12),0_0_0_0.5px_rgba(0,0,0,0.04)]'
+                    : 'text-ink-muted font-medium hover:text-ink'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {/* Panel */}
+          {tab === 'emoji' ? (
+            <div>
+              <div className="grid grid-cols-6 gap-0.5">
+                {SUGGESTED_EMOJI.map((em) => (
+                  <button
+                    key={em}
+                    type="button"
+                    onClick={() => void setMemberAvatar(member.id, { avatarEmoji: em })}
+                    className={`text-[19px] leading-none py-1 rounded-[7px] transition hover:bg-surface-hover ${
+                      member.avatarEmoji === em ? 'bg-accent-tint' : ''
+                    }`}
+                    aria-label={`Use ${em}`}
+                  >
+                    {em}
+                  </button>
+                ))}
+              </div>
+              <input
+                type="text"
+                placeholder="Type or paste an emoji…"
+                maxLength={12}
+                onChange={(e) => {
+                  const g = firstGrapheme(e.target.value)
+                  if (g) void setMemberAvatar(member.id, { avatarEmoji: g })
+                }}
+                className="mt-2 w-full text-[13px] bg-canvas border border-border rounded-[8px] px-2.5 py-1.5 outline-none focus:border-accent"
+              />
+            </div>
+          ) : (
+            <div>
+              <input
+                ref={fileRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/gif"
+                onChange={onFile}
+                className="hidden"
+              />
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => fileRef.current?.click()}
+                className="w-full inline-flex items-center justify-center gap-2 text-[13px] font-medium bg-accent text-white rounded-[9px] py-2 transition hover:brightness-105 disabled:opacity-55"
+              >
+                <Upload size={14} />
+                {busy ? 'Resizing…' : 'Upload photo'}
+              </button>
+              {savings && !error && (
+                <div className="mt-2 text-[11.5px] text-center text-[--color-status-done] bg-[rgba(52,199,89,0.1)] rounded-[7px] py-1.5 tabular-nums">
+                  {savings}
+                </div>
+              )}
+              {error && (
+                <div className="mt-2 text-[11.5px] text-center text-red-500 bg-red-500/10 rounded-[7px] py-1.5">
+                  {error}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Remove */}
+          {hasAvatar && (
+            <button
+              type="button"
+              onClick={() => {
+                void setMemberAvatar(member.id, {
+                  avatarImage: null,
+                  avatarEmoji: null,
+                })
+                setSavings(null)
+                setOpen(false)
+              }}
+              className="mt-2 w-full inline-flex items-center justify-center gap-1.5 text-[12.5px] text-red-500 rounded-[9px] py-1.5 transition hover:bg-red-500/10"
+            >
+              <Trash2 size={13} /> Remove avatar
+            </button>
+          )}
+        </div>
+      )}
+    </div>
   )
 }
 

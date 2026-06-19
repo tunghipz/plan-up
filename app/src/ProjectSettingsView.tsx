@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { X, Trash2, UserPlus } from 'lucide-react'
+import { X, Trash2, UserPlus, Share2 } from 'lucide-react'
 import {
   db,
   uid,
@@ -8,10 +8,12 @@ import {
   deleteProject,
   updateProject,
   deleteMember,
+  exportProject,
   memberNameExists,
   type Project,
   type Member,
 } from './db'
+import { downloadJson, slugify } from './lib'
 import {
   Avatar,
   ColorSwatchRow,
@@ -66,6 +68,16 @@ export function ProjectSettingsView({
     const d = desc.trim()
     if (d === (project.description ?? '')) return
     void updateProject(project.id, { description: d })
+  }
+
+  // Export this project to a portable file (additive on import — see the header
+  // Import button). Mirrors the header menu's "Export this project".
+  const exportThisProject = async () => {
+    const bundle = await exportProject(project.id)
+    downloadJson(
+      `plan-up-${slugify(project.name)}-${bundle.exportedAt.slice(0, 10)}.json`,
+      bundle
+    )
   }
 
   const removeProject = async () => {
@@ -143,6 +155,26 @@ export function ProjectSettingsView({
                   onPick={(c) => void updateProject(project.id, { color: c })}
                 />
               </div>
+            </div>
+            {/* Share = export this one project to a portable file (additive on
+                import). Footer action of the Project card. */}
+            <div className="-mx-5 border-t border-border-hair" />
+            <div className="flex items-center gap-4">
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-medium text-ink">
+                  Share this project
+                </div>
+                <div className="text-[12.5px] text-ink-muted mt-0.5">
+                  Export a file a teammate can import — adds a new project, never
+                  overwrites their data.
+                </div>
+              </div>
+              <button
+                onClick={exportThisProject}
+                className="shrink-0 inline-flex items-center gap-1.5 text-sm font-medium text-accent hover:bg-accent-soft rounded-[8px] px-3 py-1.5 transition"
+              >
+                <Share2 size={14} /> Export
+              </button>
             </div>
           </section>
 

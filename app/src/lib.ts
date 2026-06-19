@@ -484,3 +484,26 @@ export function useDarkMode() {
 
   return [dark, setDark] as const
 }
+
+/** Download any JSON-serialisable payload as a file (Blob + transient anchor). */
+export function downloadJson(filename: string, data: unknown) {
+  const blob = new Blob([JSON.stringify(data, null, 2)], {
+    type: 'application/json',
+  })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+/** Filesystem-safe slug for a project name; falls back to "project" when empty. */
+export function slugify(name: string): string {
+  const s = name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+  return s || 'project'
+}

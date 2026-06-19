@@ -1,5 +1,6 @@
 import Dexie, { type Table } from 'dexie'
 import { formatSeqRanges, defaultSprintDates, todayLocalISO } from './lib'
+import { remapBundle, type ProjectBundle } from './project-io'
 
 export type Status = 'todo' | 'in_progress' | 'done'
 export type Priority = 'urgent' | 'high' | 'normal' | 'low' | 'none'
@@ -1864,6 +1865,79 @@ export async function importAll(data: ExportPayload) {
       })
     }
     throw err
+  }
+}
+
+/**
+ * Export a SINGLE project to a portable, self-contained `ProjectBundle`
+ * (version 5) — the "share one project" counterpart to the full-DB `exportAll`.
+ * Reads each table filtered by `projectId`; the result can be imported into
+ * another plan-up without touching existing data. See project-io.ts and
+ * design-docs/project-export-import.md.
+ */
+export async function exportProject(projectId: string): Promise<ProjectBundle> {
+  const [project, members, sprints, collections, tasks, events] =
+    await Promise.all([
+      db.projects.get(projectId),
+      db.members.where('projectId').equals(projectId).toArray(),
+      db.sprints.where('projectId').equals(projectId).toArray(),
+      db.collections.where('projectId').equals(projectId).toArray(),
+      db.tasks.where('projectId').equals(projectId).toArray(),
+      db.events.where('projectId').equals(projectId).toArray(),
+    ])
+  if (!project) throw new Error('Project not found')
+  return {
+    version: 5,
+    kind: 'project',
+    exportedAt: new Date().toISOString(),
+    project,
+    members,
+    sprints,
+    collections,
+    tasks,
+    events,
+  }
+}
+
+/**
+ * Import a `ProjectBundle` as a BRAND-NEW project alongside existing ones —
+ * non-destructive and repeatable (each import = a fresh copy). Regenerates every
+ * id via `remapBundle` (a pure, unit-tested function), then bulk-adds into all
+ * tables in ONE rw transaction. No clears. Returns the new projectId so the
+ * caller can select it. On bulk error Dexie rolls back (existing data safe);
+ * BulkError/ConstraintError are translated like `importAll`.
+ */
+export async function importProject(
+  bundle: ProjectBundle
+): Promise<{ projectId: string; projectName: string; taskCount: number }> {
+  const remapped = remapBundle(bundle, uid)
+  try {
+    await db.transaction(
+      'rw',
+      [db.projects, db.members, db.sprints, db.collections, db.tasks, db.events],
+      async () => {
+        await db.projects.add(remapped.project)
+        if (remapped.members.length) await db.members.bulkAdd(remapped.members)
+        if (remapped.sprints.length) await db.sprints.bulkAdd(remapped.sprints)
+        if (remapped.collections.length)
+          await db.collections.bulkAdd(remapped.collections)
+        if (remapped.tasks.length) await db.tasks.bulkAdd(remapped.tasks)
+        if (remapped.events.length) await db.events.bulkAdd(remapped.events)
+      }
+    )
+  } catch (err) {
+    const name = err instanceof Error ? err.name : ''
+    if (name === 'BulkError' || name === 'ConstraintError') {
+      throw new Error('Project file contains duplicate or conflicting records.', {
+        cause: err,
+      })
+    }
+    throw err
+  }
+  return {
+    projectId: remapped.project.id,
+    projectName: remapped.project.name,
+    taskCount: remapped.tasks.length,
   }
 }
 

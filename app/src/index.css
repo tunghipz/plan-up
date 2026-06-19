@@ -221,9 +221,17 @@ h1, h2, h3, .display-tight {
 .dlg-scrim { animation: dlg-scrim-in 0.22s ease both; }
 .dlg-sheet { animation: dlg-sheet-in 0.26s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
 
+/* Non-destructive import toast — slides up from the bottom edge (project-export-
+ * import.md). Calm, brief; reduced-motion just fades. */
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: none; }
+}
+.animate-toast-in { animation: toast-in 0.28s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+
 @media (prefers-reduced-motion: reduce) {
   .status-pop, .status-pop .status-check, .capacity-seg,
-  .dlg-scrim, .dlg-sheet { animation: none !important; transition: none !important; }
+  .dlg-scrim, .dlg-sheet, .animate-toast-in { animation: none !important; transition: none !important; }
 }
 
 /* Search-palette jump-to — when a palette result is picked, App scrolls the

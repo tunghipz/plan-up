@@ -1,18 +1,26 @@
 # Persistence & backup
 
 **Status:** Implemented
-**Last updated:** 2026-06-03
+**Last updated:** 2026-06-19
 **Code:** `app/src/db.ts` (`exportAll`, `importAll`, `seedIfEmpty`), `app/src/App.tsx`
 
 ## Purpose
 Local-first storage with no backend. Data lives in the browser's IndexedDB;
 JSON export/import is the backup & transfer mechanism (not sync).
 
+> **Per-project sharing** (export one project to a portable file, import it
+> additively without wiping anything) is a sibling feature — see
+> [project-export-import.md](./project-export-import.md). This doc covers the
+> **full-DB backup** only.
+
 ## User-facing behavior
-- **Export** (header toolbar): downloads `plan-up-YYYY-MM-DD.json` containing the whole
-  database.
-- **Import** (header toolbar): pick a `.json` file → confirm
-  *"Import will REPLACE all current data. Continue?"* → all current data is wiped and
+- **Export → "Export all (full backup)"** (header toolbar menu): downloads
+  `plan-up-YYYY-MM-DD.json` containing the whole database.
+- **Import** (header toolbar): pick a `.json` file. The single Import button
+  **auto-detects** the file kind — a per-project bundle (`kind: 'project'`) is added
+  non-destructively (see project-export-import.md), while a **full backup (v1–4)**
+  takes the destructive path below.
+- Full-backup import → confirm *"Replace all data?"* → all current data is wiped and
   replaced. Success alert: *"Import successful."*
 - First launch with an empty DB seeds a demo project (see Seeding).
 

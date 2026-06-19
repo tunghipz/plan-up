@@ -49,6 +49,7 @@ Non-obvious behaviors, defaults, persistence keys.
 | --- | --- |
 | [data-model.md](./data-model.md) | IndexedDB tables, fields, Dexie schema versioning |
 | [persistence-and-backup.md](./persistence-and-backup.md) | Local-first storage, export/import JSON, seeding |
+| [project-export-import.md](./project-export-import.md) | Per-project export to a portable file + non-destructive "add as new project" import (auto-detected alongside full backup) |
 | [app-shell-and-navigation.md](./app-shell-and-navigation.md) | Layout, icon rail, resizable sprint panel, capacity stats |
 | [projects.md](./projects.md) | Multi-project create/switch/delete |
 | [project-member-settings.md](./project-member-settings.md) | Gear → settings page: edit project info (name/description/color) + members + delete |

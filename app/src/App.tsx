@@ -24,6 +24,9 @@ import {
   ArchiveRestore,
   FolderSync,
   Layers,
+  Package,
+  Database,
+  Check,
 } from 'lucide-react'
 import {
   db,
@@ -31,6 +34,9 @@ import {
   colorForName,
   exportAll,
   importAll,
+  exportProject,
+  importProject,
+  deleteProject,
   seedIfEmpty,
   dedupeSprints,
   setSprintNote,
@@ -48,6 +54,7 @@ import {
   type Collection,
   type ExportPayload,
 } from './db'
+import { isProjectBundle } from './project-io'
 import { CollectionView, CollectionBarIdentity, StatusEditor } from './CollectionView'
 import { useConfirm } from './ConfirmDialog'
 import { SprintView } from './SprintView'
@@ -61,6 +68,8 @@ import {
   formatShortDate,
   isOverdue,
   useDarkMode,
+  downloadJson,
+  slugify,
   safeStorage,
   defaultSprintDates,
   upcomingMondays,
@@ -126,6 +135,14 @@ function SprintStateDot({
     </svg>
   )
 }
+
+/** Transient feedback after a non-destructive import (slides up from the bottom,
+ *  optional Undo action). Plain timeout dismiss; no toast queue (one at a time). */
+type ToastState = {
+  title: string
+  detail: string
+  onUndo?: () => void
+} | null
 
 function App() {
   const [seedError, setSeedError] = useState<string | null>(null)
@@ -215,6 +232,40 @@ function App() {
     })
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
+  // Export split-menu (header) — "this project" vs "full backup".
+  const [exportMenuOpen, setExportMenuOpen] = useState(false)
+  const exportMenuRef = useRef<HTMLDivElement>(null)
+  // Non-destructive import feedback (add-as-new). Replace-all keeps its dialog.
+  const [toast, setToast] = useState<ToastState>(null)
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const showToast = (t: NonNullable<ToastState>) => {
+    if (toastTimer.current) clearTimeout(toastTimer.current)
+    setToast(t)
+    toastTimer.current = setTimeout(() => setToast(null), 6000)
+  }
+  // Close the export menu on outside-click / Escape; clear the toast timer on unmount.
+  useEffect(() => {
+    if (!exportMenuOpen) return
+    const onDown = (e: MouseEvent) => {
+      if (!exportMenuRef.current?.contains(e.target as Node))
+        setExportMenuOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setExportMenuOpen(false)
+    }
+    window.addEventListener('mousedown', onDown)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('mousedown', onDown)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [exportMenuOpen])
+  useEffect(
+    () => () => {
+      if (toastTimer.current) clearTimeout(toastTimer.current)
+    },
+    []
+  )
   const [dark, setDark] = useDarkMode()
   const fileInputRef = useRef<HTMLInputElement>(null)
   // Scroll container for the sprint views — search-palette jump-to scrolls it to
@@ -475,17 +526,19 @@ function App() {
     )
   }
 
-  const handleExport = async () => {
+  // Full-DB backup (every project) — restore-on-a-new-machine file.
+  const handleExportAll = async () => {
+    setExportMenuOpen(false)
     const data = await exportAll()
-    const blob = new Blob([JSON.stringify(data, null, 2)], {
-      type: 'application/json',
-    })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `plan-up-${data.exportedAt.slice(0, 10)}.json`
-    a.click()
-    URL.revokeObjectURL(url)
+    downloadJson(`plan-up-${data.exportedAt.slice(0, 10)}.json`, data)
+  }
+
+  // Single-project share file (additive on import). Used by the header menu and
+  // the inline action in Project settings.
+  const handleExportProject = async (projectId: string, name: string) => {
+    setExportMenuOpen(false)
+    const bundle = await exportProject(projectId)
+    downloadJson(`plan-up-${slugify(name)}-${bundle.exportedAt.slice(0, 10)}.json`, bundle)
   }
 
   const handleImportClick = () => fileInputRef.current?.click()
@@ -493,6 +546,47 @@ function App() {
     const file = e.target.files?.[0]
     e.target.value = ''
     if (!file) return
+    let data: unknown
+    try {
+      data = JSON.parse(await file.text())
+    } catch {
+      alert('Import failed: not a valid JSON file.')
+      return
+    }
+
+    // Auto-detect file kind. A single-project bundle is ADDITIVE — it adds a new
+    // project and destroys nothing, so it needs no confirm (just a toast + Undo).
+    if (isProjectBundle(data)) {
+      try {
+        const { projectId, projectName, taskCount } = await importProject(data)
+        const counts = {
+          sprints: data.sprints.length,
+          members: data.members.length,
+        }
+        // Select the freshly-imported project so the user lands on it.
+        setSelKindState('sprint')
+        safeStorage.set(SELKIND_KEY, 'sprint')
+        setCurrentCollectionIdState(null)
+        safeStorage.remove(SELCOLL_KEY)
+        setCurrentSprintId(null)
+        setCurrentProjectId(projectId)
+        showToast({
+          title: `Imported “${projectName}” as a new project`,
+          detail: `${counts.sprints} sprint${counts.sprints === 1 ? '' : 's'} · ${taskCount} task${taskCount === 1 ? '' : 's'} · ${counts.members} member${counts.members === 1 ? '' : 's'}`,
+          // Undo = delete exactly the project we just added (safe, reversible).
+          onUndo: async () => {
+            setToast(null)
+            await deleteProject(projectId)
+            setCurrentProjectId(null)
+          },
+        })
+      } catch (err) {
+        alert(`Import failed: ${err instanceof Error ? err.message : String(err)}`)
+      }
+      return
+    }
+
+    // Otherwise treat it as a legacy full backup → destructive replace-all.
     if (
       !(await confirm({
         title: 'Replace all data?',
@@ -503,9 +597,7 @@ function App() {
     )
       return
     try {
-      const text = await file.text()
-      const data = JSON.parse(text) as ExportPayload
-      await importAll(data)
+      await importAll(data as ExportPayload)
       // Imported data replaces everything — the old selection ids now point at
       // wiped rows. Reset to a clean slate; the project/sprint effects reselect
       // valid targets (projects[0] → its latest sprint) once the queries refire.
@@ -1042,17 +1134,64 @@ function App() {
                 <History size={15} strokeWidth={1.9} />
               </button>
             )}
-            <button
-              onClick={handleExport}
-              className="text-xs flex items-center gap-1.5 px-2 py-1.5 text-accent hover:bg-accent-soft rounded-md transition"
-              title="Export JSON backup"
-            >
-              <Download size={13} /> Export
-            </button>
+            {/* Export split-menu: "this project" (additive share file) vs the
+                full DB backup. See design-docs/project-export-import.md. */}
+            <div className="relative" ref={exportMenuRef}>
+              <button
+                onClick={() => setExportMenuOpen((o) => !o)}
+                aria-haspopup="menu"
+                aria-expanded={exportMenuOpen}
+                className="text-xs flex items-center gap-1.5 px-2 py-1.5 text-accent hover:bg-accent-soft rounded-md transition"
+                title="Export"
+              >
+                <Download size={13} /> Export
+                <ChevronDown size={12} className={`transition-transform ${exportMenuOpen ? 'rotate-180' : ''}`} />
+              </button>
+              {exportMenuOpen && (
+                <div
+                  role="menu"
+                  className="absolute right-0 top-[calc(100%+6px)] z-30 min-w-[262px] p-1.5 rounded-[12px] bg-surface shadow-[0_12px_32px_rgba(0,0,0,0.16),0_0_0_0.5px_rgba(0,0,0,0.06)] dark:shadow-[0_12px_32px_rgba(0,0,0,0.55),0_0_0_0.5px_rgba(255,255,255,0.08)]"
+                >
+                  <button
+                    role="menuitem"
+                    disabled={!currentProject}
+                    onClick={() =>
+                      currentProject &&
+                      handleExportProject(currentProject.id, currentProject.name)
+                    }
+                    className="w-full flex items-start gap-3 p-2.5 rounded-[8px] text-left hover:bg-surface-hover transition disabled:opacity-40 disabled:hover:bg-transparent"
+                  >
+                    <span className="shrink-0 w-[30px] h-[30px] rounded-[8px] flex items-center justify-center bg-accent-soft text-accent">
+                      <Package size={15} strokeWidth={1.9} />
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block text-[13.5px] font-medium text-ink">Export this project</span>
+                      <span className="block text-[12px] text-ink-muted truncate">
+                        {currentProject?.name ?? 'No project selected'}
+                      </span>
+                    </span>
+                  </button>
+                  <div className="h-px bg-border-hair mx-2 my-1" />
+                  <button
+                    role="menuitem"
+                    onClick={handleExportAll}
+                    className="w-full flex items-start gap-3 p-2.5 rounded-[8px] text-left hover:bg-surface-hover transition"
+                  >
+                    <span className="shrink-0 w-[30px] h-[30px] rounded-[8px] flex items-center justify-center bg-accent-soft text-accent">
+                      <Database size={15} strokeWidth={1.9} />
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block text-[13.5px] font-medium text-ink">Export all (full backup)</span>
+                      <span className="block text-[12px] text-ink-muted">Every project — restore on a new machine</span>
+                    </span>
+                  </button>
+                </div>
+              )}
+            </div>
             <button
               onClick={handleImportClick}
               className="text-xs flex items-center gap-1.5 px-2 py-1.5 text-accent hover:bg-accent-soft rounded-md transition"
-              title="Import JSON backup"
+              title="Import a project file or full backup"
             >
               <Upload size={13} /> Import
             </button>
@@ -1253,6 +1392,30 @@ function App() {
           onClose={() => setPaletteOpen(false)}
         />
       )}
+
+      {toast &&
+        createPortal(
+          <div className="fixed inset-x-0 bottom-6 z-[60] flex justify-center px-4 pointer-events-none">
+            <div className="pointer-events-auto flex items-center gap-3 min-w-[340px] max-w-[460px] px-4 py-3 rounded-[14px] bg-surface border border-border-hair animate-toast-in shadow-[0_12px_32px_rgba(0,0,0,0.16),0_0_0_0.5px_rgba(0,0,0,0.06)] dark:shadow-[0_12px_32px_rgba(0,0,0,0.55),0_0_0_0.5px_rgba(255,255,255,0.08)]">
+              <span className="shrink-0 w-[34px] h-[34px] rounded-full flex items-center justify-center bg-status-done/15 text-status-done">
+                <Check size={18} strokeWidth={2.2} />
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="text-[13.5px] font-semibold text-ink truncate">{toast.title}</div>
+                <div className="text-[12px] text-ink-muted mt-0.5">{toast.detail}</div>
+              </div>
+              {toast.onUndo && (
+                <button
+                  onClick={toast.onUndo}
+                  className="shrink-0 self-center text-[13px] font-medium text-accent hover:bg-accent-soft rounded-md px-2.5 py-1.5 transition"
+                >
+                  Undo
+                </button>
+              )}
+            </div>
+          </div>,
+          document.body
+        )}
 
     </div>
   )

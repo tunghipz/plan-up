@@ -111,6 +111,18 @@ describe('exportProject', () => {
   it('throws for an unknown project id', async () => {
     await expect(exportProject('does-not-exist')).rejects.toThrow()
   })
+
+  it('carries the project emoji icon through export → import', async () => {
+    const { pid } = await seedProjectA()
+    await db.projects.update(pid, { icon: '🚀' })
+
+    const bundle = await exportProject(pid)
+    expect(bundle.project.icon).toBe('🚀')
+
+    const { projectId } = await importProject(bundle)
+    const imported = await db.projects.get(projectId)
+    expect(imported?.icon).toBe('🚀')
+  })
 })
 
 describe('importProject', () => {

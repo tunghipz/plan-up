@@ -30,8 +30,10 @@ fills two existing gaps: no way to rename a project, and `deleteProject()` was o
   its members. It is not a global project manager.
 - Three inset-grouped cards (card-per-group, per `design-system.md`):
   1. **Project** — edit name (`.editable`), a multi-line **description** (textarea, saved
-     **on blur** since `Enter` inserts a newline), and a **color** chosen from the existing
-     8-color palette (swatch row; overrides the name-hash color used on the rail tile).
+     **on blur** since `Enter` inserts a newline), an **icon** (emoji — curated grid +
+     typed/pasted, "Aa" clears to the first-letter fallback; see
+     [project-icon-emoji.md](./project-icon-emoji.md)), and a **color** chosen from the
+     existing 8-color palette (swatch row; overrides the name-hash color used on the rail tile).
   2. **Members** — one **two-line** row per member: avatar + name (`.editable`) on top,
      and the member's **days off as a metric line underneath** — `📅 2 days off`, **always
      shown** (`No days off this sprint` when none, click to edit). Days off is the *primary*
@@ -44,14 +46,15 @@ fills two existing gaps: no way to rename a project, and `deleteProject()` was o
      because it cascades.
 
 ## Data
-- `Project` gains two **optional, non-indexed** fields:
-  `description?: string` and `color?: string` (a hex from the palette). See
-  [data-model.md](./data-model.md).
+- `Project` gains three **optional, non-indexed** fields:
+  `description?: string`, `color?: string` (a hex from the palette), and `icon?: string`
+  (one emoji grapheme). See [data-model.md](./data-model.md),
+  [project-icon-emoji.md](./project-icon-emoji.md).
 - `Member` is unchanged: `{ id, projectId, name, color, daysOff }` — name/color edited
   here, days-off still flows through `setMemberDaysOff` so scheduling recomputes.
 
 ### No Dexie version bump
-`description` and `color` are **not indexed**, and Dexie only declares indexed properties
+`description`, `color`, and `icon` are **not indexed**, and Dexie only declares indexed properties
 in `.stores()`. New properties on stored objects need no migration. Existing project rows
 simply lack the fields; the UI falls back to `colorForName(name)` for color and an empty
 description. (If we ever want to *query/sort* by these, that's when a `version().stores()`

@@ -53,6 +53,7 @@ Non-obvious behaviors, defaults, persistence keys.
 | [app-shell-and-navigation.md](./app-shell-and-navigation.md) | Layout, icon rail, resizable sprint panel, capacity stats |
 | [projects.md](./projects.md) | Multi-project create/switch/delete |
 | [project-member-settings.md](./project-member-settings.md) | Gear → settings page: edit project info (name/description/color) + members + delete |
+| [project-icon-emoji.md](./project-icon-emoji.md) | Optional emoji override for a project's icon-rail tile (curated grid + native picker; falls back to first letter) |
 | [sprints.md](./sprints.md) | Sprint CRUD, biweekly defaults, per-sprint sequence, locked `Sprint N` name + optional goal note |
 | [sprint-cadence.md](./sprint-cadence.md) | Sprint start locked to Monday + fixed 2-week duration (Monday-strip picker, derived read-only end) |
 | [sprint-archive.md](./sprint-archive.md) | Reversible archive to declutter the sprint list (collapsible `Archived (N)` section, hover action, out of active flow) |

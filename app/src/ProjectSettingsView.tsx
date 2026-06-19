@@ -18,6 +18,7 @@ import { downloadJson, slugify } from './lib'
 import {
   AvatarPicker,
   ColorSwatchRow,
+  EmojiPickerRow,
   MemberColorDot,
   MemberDaysOffButton,
 } from './members'
@@ -148,6 +149,15 @@ export function ProjectSettingsView({
                 aria-label="Project description"
               />
             </label>
+            <div>
+              <span className="text-xs text-ink-muted">Icon</span>
+              <div className="mt-1.5">
+                <EmojiPickerRow
+                  value={project.icon}
+                  onPick={(icon) => void updateProject(project.id, { icon })}
+                />
+              </div>
+            </div>
             <div>
               <span className="text-xs text-ink-muted">Color</span>
               <div className="mt-1.5">

@@ -112,6 +112,12 @@ export interface Project {
    * falls back to `colorForName(name)`. Non-indexed → no Dexie version bump.
    */
   color?: string
+  /**
+   * Optional emoji shown on the icon-rail tile instead of the name's first
+   * letter. When unset, the UI falls back to the first letter. One grapheme,
+   * non-indexed → no Dexie version bump (see project-icon-emoji.md).
+   */
+  icon?: string
 }
 
 export interface Member {
@@ -836,7 +842,7 @@ export async function createProject(name: string): Promise<Project> {
  */
 export async function updateProject(
   id: string,
-  patch: Partial<Pick<Project, 'name' | 'description' | 'color'>>
+  patch: Partial<Pick<Project, 'name' | 'description' | 'color' | 'icon'>>
 ): Promise<void> {
   await db.projects.update(id, patch)
 }

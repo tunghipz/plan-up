@@ -811,7 +811,10 @@ function App() {
       <aside className="vibrancy w-[58px] shrink-0 border-r border-border-hair flex flex-col items-center py-3.5 gap-2.5">
         {projects?.map((p) => {
           const isActive = p.id === currentProjectId
-          const initial = p.name.trim().charAt(0).toUpperCase() || '·'
+          // Emoji icon wins; otherwise the name's first letter (see
+          // project-icon-emoji.md). `||` so a stored empty string also falls back.
+          const isEmoji = !!p.icon
+          const label = p.icon || p.name.trim().charAt(0).toUpperCase() || '·'
           return (
             <button
               key={p.id}
@@ -819,17 +822,19 @@ function App() {
               title={p.name}
               aria-label={p.name}
               aria-current={isActive ? 'true' : undefined}
-              className={`tile-press w-[36px] h-[36px] rounded-[10px] flex items-center justify-center text-white text-[15px] font-semibold transition ${
+              className={`tile-press w-[36px] h-[36px] rounded-[10px] flex items-center justify-center text-white font-semibold transition ${
+                isEmoji ? 'text-[19px]' : 'text-[15px]'
+              } ${
                 isActive
                   ? 'shadow-[0_0_0_2.5px_var(--color-accent),0_2px_5px_rgba(0,0,0,0.14)]'
                   : 'opacity-80 hover:opacity-100'
               }`}
               style={{
                 background: p.color ?? colorForName(p.name),
-                letterSpacing: '-0.01em',
+                letterSpacing: isEmoji ? '0' : '-0.01em',
               }}
             >
-              {initial}
+              {label}
             </button>
           )
         })}

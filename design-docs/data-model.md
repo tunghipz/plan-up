@@ -14,11 +14,12 @@ Six IndexedDB tables (Dexie database name **`plan-up`**): `projects`, `members`,
 `sprints`, `tasks`, `collections`, `events`.
 
 ### `Project` (`db.ts:19`)
-`id` · `name` · `createdAt` (number) · `description?` (string) · `color?` (hex)
-- `description` and `color` are **optional, non-indexed** fields edited from the settings
-  page (see [project-member-settings.md](./project-member-settings.md)). Because they are
+`id` · `name` · `createdAt` (number) · `description?` (string) · `color?` (hex) · `icon?` (emoji)
+- `description`, `color`, and `icon` are **optional, non-indexed** fields edited from the
+  settings page (see [project-member-settings.md](./project-member-settings.md),
+  [project-icon-emoji.md](./project-icon-emoji.md)). Because they are
   not indexed, adding them needed **no Dexie version bump**; rows without them fall back to
-  `colorForName(name)` and an empty description.
+  `colorForName(name)`, an empty description, and the name's first letter respectively.
 
 ### `Member` (`db.ts:25`)
 `id` · `projectId` · `name` · `color` (hex) · `daysOff: DayOff[]` · `title?` (string)

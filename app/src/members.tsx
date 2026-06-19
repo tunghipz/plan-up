@@ -475,6 +475,83 @@ export function ColorSwatchRow({
   )
 }
 
+/** Curated emoji for a project icon (see project-icon-emoji.md). The text input
+ *  beside the grid covers everything else via the OS picker (⌃⌘Space on macOS). */
+export const PROJECT_ICON_EMOJIS = [
+  '📅', '✅', '🚀', '🎯', '📌', '💡', '📋', '🗂️',
+  '🧩', '🔧', '🐛', '💬', '📈', '🔥', '⭐', '🎨',
+  '🛠️', '📦', '🧪', '🌐', '🔍', '⏱️', '📝', '🎓',
+]
+
+/** Inline emoji picker mirroring ColorSwatchRow's `{ value, onPick }` shape.
+ *  A leading "Aa" chip clears the emoji (→ first-letter fallback). The input
+ *  accepts any typed/pasted emoji, clamped to one grapheme. `undefined` = unset. */
+export function EmojiPickerRow({
+  value,
+  onPick,
+}: {
+  value: string | undefined
+  onPick: (icon: string | undefined) => void
+}) {
+  const isCustom = !!value && !PROJECT_ICON_EMOJIS.includes(value)
+  return (
+    <div className="flex items-start gap-3">
+      <div className="grid grid-cols-8 gap-1.5">
+        <button
+          type="button"
+          onClick={() => onPick(undefined)}
+          aria-label="No emoji — show the first letter"
+          aria-pressed={!value}
+          title="No emoji — show the first letter"
+          className={`w-8 h-8 rounded-[8px] grid place-items-center text-[11px] font-semibold text-ink-muted transition ${
+            !value
+              ? 'bg-surface ring-2 ring-accent'
+              : 'bg-canvas hover:bg-surface-hover'
+          }`}
+        >
+          Aa
+        </button>
+        {PROJECT_ICON_EMOJIS.map((e) => {
+          const active = value === e
+          return (
+            <button
+              key={e}
+              type="button"
+              onClick={() => onPick(e)}
+              aria-label={`Icon ${e}`}
+              aria-pressed={active}
+              title={e}
+              className={`w-8 h-8 rounded-[8px] grid place-items-center text-[18px] leading-none transition ${
+                active
+                  ? 'bg-surface ring-2 ring-accent'
+                  : 'bg-canvas hover:bg-surface-hover hover:scale-110'
+              }`}
+            >
+              {e}
+            </button>
+          )
+        })}
+      </div>
+      <div className="shrink-0">
+        <input
+          value={isCustom ? value : ''}
+          onChange={(e) => onPick(firstGrapheme(e.target.value) || undefined)}
+          maxLength={8}
+          placeholder="🙂"
+          aria-label="Type or paste any emoji"
+          className={`w-12 h-8 text-center text-[18px] leading-none bg-canvas border rounded-[8px] outline-none transition focus:ring-2 focus:ring-accent/40 focus:border-accent ${
+            isCustom ? 'border-accent' : 'border-border'
+          }`}
+        />
+        <div className="text-[10.5px] text-ink-faint mt-1 text-center leading-tight">
+          gõ / dán
+          <br />⌃⌘Space
+        </div>
+      </div>
+    </div>
+  )
+}
+
 /**
  * Quiet color control: a single dot of the member's current color; click opens
  * a small palette popover. Color is secondary here (the constitution treats it

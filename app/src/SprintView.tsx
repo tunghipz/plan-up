@@ -1090,7 +1090,7 @@ function PriorityChip({ priority }: { priority: string }) {
 function MilestoneTag() {
   return (
     <span
-      className="inline-flex items-center gap-1 shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold bg-accent-soft text-accent mt-[2px] select-none"
+      className="inline-flex items-center gap-1 shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold bg-accent-soft text-accent select-none"
       title="Milestone — a zero-effort checkpoint (no duration)"
     >
       <span className="w-[7px] h-[7px] rotate-45 rounded-[1.5px] bg-accent" aria-hidden />
@@ -1229,7 +1229,7 @@ function TitleTextarea({
           done ? 'line-through text-ink-faint' : ''
         } ${welcomeHint ? 'welcome-hint' : ''} ${bold ? 'font-semibold' : ''}`}
       />
-      {trailing && <span className="shrink-0 self-start mt-[3px]">{trailing}</span>}
+      {trailing && <span className="shrink-0 self-center">{trailing}</span>}
     </div>
   )
 }

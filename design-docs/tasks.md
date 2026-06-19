@@ -15,8 +15,11 @@ organize and plan tasks.
 See [data-model.md](./data-model.md).
 
 ## User-facing behavior
-- **Add:** the "Add task" row at the bottom of a group — type a title, Enter. New task:
-  `status='todo'`, `priority='normal'`, `startDate = sprint start`, `sequence = nextSequence`.
+- **Add:** the "Add task" row at the bottom of a group — type a title, then **Enter** or
+  **blur** (click away / Tab) to commit, so a typed-but-unsubmitted title is never lost.
+  Empty input commits nothing; the synchronous clear means Enter-then-blur can't double-add.
+  New task: `status='todo'`, `priority='normal'`, `startDate = sprint start`,
+  `sequence = nextSequence`.
 - **Edit inline** (all in-row): title, effort, start/end date, status, prereqs, assignee.
 - **Delete:** select the task (hover → checkbox) and use **Xoá** on the floating
   `SelectionBar` (confirm). Works on a multi-select too. There is **no per-row kebab** —

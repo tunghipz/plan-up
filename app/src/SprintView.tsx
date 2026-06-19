@@ -1165,6 +1165,10 @@ function AddTaskRow({
           // telex/VNI, etc.) must not also submit the row mid-word.
           if (e.key === 'Enter' && !e.nativeEvent.isComposing) add()
         }}
+        // Commit on blur too (click away / Tab): a typed-but-unsubmitted row
+        // shouldn't be lost. `add()` no-ops on empty and clears synchronously,
+        // so an Enter-then-blur can't double-submit.
+        onBlur={() => void add()}
         placeholder="Add task"
         className={`${COL.title} editable placeholder:text-ink-faint bg-transparent`}
       />

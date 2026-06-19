@@ -54,7 +54,7 @@ import {
   type Collection,
   type ExportPayload,
 } from './db'
-import { isProjectBundle } from './project-io'
+import { isProjectBundle, looksLikeProjectBundle } from './project-io'
 import { CollectionView, CollectionBarIdentity, StatusEditor } from './CollectionView'
 import { useConfirm } from './ConfirmDialog'
 import { SprintView } from './SprintView'
@@ -554,9 +554,17 @@ function App() {
       return
     }
 
-    // Auto-detect file kind. A single-project bundle is ADDITIVE — it adds a new
-    // project and destroys nothing, so it needs no confirm (just a toast + Undo).
-    if (isProjectBundle(data)) {
+    // Auto-detect file kind. A file that CLAIMS kind:'project' is committed to the
+    // project path here — if it then fails full validation it's reported as a
+    // corrupt project file, never re-routed to the destructive replace-all confirm
+    // (a damaged share file must not raise a full-DB-wipe prompt).
+    if (looksLikeProjectBundle(data)) {
+      if (!isProjectBundle(data)) {
+        alert('Import failed: this project file is invalid or corrupt.')
+        return
+      }
+      // A single-project bundle is ADDITIVE — it adds a new project and destroys
+      // nothing, so it needs no confirm (just a toast + Undo).
       try {
         const { projectId, projectName, taskCount } = await importProject(data)
         const counts = {

@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest'
-import { isProjectBundle, remapBundle, type ProjectBundle } from './project-io'
+import {
+  isProjectBundle,
+  looksLikeProjectBundle,
+  remapBundle,
+  type ProjectBundle,
+} from './project-io'
 import type {
   Project,
   Member,
@@ -167,6 +172,29 @@ describe('isProjectBundle', () => {
   it('rejects a bundle whose project is not an object', () => {
     const b = { ...sampleBundle(), project: null }
     expect(isProjectBundle(b)).toBe(false)
+  })
+})
+
+describe('looksLikeProjectBundle', () => {
+  it('is true whenever kind === "project", even if the bundle is malformed', () => {
+    expect(looksLikeProjectBundle(sampleBundle())).toBe(true)
+    // truncated: claims to be a project but missing the arrays
+    expect(
+      looksLikeProjectBundle({ kind: 'project', version: 5, project: {} })
+    ).toBe(true)
+    // a damaged file that isProjectBundle would reject is still "project-shaped"
+    const broken = { ...sampleBundle(), tasks: undefined }
+    expect(looksLikeProjectBundle(broken)).toBe(true)
+    expect(isProjectBundle(broken)).toBe(false)
+  })
+
+  it('is false for a full backup (no kind) and for junk', () => {
+    expect(
+      looksLikeProjectBundle({ version: 4, projects: [], members: [] })
+    ).toBe(false)
+    expect(looksLikeProjectBundle(null)).toBe(false)
+    expect(looksLikeProjectBundle('project')).toBe(false)
+    expect(looksLikeProjectBundle({ kind: 'full' })).toBe(false)
   })
 })
 

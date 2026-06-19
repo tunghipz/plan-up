@@ -1,7 +1,7 @@
 # Project export / import (shareable project files)
 
 **Status:** Implemented
-**Last updated:** 2026-06-19
+**Last updated:** 2026-06-19 (corrupt project-file branch)
 **Code:** `app/src/project-io.ts` (`ProjectBundle`, `isProjectBundle`, `remapBundle`),
 `app/src/db.ts` (`exportProject`, `importProject`), `app/src/App.tsx` (header split-menu,
 `handleImportFile`, import toast, `downloadJson`), `app/src/ProjectSettingsView.tsx`
@@ -28,7 +28,13 @@ Two entry points, complementary by role (see the demo `demo/export-per-project.h
   (after a hairline) with an `Export` action, scoped to the project being edited.
 
 ### Import (one button, auto-detect)
-The single `Import` button reads the file and branches on its `kind`:
+The single `Import` button reads the file and branches on its `kind`. **A file that
+*claims* `kind: 'project'` is committed to the project path** (`looksLikeProjectBundle`):
+if it then fails full `isProjectBundle` validation (truncated / hand-edited / missing
+array) it is rejected with *"this project file is invalid or corrupt"* — it is **never**
+re-routed to the destructive replace-all confirm (a damaged share file must not raise a
+full-DB-wipe prompt). Only a file with **no** `kind: 'project'` marker takes the
+full-backup path. Branches:
 - **`kind: 'project'` → additive.** Imports as a **new** project alongside existing ones,
   regenerating every id. **No confirm** (nothing is destroyed). A success **toast** slides up:
   *"Imported '<name>' as a new project · N sprints · N tasks · N members"* with an **Undo**

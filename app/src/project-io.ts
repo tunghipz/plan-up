@@ -33,6 +33,19 @@ const isObj = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null
 
 /**
+ * Cheap "does this file CLAIM to be a single project?" check — true whenever
+ * `kind === 'project'`, regardless of whether the rest of the payload is valid.
+ * The import entry point uses this to commit a file to the project path FIRST,
+ * so a damaged/truncated project file is reported as corrupt rather than falling
+ * through to the destructive full-backup replace-all prompt. Pair with
+ * `isProjectBundle` (the full shape check) to tell "claims project" from
+ * "is a valid project". See design-docs/project-export-import.md.
+ */
+export function looksLikeProjectBundle(data: unknown): boolean {
+  return isObj(data) && data.kind === 'project'
+}
+
+/**
  * Type guard / validation for the single import entry point. Reject-whole-file:
  * a `version: 5` payload must have `kind: 'project'`, an object `project`, and all
  * five arrays present and well-shaped. A single missing/wrong-typed field rejects

@@ -559,9 +559,11 @@ function App() {
             aria-hidden
           />
           <span className="flex-1 min-w-0">
+            {/* Note glyph hugs the title text (not the row edge) so it never
+               collides with the hover archive action. See sprint-archive.md. */}
             <span className="flex items-center gap-1.5 min-w-0">
               <span
-                className={`flex-1 min-w-0 truncate font-medium ${
+                className={`min-w-0 truncate font-medium ${
                   archived && !isActive ? 'text-ink-muted' : ''
                 }`}
               >

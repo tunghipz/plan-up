@@ -18,13 +18,13 @@ collapsible **Archived** section, keeping all its tasks/data intact and one clic
 return. It's the gentle alternative to delete (which plan-up deliberately doesn't have).
 
 ## User-facing behavior
-- **Archive a sprint — two entry points:**
-  - **Sprint panel row:** hover a sprint row → a quiet **archive icon** appears at the
-    row's right edge (same hover idiom as the inline-rename ✎ and the note glyph). Click
-    → the sprint drops into the Archived section. Calm at rest (icon hidden), accent on
-    hover.
-  - **Sprint header:** the currently-open sprint can be archived from its header (so you
-    can archive the one you're looking at without hunting for its row).
+- **Archive a sprint:** hover a sprint row → a quiet **archive icon** appears at the
+  row's right edge (same hover idiom as the inline-rename ✎). Click → the sprint drops
+  into the Archived section. Calm at rest (icon hidden), accent on hover. (Works on the
+  current sprint too, so there's no separate header affordance — see Future.)
+  - **Note glyph placement:** the "has a note" glyph hugs the **title text** (right after
+    the name), not the row's right edge — so it never collides with the hover archive
+    action sitting at the edge. (Fixed 2026-06-19; the name span dropped `flex-1`.)
 - **Archived section:** below the active Sprints list, a collapsible **`Archived (N)`**
   sub-header. **Collapsed by default**; click to expand. Collapse state is remembered
   (localStorage `plan-up:sidebarArchivedCollapsed`, same pattern as the Sprints /
@@ -95,3 +95,6 @@ lucide glyphs, `--color-ink-muted`). History starts when the feature ships (no b
   things the user didn't ask to hide.
 - **Bulk archive** ("archive all completed before {date}") if the manual flow proves
   tedious at scale.
+- **Header archive affordance:** a dedicated archive action in the open sprint's header.
+  Not built — the row hover action already covers the current sprint. Add only if users
+  expect it where they're looking.

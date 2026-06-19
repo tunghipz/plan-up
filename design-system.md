@@ -155,7 +155,10 @@ Một **khối mảnh** trên đầu view (không phải 3 thẻ số rời): ti
 ## 5. Component rules
 
 ### 5.1 Avatar
-- 1 chữ first-letter. `colorForName` (§2.4). **Không** random/user-pick.
+- **3 tầng**: ảnh upload → emoji → chữ first-letter (fallback). Màu nền (`colorForName`,
+  §2.4) vẫn là nền cho emoji + fallback cuối. Component `Avatar` là **single render point**
+  (prop `size` px + `ring`), dùng ở mọi surface. Đổi avatar chỉ ở Project Settings qua
+  `AvatarPicker` (segmented Photo|Emoji). Xem [`design-docs/member-avatars.md`](./design-docs/member-avatars.md).
 - Vòng tròn đặc. Sizes: `w-7 h-7` group header, `w-6 h-6` task row.
 
 ### 5.2 Status circle (Reminders-style) + status pill

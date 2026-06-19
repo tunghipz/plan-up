@@ -1916,12 +1916,15 @@ function TaskColumnHeader({
   >
   showAssignee?: boolean
 }) {
+  // Three-state cycle per column: asc → desc → off. "Off" clears back to the
+  // default seq order (DEFAULT_SORT), which also re-enables drag-to-reorder.
+  // See design-docs/list-view.md.
   const onSort = (field: SortField) => {
-    setSort((prev) =>
-      prev.field === field
-        ? { field, dir: prev.dir === 'asc' ? 'desc' : 'asc' }
-        : { field, dir: 'asc' }
-    )
+    setSort((prev) => {
+      if (prev.field !== field) return { field, dir: 'asc' }
+      if (prev.dir === 'asc') return { field, dir: 'desc' }
+      return DEFAULT_SORT
+    })
   }
   return (
     <div className="flex items-center gap-3 px-4 py-1.5 border-b border-border-hair bg-canvas-sunk/40">
@@ -2006,6 +2009,15 @@ function SortHeader({
   align?: 'start' | 'center' | 'end'
 }) {
   const isActive = sort.field === field
+  // Hint the NEXT click in the asc → desc → off cycle (off only clears a
+  // non-seq column, since seq is the default order). See list-view.md.
+  const nextHint = !isActive
+    ? `Sort by ${label}`
+    : sort.dir === 'asc'
+      ? `Sort by ${label}, descending`
+      : field === 'seq'
+        ? `Sort by ${label}, ascending`
+        : 'Clear sort'
   return (
     <button
       type="button"
@@ -2017,7 +2029,8 @@ function SortHeader({
             ? 'justify-center'
             : ''
       } ${isActive ? 'text-accent' : 'text-ink-faint hover:text-ink'}`}
-      aria-label={`Sort by ${label}`}
+      aria-label={nextHint}
+      title={nextHint}
     >
       <span>{label}</span>
       <span

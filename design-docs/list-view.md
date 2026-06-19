@@ -1,7 +1,7 @@
 # List view
 
 **Status:** Implemented
-**Last updated:** 2026-06-05
+**Last updated:** 2026-06-19
 **Code:** `app/src/SprintView.tsx` (`MemberCard`, `UnassignedCard`, `GroupHeader`,
 `TaskColumnHeader`, `SortHeader`, `COL`, `TaskRows` drag state, `TaskRow` grip),
 `app/src/db.ts` (`orderBetween`, `setListOrder`)
@@ -16,9 +16,13 @@ inset-grouped cards, fully editable inline.
   + an "Add task" row.
 - **Collapse** a member card by clicking its header (persisted per sprint).
 - **Sort** by any column via its header (`ID, Task, Effort, Start, End, Status, Prereq`);
-  click toggles asc/desc, active column shows an arrow. Sort is **shared across all
-  member cards** (one preference, not per-member) and **persisted** so it survives
-  switching view/sprint/project and a page reload (defaults to `seq asc` first run).
+  clicking a column **cycles three states: asc → desc → off**. "Off" clears the sort back to
+  the default `seq asc` (manual order), which also re-enables drag-to-reorder. The active
+  column shows an arrow (▲/▼); cleared columns show none. (The `ID`/`seq` column is the manual
+  order itself, so its "off" state is identical to `seq asc` — it effectively just toggles
+  asc/desc.) Sort is **shared across all member cards** (one preference, not per-member) and
+  **persisted** so it survives switching view/sprint/project and a page reload (defaults to
+  `seq asc` first run).
 - Member cards omit the **Assignee** column (everyone in the group is the same person);
   the Unassigned card keeps it.
 

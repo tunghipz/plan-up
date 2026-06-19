@@ -1425,14 +1425,16 @@ export async function setMemberAvatar(
   patch: { avatarImage?: string | null; avatarEmoji?: string | null }
 ): Promise<void> {
   const next: Partial<Member> = {}
-  if (patch.avatarImage != null) {
+  // Truthy (not `!= null`) so an empty string clears too — a blank avatar is
+  // never a valid value, only a clear.
+  if (patch.avatarImage) {
     next.avatarImage = patch.avatarImage
     next.avatarEmoji = undefined // setting an image clears any emoji
-  } else if (patch.avatarEmoji != null) {
+  } else if (patch.avatarEmoji) {
     next.avatarEmoji = patch.avatarEmoji
     next.avatarImage = undefined // setting an emoji clears any image
   } else {
-    // both null/undefined → explicit clear of whatever was set
+    // nothing set → explicit clear of whatever was there
     next.avatarImage = undefined
     next.avatarEmoji = undefined
   }

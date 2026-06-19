@@ -1204,4 +1204,11 @@ describe('setMemberAvatar', () => {
     expect(m!.name).toBe('Avery')
     expect(m!.color).toBe('#0071e3')
   })
+
+  it('treats an empty-string emoji as a clear, not a value', async () => {
+    await setMemberAvatar(M, { avatarEmoji: '🦊' })
+    await setMemberAvatar(M, { avatarEmoji: '' })
+    const m = await db.members.get(M)
+    expect(m!.avatarEmoji ?? null).toBe(null)
+  })
 })

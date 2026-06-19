@@ -378,7 +378,7 @@ export function AvatarPicker({ member }: { member: Member }) {
                 {busy ? 'Resizing…' : 'Upload photo'}
               </button>
               {savings && !error && (
-                <div className="mt-2 text-[11.5px] text-center text-[--color-status-done] bg-[rgba(52,199,89,0.1)] rounded-[7px] py-1.5 tabular-nums">
+                <div className="mt-2 text-[11.5px] text-center text-status-done bg-status-done/15 rounded-[7px] py-1.5 tabular-nums">
                   {savings}
                 </div>
               )}

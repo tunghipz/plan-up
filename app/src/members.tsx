@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Calendar, X, Upload, Trash2 } from 'lucide-react'
 import {
@@ -82,11 +82,60 @@ export function Avatar({
   )
 }
 
-/** A small set of suggested emoji for the picker (calm, no full grid library). */
-const SUGGESTED_EMOJI = [
+/**
+ * Searchable emoji set for the avatar picker — curated + keyword-tagged so the
+ * user can type a name ("fox", "rocket") to filter. Deliberately a small curated
+ * list, not a full emoji-name database (calm, dependency-free). [char, keywords].
+ */
+const EMOJI: [string, string][] = [
+  ['😀', 'smile happy'], ['😎', 'cool sunglasses'], ['🤓', 'nerd geek'], ['🥳', 'party celebrate'],
+  ['😴', 'sleep tired'], ['🤖', 'robot bot'], ['👻', 'ghost'], ['💀', 'skull'],
+  ['🦸', 'hero superhero'], ['🧙', 'wizard mage'], ['🧑‍💻', 'coder developer dev'], ['👑', 'crown king queen'],
+  ['🦊', 'fox'], ['🐙', 'octopus'], ['🐧', 'penguin'], ['🦉', 'owl'],
+  ['🐢', 'turtle tortoise'], ['🐝', 'bee'], ['🦄', 'unicorn'], ['🐳', 'whale'],
+  ['🦁', 'lion'], ['🐯', 'tiger'], ['🐱', 'cat kitty'], ['🐶', 'dog puppy'],
+  ['🐰', 'rabbit bunny'], ['🐼', 'panda'], ['🐨', 'koala'], ['🐸', 'frog'],
+  ['🐵', 'monkey'], ['🦅', 'eagle bird'], ['🦋', 'butterfly'], ['🐺', 'wolf'],
+  ['🦈', 'shark'], ['🐬', 'dolphin'], ['🦦', 'otter'], ['🦥', 'sloth'],
+  ['🐉', 'dragon'], ['🦖', 'dinosaur trex'], ['🦒', 'giraffe'], ['🐘', 'elephant'],
+  ['🦔', 'hedgehog'], ['🐮', 'cow'], ['🐷', 'pig'], ['🦜', 'parrot bird'],
+  ['🌸', 'flower blossom'], ['🌹', 'rose'], ['🌻', 'sunflower'], ['🌵', 'cactus'],
+  ['🌲', 'tree pine'], ['🍀', 'clover luck'], ['🔥', 'fire flame'], ['⚡', 'lightning bolt'],
+  ['⭐', 'star'], ['🌙', 'moon'], ['☀️', 'sun'], ['🌈', 'rainbow'],
+  ['🌊', 'wave ocean'], ['❄️', 'snow snowflake'], ['💧', 'water drop'],
+  ['🍕', 'pizza'], ['🍔', 'burger'], ['🌶️', 'pepper chili spicy'], ['🍑', 'peach'],
+  ['🍎', 'apple'], ['🍓', 'strawberry'], ['🍉', 'watermelon'], ['🍌', 'banana'],
+  ['🥑', 'avocado'], ['🍩', 'donut'], ['🍰', 'cake'], ['🍪', 'cookie'],
+  ['🍦', 'icecream'], ['☕', 'coffee'], ['🍵', 'tea'], ['🍺', 'beer'],
+  ['🍷', 'wine'], ['🥕', 'carrot'], ['🌽', 'corn'], ['🍣', 'sushi'],
+  ['🚀', 'rocket launch space'], ['✈️', 'plane airplane travel'], ['🚗', 'car'], ['🚲', 'bike bicycle'],
+  ['⚽', 'soccer football'], ['🏀', 'basketball'], ['🎸', 'guitar music'], ['🎮', 'game gaming controller'],
+  ['🎨', 'art paint'], ['📚', 'book books read'], ['💡', 'idea lightbulb'], ['🔔', 'bell'],
+  ['🎯', 'target dart goal'], ['🏆', 'trophy win'], ['🎁', 'gift present'], ['💎', 'diamond gem'],
+  ['🧩', 'puzzle'], ['🔑', 'key'], ['🛠️', 'tools build'], ['📌', 'pin'],
+  ['❤️', 'heart love red'], ['💙', 'blue heart'], ['💚', 'green heart'], ['💜', 'purple heart'],
+  ['🧡', 'orange heart'], ['💛', 'yellow heart'], ['✨', 'sparkles'], ['✅', 'check done'],
+  ['👍', 'thumbsup like'], ['👋', 'wave hello hi'], ['🙌', 'raise celebrate'], ['🤝', 'handshake deal'],
+]
+
+/** Default grid shown when the search box is empty. */
+const DEFAULT_EMOJI = [
   '🦊', '🐙', '🚀', '🐧', '🦉', '🐢', '🌶️', '🍑',
   '🐝', '🦄', '🐳', '🍕', '⚡', '🌸', '🦁', '🤖',
 ]
+
+/** Resolve the emoji grid for a search query (empty → default set). A query that
+ *  itself contains an emoji (paste) surfaces that emoji as the first result. */
+function emojiResultsFor(query: string): string[] {
+  const q = query.trim().toLowerCase()
+  if (!q) return DEFAULT_EMOJI
+  const matches = EMOJI.filter(
+    ([char, kw]) => kw.includes(q) || char === query.trim()
+  ).map(([char]) => char)
+  const typed = /\p{Extended_Pictographic}/u.test(query) ? firstGrapheme(query) : ''
+  if (typed && !matches.includes(typed)) matches.unshift(typed)
+  return matches.slice(0, 24)
+}
 
 function fmtBytes(n: number): string {
   if (n < 1024) return `${n} B`
@@ -113,13 +162,56 @@ export function AvatarPicker({ member }: { member: Member }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [savings, setSavings] = useState<string | null>(null)
-  const ref = useRef<HTMLDivElement>(null)
+  const [emojiQuery, setEmojiQuery] = useState('')
+  const btnRef = useRef<HTMLButtonElement>(null)
+  const popRef = useRef<HTMLDivElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+  // Popover lives in a portal with fixed positioning (like MemberDaysOffButton)
+  // so it escapes the settings drawer's `overflow-auto` scroll container, which
+  // would otherwise clip it. See design-docs/member-avatars.md.
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
+
+  // Pin the popover to the trigger, flipping above when there's no room below
+  // (the popover is taller than a viewport bottom edge can hold). Re-pin on
+  // scroll/resize and whenever the panel's height changes (tab / state).
+  useLayoutEffect(() => {
+    if (!open) {
+      setPos(null)
+      return
+    }
+    const W = 264
+    const GAP = 8
+    const pin = () => {
+      const br = btnRef.current?.getBoundingClientRect()
+      if (!br) return
+      const h = popRef.current?.offsetHeight ?? 320
+      let top = br.bottom + GAP
+      if (top + h > window.innerHeight - GAP) top = br.top - GAP - h // flip up
+      if (top < GAP) top = GAP
+      let left = br.left
+      if (left + W > window.innerWidth - GAP) left = window.innerWidth - W - GAP
+      if (left < GAP) left = GAP
+      setPos({ top, left })
+    }
+    pin()
+    window.addEventListener('scroll', pin, true)
+    window.addEventListener('resize', pin)
+    return () => {
+      window.removeEventListener('scroll', pin, true)
+      window.removeEventListener('resize', pin)
+    }
+  }, [open, tab, busy, savings, error, emojiQuery, member.avatarImage, member.avatarEmoji])
 
   useEffect(() => {
     if (!open) return
     const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+      const t = e.target as Node
+      if (
+        btnRef.current && !btnRef.current.contains(t) &&
+        popRef.current && !popRef.current.contains(t)
+      ) {
+        setOpen(false)
+      }
     }
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setOpen(false)
@@ -137,6 +229,7 @@ export function AvatarPicker({ member }: { member: Member }) {
     if (open) {
       setTab(member.avatarImage ? 'photo' : 'emoji')
       setError(null)
+      setEmojiQuery('')
     }
   }, [open, member.avatarImage])
 
@@ -159,10 +252,12 @@ export function AvatarPicker({ member }: { member: Member }) {
   }
 
   const hasAvatar = !!(member.avatarImage || member.avatarEmoji)
+  const emojiResults = emojiResultsFor(emojiQuery)
 
   return (
-    <div ref={ref} className="relative shrink-0">
+    <div className="shrink-0">
       <button
+        ref={btnRef}
         type="button"
         onClick={(e) => {
           e.stopPropagation()
@@ -181,10 +276,14 @@ export function AvatarPicker({ member }: { member: Member }) {
         </span>
       </button>
 
-      {open && (
+      {open && createPortal(
         <div
+          ref={popRef}
           onClick={(e) => e.stopPropagation()}
-          className="absolute left-0 top-[calc(100%+8px)] z-30 w-[264px] bg-surface border border-border-hair rounded-[14px] shadow-[0_10px_36px_rgba(0,0,0,0.18)] p-3.5"
+          style={{ position: 'fixed', top: pos?.top ?? -9999, left: pos?.left ?? -9999 }}
+          className={`z-[60] w-[264px] bg-surface border border-border-hair rounded-[14px] shadow-[0_10px_36px_rgba(0,0,0,0.18)] p-3.5 transition-opacity ${
+            pos ? 'opacity-100' : 'opacity-0 pointer-events-none'
+          }`}
         >
           {/* Preview row */}
           <div className="flex items-center gap-2.5 mb-3">
@@ -228,31 +327,37 @@ export function AvatarPicker({ member }: { member: Member }) {
           {/* Panel */}
           {tab === 'emoji' ? (
             <div>
-              <div className="grid grid-cols-6 gap-0.5">
-                {SUGGESTED_EMOJI.map((em) => (
-                  <button
-                    key={em}
-                    type="button"
-                    onClick={() => void setMemberAvatar(member.id, { avatarEmoji: em })}
-                    className={`text-[19px] leading-none py-1 rounded-[7px] transition hover:bg-surface-hover ${
-                      member.avatarEmoji === em ? 'bg-accent-tint' : ''
-                    }`}
-                    aria-label={`Use ${em}`}
-                  >
-                    {em}
-                  </button>
-                ))}
-              </div>
               <input
                 type="text"
-                placeholder="Type or paste an emoji…"
-                maxLength={12}
-                onChange={(e) => {
-                  const g = firstGrapheme(e.target.value)
-                  if (g) void setMemberAvatar(member.id, { avatarEmoji: g })
-                }}
-                className="mt-2 w-full text-[13px] bg-canvas border border-border rounded-[8px] px-2.5 py-1.5 outline-none focus:border-accent"
+                value={emojiQuery}
+                onChange={(e) => setEmojiQuery(e.target.value)}
+                placeholder="Search (fox, rocket…) or paste an emoji"
+                maxLength={24}
+                autoFocus
+                aria-label="Search emoji"
+                className="mb-2 w-full text-[13px] bg-canvas border border-border rounded-[8px] px-2.5 py-1.5 outline-none focus:border-accent"
               />
+              {emojiResults.length > 0 ? (
+                <div className="grid grid-cols-6 gap-0.5">
+                  {emojiResults.map((em) => (
+                    <button
+                      key={em}
+                      type="button"
+                      onClick={() => void setMemberAvatar(member.id, { avatarEmoji: em })}
+                      className={`text-[19px] leading-none py-1 rounded-[7px] transition hover:bg-surface-hover ${
+                        member.avatarEmoji === em ? 'bg-accent-tint' : ''
+                      }`}
+                      aria-label={`Use ${em}`}
+                    >
+                      {em}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-[12px] text-ink-faint text-center py-3">
+                  No emoji found
+                </div>
+              )}
             </div>
           ) : (
             <div>
@@ -302,7 +407,8 @@ export function AvatarPicker({ member }: { member: Member }) {
               <Trash2 size={13} /> Remove avatar
             </button>
           )}
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   )

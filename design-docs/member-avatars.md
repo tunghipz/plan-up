@@ -34,7 +34,12 @@ Because there is one render point, every surface updates for free.
 Avatars are edited **only** in the Project Settings member row (gear → settings),
 matching where rename/title/color/days-off live — one place, no drifting
 affordances. The member's `Avatar` is rendered as a button; clicking opens a small
-**absolute popover** (no portal — the Members card has no overflow clip).
+popover **rendered via `createPortal` to `document.body` with `position: fixed`**,
+pinned to the trigger and re-pinned on scroll/resize. This mirrors
+`MemberDaysOffButton`: the settings drawer body is an `overflow-auto` scroll
+container, so an `absolute` popover would be clipped (it was, initially). The
+popover also **flips above** the trigger when there isn't room below and clamps to
+the viewport, since it is taller than the days-off one.
 
 Layout = **Segmented** (chosen from a 3-way prototype, see *History*):
 - Preview row (live 44px avatar + name/title).

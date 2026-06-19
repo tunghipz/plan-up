@@ -18,7 +18,10 @@ import {
   Lock,
   StickyNote,
   ChevronDown,
+  ChevronRight,
   History,
+  Archive,
+  ArchiveRestore,
 } from 'lucide-react'
 import {
   db,
@@ -29,6 +32,7 @@ import {
   seedIfEmpty,
   dedupeSprints,
   setSprintNote,
+  setSprintArchived,
   recomputeAllDates,
   moveUnfinishedToNextSprint,
   logEvent,
@@ -62,6 +66,9 @@ import {
   sprintEndForStart,
   todayLocalISO,
   MON,
+  latestActiveSprint,
+  nextSprintNumber,
+  sprintToSelect,
 } from './lib'
 
 const CURRENT_PROJECT_KEY = 'plan-up:currentProjectId'
@@ -128,8 +135,14 @@ function App() {
   // Collapsible sidebar sections — persisted per section (design-system §6.2).
   const SPRINTS_COLLAPSED_KEY = 'plan-up:sidebarSprintsCollapsed'
   const COLLS_COLLAPSED_KEY = 'plan-up:sidebarCollectionsCollapsed'
+  const ARCHIVED_COLLAPSED_KEY = 'plan-up:sidebarArchivedCollapsed'
   const [sprintsCollapsed, setSprintsCollapsed] = useState(
     () => safeStorage.get(SPRINTS_COLLAPSED_KEY) === '1'
+  )
+  // Archived sub-section starts collapsed (default '1' when unset) — see
+  // design-docs/sprint-archive.md.
+  const [archivedCollapsed, setArchivedCollapsed] = useState(
+    () => safeStorage.get(ARCHIVED_COLLAPSED_KEY) !== '0'
   )
   const [collectionsCollapsed, setCollectionsCollapsed] = useState(
     () => safeStorage.get(COLLS_COLLAPSED_KEY) === '1'
@@ -142,6 +155,11 @@ function App() {
   const toggleCollectionsCollapsed = () =>
     setCollectionsCollapsed((p) => {
       safeStorage.set(COLLS_COLLAPSED_KEY, p ? '0' : '1')
+      return !p
+    })
+  const toggleArchivedCollapsed = () =>
+    setArchivedCollapsed((p) => {
+      safeStorage.set(ARCHIVED_COLLAPSED_KEY, p ? '0' : '1')
       return !p
     })
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -299,7 +317,8 @@ function App() {
       return
     }
     if (!currentSprintId || !sprints.some((s) => s.id === currentSprintId)) {
-      setCurrentSprintId(sprints[sprints.length - 1].id)
+      // Prefer the latest non-archived sprint; never land on a blank view.
+      setCurrentSprintId(sprintToSelect(sprints))
     }
   }, [sprints, currentSprintId])
 
@@ -457,7 +476,10 @@ function App() {
   const nextSprint = useMemo(() => {
     if (!sprints || !currentSprint) return null
     const idx = sprints.findIndex((s) => s.id === currentSprint.id)
-    return idx >= 0 && idx < sprints.length - 1 ? sprints[idx + 1] : null
+    if (idx < 0) return null
+    // Rollover target = the next NON-archived sprint (must match
+    // moveUnfinishedToNextSprint in db.ts). See sprint-archive.md.
+    return sprints.slice(idx + 1).find((s) => s.archivedAt == null) ?? null
   }, [sprints, currentSprint])
   // Unfinished tasks = the exact set that rolls over (matches
   // moveUnfinishedToNextSprint). Sorted by sequence for a stable preview list.
@@ -482,6 +504,113 @@ function App() {
     if (result.targetSprintId) {
       setCurrentSprintId(result.targetSprintId)
     }
+  }
+
+  // Archive splits the sprint list into the active flow + a quiet "Archived"
+  // section. See design-docs/sprint-archive.md.
+  const activeSprints = useMemo(
+    () => (sprints ?? []).filter((s) => s.archivedAt == null),
+    [sprints]
+  )
+  const archivedSprints = useMemo(
+    () => (sprints ?? []).filter((s) => s.archivedAt != null),
+    [sprints]
+  )
+  const onArchiveToggle = async (sprintId: string, archived: boolean) => {
+    await setSprintArchived(sprintId, archived)
+    // Archiving the current sprint hands off to the latest active one (never a
+    // blank view) — useLiveQuery won't re-select since the row still exists.
+    if (archived && sprintId === currentSprintId) {
+      const after = (sprints ?? []).map((s) =>
+        s.id === sprintId ? { ...s, archivedAt: Date.now() } : s
+      )
+      setCurrentSprintId(sprintToSelect(after))
+    }
+    if (archived) setArchivedCollapsed(false) // reveal where it went
+  }
+
+  // One renderer for both the active list and the Archived section. Archived
+  // rows are muted, carry an "archived {date}" caption, and flip the hover
+  // action to Unarchive. The action is an absolute sibling (not nested in the
+  // row <button>, which would be invalid HTML).
+  const renderSprintRow = (s: Sprint, archived: boolean) => {
+    const isActive = selKind === 'sprint' && s.id === currentSprintId
+    const c = sprintTaskCounts.get(s.id)
+    const allDone = c && c.total > 0 && c.done === c.total
+    const aDate = archived && s.archivedAt ? new Date(s.archivedAt) : null
+    return (
+      <div key={s.id} className="relative group/row">
+        <button
+          onClick={() => selectSprint(s.id)}
+          className={`w-full text-left flex items-center gap-2.5 px-2.5 py-2 mb-0.5 text-[14px] rounded-lg transition ${
+            isActive ? 'bg-accent text-white' : 'text-ink hover:bg-surface-hover'
+          }`}
+        >
+          <span
+            className={`w-2 h-2 rounded-full shrink-0 ${
+              isActive
+                ? 'bg-white/90'
+                : archived
+                  ? 'bg-ink-faint/50'
+                  : allDone
+                    ? 'bg-status-done'
+                    : 'bg-ink-faint'
+            }`}
+            aria-hidden
+          />
+          <span className="flex-1 min-w-0">
+            <span className="flex items-center gap-1.5 min-w-0">
+              <span
+                className={`flex-1 min-w-0 truncate font-medium ${
+                  archived && !isActive ? 'text-ink-muted' : ''
+                }`}
+              >
+                {s.name}
+              </span>
+              {s.note && (
+                <StickyNote
+                  size={13}
+                  strokeWidth={2}
+                  className={`shrink-0 ${isActive ? 'text-white/70' : 'text-ink-faint'}`}
+                  aria-label="Has note"
+                />
+              )}
+            </span>
+            <span
+              className={`block truncate text-[11.5px] leading-tight mt-0.5 tab-data ${
+                isActive ? 'text-white/80' : 'text-ink-faint'
+              }`}
+            >
+              {formatSprintRange(s.startDate, s.endDate)}
+              {!archived && c && c.total > 0 &&
+                ` · ${c.total} task${c.total === 1 ? '' : 's'}`}
+              {aDate && ` · archived ${MON[aDate.getMonth()]} ${aDate.getDate()}`}
+            </span>
+          </span>
+          <span className="w-5 shrink-0" aria-hidden />
+        </button>
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation()
+            void onArchiveToggle(s.id, !archived)
+          }}
+          title={archived ? 'Unarchive sprint' : 'Archive sprint'}
+          aria-label={archived ? `Unarchive ${s.name}` : `Archive ${s.name}`}
+          className={`absolute right-2.5 top-1/2 -translate-y-1/2 grid place-items-center w-6 h-6 rounded-md opacity-0 group-hover/row:opacity-100 focus:opacity-100 transition ${
+            isActive
+              ? 'text-white/80 hover:bg-white/20'
+              : 'text-ink-faint hover:bg-accent-soft hover:text-accent'
+          }`}
+        >
+          {archived ? (
+            <ArchiveRestore size={14} strokeWidth={1.9} />
+          ) : (
+            <Archive size={14} strokeWidth={1.9} />
+          )}
+        </button>
+      </div>
+    )
   }
 
   const capacity = useMemo(() => {
@@ -604,9 +733,9 @@ function App() {
                   aria-hidden
                 />
                 Sprints
-                {(sprints?.length ?? 0) > 0 && (
+                {activeSprints.length > 0 && (
                   <span className="tabular-nums font-medium text-ink-faint/70">
-                    {sprints?.length}
+                    {activeSprints.length}
                   </span>
                 )}
               </span>
@@ -623,55 +752,44 @@ function App() {
             </div>
             {!sprintsCollapsed && (
             <div className="px-2.5 pb-2">
-              {sprints?.map((s) => {
-                // Only one container highlights at a time — a remembered sprint
-                // must not stay lit while a collection is selected (and vice versa).
-                const isActive = selKind === 'sprint' && s.id === currentSprintId
-                const c = sprintTaskCounts.get(s.id)
-                const allDone = c && c.total > 0 && c.done === c.total
-                return (
-                  <button
-                    key={s.id}
-                    onClick={() => selectSprint(s.id)}
-                    className={`w-full text-left flex items-center gap-2.5 px-2.5 py-2 mb-0.5 text-[14px] rounded-lg transition ${
-                      isActive
-                        ? 'bg-accent text-white'
-                        : 'text-ink hover:bg-surface-hover'
-                    }`}
-                  >
-                    <span
-                      className={`w-2 h-2 rounded-full shrink-0 ${
-                        isActive ? 'bg-white/90' : allDone ? 'bg-status-done' : 'bg-ink-faint'
-                      }`}
-                      aria-hidden
-                    />
-                    <span className="flex-1 min-w-0">
-                      <span className="flex items-center gap-1.5 min-w-0">
-                        <span className="flex-1 min-w-0 truncate font-medium">{s.name}</span>
-                        {s.note && (
-                          <StickyNote
-                            size={13}
-                            strokeWidth={2}
-                            className={`shrink-0 ${isActive ? 'text-white/70' : 'text-ink-faint'}`}
-                            aria-label="Has note"
-                          />
-                        )}
-                      </span>
-                      <span className={`block truncate text-[11.5px] leading-tight mt-0.5 tab-data ${isActive ? 'text-white/80' : 'text-ink-faint'}`}>
-                        {formatSprintRange(s.startDate, s.endDate)}
-                        {c && c.total > 0 &&
-                          ` · ${c.total} task${c.total === 1 ? '' : 's'}`}
-                      </span>
-                    </span>
-                  </button>
-                )
-              })}
+              {activeSprints.map((s) => renderSprintRow(s, false))}
               {sprints && sprints.length === 0 && (
                 <div className="px-3 py-3 text-[13px] text-ink-faint italic">
                   No sprints yet
                 </div>
               )}
+              {sprints && sprints.length > 0 && activeSprints.length === 0 && (
+                <div className="px-3 py-3 text-[13px] text-ink-faint italic">
+                  All sprints archived
+                </div>
+              )}
             </div>
+            )}
+            {/* Archived (N) — collapsible, hidden when empty. sprint-archive.md */}
+            {archivedSprints.length > 0 && (
+              <>
+                <div
+                  onClick={toggleArchivedCollapsed}
+                  role="button"
+                  aria-expanded={!archivedCollapsed}
+                  className="flex items-center gap-1.5 px-[18px] pt-1 pb-1.5 cursor-pointer select-none text-[12px] font-semibold text-ink-faint"
+                >
+                  {archivedCollapsed ? (
+                    <ChevronRight size={12} className="shrink-0" aria-hidden />
+                  ) : (
+                    <ChevronDown size={12} className="shrink-0" aria-hidden />
+                  )}
+                  Archived
+                  <span className="tabular-nums font-medium text-ink-faint/70">
+                    ({archivedSprints.length})
+                  </span>
+                </div>
+                {!archivedCollapsed && (
+                  <div className="px-2.5 pb-2">
+                    {archivedSprints.map((s) => renderSprintRow(s, true))}
+                  </div>
+                )}
+              </>
             )}
             <div
               onClick={toggleCollectionsCollapsed}
@@ -1056,10 +1174,8 @@ function App() {
       {showNewSprint && currentProjectId && (
         <NewSprintDialog
           projectId={currentProjectId}
-          lastSprint={
-            sprints && sprints.length > 0 ? sprints[sprints.length - 1] : null
-          }
-          sprintCount={sprints?.length ?? 0}
+          lastSprint={latestActiveSprint(sprints ?? [])}
+          nextNumber={nextSprintNumber(sprints ?? [])}
           onClose={() => setShowNewSprint(false)}
           onCreate={(s) => {
             setCurrentSprintId(s.id)
@@ -1446,13 +1562,15 @@ function MondayStrip({
 function NewSprintDialog({
   projectId,
   lastSprint,
-  sprintCount,
+  nextNumber,
   onClose,
   onCreate,
 }: {
   projectId: string
+  /** Latest non-archived sprint — drives the back-to-back date default. */
   lastSprint: Sprint | null
-  sprintCount: number
+  /** Next `Sprint N` number (computed excluding archived collisions). */
+  nextNumber: number
   onClose: () => void
   onCreate: (s: Sprint) => void
 }) {
@@ -1468,14 +1586,7 @@ function NewSprintDialog({
       lastSprint?.endDate ?? null,
       todayStr
     )
-    // Increment "Sprint N" from the last sprint name when possible;
-    // otherwise count up by sprint total.
-    let nextNum = sprintCount + 1
-    if (lastSprint) {
-      const m = lastSprint.name.match(/Sprint\s+(\d+)/i)
-      if (m) nextNum = parseInt(m[1], 10) + 1
-    }
-    return { name: `Sprint ${nextNum}`, startDate, endDate }
+    return { name: `Sprint ${nextNumber}`, startDate, endDate }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 

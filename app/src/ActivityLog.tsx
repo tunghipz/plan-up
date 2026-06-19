@@ -14,6 +14,8 @@ import {
   RotateCcw,
   Rocket,
   Pencil,
+  Archive,
+  ArchiveRestore,
   type LucideIcon,
 } from 'lucide-react'
 import { sprintEvents, type ActivityEvent, type LoggableField, type Member, type Task } from './db'
@@ -43,6 +45,8 @@ function visuals(e: ActivityEvent): { Icon: LucideIcon; color: string } {
   if (e.kind === 'created') return { Icon: FilePlus2, color: 'var(--color-accent)' }
   if (e.kind === 'rolled_over') return { Icon: RotateCcw, color: 'var(--color-ink-muted)' }
   if (e.kind === 'sprint_started') return { Icon: Rocket, color: 'var(--color-accent)' }
+  if (e.kind === 'sprint_archived') return { Icon: Archive, color: 'var(--color-ink-muted)' }
+  if (e.kind === 'sprint_unarchived') return { Icon: ArchiveRestore, color: 'var(--color-ink-muted)' }
   // kind === 'edit'
   switch (e.field) {
     case 'status':
@@ -105,6 +109,10 @@ function ChangePhrase({ e }: { e: ActivityEvent }) {
   if (e.kind === 'created') return <span className="font-medium text-ink">Created</span>
   if (e.kind === 'sprint_started')
     return <span className="font-medium text-ink">Sprint started</span>
+  if (e.kind === 'sprint_archived')
+    return <span className="font-medium text-ink">Archived</span>
+  if (e.kind === 'sprint_unarchived')
+    return <span className="font-medium text-ink">Unarchived</span>
   if (e.kind === 'rolled_over')
     return (
       <span>

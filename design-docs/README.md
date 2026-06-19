@@ -54,6 +54,7 @@ Non-obvious behaviors, defaults, persistence keys.
 | [project-member-settings.md](./project-member-settings.md) | Gear → settings page: edit project info (name/description/color) + members + delete |
 | [sprints.md](./sprints.md) | Sprint CRUD, biweekly defaults, per-sprint sequence, locked `Sprint N` name + optional goal note |
 | [sprint-cadence.md](./sprint-cadence.md) | Sprint start locked to Monday + fixed 2-week duration (Monday-strip picker, derived read-only end) |
+| [sprint-archive.md](./sprint-archive.md) | Reversible archive to declutter the sprint list (collapsible `Archived (N)` section, hover action, out of active flow) |
 | [collections.md](./collections.md) | Task ngoài sprint — collection tự đặt tên, nhiều bảng (sections), view List (giống sprint, tap-to-edit) + Calendar liền mạch, status do user tự tạo per-collection |
 | [sprint-rollover.md](./sprint-rollover.md) | Move unfinished tasks to next sprint — preview popover |
 | [members-and-days-off.md](./members-and-days-off.md) | Member labels, colors, off-days |

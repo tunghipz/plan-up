@@ -63,6 +63,11 @@ newly created sprints are guaranteed `Sprint N`. (Decision 2026-06-12.)
 a sprint. Moving a task across sprints renumbers it — see
 [sprint-rollover.md](./sprint-rollover.md).
 
+## Archiving
+Sprints can be **archived** (reversible hide) to declutter a long list — they drop into a
+collapsible `Archived (N)` section and leave the active flow (new-sprint default, rollover
+target, auto-select, `Sprint N` numbering). Spec: [sprint-archive.md](./sprint-archive.md).
+
 ## Rules & edge cases
 - Reopening `NewSprintDialog` without creating keeps the same suggestion (memoized).
 - Current sprint isn't persisted across sessions (defaults to the latest by `startDate`).

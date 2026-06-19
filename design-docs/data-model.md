@@ -27,10 +27,14 @@ Six IndexedDB tables (Dexie database name **`plan-up`**): `projects`, `members`,
 
 ### `Sprint` (`db.ts:37`)
 `id` · `projectId` · `name` · `startDate` · `endDate` (both `yyyy-mm-dd`) · `note?` (string)
+· `archivedAt?` (number)
 - `name` is **automatic and locked** (`Sprint N`) — no rename UI; see [sprints.md](./sprints.md).
 - `note?` is an **optional, non-indexed** sprint-goal string edited via the header goal
   banner. Like `Project.description` it needs **no Dexie version bump**; rows without it
   read as empty.
+- `archivedAt?` is an **optional, non-indexed** epoch-ms timestamp (absent = active) —
+  again **no Dexie version bump**. Set/cleared via `setSprintArchived`; archived sprints
+  leave the active flow. See [sprint-archive.md](./sprint-archive.md).
 
 ### `Task` (`db.ts:45`)
 `id` · `projectId` · `sequence` (number, per-sprint) · `title` · `assigneeId` (`string|null`) ·

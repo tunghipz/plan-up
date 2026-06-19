@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { Status, Priority, LoggableField } from './db'
+import type { Status, Priority, LoggableField, Sprint } from './db'
 
 const MS = 86400_000
 
@@ -204,6 +204,39 @@ export function upcomingMondays(fromMonday: string, n: number): string[] {
     d.setUTCDate(d.getUTCDate() + 7)
   }
   return out
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Sprint archive — active-flow helpers (see design-docs/sprint-archive.md).
+// `sprints` is assumed in startDate order (how the app queries them). Archived
+// sprints (`archivedAt != null`) are excluded from the active flow.
+// ──────────────────────────────────────────────────────────────────────────
+
+/** The last non-archived sprint by order (for back-to-back defaults), or null. */
+export function latestActiveSprint(sprints: Sprint[]): Sprint | null {
+  for (let i = sprints.length - 1; i >= 0; i--) {
+    if (sprints[i].archivedAt == null) return sprints[i]
+  }
+  return null
+}
+
+/** Next `Sprint N` number — past the highest number across ALL sprints (active
+ * or archived) so a number is never reused. Falls back to count+1 if no name
+ * matches `Sprint <n>`. */
+export function nextSprintNumber(sprints: Sprint[]): number {
+  let max = 0
+  for (const s of sprints) {
+    const m = s.name.match(/Sprint\s+(\d+)/i)
+    if (m) max = Math.max(max, parseInt(m[1], 10))
+  }
+  return max > 0 ? max + 1 : sprints.length + 1
+}
+
+/** Which sprint to auto-select: the latest active one, else the latest overall
+ * (never blank when sprints exist), else null. Returns the sprint id. */
+export function sprintToSelect(sprints: Sprint[]): string | null {
+  if (sprints.length === 0) return null
+  return (latestActiveSprint(sprints) ?? sprints[sprints.length - 1]).id
 }
 
 // ──────────────────────────────────────────────────────────────────────────

@@ -53,7 +53,13 @@ export interface ChangeLogEntry {
  * - `rolled_over` — a task carried over from a previous sprint (`from` = its name)
  * - `sprint_started` — the sprint was created (task-less, sprint-level)
  */
-export type ActivityKind = 'created' | 'edit' | 'rolled_over' | 'sprint_started'
+export type ActivityKind =
+  | 'created'
+  | 'edit'
+  | 'rolled_over'
+  | 'sprint_started'
+  | 'sprint_archived'
+  | 'sprint_unarchived'
 
 /**
  * One row in the append-only, uncapped sprint activity store — the app's sole
@@ -134,6 +140,9 @@ export interface Sprint {
   /** Optional, non-indexed sprint-goal note (edited via header goal banner).
    * Needs no Dexie version bump — rows without it read as empty. */
   note?: string
+  /** Epoch ms when archived; absent = active. Optional, non-indexed → no Dexie
+   * version bump (same pattern as `note`). See design-docs/sprint-archive.md. */
+  archivedAt?: number
 }
 
 export interface Section {
@@ -607,6 +616,36 @@ export async function setSprintNote(
 ): Promise<void> {
   const trimmed = note.trim()
   await db.sprints.update(sprintId, { note: trimmed || undefined })
+}
+
+/**
+ * Archive (or unarchive) a sprint — a reversible hide, not a delete. Sets/clears
+ * `archivedAt` and records a sprint-level activity event. Archived sprints leave
+ * the active flow (auto-select, new-sprint default, rollover target). See
+ * design-docs/sprint-archive.md.
+ */
+export async function setSprintArchived(
+  sprintId: string,
+  archived: boolean
+): Promise<void> {
+  return db.transaction('rw', db.sprints, db.events, async () => {
+    const sprint = await db.sprints.get(sprintId)
+    if (!sprint) return
+    await db.sprints.update(sprintId, {
+      archivedAt: archived ? Date.now() : undefined,
+    })
+    await logEvent({
+      projectId: sprint.projectId,
+      sprintId,
+      taskId: null,
+      taskSeq: null,
+      taskTitle: null,
+      kind: archived ? 'sprint_archived' : 'sprint_unarchived',
+      from: null,
+      to: null,
+      ts: Date.now(),
+    })
+  })
 }
 
 /** Next sequence number within a sprint. Sequences are never reused. */
@@ -1296,7 +1335,9 @@ export async function moveUnfinishedToNextSprint(
     const sourceIdx = sprints.findIndex((s) => s.id === sourceSprintId)
     if (sourceIdx === -1) return { movedCount: 0, targetSprintId: null }
     const source = sprints[sourceIdx]
-    const target = sprints[sourceIdx + 1]
+    // Target = the next NON-archived sprint (archived sprints are out of the
+    // active flow — never rollover targets). See design-docs/sprint-archive.md.
+    const target = sprints.slice(sourceIdx + 1).find((s) => s.archivedAt == null)
     if (!target) return { movedCount: 0, targetSprintId: null }
 
     const unfinished = await db.tasks

@@ -289,3 +289,17 @@ h1, h2, h3, .display-tight {
   line-height: 1;
   animation: prereq-arrow-in 0.2s ease var(--d, 0s) both;
 }
+
+/* Sprint state glyph — calm "live" pulse on the in-progress halo (sprints.md). */
+@keyframes sprint-live {
+  0%, 100% { opacity: 0.16; transform: scale(1); }
+  50% { opacity: 0.34; transform: scale(1.12); }
+}
+.animate-sprint-live {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: sprint-live 2s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-sprint-live { animation: none; opacity: 0.18; }
+}

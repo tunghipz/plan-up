@@ -22,6 +22,8 @@ import {
   History,
   Archive,
   ArchiveRestore,
+  Repeat,
+  Layers,
 } from 'lucide-react'
 import {
   db,
@@ -65,6 +67,7 @@ import {
   snapToMonday,
   sprintEndForStart,
   todayLocalISO,
+  sprintTemporalState,
   MON,
   latestActiveSprint,
   nextSprintNumber,
@@ -75,6 +78,54 @@ const CURRENT_PROJECT_KEY = 'plan-up:currentProjectId'
 const VIEW_KEY = 'plan-up:view'
 type ViewMode = 'list' | 'board' | 'timeline'
 type CollectionViewMode = 'list' | 'calendar'
+
+// Leading row glyph encoding a sprint's temporal state (upcoming / in-progress / past),
+// using only existing status tokens — no new colour. `onAccent` = rendered on the
+// selected accent-filled row, so shapes switch to white. See sprints.md (State glyph).
+function SprintStateDot({
+  state,
+  done,
+  onAccent,
+}: {
+  state: 'upcoming' | 'progress' | 'past'
+  done: boolean
+  onAccent: boolean
+}) {
+  // currentColor drives every stroke/fill; the halo is the same colour at low opacity.
+  const tone = onAccent
+    ? 'text-white'
+    : state === 'progress'
+      ? 'text-accent'
+      : state === 'past' && done
+        ? 'text-status-done'
+        : 'text-status-todo'
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden
+      className={`shrink-0 ${tone}`}
+    >
+      {state === 'upcoming' && (
+        // hollow ring — not started
+        <circle cx="12" cy="12" r="5" stroke="currentColor" strokeWidth="2" />
+      )}
+      {state === 'progress' && (
+        <>
+          {/* live: soft halo + solid dot, with a calm pulse */}
+          <circle className="animate-sprint-live" cx="12" cy="12" r="9" fill="currentColor" opacity="0.18" />
+          <circle cx="12" cy="12" r="4.6" fill="currentColor" />
+        </>
+      )}
+      {state === 'past' && (
+        // solid muted dot (green via `tone` when fully done)
+        <circle cx="12" cy="12" r="5" fill="currentColor" />
+      )}
+    </svg>
+  )
+}
 
 function App() {
   const [seedError, setSeedError] = useState<string | null>(null)
@@ -529,6 +580,8 @@ function App() {
     if (archived) setArchivedCollapsed(false) // reveal where it went
   }
 
+  // Computed once per render, shared by every row's state glyph (not per-row).
+  const today = todayLocalISO()
   // One renderer for both the active list and the Archived section. Archived
   // rows are muted, carry an "archived {date}" caption, and flip the hover
   // action to Unarchive. The action is an absolute sibling (not nested in the
@@ -536,7 +589,8 @@ function App() {
   const renderSprintRow = (s: Sprint, archived: boolean) => {
     const isActive = selKind === 'sprint' && s.id === currentSprintId
     const c = sprintTaskCounts.get(s.id)
-    const allDone = c && c.total > 0 && c.done === c.total
+    const allDone = !!(c && c.total > 0 && c.done === c.total)
+    const state = sprintTemporalState(s.startDate, s.endDate, today)
     const aDate = archived && s.archivedAt ? new Date(s.archivedAt) : null
     return (
       <div key={s.id} className="relative group/row">
@@ -546,18 +600,7 @@ function App() {
             isActive ? 'bg-accent text-white' : 'text-ink hover:bg-surface-hover'
           }`}
         >
-          <span
-            className={`w-2 h-2 rounded-full shrink-0 ${
-              isActive
-                ? 'bg-white/90'
-                : archived
-                  ? 'bg-ink-faint/50'
-                  : allDone
-                    ? 'bg-status-done'
-                    : 'bg-ink-faint'
-            }`}
-            aria-hidden
-          />
+          <SprintStateDot state={state} done={allDone} onAccent={isActive} />
           <span className="flex-1 min-w-0">
             {/* Note glyph hugs the title text (not the row edge) so it never
                collides with the hover archive action. See sprint-archive.md. */}
@@ -726,17 +769,18 @@ function App() {
               onClick={toggleSprintsCollapsed}
               role="button"
               aria-expanded={!sprintsCollapsed}
-              className="flex items-center justify-between px-[18px] pt-2 pb-1.5 cursor-pointer select-none"
+              className="flex items-center justify-between px-[18px] pt-3 pb-1.5 cursor-pointer select-none"
             >
-              <span className="flex items-center gap-1.5 text-[12px] font-semibold text-ink-faint">
+              <span className="flex items-center gap-2 text-[15.5px] font-semibold tracking-[-0.01em] text-ink-muted">
                 <ChevronDown
-                  size={12}
-                  className={`shrink-0 transition-transform ${sprintsCollapsed ? '-rotate-90' : ''}`}
+                  size={13}
+                  className={`shrink-0 text-ink-faint transition-transform ${sprintsCollapsed ? '-rotate-90' : ''}`}
                   aria-hidden
                 />
+                <Repeat size={16} className="shrink-0 text-ink-faint" aria-hidden />
                 Sprints
                 {activeSprints.length > 0 && (
-                  <span className="tabular-nums font-medium text-ink-faint/70">
+                  <span className="text-[13px] tabular-nums font-medium text-ink-faint/70">
                     {activeSprints.length}
                   </span>
                 )}
@@ -753,7 +797,7 @@ function App() {
               </button>
             </div>
             {!sprintsCollapsed && (
-            <div className="px-2.5 pb-2">
+            <div className="pl-[26px] pr-2.5 pb-2">
               {activeSprints.map((s) => renderSprintRow(s, false))}
               {sprints && sprints.length === 0 && (
                 <div className="px-3 py-3 text-[13px] text-ink-faint italic">
@@ -765,33 +809,35 @@ function App() {
                   All sprints archived
                 </div>
               )}
-            </div>
-            )}
-            {/* Archived (N) — collapsible, hidden when empty. sprint-archive.md */}
-            {archivedSprints.length > 0 && (
-              <>
-                <div
-                  onClick={toggleArchivedCollapsed}
-                  role="button"
-                  aria-expanded={!archivedCollapsed}
-                  className="flex items-center gap-1.5 px-[18px] pt-1 pb-1.5 cursor-pointer select-none text-[12px] font-semibold text-ink-faint"
-                >
-                  {archivedCollapsed ? (
-                    <ChevronRight size={12} className="shrink-0" aria-hidden />
-                  ) : (
-                    <ChevronDown size={12} className="shrink-0" aria-hidden />
+              {/* Archived sprints — an inline "Show N archived" disclosure that
+                 lives INSIDE the Sprints group (not a peer header), so the panel
+                 reads as one Sprints group + Collections as its peer. The rows
+                 reveal indented directly below. See sprint-archive.md (Hierarchy). */}
+              {archivedSprints.length > 0 && (
+                <>
+                  <button
+                    type="button"
+                    onClick={toggleArchivedCollapsed}
+                    aria-expanded={!archivedCollapsed}
+                    className="w-full flex items-center gap-1.5 mt-0.5 px-2.5 py-1.5 rounded-lg text-[12.5px] text-ink-faint hover:bg-surface-hover hover:text-ink-muted transition cursor-pointer select-none"
+                  >
+                    {archivedCollapsed ? (
+                      <ChevronRight size={11} className="shrink-0" aria-hidden />
+                    ) : (
+                      <ChevronDown size={11} className="shrink-0" aria-hidden />
+                    )}
+                    {archivedCollapsed
+                      ? `Show ${archivedSprints.length} archived`
+                      : 'Hide archived'}
+                  </button>
+                  {!archivedCollapsed && (
+                    <div className="pl-3">
+                      {archivedSprints.map((s) => renderSprintRow(s, true))}
+                    </div>
                   )}
-                  Archived
-                  <span className="tabular-nums font-medium text-ink-faint/70">
-                    ({archivedSprints.length})
-                  </span>
-                </div>
-                {!archivedCollapsed && (
-                  <div className="px-2.5 pb-2">
-                    {archivedSprints.map((s) => renderSprintRow(s, true))}
-                  </div>
-                )}
-              </>
+                </>
+              )}
+            </div>
             )}
             <div
               onClick={toggleCollectionsCollapsed}
@@ -799,15 +845,16 @@ function App() {
               aria-expanded={!collectionsCollapsed}
               className="flex items-center justify-between px-[18px] pt-3 pb-1.5 cursor-pointer select-none"
             >
-              <span className="flex items-center gap-1.5 text-[12px] font-semibold text-ink-faint">
+              <span className="flex items-center gap-2 text-[15.5px] font-semibold tracking-[-0.01em] text-ink-muted">
                 <ChevronDown
-                  size={12}
-                  className={`shrink-0 transition-transform ${collectionsCollapsed ? '-rotate-90' : ''}`}
+                  size={13}
+                  className={`shrink-0 text-ink-faint transition-transform ${collectionsCollapsed ? '-rotate-90' : ''}`}
                   aria-hidden
                 />
+                <Layers size={16} className="shrink-0 text-ink-faint" aria-hidden />
                 Collections
                 {(collections?.length ?? 0) > 0 && (
-                  <span className="tabular-nums font-medium text-ink-faint/70">
+                  <span className="text-[13px] tabular-nums font-medium text-ink-faint/70">
                     {collections?.length}
                   </span>
                 )}
@@ -824,7 +871,7 @@ function App() {
               </button>
             </div>
             {!collectionsCollapsed && (
-            <div className="px-2.5 pb-2">
+            <div className="pl-[26px] pr-2.5 pb-2">
               {collections?.map((c) => {
                 const isActive = selKind === 'collection' && c.id === currentCollectionId
                 return (

@@ -95,7 +95,8 @@ Avatar = **vòng tròn đặc** màu trên, chữ trắng first-letter.
 - **Kích thước**:
   - Large title (project name): `text-[21px]` (≈21px) `font-bold tracking-[-0.022em]`
   - Sprint title (header): `text-[18px] font-bold tracking-[-0.018em]`
-  - Group/section heading: `text-[15.5px] font-semibold tracking-[-0.01em]`
+  - Sidebar section title (Sprints / Collections): `text-[15.5px] font-semibold tracking-[-0.01em] text-ink-muted` — a **navigation title**, deliberately bigger than the `Sprint N` rows it owns, with the list indented (`pl-[26px]`) beneath. Caret + type icon stay `text-ink-faint`. Scale reads project 21 › section 15.5 › row 14. See `app-shell-and-navigation.md`.
+  - Group/section heading (inside content cards): `text-[15.5px] font-semibold tracking-[-0.01em]`
   - Body / task title: `text-[14.5px]` `tracking-[-0.006em]`
   - Metadata (date, effort, count): `text-[13px]`
   - Micro label / column header: `text-[11px] font-semibold` (KHÔNG uppercase tracked kiểu mono nữa — Apple dùng label thường, nhỏ, xám)

@@ -5,6 +5,7 @@ import {
   defaultSprintDates,
   upcomingMondays,
   sprintEndForStart,
+  sprintTemporalState,
 } from './lib'
 
 // All dates ISO `yyyy-mm-dd`. June 2026 Mondays: 1, 8, 15, 22, 29.
@@ -107,5 +108,22 @@ describe('upcomingMondays', () => {
   })
   it('crosses a month boundary', () => {
     expect(upcomingMondays('2026-06-29', 2)).toEqual(['2026-06-29', '2026-07-06'])
+  })
+})
+
+describe('sprintTemporalState', () => {
+  // Sprint window Jun 8 (Mon) → Jun 21 (Sun), inclusive both ends.
+  const start = '2026-06-08'
+  const end = '2026-06-21'
+  it('is upcoming before the start', () => {
+    expect(sprintTemporalState(start, end, '2026-06-07')).toBe('upcoming')
+  })
+  it('is in progress on the start day, mid-window, and the end day', () => {
+    expect(sprintTemporalState(start, end, '2026-06-08')).toBe('progress')
+    expect(sprintTemporalState(start, end, '2026-06-15')).toBe('progress')
+    expect(sprintTemporalState(start, end, '2026-06-21')).toBe('progress')
+  })
+  it('is past the day after the end', () => {
+    expect(sprintTemporalState(start, end, '2026-06-22')).toBe('past')
   })
 })

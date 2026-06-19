@@ -154,6 +154,21 @@ export function sprintEndForStart(startDate: string): string {
   return e.toISOString().slice(0, 10)
 }
 
+export type SprintTemporalState = 'upcoming' | 'progress' | 'past'
+
+/** A sprint's state relative to `today` (a local `yyyy-mm-dd`), derived from its locked
+ * window. ISO date strings compare chronologically, so plain `<`/`>` is correct. The
+ * window is inclusive on both ends (Mon..Sun). Drives the row state glyph — see sprints.md. */
+export function sprintTemporalState(
+  startDate: string,
+  endDate: string,
+  today: string = todayLocalISO(),
+): SprintTemporalState {
+  if (today < startDate) return 'upcoming'
+  if (today > endDate) return 'past'
+  return 'progress'
+}
+
 /** Snap a `yyyy-mm-dd` back to the Monday of its ISO week (Monday unchanged). */
 export function snapToMonday(dateStr: string): string {
   const d = new Date(dateStr + 'T00:00:00Z')

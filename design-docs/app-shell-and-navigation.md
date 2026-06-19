@@ -1,7 +1,9 @@
 # App shell & navigation
 
 **Status:** Implemented
-**Last updated:** 2026-06-16 (project tiles: aria-label + aria-current for screen readers)
+**Last updated:** 2026-06-19 (section headers promoted to **titles** — 15.5px semibold
+ink-muted, lists indented beneath — plus the muted type icon: Sprints = `Repeat`,
+Collections = `Layers`)
 **Code:** `app/src/App.tsx`
 
 ## Purpose
@@ -45,6 +47,21 @@ computed from the current sprint's **leaf** tasks (parents excluded — see task
   **collapsible row** (click toggles; `ChevronDown` rotates `-90°` when collapsed; a muted
   count shows next to the label when > 0). The `+` button `stopPropagation`s so it never
   toggles. Collapse state persists per section in `localStorage`.
+  - **Type icon (2026-06-19):** between the caret and the label each header carries a muted
+    `16px` lucide icon marking it as a *kind* of container — **Sprints = `Repeat`** (the
+    Monday-locked biweekly cadence), **Collections = `Layers`** (a stack of standing groups).
+    Two distinct silhouettes (no generic folder) so the peer sections separate at a glance.
+    Kept `text-ink-faint`, **never accent** — wayfinding, not decoration (design-system §2.1).
+    These are the only per-section icons; row-level icons stay reserved for state/actions to
+    avoid icon slop.
+  - **Title weight + indent (2026-06-19):** the section labels are **titles**, not the old
+    faint tags — `text-[15.5px] font-semibold tracking-[-0.01em] text-ink-muted` (caret + type
+    icon stay `text-ink-faint`; the count beside is `text-[13px]` muted). The lists sit
+    **indented** (`pl-[26px]`) so rows nest beneath their title. This gives a deliberate
+    three-step scale — **project name 21 › section title 15.5 › row 14** — that makes hierarchy
+    clear while staying close to the calm macOS section-label idiom (promoted from `ink-faint`
+    to `ink-muted` for heading weight, not full ink). The archived disclosure sits at the list
+    indent; archived rows nest one step deeper (`pl-3`).
 
 - **Sidebar version footer (2026-06-16):** a calm `plan-up · v{version}` line pinned to the
   **bottom** of the resizable sidebar (`mt-auto`, hairline `border-t`, `text-[11px]`

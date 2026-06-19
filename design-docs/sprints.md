@@ -1,9 +1,11 @@
 # Sprints
 
 **Status:** Implemented
-**Last updated:** 2026-06-12
-**Code:** `app/src/App.tsx` (`NewSprintDialog`, `SprintNoteBanner`, sprint panel),
-`app/src/db.ts` (`nextSequence`, `setSprintNote`)
+**Last updated:** 2026-06-19 (sprint state glyph: leading dot now encodes upcoming /
+in-progress / past, replacing the flat dot)
+**Code:** `app/src/App.tsx` (`NewSprintDialog`, `SprintNoteBanner`, sprint panel,
+`SprintStateDot`, `renderSprintRow`), `app/src/db.ts` (`nextSequence`, `setSprintNote`),
+`app/src/lib.ts` (`sprintTemporalState`; tests in `sprint-cadence.test.ts`)
 
 ## Purpose
 A sprint is the time-boxed folder tasks live in. Biweekly by default, with a clean
@@ -19,6 +21,18 @@ context lives in an **optional note** instead.
   task count; a small note glyph appears **trailing at the row's right edge** when the sprint
   has a note — kept off the title so the name stays clean; faint at rest, white/80 on the
   selected accent row).
+- **State glyph (leading dot):** each sprint row's leading glyph encodes its **temporal
+  state** — derived from today vs the sprint's locked window (`sprintTemporalState` in
+  `lib.ts`), not from selection. Three states, using only existing status tokens (no new
+  colour — see design-system §2.3):
+  - **Upcoming** (`today < startDate`) — a **hollow ring**, `--color-status-todo` grey. Not started.
+  - **In progress / đang diễn ra** (`startDate ≤ today ≤ endDate`) — a **filled accent dot
+    inside a soft accent halo** (the one "live" sprint), `--color-accent`.
+  - **Past / đã qua** (`today > endDate`) — a **solid muted dot**, `--color-status-todo` grey;
+    flips to **`--color-status-done` green** when every task is done (`done === total > 0`).
+  - On the **selected** row (accent bg) the same shapes render in white/translucent-white, so
+    state stays legible while the row is highlighted. The glyph is `aria-hidden` (state is
+    conveyed by the date range text too). The "live" halo has a calm 2s pulse.
 - **Name is not editable.** There is no rename affordance anywhere — the header title is
   plain locked text. (Removed the old `SprintNameEditor` inline rename.)
 - **Note (optional):** a sprint-goal line shown in a thin **goal banner** beneath the

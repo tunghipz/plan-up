@@ -116,6 +116,13 @@ const EMOJI: [string, string][] = [
   ['❤️', 'heart love red'], ['💙', 'blue heart'], ['💚', 'green heart'], ['💜', 'purple heart'],
   ['🧡', 'orange heart'], ['💛', 'yellow heart'], ['✨', 'sparkles'], ['✅', 'check done'],
   ['👍', 'thumbsup like'], ['👋', 'wave hello hi'], ['🙌', 'raise celebrate'], ['🤝', 'handshake deal'],
+  // Project / planning oriented — keeps the trimmed project-icon set reachable
+  // by name now that the picker shows only two curated rows (see EmojiPickerRow).
+  ['📅', 'calendar date schedule'], ['📋', 'clipboard list tasks'], ['🗂️', 'folder files archive'],
+  ['🔧', 'wrench fix tool repair'], ['🐛', 'bug issue defect'], ['💬', 'chat comment message'],
+  ['📈', 'chart growth trending up'], ['📊', 'chart bar data stats'], ['📦', 'box package ship release'],
+  ['🧪', 'lab test experiment'], ['🌐', 'globe web world internet'], ['🔍', 'search find magnify'],
+  ['⏱️', 'timer stopwatch deadline'], ['📝', 'memo note write doc'], ['🎓', 'graduate learn education'],
 ]
 
 /** Default grid shown when the search box is empty. */
@@ -475,17 +482,20 @@ export function ColorSwatchRow({
   )
 }
 
-/** Curated emoji for a project icon (see project-icon-emoji.md). The text input
- *  beside the grid covers everything else via the OS picker (⌃⌘Space on macOS). */
+/** Curated emoji for a project icon (see project-icon-emoji.md) — the 15 most
+ *  project-relevant glyphs, sized to exactly two rows alongside the leading "Aa"
+ *  chip (8 cols × 2). Everything else is reached through the search box, which
+ *  filters the shared `EMOJI` keyword set (and surfaces any pasted emoji). */
 export const PROJECT_ICON_EMOJIS = [
-  '📅', '✅', '🚀', '🎯', '📌', '💡', '📋', '🗂️',
-  '🧩', '🔧', '🐛', '💬', '📈', '🔥', '⭐', '🎨',
-  '🛠️', '📦', '🧪', '🌐', '🔍', '⏱️', '📝', '🎓',
+  '🚀', '🎯', '✅', '📌', '📋', '💡', '🔥', '⭐',
+  '📈', '🐛', '🔧', '🎨', '🧩', '📦', '🗂️',
 ]
 
 /** Inline emoji picker mirroring ColorSwatchRow's `{ value, onPick }` shape.
- *  A leading "Aa" chip clears the emoji (→ first-letter fallback). The input
- *  accepts any typed/pasted emoji, clamped to one grapheme. `undefined` = unset. */
+ *  A search box sits on top: empty → two curated rows of project emoji (with a
+ *  leading "Aa" chip that clears the emoji → first-letter fallback); non-empty →
+ *  results from the shared `EMOJI` keyword set, which also surfaces any pasted
+ *  emoji as the first hit (full coverage, no dependency). `undefined` = unset. */
 export function EmojiPickerRow({
   value,
   onPick,
@@ -493,61 +503,68 @@ export function EmojiPickerRow({
   value: string | undefined
   onPick: (icon: string | undefined) => void
 }) {
-  const isCustom = !!value && !PROJECT_ICON_EMOJIS.includes(value)
+  const [query, setQuery] = useState('')
+  const results = query.trim() ? emojiResultsFor(query) : null
+
+  const cell = (e: string) => {
+    const active = value === e
+    return (
+      <button
+        key={e}
+        type="button"
+        onClick={() => onPick(e)}
+        aria-label={`Icon ${e}`}
+        aria-pressed={active}
+        title={e}
+        className={`w-8 h-8 rounded-[8px] grid place-items-center text-[18px] leading-none transition ${
+          active
+            ? 'bg-surface ring-2 ring-accent'
+            : 'bg-canvas hover:bg-surface-hover hover:scale-110'
+        }`}
+      >
+        {e}
+      </button>
+    )
+  }
+
   return (
-    <div className="flex items-start gap-3">
-      <div className="grid grid-cols-8 gap-1.5">
-        <button
-          type="button"
-          onClick={() => onPick(undefined)}
-          aria-label="No emoji — show the first letter"
-          aria-pressed={!value}
-          title="No emoji — show the first letter"
-          className={`w-8 h-8 rounded-[8px] grid place-items-center text-[11px] font-semibold text-ink-muted transition ${
-            !value
-              ? 'bg-surface ring-2 ring-accent'
-              : 'bg-canvas hover:bg-surface-hover'
-          }`}
-        >
-          Aa
-        </button>
-        {PROJECT_ICON_EMOJIS.map((e) => {
-          const active = value === e
-          return (
-            <button
-              key={e}
-              type="button"
-              onClick={() => onPick(e)}
-              aria-label={`Icon ${e}`}
-              aria-pressed={active}
-              title={e}
-              className={`w-8 h-8 rounded-[8px] grid place-items-center text-[18px] leading-none transition ${
-                active
-                  ? 'bg-surface ring-2 ring-accent'
-                  : 'bg-canvas hover:bg-surface-hover hover:scale-110'
-              }`}
-            >
-              {e}
-            </button>
-          )
-        })}
-      </div>
-      <div className="shrink-0">
-        <input
-          value={isCustom ? value : ''}
-          onChange={(e) => onPick(firstGrapheme(e.target.value) || undefined)}
-          maxLength={8}
-          placeholder="🙂"
-          aria-label="Type or paste any emoji"
-          className={`w-12 h-8 text-center text-[18px] leading-none bg-canvas border rounded-[8px] outline-none transition focus:ring-2 focus:ring-accent/40 focus:border-accent ${
-            isCustom ? 'border-accent' : 'border-border'
-          }`}
-        />
-        <div className="text-[10.5px] text-ink-faint mt-1 text-center leading-tight">
-          gõ / dán
-          <br />⌃⌘Space
+    <div className="w-[298px]">
+      <input
+        type="text"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        placeholder="Search emoji (rocket, chart, fire…) or paste one"
+        maxLength={24}
+        aria-label="Search emoji"
+        className="mb-2 w-full text-[13px] bg-canvas border border-border rounded-[8px] px-2.5 py-1.5 outline-none transition focus:ring-2 focus:ring-accent/40 focus:border-accent placeholder:text-ink-faint"
+      />
+      {results ? (
+        results.length > 0 ? (
+          <div className="grid grid-cols-8 gap-1.5">{results.map(cell)}</div>
+        ) : (
+          <div className="py-3 text-center text-[12px] text-ink-faint">
+            No emoji found — try another word.
+          </div>
+        )
+      ) : (
+        <div className="grid grid-cols-8 gap-1.5">
+          <button
+            type="button"
+            onClick={() => onPick(undefined)}
+            aria-label="No emoji — show the first letter"
+            aria-pressed={!value}
+            title="No emoji — show the first letter"
+            className={`w-8 h-8 rounded-[8px] grid place-items-center text-[11px] font-semibold text-ink-muted transition ${
+              !value
+                ? 'bg-surface ring-2 ring-accent'
+                : 'bg-canvas hover:bg-surface-hover'
+            }`}
+          >
+            Aa
+          </button>
+          {PROJECT_ICON_EMOJIS.map(cell)}
         </div>
-      </div>
+      )}
     </div>
   )
 }

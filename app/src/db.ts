@@ -2235,10 +2235,23 @@ export async function importProject(
         await db.projects.add(remapped.project)
         // Link each imported member to a Person in THIS db by normalized name
         // (reuse an existing same-name person, else create) — the bundle's
-        // personId references the source DB. See design-docs/home-dashboard.md.
+        // personId references the source DB. Read existing people ONCE and build
+        // a name→id map, rather than re-scanning the table per member (O(n²)).
+        // New names dedupe within the bundle too. See design-docs/home-dashboard.md.
+        const byName = new Map<string, string>()
+        for (const pp of await db.people.toArray()) byName.set(normalizePersonName(pp.name), pp.id)
+        const newPeople: Person[] = []
         for (const m of remapped.members) {
-          m.personId = await linkOrCreatePerson(m.name)
+          const key = normalizePersonName(m.name)
+          let pid = byName.get(key)
+          if (!pid) {
+            pid = uid()
+            byName.set(key, pid)
+            newPeople.push({ id: pid, name: m.name.trim(), color: colorForName(m.name), createdAt: Date.now() })
+          }
+          m.personId = pid
         }
+        if (newPeople.length) await db.people.bulkAdd(newPeople)
         if (remapped.members.length) await db.members.bulkAdd(remapped.members)
         if (remapped.sprints.length) await db.sprints.bulkAdd(remapped.sprints)
         if (remapped.collections.length)

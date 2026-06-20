@@ -18,6 +18,7 @@ async function clearAll() {
     db.collections.clear(),
     db.tasks.clear(),
     db.events.clear(),
+    db.people.clear(),
   ])
 }
 
@@ -179,6 +180,37 @@ describe('importProject', () => {
     // task ids are globally distinct
     const taskIds = (await db.tasks.toArray()).map((t) => t.id)
     expect(new Set(taskIds).size).toBe(taskIds.length)
+  })
+
+  // Cross-project People: imported members must link to a Person in THIS db
+  // (the bundle's personId references the source db). See design-docs/home-dashboard.md.
+  it('links each imported member to a Person by normalized name', async () => {
+    const { pid } = await seedProjectA() // member "Tâm", no personId in the bundle
+    const bundle = await exportProject(pid)
+
+    const { projectId } = await importProject(bundle)
+    const people = await db.people.toArray()
+    const imported = await db.members.where('projectId').equals(projectId).toArray()
+
+    expect(people).toHaveLength(1)
+    expect(people[0].name).toBe('Tâm')
+    expect(imported[0].personId).toBe(people[0].id)
+  })
+
+  it('re-importing the same person reuses the existing Person (no duplicate)', async () => {
+    const { pid } = await seedProjectA()
+    const bundle = await exportProject(pid)
+
+    const a = await importProject(bundle)
+    const b = await importProject(bundle)
+
+    // Two project copies, but ONE shared person "Tâm" across both.
+    const people = await db.people.toArray()
+    expect(people).toHaveLength(1)
+    const mA = (await db.members.where('projectId').equals(a.projectId).toArray())[0]
+    const mB = (await db.members.where('projectId').equals(b.projectId).toArray())[0]
+    expect(mA.personId).toBe(people[0].id)
+    expect(mB.personId).toBe(people[0].id)
   })
 
   it('preserves Task.sequence and lets the next created task self-correct', async () => {

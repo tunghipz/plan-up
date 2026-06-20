@@ -13,6 +13,7 @@ import {
   type Person,
 } from './db'
 import { Avatar, ColorSwatchRow } from './members'
+import { useConfirm } from './ConfirmDialog'
 import { latestActiveSprint, formatSprintRange, formatShortDate, todayLocalISO } from './lib'
 import { personLoad, personProjectCount, nextDayOff, taskOverdue } from './people'
 
@@ -233,6 +234,7 @@ function PersonRow({ entry, allPeople }: { entry: RosterEntry; allPeople: Person
   const [menu, setMenu] = useState(false)
   const [name, setName] = useState(person.name)
   const others = allPeople.filter((p) => p.id !== person.id)
+  const confirm = useConfirm()
   const btnRef = useRef<HTMLButtonElement>(null)
   const popRef = useRef<HTMLDivElement>(null)
   // The People panel has `overflow-hidden` (rounded corners), so an absolutely
@@ -366,8 +368,18 @@ function PersonRow({ entry, allPeople }: { entry: RosterEntry; allPeople: Person
                   {others.map((o) => (
                     <button
                       key={o.id}
-                      onClick={() => {
-                        mergePeople(person.id, o.id)
+                      onClick={async () => {
+                        // Merge is irreversible (no split) — confirm first
+                        // (design-system §6.4: confirm before destructive).
+                        if (
+                          !(await confirm({
+                            title: 'Merge people?',
+                            message: `“${person.name}” will be merged into “${o.name}” — their project memberships move over and “${person.name}” is removed. This can’t be undone.`,
+                            confirmLabel: 'Merge',
+                          }))
+                        )
+                          return
+                        await mergePeople(person.id, o.id)
                         setMenu(false)
                       }}
                       className="w-full flex items-center gap-2 px-2 py-1.5 rounded-[8px] text-left hover:bg-surface-hover transition"

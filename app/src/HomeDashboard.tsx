@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { Users, MoreHorizontal, AlertTriangle, CalendarOff } from 'lucide-react'
 import {
@@ -225,14 +226,61 @@ export function HomeDashboard({
   )
 }
 
+const MENU_W = 248
+
 function PersonRow({ entry, allPeople }: { entry: RosterEntry; allPeople: Person[] }) {
   const { person, load, projectCount, off, projColors } = entry
   const [menu, setMenu] = useState(false)
   const [name, setName] = useState(person.name)
   const others = allPeople.filter((p) => p.id !== person.id)
+  const btnRef = useRef<HTMLButtonElement>(null)
+  const popRef = useRef<HTMLDivElement>(null)
+  // The People panel has `overflow-hidden` (rounded corners), so an absolutely
+  // positioned popover inside it gets CLIPPED. Portal it to <body> and pin it to
+  // the trigger's screen rect — same idiom as MemberDaysOffButton/CalendarPopover.
+  const [pos, setPos] = useState<{ top: number; left: number }>({ top: -9999, left: -9999 })
+
+  useEffect(() => {
+    if (!menu) return
+    const pin = () => {
+      const r = btnRef.current?.getBoundingClientRect()
+      if (!r) return
+      // Right-align to the trigger, clamped into the viewport.
+      let left = Math.min(r.right - MENU_W, window.innerWidth - 8 - MENU_W)
+      left = Math.max(8, left)
+      // Below by default; flip above if it would overflow the bottom edge.
+      const h = popRef.current?.offsetHeight ?? 280
+      let top = r.bottom + 6
+      if (top + h > window.innerHeight - 8) top = Math.max(8, r.top - 6 - h)
+      setPos({ top, left })
+    }
+    pin()
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node
+      if (
+        popRef.current && !popRef.current.contains(t) &&
+        btnRef.current && !btnRef.current.contains(t)
+      ) {
+        setMenu(false)
+      }
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMenu(false)
+    }
+    window.addEventListener('scroll', pin, true)
+    window.addEventListener('resize', pin)
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('scroll', pin, true)
+      window.removeEventListener('resize', pin)
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [menu])
 
   return (
-    <div className="relative group/row flex items-center gap-3 px-4 py-3 border-b border-border-hair last:border-b-0">
+    <div className="group/row flex items-center gap-3 px-4 py-3 border-b border-border-hair last:border-b-0">
       <span
         className="shrink-0 w-[34px] h-[34px] rounded-full inline-flex items-center justify-center text-white text-[14px] font-semibold select-none"
         style={{ background: person.color || colorForName(person.name) }}
@@ -270,6 +318,7 @@ function PersonRow({ entry, allPeople }: { entry: RosterEntry; allPeople: Person
         </div>
       </div>
       <button
+        ref={btnRef}
         onClick={() => {
           setName(person.name)
           setMenu((v) => !v)
@@ -285,10 +334,13 @@ function PersonRow({ entry, allPeople }: { entry: RosterEntry; allPeople: Person
         <MoreHorizontal size={16} />
       </button>
 
-      {menu && (
-        <>
-          <div className="fixed inset-0 z-40" onClick={() => setMenu(false)} aria-hidden />
-          <div className="absolute right-3 top-12 z-50 w-[248px] bg-surface rounded-[12px] border border-border-hair shadow-[0_12px_40px_rgba(0,0,0,0.18)] p-3">
+      {menu &&
+        createPortal(
+          <div
+            ref={popRef}
+            style={{ position: 'fixed', top: pos.top, left: pos.left, width: MENU_W }}
+            className="z-50 bg-surface rounded-[12px] border border-border-hair shadow-[0_12px_40px_rgba(0,0,0,0.18)] p-3"
+          >
             <label className="block text-[11px] font-semibold text-ink-faint mb-1">Name</label>
             <input
               value={name}
@@ -335,9 +387,9 @@ function PersonRow({ entry, allPeople }: { entry: RosterEntry; allPeople: Person
                 </p>
               </>
             )}
-          </div>
-        </>
-      )}
+          </div>,
+          document.body
+        )}
     </div>
   )
 }

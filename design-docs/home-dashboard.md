@@ -76,6 +76,9 @@ showing:
 
 People is read-mostly, with the **minimum identity management** the feature needs (it can't
 work without it — see below): rename a person, recolor, and **merge** two people into one.
+The `⋯` manage popover is **portaled to `<body>`** and pinned to its trigger (with
+viewport-edge flip/clamp) — the People panel uses `overflow-hidden` for its rounded corners,
+so an in-panel `absolute` popover would be clipped (fixed 2026-06-20).
 
 ## Data model — Dexie **v13** (see [data-model.md](./data-model.md))
 

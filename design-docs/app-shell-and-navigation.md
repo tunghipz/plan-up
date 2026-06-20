@@ -1,20 +1,32 @@
 # App shell & navigation
 
 **Status:** Implemented
-**Last updated:** 2026-06-19
+**Last updated:** 2026-06-20
 **Code:** `app/src/App.tsx`
 
 ## Purpose
 The three-pane macOS-style frame that hosts everything, plus the at-a-glance
 capacity banner above the active view.
 
+## Top-level screen (`screen`)
+`App.tsx` holds a top-level `screen: 'home' | 'project'`, persisted at
+`localStorage['plan-up:screen']`. `'project'` is the three-pane frame below;
+`'home'` replaces the sprint panel + main column with the full-width
+[Home dashboard](./home-dashboard.md) (the rail stays). The per-project selection
+is preserved while on Home, so returning restores it. Reload lands on the last
+screen — Home is **never** force-shown over a project you left open.
+
 ## User-facing behavior
 Left → right:
-1. **Icon rail** (58px, vibrancy) — one squircle tile per project (initial + brand color),
-   active project ringed in accent; `+` opens New Project; dark-mode toggle pinned bottom.
-   Each project tile carries `aria-label={p.name}` (so the accessible name is the full
-   project name, not the single visible initial) and `aria-current="true"` on the active
-   one — screen readers announce e.g. "My Project, current, button" instead of just "M".
+1. **Icon rail** (58px, vibrancy) — a **`Home` tile pinned at the top** (a `LayoutGrid`
+   glyph on a surface squircle, accent-ringed when `screen==='home'`), a hairline separator,
+   then one squircle tile per project (initial/emoji + brand color), active project ringed in
+   accent **only while `screen==='project'`**; `+` opens New Project; dark-mode toggle pinned
+   bottom. Clicking Home → portfolio overview; clicking a project tile (or a Home card) →
+   that project. Each project tile carries `aria-label={p.name}` (so the accessible name is the
+   full project name, not the single visible initial) and `aria-current="true"` on the active
+   one — screen readers announce e.g. "My Project, current, button" instead of just "M". The
+   Home tile carries `aria-label="Home"` + `aria-current` when active.
 2. **Sprint panel** (vibrancy, **resizable**) — project name + sprint/task counts, the
    sprint list (active row = accent bg), `+`/`n` to add a sprint. **Drag the right edge**
    to resize.
@@ -88,7 +100,7 @@ computed from the current sprint's **leaf** tasks (parents excluded — see task
   anti-pattern (§6.5 / §8.3).
 
 ## Rules & edge cases
-- **localStorage keys:** `plan-up:currentProjectId`, `plan-up:currentSprintId`,
+- **localStorage keys:** `plan-up:screen`, `plan-up:currentProjectId`, `plan-up:currentSprintId`,
   `plan-up:selKind`, `plan-up:selCollectionId`, `plan-up:view`, `plan-up:collectionView`,
   `plan-up:sidebarWidth`, `plan-up:dark`, `plan-up:collapsed:<sprintId>`,
   `plan-up:sidebarSprintsCollapsed`, `plan-up:sidebarCollectionsCollapsed`.

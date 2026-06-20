@@ -1,7 +1,7 @@
 # Data model
 
 **Status:** Implemented
-**Last updated:** 2026-06-12
+**Last updated:** 2026-06-20
 **Code:** `app/src/db.ts`
 
 ## Purpose

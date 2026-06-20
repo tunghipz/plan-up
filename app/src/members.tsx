@@ -644,6 +644,12 @@ export function MemberDaysOffButton({
     pin()
     const onClick = (e: MouseEvent) => {
       const target = e.target as Node
+      // The date picker's calendar is portaled to <body>, so it sits OUTSIDE
+      // popRef. Without this guard, clicking a day fires this mousedown first,
+      // closes the popover, and unmounts the calendar before the day's click
+      // lands — so a day off can never be picked. Treat calendar clicks as
+      // inside. See design-docs/members-and-days-off.md.
+      if (target instanceof Element && target.closest('[data-calendar-popover]')) return
       if (
         popRef.current && !popRef.current.contains(target) &&
         btnRef.current && !btnRef.current.contains(target)

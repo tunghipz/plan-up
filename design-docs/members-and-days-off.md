@@ -55,6 +55,13 @@ half-day = 0.5 (see [scheduling.md](./scheduling.md)).
 - Avatar = colored circle with the uppercased first letter.
 
 ## Rules & edge cases
+- **Nested calendar / outside-click (2026-06-20 fix):** the add-day `DateField` opens a
+  `CalendarPopover` that is **portaled to `<body>`**, so it sits outside the days-off
+  popover's `popRef`. The popover's `document` `mousedown` outside-click handler therefore
+  treated a calendar-day click as "outside" and closed the popover *on mousedown*, unmounting
+  the calendar before the day's `onClick` fired — so a day off could never be picked. Fix:
+  the calendar portal is marked `data-calendar-popover` and the days-off handler ignores
+  mousedowns inside `[data-calendar-popover]`. (`members.tsx`, `DatePicker.tsx`.)
 - Off-day changes re-run scheduling immediately, so dates shift the moment availability
   changes.
 - Half-day AM vs PM is labeled for humans but both count 0.5 toward effort.

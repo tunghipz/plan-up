@@ -23,8 +23,7 @@ import {
 } from 'lucide-react'
 import {
   db,
-  uid,
-  colorForName,
+  addMember,
   deleteTask,
   setTaskParent,
   createGroupFromSelection,
@@ -33,7 +32,6 @@ import {
   setListOrder,
   renormalizeListOrder,
   compareMembersByOrder,
-  nextMemberOrder,
   setMemberOrder,
   renormalizeMemberOrder,
   findCyclePath,
@@ -2707,14 +2705,7 @@ function AddMemberRow({
       onDeactivate()
       return
     }
-    await db.members.add({
-      id: uid(),
-      projectId,
-      name: n,
-      color: colorForName(n),
-      daysOff: [],
-      order: await nextMemberOrder(projectId),
-    })
+    await addMember(projectId, n)
     setName('')
     inputRef.current?.focus()
   }

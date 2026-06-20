@@ -10,8 +10,8 @@ discipline that lets the schema evolve without losing local data.
 
 ## Entities
 
-Six IndexedDB tables (Dexie database name **`plan-up`**): `projects`, `members`,
-`sprints`, `tasks`, `collections`, `events`.
+Seven IndexedDB tables (Dexie database name **`plan-up`**): `projects`, `members`,
+`sprints`, `tasks`, `collections`, `events`, `people`.
 
 ### `Project` (`db.ts:19`)
 `id` · `name` · `createdAt` (number) · `description?` (string) · `color?` (hex) · `icon?` (emoji)
@@ -23,8 +23,11 @@ Six IndexedDB tables (Dexie database name **`plan-up`**): `projects`, `members`,
 
 ### `Member` (`db.ts:25`)
 `id` · `projectId` · `name` · `color` (hex) · `daysOff: DayOff[]` · `title?` (string)
-· `avatarImage?` (string) · `avatarEmoji?` (string) · `order` (number)
+· `avatarImage?` (string) · `avatarEmoji?` (string) · `order` (number) · `personId?` (string)
 - A member is just a **label** — no auth, no login. The user creates them.
+- `personId?` links this membership to a global [`Person`](#person-dbts) — one human across
+  projects. **Indexed** (added in **v13**, backfilled by grouping members by normalized name).
+  Every new member gets one via `addMember` / import. See [home-dashboard.md](./home-dashboard.md).
 - `order` is the **manual lane order** (per project) used to sort member cards in the
   List view (drag-to-reorder) and the Board view's `member` sort. Non-indexed; backfilled
   in **v12** to `0..N-1` per project. See [member-lane-order.md](./member-lane-order.md).
@@ -95,6 +98,17 @@ Six IndexedDB tables (Dexie database name **`plan-up`**): `projects`, `members`,
   write time** so the log stays readable after renumbering or deletion.
 - Indexes: `id, sprintId, ts, projectId`.
 
+### `Person` (`db.ts`, table `people`)
+`id` · `name` · `color` (hex) · `createdAt` (number)
+- A **real human shared across projects**. A `Member` is one project's membership for a
+  person (`Member.personId` → `Person.id`); the same human in N projects is N members but
+  ONE person. Added in **v13**.
+- **Identity only** — days-off and assignment stay on `Member`, so the scheduler is
+  untouched. The Home roster aggregates a person's load/days-off across their members.
+- Created/linked by normalized name (`addMember`, import, the v13 backfill). A person with
+  zero remaining members is kept (hidden from the roster), not deleted. Rename/recolor/merge
+  via the People roster. See [home-dashboard.md](./home-dashboard.md).
+
 ### Value types
 - `ChangeLogEntry`: `{ field: LoggableField; from: string|null; to: string|null;
   ts: number }` over 8 loggable fields (title, status, priority, assigneeId, startDate,
@@ -114,7 +128,7 @@ All dates are stored as `yyyy-mm-dd` strings.
 
 ## Schema versioning
 
-Dexie `version().stores()` + an upgrade callback per bump. Current version: **12**.
+Dexie `version().stores()` + an upgrade callback per bump. Current version: **13**.
 
 | Ver | Change |
 | --- | --- |
@@ -130,10 +144,12 @@ Dexie `version().stores()` + an upgrade callback per bump. Current version: **12
 | 10 | Add `events` table (sprint activity log). No data backfill — history starts at v10. |
 | 11 | Remove the per-task `Task.changeLog` field (per-task change log removed). Upgrade strips the dead property from existing task rows; no index change. |
 | 12 | Add `Member.order` (non-indexed manual lane order); backfill per project to `0..N-1` in current `toArray()` order. See [member-lane-order.md](./member-lane-order.md). |
+| 13 | Add `people` table + indexed `Member.personId` (re-declare full `members` store). Backfill groups existing members by normalized name across all projects → one person each, linked. Scheduler untouched. See [home-dashboard.md](./home-dashboard.md). |
 
 Current indexes:
 - `projects`: `id, name, createdAt`
-- `members`: `id, name, projectId`
+- `members`: `id, name, projectId, personId`
+- `people`: `id, name`
 - `sprints`: `id, startDate, projectId`
 - `tasks`: `id, sprintId, assigneeId, status, createdAt, projectId, collectionId`
 - `collections`: `id, projectId, order`

@@ -1,6 +1,7 @@
 import Dexie, { type Table } from 'dexie'
 import { formatSeqRanges, defaultSprintDates, todayLocalISO } from './lib'
 import { remapBundle, type ProjectBundle } from './project-io'
+import { buildPersonBackfill, normalizePersonName } from './people'
 
 export type Status = 'todo' | 'in_progress' | 'done'
 export type Priority = 'urgent' | 'high' | 'normal' | 'low' | 'none'
@@ -120,11 +121,32 @@ export interface Project {
   icon?: string
 }
 
+/**
+ * A real person, shared across projects. A `Member` is one project's membership
+ * for a person (`Member.personId` → `Person.id`); the same human appearing in
+ * several projects is several members but ONE person. Identity only — days-off
+ * and assignment stay on `Member`, so the scheduler is untouched.
+ * See design-docs/home-dashboard.md.
+ */
+export interface Person {
+  id: string
+  name: string
+  color: string
+  createdAt: number
+}
+
 export interface Member {
   id: string
   projectId: string
   name: string
   color: string
+  /**
+   * Links this membership to a global {@link Person}. Backfilled in v13 (group
+   * members by normalized name across all projects → one person each); set on
+   * every new member via `addMember` / import. Indexed so a person's members
+   * are queryable. See design-docs/home-dashboard.md.
+   */
+  personId?: string
   /**
    * Additional non-working days for this member, on top of weekends.
    * Pushes tasks forward when their start/end is computed from prereqs.
@@ -254,6 +276,7 @@ class PlanDB extends Dexie {
   tasks!: Table<Task, string>
   collections!: Table<Collection, string>
   events!: Table<ActivityEvent, string>
+  people!: Table<Person, string>
 
   constructor() {
     super('plan-up')
@@ -432,6 +455,36 @@ class PlanDB extends Dexie {
         }
       }
     })
+    // v13 (2026-06-20): cross-project People (design-docs/home-dashboard.md).
+    // New `people` table; members gain indexed `personId`. Re-declare the full
+    // members index (append personId — keep projectId/name) and carry forward
+    // every other table from v10. Backfill groups existing members by normalized
+    // name across ALL projects into one person each (buildPersonBackfill, the
+    // unit-tested pure fn) and links them — all within this version's upgrade tx
+    // (the people store is created before the upgrade runs).
+    this.version(13)
+      .stores({
+        projects: 'id, name, createdAt',
+        members: 'id, name, projectId, personId',
+        sprints: 'id, startDate, projectId',
+        collections: 'id, projectId, order',
+        tasks: 'id, sprintId, assigneeId, status, createdAt, projectId, collectionId',
+        events: 'id, sprintId, ts, projectId',
+        people: 'id, name',
+      })
+      .upgrade(async (tx) => {
+        const members = await tx.table<Member>('members').toArray()
+        const { people, links } = buildPersonBackfill(
+          members,
+          uid,
+          colorForName,
+          Date.now()
+        )
+        if (people.length) await tx.table<Person>('people').bulkAdd(people)
+        for (const { memberId, personId } of links) {
+          await tx.table('members').update(memberId, { personId })
+        }
+      })
   }
 }
 
@@ -1880,7 +1933,9 @@ export async function memberNameExists(
 }
 
 // Cascade-safe member delete: orphaned tasks become Unassigned (assigneeId=null)
-// rather than disappearing from the UI.
+// rather than disappearing from the UI. The linked Person is intentionally kept
+// (it may still belong to other projects; a zero-member person is hidden from
+// the roster, not deleted — design-docs/home-dashboard.md).
 export async function deleteMember(memberId: string) {
   await db.transaction('rw', db.members, db.tasks, async () => {
     await db.tasks
@@ -1889,6 +1944,80 @@ export async function deleteMember(memberId: string) {
       .modify({ assigneeId: null })
     await db.members.delete(memberId)
   })
+}
+
+// ---- People (cross-project identity) — design-docs/home-dashboard.md ----
+
+/** Existing global person whose normalized name matches `name`, else undefined. */
+async function findPersonByName(name: string): Promise<Person | undefined> {
+  const target = normalizePersonName(name)
+  if (!target) return undefined
+  const all = await db.people.toArray()
+  return all.find((p) => normalizePersonName(p.name) === target)
+}
+
+/**
+ * Link a name to a Person: reuse an existing person with the same normalized
+ * name (across all projects), else create one. Returns the personId. Joins the
+ * ambient Dexie transaction when called inside one (import/seed paths).
+ */
+export async function linkOrCreatePerson(name: string): Promise<string> {
+  const existing = await findPersonByName(name)
+  if (existing) return existing.id
+  const person: Person = {
+    id: uid(),
+    name: name.trim(),
+    color: colorForName(name),
+    createdAt: Date.now(),
+  }
+  await db.people.add(person)
+  return person.id
+}
+
+/**
+ * The single member-creation write path. Creates the member with a linked
+ * person (reuse same-name person, else create) + lane order. Does NOT enforce
+ * per-project name uniqueness — callers decide (settings shows an inline error;
+ * the sprint inline add allows it). Returns the created member.
+ */
+export async function addMember(projectId: string, name: string): Promise<Member> {
+  const n = name.trim()
+  const [personId, order] = await Promise.all([
+    linkOrCreatePerson(n),
+    nextMemberOrder(projectId),
+  ])
+  const member: Member = {
+    id: uid(),
+    projectId,
+    name: n,
+    color: colorForName(n),
+    daysOff: [],
+    order,
+    personId,
+  }
+  await db.members.add(member)
+  return member
+}
+
+/** Merge `srcId` into `dstId`: reassign src's members to dst, delete src person. */
+export async function mergePeople(srcId: string, dstId: string): Promise<void> {
+  if (srcId === dstId) return
+  await db.transaction('rw', db.people, db.members, async () => {
+    await db.members.where('personId').equals(srcId).modify({ personId: dstId })
+    await db.people.delete(srcId)
+  })
+}
+
+/** Rename a person (display name only; does not touch member.name). */
+export async function renamePerson(personId: string, name: string): Promise<void> {
+  const n = name.trim()
+  if (!n) return
+  await db.people.update(personId, { name: n })
+}
+
+/** Recolor a person (avatar color). */
+export async function recolorPerson(personId: string, color: string): Promise<void> {
+  await db.people.update(personId, { color })
 }
 
 export interface ExportPayload {
@@ -1949,7 +2078,7 @@ export async function importAll(data: ExportPayload) {
   try {
    await db.transaction(
     'rw',
-    [db.projects, db.members, db.sprints, db.collections, db.tasks, db.events],
+    [db.projects, db.members, db.sprints, db.collections, db.tasks, db.events, db.people],
     async () => {
       await db.events.clear()
       await db.tasks.clear()
@@ -1957,6 +2086,7 @@ export async function importAll(data: ExportPayload) {
       await db.members.clear()
       await db.collections.clear()
       await db.projects.clear()
+      await db.people.clear()
       // v1 payloads predate multi-project — synthesize a default project
       // and stamp it onto every row. Any payload that carries `projects`
       // (v2, v3, …) must keep its real project ids, otherwise sprints/
@@ -1982,6 +2112,13 @@ export async function importAll(data: ExportPayload) {
         )
         return { ...m, projectId: pidOf(m), daysOff }
       })
+      // Rebuild People fresh from the imported members (any personId in the
+      // payload references the source DB and is meaningless here) — group by
+      // normalized name so a person recurring across projects re-unifies.
+      const { people, links } = buildPersonBackfill(members, uid, colorForName, Date.now())
+      const personByMember = new Map(links.map((l) => [l.memberId, l.personId]))
+      for (const m of members) m.personId = personByMember.get(m.id)
+      if (people.length) await db.people.bulkAdd(people)
       await db.members.bulkAdd(members)
 
       const sprints: Sprint[] = data.sprints.map((s) => ({
@@ -2093,9 +2230,15 @@ export async function importProject(
   try {
     await db.transaction(
       'rw',
-      [db.projects, db.members, db.sprints, db.collections, db.tasks, db.events],
+      [db.projects, db.members, db.sprints, db.collections, db.tasks, db.events, db.people],
       async () => {
         await db.projects.add(remapped.project)
+        // Link each imported member to a Person in THIS db by normalized name
+        // (reuse an existing same-name person, else create) — the bundle's
+        // personId references the source DB. See design-docs/home-dashboard.md.
+        for (const m of remapped.members) {
+          m.personId = await linkOrCreatePerson(m.name)
+        }
         if (remapped.members.length) await db.members.bulkAdd(remapped.members)
         if (remapped.sprints.length) await db.sprints.bulkAdd(remapped.sprints)
         if (remapped.collections.length)
@@ -2194,10 +2337,7 @@ export async function dedupeSprints(): Promise<number> {
 async function doSeed() {
   await db.transaction(
     'rw',
-    db.projects,
-    db.members,
-    db.sprints,
-    db.tasks,
+    [db.projects, db.members, db.sprints, db.tasks, db.people],
     async () => {
       // Ensure at least one project exists (the migration creates one for
       // upgrading users; first-launch needs us to handle it here too).
@@ -2226,6 +2366,11 @@ async function seedFresh(projectId: string) {
     color: colorForName(name),
     daysOff: [],
   }))
+  // Link each seeded member to a fresh Person (one per distinct name).
+  const { people, links } = buildPersonBackfill(members, uid, colorForName, Date.now())
+  const personByMember = new Map(links.map((l) => [l.memberId, l.personId]))
+  for (const m of members) m.personId = personByMember.get(m.id)
+  if (people.length) await db.people.bulkAdd(people)
   await db.members.bulkAdd(members)
 
   // Seeded Sprint 1 must honor the Monday-locked, 2-week cadence too — the

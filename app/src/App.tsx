@@ -63,6 +63,7 @@ import { GanttView } from './GanttView'
 import { ActivityLog } from './ActivityLog'
 import { VersionFooter } from './VersionFooter'
 import { ProjectSettingsView } from './ProjectSettingsView'
+import { HomeDashboard } from './HomeDashboard'
 import { Avatar } from './members'
 import {
   formatSprintRange,
@@ -188,6 +189,26 @@ function App() {
   const setView = (v: ViewMode) => {
     setViewState(v)
     safeStorage.set(VIEW_KEY, v)
+  }
+  // Top-level screen: the Home overview vs a single project. Persisted so a
+  // reload lands back where you were (Home is never force-shown over a project).
+  // See design-docs/home-dashboard.md.
+  const SCREEN_KEY = 'plan-up:screen'
+  const [screen, setScreenState] = useState<'home' | 'project'>(
+    () => (safeStorage.get(SCREEN_KEY) === 'home' ? 'home' : 'project')
+  )
+  const setScreen = (s: 'home' | 'project') => {
+    setScreenState(s)
+    safeStorage.set(SCREEN_KEY, s)
+  }
+  const goHome = () => {
+    setSettingsOpen(false)
+    setShowActivity(false)
+    setScreen('home')
+  }
+  const openProject = (id: string) => {
+    setCurrentProjectId(id)
+    setScreen('project')
   }
   // Sprint activity log is a full-page overlay of the main column (not a persisted
   // view mode — it's a transient drill-in, reset when the sprint changes). See
@@ -511,11 +532,12 @@ function App() {
       }
       if (inField) return
       if (e.key === '/') {
-        if (settingsOpen || !sprintActive) return // no palette over settings / no sprint
+        // no palette over settings / no sprint / on the Home overview
+        if (settingsOpen || !sprintActive || screen === 'home') return
         e.preventDefault()
         setPaletteOpen(true)
       } else if (e.key === 'n' && !e.metaKey && !e.ctrlKey) {
-        if (settingsOpen) return // don't stack a dialog over settings
+        if (settingsOpen || screen === 'home') return // no dialog over settings / on Home
         e.preventDefault()
         setShowNewSprint(true)
       } else if (e.key === 'd' && (e.metaKey || e.ctrlKey) && e.shiftKey) {
@@ -525,7 +547,7 @@ function App() {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [paletteOpen, dark, setDark, settingsOpen, showActivity, selKind, currentSprintId])
+  }, [paletteOpen, dark, setDark, settingsOpen, showActivity, selKind, currentSprintId, screen])
 
   if (seedError) {
     return (
@@ -809,8 +831,24 @@ function App() {
     <div className="h-screen flex bg-canvas text-ink overflow-hidden">
       {/* Icon rail: macOS vibrancy. Squircle app-icon tiles, accent ring on active. */}
       <aside className="vibrancy w-[58px] shrink-0 border-r border-border-hair flex flex-col items-center py-3.5 gap-2.5">
+        {/* Home — portfolio overview. A surface tile (not a colored project),
+            ringed in accent when active. See design-docs/home-dashboard.md. */}
+        <button
+          onClick={goHome}
+          title="Home"
+          aria-label="Home"
+          aria-current={screen === 'home' ? 'true' : undefined}
+          className={`tile-press w-[36px] h-[36px] rounded-[10px] bg-surface flex items-center justify-center transition ${
+            screen === 'home'
+              ? 'text-accent shadow-[0_0_0_2.5px_var(--color-accent),0_2px_5px_rgba(0,0,0,0.14)]'
+              : 'text-ink-muted shadow-[0_1px_3px_rgba(0,0,0,0.12),0_0_0_0.5px_rgba(0,0,0,0.04)] hover:text-ink'
+          }`}
+        >
+          <LayoutGrid size={18} strokeWidth={2} />
+        </button>
+        <div className="w-[26px] h-px bg-[var(--color-border)] shrink-0" />
         {projects?.map((p) => {
-          const isActive = p.id === currentProjectId
+          const isActive = screen === 'project' && p.id === currentProjectId
           // Emoji icon wins; otherwise the name's first letter (see
           // project-icon-emoji.md). `||` so a stored empty string also falls back.
           const isEmoji = !!p.icon
@@ -818,7 +856,7 @@ function App() {
           return (
             <button
               key={p.id}
-              onClick={() => setCurrentProjectId(p.id)}
+              onClick={() => openProject(p.id)}
               title={p.name}
               aria-label={p.name}
               aria-current={isActive ? 'true' : undefined}
@@ -855,6 +893,10 @@ function App() {
         </button>
       </aside>
 
+      {screen === 'home' ? (
+        <HomeDashboard projects={projects ?? []} onOpenProject={openProject} />
+      ) : (
+      <>
       {/* Secondary panel: macOS vibrancy sidebar, accent-filled active row */}
       <aside
         className="vibrancy shrink-0 border-r border-border-hair flex flex-col overflow-hidden relative"
@@ -1320,6 +1362,8 @@ function App() {
           </main>
         </div>
       </div>
+      </>
+      )}
 
       {/* Settings drawer — right-side inspector over a dimmed backdrop. Both
           stay mounted while a project exists so the slide animates. */}
@@ -1386,7 +1430,7 @@ function App() {
         <NewProjectDialog
           onClose={() => setShowNewProject(false)}
           onCreate={(p) => {
-            setCurrentProjectId(p.id)
+            openProject(p.id)
             setShowNewProject(false)
           }}
         />

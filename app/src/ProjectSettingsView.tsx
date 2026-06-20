@@ -3,14 +3,13 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { X, Trash2, UserPlus, Share2 } from 'lucide-react'
 import {
   db,
-  uid,
   colorForName,
+  addMember,
   deleteProject,
   updateProject,
   deleteMember,
   exportProject,
   memberNameExists,
-  nextMemberOrder,
   type Project,
   type Member,
 } from './db'
@@ -344,14 +343,7 @@ function AddMember({ projectId }: { projectId: string }) {
       setErr(`“${n}” is already a member`)
       return
     }
-    await db.members.add({
-      id: uid(),
-      projectId,
-      name: n,
-      color: colorForName(n),
-      daysOff: [],
-      order: await nextMemberOrder(projectId),
-    })
+    await addMember(projectId, n)
     setName('')
     setErr('')
     ref.current?.focus()

@@ -19,6 +19,8 @@ async function clearAll() {
     db.tasks.clear(),
     db.events.clear(),
     db.people.clear(),
+    db.aiThreads.clear(),
+    db.aiMessages.clear(),
   ])
 }
 
@@ -87,6 +89,23 @@ async function seedProjectA() {
     to: null,
     ts: 5,
   })
+  const aiThreadId = uid()
+  await db.aiThreads.add({
+    id: aiThreadId,
+    projectId: pid,
+    title: 'Planning chat',
+    createdAt: 6,
+    updatedAt: 7,
+    skillId: 'project-management',
+  })
+  await db.aiMessages.add({
+    id: uid(),
+    projectId: pid,
+    threadId: aiThreadId,
+    role: 'user',
+    content: 'What is risky?',
+    ts: 7,
+  })
   return { pid, mid, sid, t1Id: t1.id, t2Id: t2.id }
 }
 
@@ -104,6 +123,8 @@ describe('exportProject', () => {
     expect(bundle.project.id).toBe(pid)
     expect(bundle.tasks).toHaveLength(2)
     expect(bundle.members).toHaveLength(1)
+    expect(bundle.aiThreads).toHaveLength(1)
+    expect(bundle.aiMessages).toHaveLength(1)
     expect(bundle.tasks.every((t) => t.projectId === pid)).toBe(true)
     expect(bundle.project.name).not.toBe('Beta')
     expect(other).not.toBe(pid)
@@ -164,6 +185,22 @@ describe('importProject', () => {
     // dependency survives and points at the new t1 id (not the old one)
     expect(a2.dependsOn).toEqual([a1.id])
     expect(a2.dependsOn[0]).not.toBe(undefined)
+  })
+
+  it('round-trips AI chat history onto NEW thread ids', async () => {
+    const { pid } = await seedProjectA()
+    const bundle = await exportProject(pid)
+    const oldThreadId = bundle.aiThreads?.[0].id
+
+    const { projectId: newPid } = await importProject(bundle)
+
+    const threads = await db.aiThreads.where('projectId').equals(newPid).toArray()
+    const messages = await db.aiMessages.where('projectId').equals(newPid).toArray()
+    expect(threads).toHaveLength(1)
+    expect(messages).toHaveLength(1)
+    expect(threads[0].id).not.toBe(oldThreadId)
+    expect(messages[0].threadId).toBe(threads[0].id)
+    expect(messages[0].content).toBe('What is risky?')
   })
 
   it('imports the same file twice into two independent copies (no collision)', async () => {

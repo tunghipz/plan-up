@@ -89,6 +89,25 @@ export interface ActivityEvent {
   ts: number
 }
 
+export interface AiThread {
+  id: string
+  projectId: string
+  title: string
+  createdAt: number
+  updatedAt: number
+  /** Bundled skill loaded when the chat was created. */
+  skillId?: string
+}
+
+export interface AiMessage {
+  id: string
+  projectId: string
+  threadId: string
+  role: 'user' | 'assistant' | 'system'
+  content: string
+  ts: number
+}
+
 /**
  * A day off for a member.
  * - `half` omitted → entire day off (contributes 0 to effort)
@@ -277,6 +296,8 @@ class PlanDB extends Dexie {
   collections!: Table<Collection, string>
   events!: Table<ActivityEvent, string>
   people!: Table<Person, string>
+  aiThreads!: Table<AiThread, string>
+  aiMessages!: Table<AiMessage, string>
 
   constructor() {
     super('plan-up')
@@ -485,6 +506,20 @@ class PlanDB extends Dexie {
           await tx.table('members').update(memberId, { personId })
         }
       })
+    // v14 (2026-06-23): per-project AI Chat history. New tables only; no
+    // backfill. Threads are project-scoped, messages duplicate projectId for
+    // cheap export/delete without joining through the thread.
+    this.version(14).stores({
+      projects: 'id, name, createdAt',
+      members: 'id, name, projectId, personId',
+      sprints: 'id, startDate, projectId',
+      collections: 'id, projectId, order',
+      tasks: 'id, sprintId, assigneeId, status, createdAt, projectId, collectionId',
+      events: 'id, sprintId, ts, projectId',
+      people: 'id, name',
+      aiThreads: 'id, projectId, updatedAt',
+      aiMessages: 'id, threadId, projectId, ts',
+    })
   }
 }
 
@@ -908,10 +943,16 @@ export async function updateProject(
 export async function deleteProject(projectId: string): Promise<void> {
   await db.transaction(
     'rw',
-    db.projects,
-    db.members,
-    db.sprints,
-    db.tasks,
+    [
+      db.projects,
+      db.members,
+      db.sprints,
+      db.collections,
+      db.tasks,
+      db.events,
+      db.aiThreads,
+      db.aiMessages,
+    ],
     async () => {
       const taskIds = (
         await db.tasks.where('projectId').equals(projectId).toArray()
@@ -928,6 +969,10 @@ export async function deleteProject(projectId: string): Promise<void> {
         })
       }
       await db.tasks.where('projectId').equals(projectId).delete()
+      await db.events.where('projectId').equals(projectId).delete()
+      await db.collections.where('projectId').equals(projectId).delete()
+      await db.aiMessages.where('projectId').equals(projectId).delete()
+      await db.aiThreads.where('projectId').equals(projectId).delete()
       await db.sprints.where('projectId').equals(projectId).delete()
       await db.members.where('projectId').equals(projectId).delete()
       await db.projects.delete(projectId)
@@ -2021,7 +2066,7 @@ export async function recolorPerson(personId: string, color: string): Promise<vo
 }
 
 export interface ExportPayload {
-  version: 1 | 2 | 3 | 4
+  version: 1 | 2 | 3 | 4 | 5
   exportedAt: string
   /** v2 introduces multi-project. v1 payloads have no `projects` field. */
   projects?: Project[]
@@ -2032,19 +2077,24 @@ export interface ExportPayload {
   tasks: Task[]
   /** v4 introduces the sprint activity log. Older payloads have no `events`. */
   events?: ActivityEvent[]
+  /** v5 introduces per-project AI Chat history. */
+  aiThreads?: AiThread[]
+  aiMessages?: AiMessage[]
 }
 
 export async function exportAll(): Promise<ExportPayload> {
-  const [projects, members, sprints, collections, tasks, events] = await Promise.all([
+  const [projects, members, sprints, collections, tasks, events, aiThreads, aiMessages] = await Promise.all([
     db.projects.toArray(),
     db.members.toArray(),
     db.sprints.toArray(),
     db.collections.toArray(),
     db.tasks.toArray(),
     db.events.toArray(),
+    db.aiThreads.toArray(),
+    db.aiMessages.toArray(),
   ])
   return {
-    version: 4,
+    version: 5,
     exportedAt: new Date().toISOString(),
     projects,
     members,
@@ -2052,11 +2102,13 @@ export async function exportAll(): Promise<ExportPayload> {
     collections,
     tasks,
     events,
+    aiThreads,
+    aiMessages,
   }
 }
 
 export async function importAll(data: ExportPayload) {
-  if (!data || ![1, 2, 3, 4].includes(data.version)) {
+  if (!data || ![1, 2, 3, 4, 5].includes(data.version)) {
     throw new Error('Unsupported export version')
   }
   // Validate shape BEFORE the transaction clears anything. A payload can carry
@@ -2071,15 +2123,29 @@ export async function importAll(data: ExportPayload) {
     !Array.isArray(data.tasks) ||
     (data.projects !== undefined && !Array.isArray(data.projects)) ||
     (data.collections !== undefined && !Array.isArray(data.collections)) ||
-    (data.events !== undefined && !Array.isArray(data.events))
+    (data.events !== undefined && !Array.isArray(data.events)) ||
+    (data.aiThreads !== undefined && !Array.isArray(data.aiThreads)) ||
+    (data.aiMessages !== undefined && !Array.isArray(data.aiMessages))
   ) {
     throw new Error('Not a valid plan-up backup')
   }
   try {
    await db.transaction(
     'rw',
-    [db.projects, db.members, db.sprints, db.collections, db.tasks, db.events, db.people],
+    [
+      db.projects,
+      db.members,
+      db.sprints,
+      db.collections,
+      db.tasks,
+      db.events,
+      db.people,
+      db.aiThreads,
+      db.aiMessages,
+    ],
     async () => {
+      await db.aiMessages.clear()
+      await db.aiThreads.clear()
       await db.events.clear()
       await db.tasks.clear()
       await db.sprints.clear()
@@ -2167,6 +2233,17 @@ export async function importAll(data: ExportPayload) {
       if (data.version >= 4 && Array.isArray(data.events) && data.events.length) {
         await db.events.bulkAdd(data.events)
       }
+
+      if (data.version >= 5 && Array.isArray(data.aiThreads) && data.aiThreads.length) {
+        await db.aiThreads.bulkAdd(
+          data.aiThreads.map((t) => ({ ...t, projectId: pidOf(t) }))
+        )
+      }
+      if (data.version >= 5 && Array.isArray(data.aiMessages) && data.aiMessages.length) {
+        await db.aiMessages.bulkAdd(
+          data.aiMessages.map((m) => ({ ...m, projectId: pidOf(m) }))
+        )
+      }
     }
    )
   } catch (err) {
@@ -2192,7 +2269,7 @@ export async function importAll(data: ExportPayload) {
  * design-docs/project-export-import.md.
  */
 export async function exportProject(projectId: string): Promise<ProjectBundle> {
-  const [project, members, sprints, collections, tasks, events] =
+  const [project, members, sprints, collections, tasks, events, aiThreads, aiMessages] =
     await Promise.all([
       db.projects.get(projectId),
       db.members.where('projectId').equals(projectId).toArray(),
@@ -2200,6 +2277,8 @@ export async function exportProject(projectId: string): Promise<ProjectBundle> {
       db.collections.where('projectId').equals(projectId).toArray(),
       db.tasks.where('projectId').equals(projectId).toArray(),
       db.events.where('projectId').equals(projectId).toArray(),
+      db.aiThreads.where('projectId').equals(projectId).toArray(),
+      db.aiMessages.where('projectId').equals(projectId).toArray(),
     ])
   if (!project) throw new Error('Project not found')
   return {
@@ -2212,6 +2291,8 @@ export async function exportProject(projectId: string): Promise<ProjectBundle> {
     collections,
     tasks,
     events,
+    aiThreads,
+    aiMessages,
   }
 }
 
@@ -2230,7 +2311,17 @@ export async function importProject(
   try {
     await db.transaction(
       'rw',
-      [db.projects, db.members, db.sprints, db.collections, db.tasks, db.events, db.people],
+      [
+        db.projects,
+        db.members,
+        db.sprints,
+        db.collections,
+        db.tasks,
+        db.events,
+        db.people,
+        db.aiThreads,
+        db.aiMessages,
+      ],
       async () => {
         await db.projects.add(remapped.project)
         // Link each imported member to a Person in THIS db by normalized name
@@ -2258,6 +2349,8 @@ export async function importProject(
           await db.collections.bulkAdd(remapped.collections)
         if (remapped.tasks.length) await db.tasks.bulkAdd(remapped.tasks)
         if (remapped.events.length) await db.events.bulkAdd(remapped.events)
+        if (remapped.aiThreads?.length) await db.aiThreads.bulkAdd(remapped.aiThreads)
+        if (remapped.aiMessages?.length) await db.aiMessages.bulkAdd(remapped.aiMessages)
       }
     )
   } catch (err) {

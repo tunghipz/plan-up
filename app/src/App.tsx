@@ -27,6 +27,7 @@ import {
   Package,
   Database,
   Check,
+  Sparkles,
 } from 'lucide-react'
 import {
   db,
@@ -64,7 +65,9 @@ import { ActivityLog } from './ActivityLog'
 import { VersionFooter } from './VersionFooter'
 import { ProjectSettingsView } from './ProjectSettingsView'
 import { HomeDashboard } from './HomeDashboard'
+import { AiChatDrawer } from './AiChatDrawer'
 import { Avatar } from './members'
+import type { AiRuntimeContext } from './ai/types'
 import {
   formatSprintRange,
   formatShortDate,
@@ -204,6 +207,7 @@ function App() {
   const goHome = () => {
     setSettingsOpen(false)
     setShowActivity(false)
+    setAiChatOpen(false)
     setScreen('home')
   }
   const openProject = (id: string) => {
@@ -259,6 +263,7 @@ function App() {
       return !p
     })
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [aiChatOpen, setAiChatOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
   // Export split-menu (header) — "this project" vs "full backup".
   const [exportMenuOpen, setExportMenuOpen] = useState(false)
@@ -527,6 +532,10 @@ function App() {
           setShowActivity(false)
           return
         }
+        if (aiChatOpen) {
+          setAiChatOpen(false)
+          return
+        }
         if (settingsOpen) setSettingsOpen(false)
         return
       }
@@ -547,7 +556,7 @@ function App() {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [paletteOpen, dark, setDark, settingsOpen, showActivity, selKind, currentSprintId, screen])
+  }, [paletteOpen, dark, setDark, settingsOpen, showActivity, aiChatOpen, selKind, currentSprintId, screen])
 
   if (seedError) {
     return (
@@ -827,6 +836,39 @@ function App() {
     }
   }, [tasks])
 
+  const aiTasks = useMemo(() => {
+    if (selKind === 'collection' && currentCollection) {
+      return (projectTasks ?? []).filter((t) => t.collectionId === currentCollection.id)
+    }
+    return tasks ?? []
+  }, [selKind, currentCollection, projectTasks, tasks])
+
+  const aiContext: AiRuntimeContext = useMemo(
+    () => ({
+      today,
+      screen,
+      containerKind: selKind,
+      view: selKind === 'collection' ? collectionView : view,
+      project: currentProject,
+      sprint: selKind === 'sprint' ? currentSprint : null,
+      collection: selKind === 'collection' ? currentCollection : null,
+      members: paletteMembers ?? [],
+      tasks: aiTasks,
+    }),
+    [
+      today,
+      screen,
+      selKind,
+      collectionView,
+      view,
+      currentProject,
+      currentSprint,
+      currentCollection,
+      paletteMembers,
+      aiTasks,
+    ]
+  )
+
   return (
     <div className="h-screen flex bg-canvas text-ink overflow-hidden">
       {/* Icon rail: macOS vibrancy. Squircle app-icon tiles, accent ring on active. */}
@@ -910,7 +952,11 @@ function App() {
                   {currentProject.name}
                 </div>
                 <button
-                  onClick={() => setSettingsOpen((v) => !v)}
+                  onClick={() => {
+                    setShowActivity(false)
+                    setAiChatOpen(false)
+                    setSettingsOpen((v) => !v)
+                  }}
                   title="Project settings"
                   aria-label="Project settings"
                   aria-pressed={settingsOpen}
@@ -1195,7 +1241,11 @@ function App() {
                 rest (accent is a signal, not chrome); accent only while open. */}
             {selKind === 'sprint' && currentSprint && (
               <button
-                onClick={() => setShowActivity((s) => !s)}
+                onClick={() => {
+                  setSettingsOpen(false)
+                  setAiChatOpen(false)
+                  setShowActivity((s) => !s)
+                }}
                 aria-pressed={showActivity}
                 title="Sprint activity log"
                 aria-label="Sprint activity log"
@@ -1423,6 +1473,57 @@ function App() {
               onClose={() => setShowActivity(false)}
             />
           </div>
+        </>
+      )}
+
+      {currentProject && (
+        <>
+          <button
+            type="button"
+            onClick={() => {
+              setSettingsOpen(false)
+              setShowActivity(false)
+              setAiChatOpen((s) => !s)
+            }}
+            aria-pressed={aiChatOpen}
+            title={aiChatOpen ? 'Close AI Chat' : 'Open AI Chat'}
+            aria-label="AI Chat"
+            style={{
+              right: aiChatOpen ? 'calc(clamp(320px, 28vw, 400px) + 16px)' : '20px',
+            }}
+            className={`fixed bottom-5 z-[60] grid h-14 w-14 place-items-center rounded-full shadow-[0_12px_28px_rgba(0,113,227,0.28),0_0_0_0.5px_rgba(0,0,0,0.06)] transition-[right,background,color,transform,box-shadow] duration-300 ease-[cubic-bezier(.32,.72,0,1)] hover:scale-[1.03] active:scale-95 ${
+              aiChatOpen
+                ? 'bg-surface text-accent border border-border-hair shadow-[0_12px_30px_rgba(0,0,0,0.18)]'
+                : 'bg-accent text-white hover:bg-accent-hover'
+            }`}
+          >
+            <Sparkles size={24} strokeWidth={1.95} />
+          </button>
+          <aside
+            role="complementary"
+            aria-label="AI Chat"
+            aria-hidden={!aiChatOpen}
+            inert={!aiChatOpen}
+            style={{
+              width: aiChatOpen ? 'clamp(320px, 28vw, 400px)' : 0,
+            }}
+            className={`h-full shrink-0 overflow-hidden bg-surface border-l border-border-hair shadow-[-10px_0_30px_rgba(0,0,0,0.10)] transition-[width,border-color,box-shadow] duration-300 ease-[cubic-bezier(.32,.72,0,1)] ${
+              aiChatOpen
+                ? ''
+                : 'pointer-events-none border-transparent shadow-none'
+            }`}
+          >
+            <div
+              className="h-full"
+              style={{ width: 'clamp(320px, 28vw, 400px)' }}
+            >
+              <AiChatDrawer
+                open={aiChatOpen}
+                context={aiContext}
+                onClose={() => setAiChatOpen(false)}
+              />
+            </div>
+          </aside>
         </>
       )}
 

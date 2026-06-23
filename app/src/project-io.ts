@@ -5,6 +5,8 @@ import type {
   Collection,
   Task,
   ActivityEvent,
+  AiThread,
+  AiMessage,
 } from './db'
 
 /**
@@ -27,6 +29,9 @@ export interface ProjectBundle {
   collections: Collection[]
   tasks: Task[]
   events: ActivityEvent[]
+  /** Added after project-bundle v5 shipped; absent in older v5 project files. */
+  aiThreads?: AiThread[]
+  aiMessages?: AiMessage[]
 }
 
 const isObj = (v: unknown): v is Record<string, unknown> =>
@@ -61,7 +66,9 @@ export function isProjectBundle(data: unknown): data is ProjectBundle {
     Array.isArray(data.sprints) &&
     Array.isArray(data.collections) &&
     Array.isArray(data.tasks) &&
-    Array.isArray(data.events)
+    Array.isArray(data.events) &&
+    (data.aiThreads === undefined || Array.isArray(data.aiThreads)) &&
+    (data.aiMessages === undefined || Array.isArray(data.aiMessages))
   )
 }
 
@@ -91,6 +98,7 @@ export function remapBundle(
   const sprintMap = new Map<string, string>()
   const collectionMap = new Map<string, string>()
   const taskMap = new Map<string, string>()
+  const aiThreadMap = new Map<string, string>()
   // section/status ids are nested per-collection but globally unique in app data,
   // so a single flat map per kind is enough.
   const sectionMap = new Map<string, string>()
@@ -104,6 +112,7 @@ export function remapBundle(
     for (const st of c.statuses) statusMap.set(st.id, newId())
   }
   for (const t of bundle.tasks) taskMap.set(t.id, newId())
+  for (const th of bundle.aiThreads ?? []) aiThreadMap.set(th.id, newId())
 
   const project: Project = { ...bundle.project, id: projectId }
 
@@ -183,6 +192,24 @@ export function remapBundle(
     })
   }
 
+  const aiThreads: AiThread[] = (bundle.aiThreads ?? []).map((t) => ({
+    ...t,
+    id: aiThreadMap.get(t.id)!,
+    projectId,
+  }))
+
+  const aiMessages: AiMessage[] = []
+  for (const m of bundle.aiMessages ?? []) {
+    const threadId = aiThreadMap.get(m.threadId)
+    if (!threadId) continue
+    aiMessages.push({
+      ...m,
+      id: newId(),
+      projectId,
+      threadId,
+    })
+  }
+
   return {
     version: 5,
     kind: 'project',
@@ -193,5 +220,7 @@ export function remapBundle(
     collections,
     tasks,
     events,
+    aiThreads,
+    aiMessages,
   }
 }

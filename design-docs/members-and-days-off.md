@@ -1,7 +1,7 @@
 # Members & days off
 
 **Status:** Implemented
-**Last updated:** 2026-06-04
+**Last updated:** 2026-06-23 (AI Chat can add/remove member day off)
 **Code:** `app/src/members.tsx` (`MemberDaysOffButton`, `DateField`, `daysOffInRange`,
 `effectiveDaysOff`), `app/src/SprintView.tsx` (passes per-sprint `range`),
 `app/src/db.ts` (`setMemberDaysOff`, `deleteMember`, `colorForName`)
@@ -21,7 +21,10 @@ computed dates respect real availability.
   rest (none in this sprint) it is an **always-visible quiet dashed "Days off" pill**
   (calendar + label, dashed border, accent on hover) — previously hover-revealed, now
   persistent so the affordance is always discoverable while staying calm.
-  (Same control also lives in the settings page, `variant="metric"`.)
+  The same control also lives in the Timeline member lane label and the settings
+  page (`variant="metric"` in settings).
+- **AI Chat:** typed actions can add/update a full-day or half-day off for a
+  visible member, or remove a day off, after the user confirms the preview.
 
 ### Per-sprint scoping (display + entry, not data)
 Off-days are real calendar dates, so each date falls inside at most one sprint's
@@ -32,6 +35,9 @@ date range. The two surfaces that show the days-off control treat scope differen
   The add-day picker is **constrained** (`min`/`max` on the `<input type="date">`)
   so you can only add off-days that belong to the sprint you're viewing. Empty state:
   *"No days off this sprint."*
+- **Timeline view** uses the same sprint-scoped `MemberDaysOffButton` in each
+  member swimlane label. Off-days render immediately as hatch bands in that
+  member's lane and as pause overlays where task bars cross the off-day.
 - **Settings page** (`variant="metric"`, no `range`): shows the **full aggregate**
   list across all sprints — the single source of truth. Empty state: *"No days off."*
 
@@ -49,6 +55,8 @@ half-day = 0.5 (see [scheduling.md](./scheduling.md)).
 - `setMemberDaysOff(memberId, daysOff)` (`db.ts:667`) — dedupes by date (last wins), drops
   malformed dates, sorts, then **recomputes every task assigned to the member** (and their
   dependents).
+- AI Chat actions `set_member_day_off` and `remove_member_day_off` route through
+  `setMemberDaysOff`, never direct member writes.
 - `deleteMember(memberId)` (`db.ts:807`) — transactional; reassigns the member's tasks to
   `assigneeId = null`.
 - `colorForName(name)` (`db.ts:199`) — deterministic 8-color palette by name hash.

@@ -12,6 +12,8 @@ const context: AiRuntimeContext = {
   project: { id: 'p1', name: 'Project', createdAt: 0 },
   sprint: null,
   collection: null,
+  collections: [],
+  sprints: [],
   members: [],
   tasks: [],
 }
@@ -41,7 +43,7 @@ describe('AI providers', () => {
 
     expect(loadAiSettings()).toMatchObject({
       provider: 'openai_login',
-      model: 'gpt-5.5',
+      model: 'gpt-5.2',
       apiKey: '',
       proxyUrl: '/api/ai/chat',
     })
@@ -80,6 +82,45 @@ describe('AI providers', () => {
       provider: 'openai_login',
       model: 'gpt-5.5',
       temperature: 0.2,
+    })
+  })
+
+  it('accepts plain markdown model replies without JSON wrapping', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          choices: [
+            {
+              message: {
+                content: '| Task | Status |\\n| --- | --- |\\n| Read file | Done |',
+              },
+            },
+          ],
+        }),
+        text: async () => '',
+      })
+    )
+
+    const proposal = await callAiProvider({
+      settings: {
+        provider: 'openai_login',
+        model: 'gpt-5.5',
+        apiKey: '',
+        proxyUrl: '/api/ai/chat',
+        authUrl: '/api/auth/openai/start',
+        sessionUrl: '/api/auth/session',
+        logoutUrl: '/api/auth/logout',
+        temperature: 0.2,
+      },
+      messages: [{ id: 'm1', role: 'user', content: 'Summarize file', ts: 1 }],
+      context,
+    })
+
+    expect(proposal).toEqual({
+      reply: '| Task | Status |\\n| --- | --- |\\n| Read file | Done |',
+      actions: [],
     })
   })
 })

@@ -8,6 +8,7 @@ import {
   LogIn,
   LogOut,
   MessageCircle,
+  Paperclip,
   Plus,
   RefreshCw,
   Send,
@@ -19,6 +20,15 @@ import { callAiProvider, loadAiSettings, saveAiSettings } from './ai/providers'
 import { buildAiContext } from './ai/context'
 import { describeAiAction, executeAiActions } from './ai/actions'
 import { MarkdownContent } from './ai/markdown'
+import {
+  AI_FILE_MAX_COUNT,
+  buildFileAttachmentPrompt,
+  formatAiFileSize,
+  readAiChatFiles,
+  splitAiMessageDisplayContent,
+  unreadableFileNames,
+  type AiChatFileAttachment,
+} from './ai/files'
 import type {
   AiAction,
   AiActionResult,
@@ -53,17 +63,22 @@ export function AiChatDrawer({
   onClose: () => void
 }) {
   const [settings, setSettings] = useState<AiChatSettings>(() => loadAiSettings())
+  const [chatMenuOpen, setChatMenuOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null)
   const [openAiAuth, setOpenAiAuth] = useState<OpenAiAuthState>({ status: 'idle' })
   const [projectManageSkill, setProjectManageSkill] = useState('')
   const [skillState, setSkillState] = useState<'idle' | 'loading' | 'loaded' | 'failed'>('idle')
   const [input, setInput] = useState('')
+  const [attachedFiles, setAttachedFiles] = useState<AiChatFileAttachment[]>([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [pendingActions, setPendingActions] = useState<AiAction[]>([])
   const scrollerRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const titleButtonRef = useRef<HTMLButtonElement>(null)
+  const chatMenuRef = useRef<HTMLDivElement>(null)
   const projectId = context.project?.id ?? null
 
   const threads = useLiveQuery<AiThread[]>(
@@ -103,6 +118,20 @@ export function AiChatDrawer({
     saveAiSettings(settings)
   }, [settings])
 
+  useEffect(() => {
+    const insertReference = (event: Event) => {
+      const text = (event as CustomEvent<{ text?: unknown }>).detail?.text
+      if (typeof text !== 'string' || !text.trim()) return
+      setInput((current) => {
+        const trimmed = current.trimEnd()
+        return trimmed ? `${trimmed} ${text}` : text
+      })
+      window.setTimeout(() => inputRef.current?.focus(), 0)
+    }
+    window.addEventListener('plan-up:ai-insert-reference', insertReference)
+    return () => window.removeEventListener('plan-up:ai-insert-reference', insertReference)
+  }, [])
+
   const checkOpenAiSession = useCallback(async () => {
     if (settings.provider !== 'openai_login') {
       setOpenAiAuth({ status: 'idle' })
@@ -134,6 +163,17 @@ export function AiChatDrawer({
         setOpenAiAuth({
           status: 'unavailable',
           error: 'Session endpoint did not return JSON.',
+        })
+        return false
+      }
+      if (
+        typeof payload === 'object' &&
+        payload !== null &&
+        (payload as Record<string, unknown>).configured === false
+      ) {
+        setOpenAiAuth({
+          status: 'unavailable',
+          error: 'OPENAI_API_KEY is not set on the gateway.',
         })
         return false
       }
@@ -258,9 +298,44 @@ export function AiChatDrawer({
   }, [open, projectId, createThread])
 
   useEffect(() => {
+    if (!open || !activeThreadId || projectManageSkill) return
+    const id = window.setTimeout(() => {
+      void loadProjectManagementSkill().catch(() => {
+        // Chat still works through the normal action schema/local fallback.
+      })
+    }, 0)
+    return () => window.clearTimeout(id)
+  }, [open, activeThreadId, projectManageSkill, loadProjectManagementSkill])
+
+  useEffect(() => {
     if (!open) return
     inputRef.current?.focus()
   }, [open])
+
+  useEffect(() => {
+    if (!chatMenuOpen) return
+
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      const target = event.target
+      if (!(target instanceof Node)) return
+      if (chatMenuRef.current?.contains(target)) return
+      if (titleButtonRef.current?.contains(target)) return
+      setChatMenuOpen(false)
+    }
+
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      setChatMenuOpen(false)
+      setSettingsOpen(false)
+    }
+
+    document.addEventListener('pointerdown', closeOnOutsidePointer)
+    document.addEventListener('keydown', closeOnEscape)
+    return () => {
+      document.removeEventListener('pointerdown', closeOnOutsidePointer)
+      document.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [chatMenuOpen])
 
   useEffect(() => {
     scrollerRef.current?.scrollTo({
@@ -271,6 +346,12 @@ export function AiChatDrawer({
 
   const contextPreview = useMemo(() => buildAiContext(context), [context])
 
+  const closeDrawer = () => {
+    setChatMenuOpen(false)
+    setSettingsOpen(false)
+    onClose()
+  }
+
   const startNewChat = async () => {
     if (!projectId || busy) return
     setError(null)
@@ -278,12 +359,39 @@ export function AiChatDrawer({
     setInput('')
     const id = await createThread(projectId)
     setActiveThreadId(id)
+    setChatMenuOpen(false)
+    setSettingsOpen(false)
   }
 
   const selectThread = (id: string) => {
     setActiveThreadId(id)
     setPendingActions([])
     setError(null)
+    setAttachedFiles([])
+    setChatMenuOpen(false)
+    setSettingsOpen(false)
+  }
+
+  const attachFiles = async (files: FileList | null) => {
+    if (!files || files.length === 0) return
+    setError(null)
+    try {
+      const fileArray = Array.from(files)
+      const rejected = unreadableFileNames(fileArray)
+      const next = await readAiChatFiles(fileArray)
+      setAttachedFiles((current) => [...current, ...next].slice(0, 4))
+      if (rejected.length > 0) {
+        setError(`Không đọc được file dạng binary: ${rejected.join(', ')}`)
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
+
+  const removeAttachedFile = (id: string) => {
+    setAttachedFiles((current) => current.filter((file) => file.id !== id))
   }
 
   const appendMessage = async (
@@ -307,7 +415,7 @@ export function AiChatDrawer({
 
   const submit = async () => {
     const text = input.trim()
-    if (!text || busy || !activeThreadId) return
+    if ((!text && attachedFiles.length === 0) || busy || !activeThreadId) return
     if (settings.provider === 'openai_login' && openAiAuth.status !== 'signed-in') {
       const signedIn = await checkOpenAiSession()
       if (!signedIn) {
@@ -318,18 +426,20 @@ export function AiChatDrawer({
     setInput('')
     setError(null)
     setPendingActions([])
+    const content = `${text || 'Please read the attached file(s).'}${buildFileAttachmentPrompt(attachedFiles)}`
     const userMessage: AiChatMessage = {
       id: uid(),
       role: 'user',
-      content: text,
+      content,
       ts: Date.now(),
     }
     const nextMessages = [...messages, userMessage]
     const nextTitle =
       !activeThread || activeThread.title === NEW_THREAD_TITLE
-        ? text.slice(0, 46)
+        ? (text || attachedFiles[0]?.name || NEW_THREAD_TITLE).slice(0, 46)
         : undefined
     await appendMessage(activeThreadId, userMessage, nextTitle)
+    setAttachedFiles([])
     setBusy(true)
     try {
       const proposal = await callAiProvider({
@@ -375,22 +485,38 @@ export function AiChatDrawer({
   const disabled = busy || !context.project || !activeThreadId
 
   return (
-    <div className="flex h-full min-w-0 flex-col overflow-hidden bg-surface text-ink">
+    <div className="relative flex h-full min-w-0 flex-col overflow-hidden bg-surface text-ink">
       <header className="h-[54px] shrink-0 border-b border-border-hair bg-surface flex items-center px-5 gap-3">
         <span className="grid h-8 w-8 place-items-center rounded-[8px] bg-accent-soft text-accent">
           <Bot size={17} strokeWidth={1.9} />
         </span>
-        <div className="min-w-0">
-          <h1 className="text-[15px] font-semibold text-ink tracking-[-0.01em]">
-            AI Chat
-          </h1>
-          <div className="text-[11.5px] text-ink-faint truncate">
-            {providerName(settings.provider)} · {settings.model}
-          </div>
-        </div>
         <button
-          onClick={onClose}
-          className="ml-auto inline-flex items-center justify-center w-7 h-7 rounded-md text-ink-faint hover:text-ink hover:bg-surface-hover transition"
+          ref={titleButtonRef}
+          type="button"
+          data-testid="ai-chat-title-menu-button"
+          onClick={() => setChatMenuOpen((v) => !v)}
+          aria-haspopup="menu"
+          aria-expanded={chatMenuOpen}
+          className="-ml-1.5 flex min-w-0 flex-1 items-center gap-1.5 rounded-[8px] px-1.5 py-1 text-left hover:bg-surface-hover transition"
+        >
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-[15px] font-semibold text-ink tracking-[-0.01em]">
+              {activeThread?.title && activeThread.title !== NEW_THREAD_TITLE
+                ? activeThread.title
+                : 'AI Chat'}
+            </span>
+            <span className="block truncate text-[11.5px] text-ink-faint">
+              {providerName(settings.provider)} · {settings.model}
+            </span>
+          </span>
+          <ChevronDown
+            size={15}
+            className={`shrink-0 text-ink-faint transition-transform ${chatMenuOpen ? 'rotate-180' : ''}`}
+          />
+        </button>
+        <button
+          onClick={closeDrawer}
+          className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-ink-faint hover:text-ink hover:bg-surface-hover transition"
           title="Close AI Chat (Esc)"
           aria-label="Close AI Chat"
         >
@@ -398,72 +524,79 @@ export function AiChatDrawer({
         </button>
       </header>
 
-      <div ref={scrollerRef} className="flex-1 overflow-auto bg-canvas px-5 py-5">
-        <div className="space-y-4">
-          <section className="bg-surface rounded-[14px] p-4 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_6px_16px_rgba(0,0,0,0.04)]">
-            <div className="flex items-center gap-2">
-              <MessageCircle size={15} className="text-ink-faint" />
-              <span className="text-[13px] font-semibold text-ink">Project chats</span>
-              <button
-                onClick={() => void startNewChat()}
-                disabled={!projectId || busy}
-                className="ml-auto inline-flex items-center gap-1 rounded-[8px] px-2 py-1 text-[12px] font-medium text-accent hover:bg-accent-soft disabled:opacity-40 transition"
-              >
-                <Plus size={13} /> New
-              </button>
-            </div>
-            <div className="mt-3 max-h-32 overflow-auto space-y-1">
-              {(threads ?? []).length === 0 ? (
-                <div className="text-[12.5px] text-ink-faint">No saved chats yet.</div>
-              ) : (
-                (threads ?? []).map((thread) => (
-                  <button
-                    key={thread.id}
-                    onClick={() => selectThread(thread.id)}
-                    className={`w-full rounded-[9px] px-2.5 py-2 text-left transition ${
-                      thread.id === activeThreadId
-                        ? 'bg-accent-soft text-accent'
-                        : 'hover:bg-surface-hover text-ink'
-                    }`}
-                  >
-                    <span className="block truncate text-[13px] font-medium">
-                      {thread.title}
-                    </span>
-                    <span className="block text-[11.5px] text-ink-faint tab-data">
-                      {formatThreadTime(thread.updatedAt)}
-                    </span>
-                  </button>
-                ))
-              )}
-            </div>
-            <div className="mt-2 text-[11.5px] text-ink-faint">
-              Skill:{' '}
-              <span className={skillState === 'loaded' ? 'text-status-done' : ''}>
-                {skillState === 'loaded'
-                  ? 'project-management loaded'
-                  : skillState === 'loading'
-                    ? 'loading project-management…'
-                    : skillState === 'failed'
-                      ? 'project-management unavailable'
-                      : 'project-management'}
-              </span>
-            </div>
-          </section>
-
-          <section className="bg-surface rounded-[14px] p-4 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_6px_16px_rgba(0,0,0,0.04)]">
+      {chatMenuOpen && (
+        <div
+          ref={chatMenuRef}
+          data-testid="ai-chat-title-menu"
+          className="absolute left-3 right-3 top-[60px] z-30 max-h-[min(72vh,620px)] overflow-auto rounded-[12px] border border-border-hair bg-surface p-3 shadow-[0_16px_42px_rgba(15,23,42,0.18)]"
+        >
+          <div className="flex items-center gap-2">
+            <MessageCircle size={15} className="text-ink-faint" />
+            <span className="text-[13px] font-semibold text-ink">Project chats</span>
             <button
+              type="button"
+              onClick={() => void startNewChat()}
+              disabled={!projectId || busy}
+              className="ml-auto inline-flex items-center gap-1 rounded-[8px] px-2 py-1 text-[12px] font-medium text-accent hover:bg-accent-soft disabled:opacity-40 transition"
+            >
+              <Plus size={13} /> New
+            </button>
+          </div>
+          <div className="mt-2 max-h-40 overflow-auto space-y-1">
+            {(threads ?? []).length === 0 ? (
+              <div className="rounded-[9px] bg-canvas px-2.5 py-2 text-[12.5px] text-ink-faint">
+                No saved chats yet.
+              </div>
+            ) : (
+              (threads ?? []).map((thread) => (
+                <button
+                  key={thread.id}
+                  type="button"
+                  onClick={() => selectThread(thread.id)}
+                  className={`w-full rounded-[9px] px-2.5 py-2 text-left transition ${
+                    thread.id === activeThreadId
+                      ? 'bg-accent-soft text-accent'
+                      : 'hover:bg-surface-hover text-ink'
+                  }`}
+                >
+                  <span className="block truncate text-[13px] font-medium">
+                    {thread.title}
+                  </span>
+                  <span className="block text-[11.5px] text-ink-faint tab-data">
+                    {formatThreadTime(thread.updatedAt)}
+                  </span>
+                </button>
+              ))
+            )}
+          </div>
+          <div className="mt-2 rounded-[9px] bg-canvas px-2.5 py-2 text-[11.5px] text-ink-faint">
+            Skill:{' '}
+            <span className={skillState === 'loaded' ? 'text-status-done' : ''}>
+              {skillState === 'loaded'
+                ? 'project-management loaded'
+                : skillState === 'loading'
+                  ? 'loading project-management…'
+                  : skillState === 'failed'
+                    ? 'project-management unavailable'
+                    : 'project-management'}
+            </span>
+          </div>
+
+          <div className="mt-3 border-t border-border-hair pt-3">
+            <button
+              type="button"
               onClick={() => setSettingsOpen((v) => !v)}
-              className="w-full flex items-center gap-2 text-left"
+              className="w-full flex items-center gap-2 rounded-[9px] px-2 py-1.5 text-left hover:bg-surface-hover transition"
               aria-expanded={settingsOpen}
             >
               <Settings2 size={15} className="text-ink-faint" />
               <span className="text-[13px] font-semibold text-ink">Provider</span>
-              <span className="ml-auto text-[12px] text-ink-faint">
+              <span className="ml-auto min-w-0 truncate text-[12px] text-ink-faint">
                 {providerLabel(settings, openAiAuth)}
               </span>
               <ChevronDown
                 size={14}
-                className={`text-ink-faint transition-transform ${settingsOpen ? 'rotate-180' : ''}`}
+                className={`shrink-0 text-ink-faint transition-transform ${settingsOpen ? 'rotate-180' : ''}`}
               />
             </button>
             {settingsOpen && (
@@ -476,8 +609,12 @@ export function AiChatDrawer({
                 onSignOut={signOutOpenAi}
               />
             )}
-          </section>
+          </div>
+        </div>
+      )}
 
+      <div ref={scrollerRef} className="flex-1 overflow-auto bg-canvas px-5 py-5">
+        <div className="space-y-4">
           <div className="space-y-2.5">
             {messages.map((m) => (
               <ChatBubble key={m.id} message={m} />
@@ -550,35 +687,77 @@ export function AiChatDrawer({
       </div>
 
       <footer className="shrink-0 border-t border-border-hair bg-surface p-2">
-        <div className="flex items-end gap-2 rounded-[12px] bg-canvas px-2 py-1.5">
-          <textarea
-            ref={inputRef}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault()
-                void submit()
+        <div className="rounded-[12px] bg-canvas px-2 py-1.5">
+          {attachedFiles.length > 0 && (
+            <div className="mb-1.5 flex flex-wrap gap-1.5 px-1">
+              {attachedFiles.map((file) => (
+                <span
+                  key={file.id}
+                  className="inline-flex max-w-full items-center gap-1.5 rounded-[8px] bg-surface px-2 py-1 text-[11.5px] text-ink-muted"
+                >
+                  <Paperclip size={12} />
+                  <span className="max-w-[180px] truncate">{file.name}</span>
+                  <button
+                    type="button"
+                    onClick={() => removeAttachedFile(file.id)}
+                    className="grid h-4 w-4 place-items-center rounded hover:bg-surface-hover"
+                    aria-label={`Remove ${file.name}`}
+                    title="Remove file"
+                  >
+                    <X size={11} />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+          <div className="flex items-end gap-2">
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              className="hidden"
+              accept=".txt,.md,.markdown,.csv,.tsv,.json,.yaml,.yml,.xml,.html,.css,.js,.jsx,.ts,.tsx,.py,.rb,.go,.rs,.java,.kt,.swift,.c,.cpp,.h,.hpp,.sql,.log,text/*,application/json,application/xml"
+              onChange={(e) => void attachFiles(e.currentTarget.files)}
+            />
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={disabled || attachedFiles.length >= AI_FILE_MAX_COUNT}
+              className="grid h-8 w-8 shrink-0 place-items-center rounded-[8px] text-ink-muted hover:bg-surface-hover disabled:opacity-40 transition"
+              aria-label="Attach files"
+              title={`Attach text files (max ${AI_FILE_MAX_COUNT})`}
+            >
+              <Paperclip size={15} />
+            </button>
+            <textarea
+              ref={inputRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault()
+                  void submit()
+                }
+              }}
+              rows={4}
+              placeholder={
+                context.project
+                  ? 'Ask, attach file, or type: thêm task "Design login"'
+                  : 'Select a project first'
               }
-            }}
-            rows={1}
-            placeholder={
-              context.project
-                ? 'Ask or type: thêm task "Design login"'
-                : 'Select a project first'
-            }
-            disabled={disabled}
-            className="max-h-[84px] min-h-[34px] flex-1 resize-none bg-transparent px-2 py-1.5 text-[13.5px] leading-relaxed text-ink outline-none placeholder:text-ink-faint disabled:opacity-50"
-          />
-          <button
-            onClick={() => void submit()}
-            disabled={disabled || !input.trim()}
-            className="grid h-8 w-8 shrink-0 place-items-center rounded-[8px] bg-accent text-white hover:bg-accent-hover disabled:opacity-40 transition"
-            aria-label="Send"
-            title="Send"
-          >
-            <Send size={15} strokeWidth={2} />
-          </button>
+              disabled={disabled}
+              className="max-h-[148px] min-h-[104px] flex-1 resize-none bg-transparent px-2 py-1.5 text-[13.5px] leading-relaxed text-ink outline-none placeholder:text-ink-faint disabled:opacity-50"
+            />
+            <button
+              onClick={() => void submit()}
+              disabled={disabled || (!input.trim() && attachedFiles.length === 0)}
+              className="grid h-8 w-8 shrink-0 place-items-center rounded-[8px] bg-accent text-white hover:bg-accent-hover disabled:opacity-40 transition"
+              aria-label="Send"
+              title="Send"
+            >
+              <Send size={15} strokeWidth={2} />
+            </button>
+          </div>
         </div>
       </footer>
     </div>
@@ -870,6 +1049,11 @@ function authDotClass(authState: OpenAiAuthState) {
 
 function ChatBubble({ message }: { message: AiChatMessage }) {
   const mine = message.role === 'user'
+  const display = splitAiMessageDisplayContent(message.content)
+  const displayBody =
+    display.attachments.length > 0 && display.body === 'Please read the attached file(s).'
+      ? ''
+      : display.body
   return (
     <div className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
       <div
@@ -879,7 +1063,29 @@ function ChatBubble({ message }: { message: AiChatMessage }) {
             : 'bg-surface text-ink border border-border-hair'
         }`}
       >
-        <MarkdownContent content={message.content} inverted={mine} />
+        {displayBody && <MarkdownContent content={displayBody} inverted={mine} />}
+        {display.attachments.length > 0 && (
+          <div className={`flex flex-wrap gap-1.5 ${displayBody ? 'mt-2' : ''}`}>
+            {display.attachments.map((file, index) => {
+              const size = formatAiFileSize(file.size)
+              return (
+                <span
+                  key={`${file.name}-${index}`}
+                  className={`inline-flex max-w-full items-center gap-1.5 rounded-[8px] px-2 py-1 text-[11.5px] ${
+                    mine
+                      ? 'bg-white/15 text-white'
+                      : 'bg-canvas text-ink-muted'
+                  }`}
+                  title={[file.name, file.type, size].filter(Boolean).join(' · ')}
+                >
+                  <Paperclip size={12} className="shrink-0" />
+                  <span className="max-w-[180px] truncate">{file.name}</span>
+                  {size && <span className="shrink-0 opacity-75">{size}</span>}
+                </span>
+              )
+            })}
+          </div>
+        )}
       </div>
     </div>
   )

@@ -1,8 +1,8 @@
 # Sprints
 
 **Status:** Implemented
-**Last updated:** 2026-06-19 (sprint state glyph: leading dot now encodes upcoming /
-in-progress / past, replacing the flat dot)
+**Last updated:** 2026-06-23 (sprint notes render safe markdown in the header
+banner)
 **Code:** `app/src/App.tsx` (`NewSprintDialog`, `SprintNoteBanner`, sprint panel,
 `SprintStateDot`, `renderSprintRow`), `app/src/db.ts` (`nextSequence`, `setSprintNote`),
 `app/src/lib.ts` (`sprintTemporalState`; tests in `sprint-cadence.test.ts`)
@@ -17,6 +17,16 @@ context lives in an **optional note** instead.
   shown locked** (`Sprint N`, read-only with a lock glyph — not an input); the editable
   fields are **Start**, **End**, and an optional **note**. Enter or **Create** to save; it
   becomes the current sprint.
+- **Edit:** hover a sprint row → open the compact row action menu → **Edit sprint**.
+  Editing keeps the name locked and lets the user change the Monday start plus the
+  optional note. End remains derived as `start + 13`; the dialog uses the same
+  Monday-strip control as create. Editing the sprint window does **not** rewrite existing
+  task dates — tasks may intentionally run outside the sprint window and the existing
+  list/board/timeline affordances already show those cases.
+- **Delete:** the same row menu includes **Delete sprint**. This is a real destructive
+  delete, not archive: the sprint, all tasks in it, and sprint-level history for that
+  sprint are removed after an in-app confirmation. Other tasks have dependencies on
+  deleted tasks cleaned up. Prefer Archive for reversible decluttering.
 - **Select:** click a row in the sprint panel (active row = accent bg, shows date range +
   task count; a small note glyph appears **trailing at the row's right edge** when the sprint
   has a note — kept off the title so the name stays clean; faint at rest, white/80 on the
@@ -39,6 +49,9 @@ context lives in an **optional note** instead.
   header (Solution B). Click the banner text to edit inline (multi-line; `⌘`+Enter or blur
   commits, Escape cancels). When empty, the banner collapses to a calm dashed
   **`+ Add sprint note`** slot (`AddGroupButton` idiom, §5.11) so it stays quiet until used.
+  Saved notes render safe markdown while viewing: paragraphs, lists, emphasis,
+  inline code, links, fenced code, and simple pipe tables. Editing always shows
+  the raw markdown text in the textarea.
 
 ## Why lock the name
 Custom sprint names drift (`Sprint 12`, `Payments`, `wk of Jun 2`…) and break the clean
@@ -59,12 +72,17 @@ Start is **locked to a Monday** and length is a **fixed 2 weeks** (ClickUp-style
   `Sprint <count+1>`. Shown locked (not editable).
 
 ## Data
-`Sprint { id, projectId, name, startDate, endDate, note? }`.
+`Sprint { id, projectId, name, startDate, endDate, note?, archivedAt? }`.
 - `note?` is an **optional, non-indexed** string → **no Dexie version bump** (same pattern
   as `Project.description`; rows without it read as empty). Written only through
-  `setSprintNote()`; trimmed empty → field cleared.
+  `setSprintNote()`; trimmed empty → field cleared. Markdown support is render-only; the
+  stored value remains the raw note string.
 - Date range rendered with `formatSprintRange` → `MMM d → MMM d` (arrow, month on both
   sides, e.g. `May 18 → May 31`).
+- Date edits write `startDate` and derived `endDate` only. Because these fields already
+  exist and there is no new index, editing needs no Dexie schema bump.
+- Deleting a sprint deletes its `tasks` and `events` rows in the same transaction, then
+  removes deleted task IDs from remaining tasks' `dependsOn`.
 
 ## Migration of legacy custom names
 Existing sprints that were manually renamed **keep their stored name** (displayed as-is) —
@@ -87,3 +105,6 @@ target, auto-select, `Sprint N` numbering). Spec: [sprint-archive.md](./sprint-a
 - Current sprint isn't persisted across sessions (defaults to the latest by `startDate`).
 - `dedupeSprints()` merges accidental same-name duplicates within a project (legacy
   cleanup) — also renumbers on merge.
+- Deleting the currently selected sprint auto-selects the latest remaining sprint, falling
+  back through archived sprints; if none remain, the task surface shows the existing empty
+  state.

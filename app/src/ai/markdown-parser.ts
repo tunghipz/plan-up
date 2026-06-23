@@ -24,16 +24,17 @@ export function parseMarkdownBlocks(content: string): MarkdownBlock[] {
       continue
     }
 
-    const codeStart = trimmed.match(/^```([\w-]+)?\s*$/)
+    const codeStart = trimmed.match(/^(`{3,})([^\s`]*)\s*$/)
     if (codeStart) {
       flushParagraph()
+      const fence = codeStart[1]
       const code: string[] = []
       i += 1
-      while (i < lines.length && !lines[i].trim().startsWith('```')) {
+      while (i < lines.length && !lines[i].trim().startsWith(fence)) {
         code.push(lines[i])
         i += 1
       }
-      blocks.push({ type: 'code', language: codeStart[1], code: code.join('\n') })
+      blocks.push({ type: 'code', language: codeStart[2], code: code.join('\n') })
       continue
     }
 

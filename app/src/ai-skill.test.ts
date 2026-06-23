@@ -1,0 +1,33 @@
+import { describe, expect, it } from 'vitest'
+import skill from '../public/skills/project-management/SKILL.md?raw'
+
+describe('project-management skill', () => {
+  it('targets plan-up typed actions instead of the old Quipu MCP tool contract', async () => {
+    expect(skill).toContain('create_task')
+    expect(skill).toContain('update_task')
+    expect(skill).toContain('delete_task')
+    expect(skill).toContain('move_task_to_next_sprint')
+    expect(skill).toContain('move_task_to_backlog')
+    expect(skill).toContain('move_task_to_sprint')
+    expect(skill).toContain('move_task_to_collection')
+    expect(skill).toContain('create_milestone')
+    expect(skill).toContain('update_milestone')
+    expect(skill).toContain('delete_milestone')
+    expect(skill).toContain('create_sprint')
+    expect(skill).toContain('update_sprint')
+    expect(skill).toContain('add_sprint_note')
+    expect(skill).toContain('delete_sprint')
+    expect(skill).toContain('create_collection')
+    expect(skill).toContain('update_collection')
+    expect(skill).toContain('delete_collection')
+    expect(skill).toContain('create_member')
+    expect(skill).toContain('update_member')
+    expect(skill).toContain('delete_member')
+    expect(skill).toContain('set_member_day_off')
+    expect(skill).toContain('remove_member_day_off')
+    expect(skill).toContain('Action-first rule')
+    expect(skill).toContain('return at least one typed action')
+    expect(skill).toContain('Proposed changes card and Apply button')
+    expect(skill).not.toMatch(/Quipu|Microsoft Project XML|read_project|assign_task/)
+  })
+})

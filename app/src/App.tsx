@@ -14,6 +14,9 @@ import {
   Calendar,
   Plus,
   Settings,
+  MoreHorizontal,
+  Pencil,
+  Trash2,
   X,
   Lock,
   StickyNote,
@@ -24,6 +27,7 @@ import {
   ArchiveRestore,
   FolderSync,
   Layers,
+  Inbox,
   Package,
   Database,
   Check,
@@ -31,7 +35,6 @@ import {
 } from 'lucide-react'
 import {
   db,
-  uid,
   colorForName,
   exportAll,
   importAll,
@@ -42,11 +45,15 @@ import {
   dedupeSprints,
   setSprintNote,
   setSprintArchived,
+  updateSprint,
+  deleteSprint,
   recomputeAllDates,
   moveUnfinishedToNextSprint,
-  logEvent,
   createProject,
+  createSprint,
   createCollection,
+  ensureProjectBacklog,
+  isBacklogCollection,
   deleteCollection,
   type Project,
   type Sprint,
@@ -68,6 +75,7 @@ import { HomeDashboard } from './HomeDashboard'
 import { AiChatDrawer } from './AiChatDrawer'
 import { Avatar } from './members'
 import type { AiRuntimeContext } from './ai/types'
+import { MarkdownContent } from './ai/markdown'
 import {
   formatSprintRange,
   formatShortDate,
@@ -229,6 +237,8 @@ function App() {
     safeStorage.set(COLLVIEW_KEY, v)
   }
   const [showNewSprint, setShowNewSprint] = useState(false)
+  const [editingSprint, setEditingSprint] = useState<Sprint | null>(null)
+  const [sprintMenuId, setSprintMenuId] = useState<string | null>(null)
   const [showNewProject, setShowNewProject] = useState(false)
   const [showNewCollection, setShowNewCollection] = useState(false)
   const confirm = useConfirm()
@@ -299,6 +309,23 @@ function App() {
     },
     []
   )
+  useEffect(() => {
+    if (!sprintMenuId) return
+    const onDown = (e: MouseEvent) => {
+      const target = e.target as Element | null
+      if (target?.closest('[data-sprint-actions]')) return
+      setSprintMenuId(null)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setSprintMenuId(null)
+    }
+    window.addEventListener('mousedown', onDown)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('mousedown', onDown)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [sprintMenuId])
   const [dark, setDark] = useDarkMode()
   const fileInputRef = useRef<HTMLInputElement>(null)
   // Scroll container for the sprint views — search-palette jump-to scrolls it to
@@ -408,6 +435,14 @@ function App() {
         : undefined,
     [seeded, currentProjectId]
   )
+  const backlogCollection = useMemo(
+    () => collections?.find(isBacklogCollection) ?? null,
+    [collections]
+  )
+  const userCollections = useMemo(
+    () => (collections ?? []).filter((c) => !isBacklogCollection(c)),
+    [collections]
+  )
   const currentCollection =
     collections?.find((c) => c.id === currentCollectionId) ?? null
 
@@ -448,6 +483,24 @@ function App() {
     }
     return counts
   }, [projectTasks])
+  const backlogTaskCount = useMemo(() => {
+    if (!backlogCollection) return 0
+    return (projectTasks ?? []).filter((t) => t.collectionId === backlogCollection.id).length
+  }, [backlogCollection, projectTasks])
+  const collectionItemCounts = useMemo(() => {
+    const counts: Record<string, number> = {}
+    for (const task of projectTasks ?? []) {
+      if (!task.collectionId) continue
+      counts[task.collectionId] = (counts[task.collectionId] ?? 0) + 1
+    }
+    return counts
+  }, [projectTasks])
+
+  useEffect(() => {
+    if (!seeded || !currentProjectId || !collections) return
+    if (collections.some(isBacklogCollection)) return
+    void ensureProjectBacklog(currentProjectId)
+  }, [seeded, currentProjectId, collections])
 
   // When project changes (or first loads), reset sprint to latest in project.
   useEffect(() => {
@@ -718,6 +771,7 @@ function App() {
     [sprints]
   )
   const onArchiveToggle = async (sprintId: string, archived: boolean) => {
+    setSprintMenuId(null)
     await setSprintArchived(sprintId, archived)
     // Archiving the current sprint hands off to the latest active one (never a
     // blank view) — useLiveQuery won't re-select since the row still exists.
@@ -729,6 +783,37 @@ function App() {
     }
     if (archived) setArchivedCollapsed(false) // reveal where it went
   }
+
+  const onDeleteSprint = async (sprint: Sprint) => {
+    setSprintMenuId(null)
+    const c = sprintTaskCounts.get(sprint.id)
+    const taskCount = c?.total ?? 0
+    const ok = await confirm({
+      title: `Delete ${sprint.name}?`,
+      message:
+        taskCount > 0
+          ? `This permanently deletes the sprint and ${taskCount} task${taskCount === 1 ? '' : 's'} inside it. Archive keeps the sprint reversible.`
+          : 'This permanently deletes the sprint. Archive keeps the sprint reversible.',
+      confirmLabel: 'Delete',
+    })
+    if (!ok) return
+    await deleteSprint(sprint.id)
+    if (sprint.id === currentSprintId) {
+      setCurrentSprintId(sprintToSelect((sprints ?? []).filter((s) => s.id !== sprint.id)))
+    }
+    showToast({ title: 'Sprint deleted', detail: `${sprint.name} was removed.` })
+  }
+
+  const insertAiReference = (text: string) => {
+    setSettingsOpen(false)
+    setShowActivity(false)
+    setAiChatOpen(true)
+    window.dispatchEvent(
+      new CustomEvent('plan-up:ai-insert-reference', { detail: { text } })
+    )
+  }
+
+  const sprintAiRef = (sprint: Sprint) => `@sprint[${sprint.name} | id=${sprint.id}]`
 
   // Computed once per render, shared by every row's state glyph (not per-row).
   const today = todayLocalISO()
@@ -743,7 +828,15 @@ function App() {
     const state = sprintTemporalState(s.startDate, s.endDate, today)
     const aDate = archived && s.archivedAt ? new Date(s.archivedAt) : null
     return (
-      <div key={s.id} className="relative group/row">
+      <div
+        key={s.id}
+        className="relative group/row"
+        onContextMenu={(e) => {
+          if ((e.target as Element | null)?.closest('[data-sprint-actions]')) return
+          e.preventDefault()
+          insertAiReference(sprintAiRef(s))
+        }}
+      >
         <button
           onClick={() => selectSprint(s.id)}
           className={`w-full text-left flex items-center gap-2.5 px-2.5 py-2 mb-0.5 text-[14px] rounded-lg transition ${
@@ -788,22 +881,52 @@ function App() {
           type="button"
           onClick={(e) => {
             e.stopPropagation()
-            void onArchiveToggle(s.id, !archived)
+            setSprintMenuId((id) => (id === s.id ? null : s.id))
           }}
-          title={archived ? 'Unarchive sprint' : 'Archive sprint'}
-          aria-label={archived ? `Unarchive ${s.name}` : `Archive ${s.name}`}
+          title="Sprint actions"
+          aria-label={`${s.name} actions`}
+          aria-expanded={sprintMenuId === s.id}
+          data-sprint-actions
           className={`absolute right-2.5 top-1/2 -translate-y-1/2 grid place-items-center w-6 h-6 rounded-md opacity-0 group-hover/row:opacity-100 focus:opacity-100 transition ${
             isActive
               ? 'text-white/80 hover:bg-white/20'
               : 'text-ink-faint hover:bg-accent-soft hover:text-accent'
           }`}
         >
-          {archived ? (
-            <ArchiveRestore size={14} strokeWidth={1.9} />
-          ) : (
-            <Archive size={14} strokeWidth={1.9} />
-          )}
+          <MoreHorizontal size={14} strokeWidth={1.9} />
         </button>
+        {sprintMenuId === s.id && (
+          <div
+            data-sprint-actions
+            className="absolute right-1.5 top-8 z-30 w-40 rounded-[10px] border border-border bg-surface shadow-[0_12px_36px_rgba(0,0,0,0.18)] p-1 text-[13px]"
+          >
+            <button
+              type="button"
+              onClick={() => {
+                setSprintMenuId(null)
+                setEditingSprint(s)
+              }}
+              className="w-full flex items-center gap-2 px-2.5 py-2 rounded-[8px] text-left text-ink hover:bg-surface-hover transition"
+            >
+              <Pencil size={14} /> Edit sprint
+            </button>
+            <button
+              type="button"
+              onClick={() => void onArchiveToggle(s.id, !archived)}
+              className="w-full flex items-center gap-2 px-2.5 py-2 rounded-[8px] text-left text-ink hover:bg-surface-hover transition"
+            >
+              {archived ? <ArchiveRestore size={14} /> : <Archive size={14} />}
+              {archived ? 'Unarchive' : 'Archive'}
+            </button>
+            <button
+              type="button"
+              onClick={() => void onDeleteSprint(s)}
+              className="w-full flex items-center gap-2 px-2.5 py-2 rounded-[8px] text-left text-red-500 hover:bg-red-500/10 transition"
+            >
+              <Trash2 size={14} /> Delete
+            </button>
+          </div>
+        )}
       </div>
     )
   }
@@ -852,6 +975,9 @@ function App() {
       project: currentProject,
       sprint: selKind === 'sprint' ? currentSprint : null,
       collection: selKind === 'collection' ? currentCollection : null,
+      collections: collections ?? [],
+      collectionItemCounts,
+      sprints: activeSprints,
       members: paletteMembers ?? [],
       tasks: aiTasks,
     }),
@@ -864,6 +990,9 @@ function App() {
       currentProject,
       currentSprint,
       currentCollection,
+      collections,
+      collectionItemCounts,
+      activeSprints,
       paletteMembers,
       aiTasks,
     ]
@@ -1051,6 +1180,41 @@ function App() {
               )}
             </div>
             )}
+            {backlogCollection && (
+              <div className="px-[18px] pt-2 pb-1">
+                <button
+                  onClick={() => selectCollection(backlogCollection.id)}
+                  className={`w-full text-left flex items-center gap-2.5 px-2.5 py-2 text-[14px] rounded-lg transition ${
+                    selKind === 'collection' && currentCollectionId === backlogCollection.id
+                      ? 'bg-accent text-white'
+                      : 'text-ink hover:bg-surface-hover'
+                  }`}
+                >
+                  <Inbox
+                    size={15}
+                    strokeWidth={1.9}
+                    className={`shrink-0 ${
+                      selKind === 'collection' && currentCollectionId === backlogCollection.id
+                        ? 'text-white/90'
+                        : 'text-ink-faint'
+                    }`}
+                    aria-hidden
+                  />
+                  <span className="flex-1 min-w-0 truncate font-medium">Backlog</span>
+                  {backlogTaskCount > 0 && (
+                    <span
+                      className={`text-[12px] tabular-nums ${
+                        selKind === 'collection' && currentCollectionId === backlogCollection.id
+                          ? 'text-white/75'
+                          : 'text-ink-faint'
+                      }`}
+                    >
+                      {backlogTaskCount}
+                    </span>
+                  )}
+                </button>
+              </div>
+            )}
             <div
               onClick={toggleCollectionsCollapsed}
               role="button"
@@ -1065,9 +1229,9 @@ function App() {
                 />
                 <Layers size={16} className="shrink-0 text-ink-faint" aria-hidden />
                 Collections
-                {(collections?.length ?? 0) > 0 && (
+                {userCollections.length > 0 && (
                   <span className="text-[13px] tabular-nums font-medium text-ink-faint/70">
-                    {collections?.length}
+                    {userCollections.length}
                   </span>
                 )}
               </span>
@@ -1084,7 +1248,7 @@ function App() {
             </div>
             {!collectionsCollapsed && (
             <div className="pl-[26px] pr-2.5 pb-2">
-              {collections?.map((c) => {
+              {userCollections.map((c) => {
                 const isActive = selKind === 'collection' && c.id === currentCollectionId
                 return (
                   <div key={c.id} className="group relative mb-0.5">
@@ -1128,7 +1292,7 @@ function App() {
                   </div>
                 )
               })}
-              {collections && collections.length === 0 && (
+              {collections && userCollections.length === 0 && (
                 <div className="px-3 py-2 text-[13px] text-ink-faint italic">No collections</div>
               )}
             </div>
@@ -1366,6 +1530,7 @@ function App() {
               <CollectionView
                 collectionId={currentCollection.id}
                 view={collectionView}
+                currentSprintId={currentSprintId}
                 onViewInList={() => setCollectionView('list')}
               />
             ) : sprints.length === 0 ? (
@@ -1404,6 +1569,7 @@ function App() {
                   sprintStartDate={currentSprint.startDate}
                   sprintEndDate={currentSprint.endDate}
                   tasks={tasks}
+                  onInsertAiReference={insertAiReference}
                 />
               )
             ) : (
@@ -1547,6 +1713,14 @@ function App() {
             setCurrentSprintId(s.id)
             setShowNewSprint(false)
           }}
+        />
+      )}
+
+      {editingSprint && (
+        <EditSprintDialog
+          sprint={editingSprint}
+          onClose={() => setEditingSprint(null)}
+          onSave={() => setEditingSprint(null)}
         />
       )}
 
@@ -1880,9 +2054,8 @@ function MondayStrip({
   const move = (next: number) => {
     const i = Math.max(0, Math.min(mondays.length - 1, next))
     onSelect(mondays[i])
-    ref.current
-      ?.querySelectorAll<HTMLButtonElement>('[role="radio"]')
-      [i]?.focus()
+    const buttons = ref.current?.querySelectorAll<HTMLButtonElement>('[role="radio"]')
+    buttons?.[i]?.focus()
   }
   const onKeyDown = (e: React.KeyboardEvent) => {
     switch (e.key) {
@@ -1990,25 +2163,10 @@ function NewSprintDialog({
 
   const submit = async () => {
     const noteTrimmed = note.trim()
-    const sprint: Sprint = {
-      id: uid(),
+    const sprint = await createSprint({
       projectId,
-      name,
       startDate,
-      endDate,
-      ...(noteTrimmed ? { note: noteTrimmed } : {}),
-    }
-    await db.sprints.add(sprint)
-    await logEvent({
-      projectId,
-      sprintId: sprint.id,
-      taskId: null,
-      taskSeq: null,
-      taskTitle: null,
-      kind: 'sprint_started',
-      from: null,
-      to: null,
-      ts: Date.now(),
+      note: noteTrimmed || null,
     })
     onCreate(sprint)
   }
@@ -2090,6 +2248,114 @@ function NewSprintDialog({
             className="px-4 py-1.5 text-sm font-medium bg-accent hover:bg-accent-hover text-white rounded-[8px] disabled:opacity-50 transition"
           >
             Create
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function EditSprintDialog({
+  sprint,
+  onClose,
+  onSave,
+}: {
+  sprint: Sprint
+  onClose: () => void
+  onSave: (s: Sprint) => void
+}) {
+  const todayStr = useMemo(() => todayLocalISO(), [])
+  const initialStart = useMemo(() => {
+    const monday = snapToMonday(sprint.startDate)
+    return sprint.startDate === monday ? sprint.startDate : monday
+  }, [sprint.startDate])
+  const [startDate, setStartDate] = useState(initialStart)
+  const [note, setNote] = useState(sprint.note ?? '')
+  const thisWeekMonday = useMemo(() => snapToMonday(todayStr), [todayStr])
+  const mondays = useMemo(() => upcomingMondays(initialStart, 9), [initialStart])
+  const endDate = useMemo(() => sprintEndForStart(startDate), [startDate])
+
+  const submit = async () => {
+    const updated = await updateSprint({
+      sprintId: sprint.id,
+      startDate,
+      note,
+    })
+    if (updated) onSave(updated)
+  }
+
+  return (
+    <div
+      className="dlg-scrim fixed inset-0 bg-black/25 backdrop-blur-md flex items-center justify-center p-4 z-50"
+      onClick={onClose}
+    >
+      <div
+        className="dlg-sheet bg-surface text-ink rounded-[16px] shadow-[0_20px_60px_rgba(0,0,0,0.28)] w-full max-w-md p-6 space-y-4 border border-border-hair"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 className="text-[19px] font-bold tracking-[-0.014em]">Edit Sprint</h2>
+        <div className="block">
+          <span className="text-xs text-ink-muted">Name</span>
+          <div className="mt-1 w-full flex items-center gap-2 px-3 py-2 bg-fill rounded-[8px] text-sm">
+            <span className="font-semibold text-ink">{sprint.name}</span>
+            <Lock size={13} className="ml-auto text-ink-faint" aria-label="Locked" />
+          </div>
+          <p className="mt-1.5 text-[11.5px] text-ink-faint leading-snug">
+            Sprint names stay automatic. Use the note for context.
+          </p>
+        </div>
+        <div className="block">
+          <span className="text-xs text-ink-muted">Start · pick a Monday</span>
+          <MondayStrip
+            mondays={mondays}
+            value={startDate}
+            thisWeekMonday={thisWeekMonday}
+            onSelect={setStartDate}
+          />
+          <div className="mt-2 flex items-center gap-2.5 px-3 py-2 bg-accent-soft rounded-[8px] text-sm">
+            <span className="text-ink-faint" aria-hidden="true">
+              →
+            </span>
+            <span className="font-semibold tabular-nums">
+              {formatShortDate(endDate)}
+            </span>
+            <span className="ml-auto text-[11px] font-semibold text-accent bg-surface rounded-full px-2 py-0.5">
+              2 weeks
+            </span>
+          </div>
+          <p className="mt-1.5 text-[11.5px] text-ink-faint leading-snug tabular-nums">
+            {formatSprintRange(startDate, endDate)} · task dates are not rewritten.
+          </p>
+        </div>
+        <label className="block">
+          <span className="text-xs text-ink-muted">Note — optional</span>
+          <textarea
+            autoFocus
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault()
+                void submit()
+              }
+            }}
+            rows={2}
+            placeholder="What's the focus of this sprint?"
+            className="mt-1 w-full px-3 py-2 border border-border bg-surface rounded-[8px] text-sm leading-relaxed resize-y focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent transition"
+          />
+        </label>
+        <div className="flex justify-end gap-2 pt-2">
+          <button
+            onClick={onClose}
+            className="px-3.5 py-1.5 text-sm font-medium text-ink-muted hover:bg-surface-hover rounded-[8px] transition"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={submit}
+            className="px-4 py-1.5 text-sm font-medium bg-accent hover:bg-accent-hover text-white rounded-[8px] transition"
+          >
+            Save
           </button>
         </div>
       </div>
@@ -2542,9 +2808,9 @@ function SprintNoteBanner({ sprint }: { sprint: Sprint }) {
           className="text-accent shrink-0 mt-0.5"
           aria-hidden
         />
-        <span className="flex-1 min-w-0 text-[13.5px] leading-relaxed text-ink whitespace-pre-wrap break-words">
-          {sprint.note}
-        </span>
+        <div className="min-w-0 flex-1 text-[13.5px] leading-relaxed break-words [&_table]:bg-surface">
+          <MarkdownContent content={sprint.note} inverted={false} />
+        </div>
       </div>
     </div>
   )

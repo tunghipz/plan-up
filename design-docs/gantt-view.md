@@ -1,7 +1,7 @@
 # Timeline view (calendar swimlanes)
 
 **Status:** Implemented
-**Last updated:** 2026-06-19
+**Last updated:** 2026-06-23
 
 > **Bar click → detail popover (2026-06-08):** event blocks were inert (chỉ `title`
 > tooltip). Nay **bấm bar** mở popover Cupertino (portal + float-shadow) hiển thị
@@ -35,8 +35,8 @@ thing List and Board can't show. Read-only: a pure projection of the auto-schedu
     runtime (`(availableWidth − labelGutter) / workdays`), clamped to a minimum so a long
     sprint still scrolls horizontally instead of squashing. The date text is sized for
     glance-readability (date `MMM d` larger than the weekday line).
-  - **A swimlane per member** — sticky-left label (avatar + name + role), separated by
-    soft hairlines + whitespace (not heavy rules).
+  - **A swimlane per member** — sticky-left label (avatar + name + role + days-off
+    control), separated by soft hairlines + whitespace (not heavy rules).
 - **Parent (group) tasks render as a summary rail** — a slim status-colored bar with end
   caps spanning **earliest child start … latest child end** (the same roll-up the List group
   row shows; parents have no own dates), tinted by the children's *derived* status. Its
@@ -55,13 +55,15 @@ thing List and Board can't show. Read-only: a pure projection of the auto-schedu
 - **Milestones (effort 0)** render as a **diamond** on their date (status-coloured) with a
   label, not a span — the Gantt convention. A milestone on a non-working day falls back to
   the `no dates` bucket. See [milestones.md](./milestones.md).
-- **Day-off** renders as a faint **diagonal-hatch** band in the member's lane (full day =
-  whole column, half = its AM or PM half), from `member.daysOff` — **member-level**, so it
-  shows even when no task spans it. Where a **task bar crosses a day-off**, the bar stays one
-  continuous block but the overlapping slice is overlaid with a same-status **hatch + dim
-  "pause"** — connecting the off-day to the task it interrupts (the bar visibly pauses there,
-  rather than the off-day being a disconnected grey band behind it). Parent summary rails are
-  exempt (they only show the lane's hatch behind them).
+- **Day-off** can be edited from the member's sticky lane label using the shared
+  days-off control. It renders as a faint **diagonal-hatch** band in the member's
+  lane (full day = whole column, half = its AM or PM half), from
+  `member.daysOff` — **member-level**, so it shows even when no task spans it.
+  Where a **task bar crosses a day-off**, the bar stays one continuous block but
+  the overlapping slice is overlaid with a same-status **hatch + dim "pause"** —
+  connecting the off-day to the task it interrupts (the bar visibly pauses there,
+  rather than the off-day being a disconnected grey band behind it). Parent
+  summary rails are exempt (they only show the lane's hatch behind them).
 - **Off-window & unscheduled tasks** never vanish, and off-window is split by **direction**:
   a task wholly **after** the window is `later` (`↗`, shows its start), one wholly **before**
   is `earlier` (`↙`, shows its end — when it finished). Tasks with no computed dates are
@@ -105,6 +107,9 @@ thing List and Board can't show. Read-only: a pure projection of the auto-schedu
   - Day-off half-columns → faint diagonal-hatch bands; each in-window task block also paints
     a same-status hatch+dim "pause" over any slice that overlaps a day-off (clipped inside the
     block's rounded bounds), so the bar reads as pausing on the off-day.
+  - Member lane labels reuse `MemberDaysOffButton` with the selected sprint range,
+    so adding/removing an off-day in Timeline updates the scheduler and the hatch
+    overlay through the same write path as List/settings.
   - Soft tints reuse the app pattern: `color-mix(in srgb, var(--color-status-X) 15%,
     transparent)` bg + `color-mix(…100%, #000 22%)` text + the raw token as the accent edge.
 - **`App.tsx`** — `ViewMode` includes `'timeline'`; `Timeline` segment (lucide

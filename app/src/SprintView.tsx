@@ -61,6 +61,11 @@ export { DatePickCell }
 
 const WELCOME_PREFIX = 'Welcome —'
 
+function taskAiRef(task: Task): string {
+  const kind = task.estimate === 0 ? 'milestone' : 'task'
+  return `@${kind}[#${task.sequence}: ${task.title} | id=${task.id}]`
+}
+
 type SortField =
   | 'seq'
   | 'title'
@@ -281,12 +286,14 @@ export function SprintView({
   sprintStartDate,
   sprintEndDate,
   tasks,
+  onInsertAiReference,
 }: {
   projectId: string
   sprintId: string
   sprintStartDate: string
   sprintEndDate: string
   tasks: Task[]
+  onInsertAiReference?: (text: string) => void
 }) {
   const members = useLiveQuery(
     () => db.members.where('projectId').equals(projectId).toArray(),
@@ -487,6 +494,7 @@ export function SprintView({
           selectedIds={selectedIds}
           onToggleSelect={toggleSelect}
           drag={laneDragFor(member)}
+          onInsertAiReference={onInsertAiReference}
         />
       ))}
 
@@ -500,6 +508,7 @@ export function SprintView({
           setSort={setSort}
           selectedIds={selectedIds}
           onToggleSelect={toggleSelect}
+          onInsertAiReference={onInsertAiReference}
         />
       )}
 
@@ -733,6 +742,7 @@ function MemberCard({
   selectedIds,
   onToggleSelect,
   drag,
+  onInsertAiReference,
 }: {
   projectId: string
   member: Member
@@ -753,6 +763,7 @@ function MemberCard({
   onToggleSelect: (id: string) => void
   /** Lane drag-to-reorder wiring (absent → card is not draggable). */
   drag?: RowDrag
+  onInsertAiReference?: (text: string) => void
 }) {
   // Leaf-based counting: a parent (a task with children in this list) is a
   // container, excluded from done/total/overdue so its work isn't double-counted
@@ -794,7 +805,14 @@ function MemberCard({
   }, [tasks, parentIds, tasksById, memberById])
   const { grip, rowProps, dragging } = useDragHandle(drag, LANE_GRIP_CLASS)
   return (
-    <Card className={`relative ${dragging ? 'opacity-40' : ''}`} {...rowProps}>
+    <Card
+      className={`relative ${dragging ? 'opacity-40' : ''}`}
+      {...rowProps}
+      onContextMenu={(e) => {
+        e.preventDefault()
+        onInsertAiReference?.(`@member[${member.name} | id=${member.id}]`)
+      }}
+    >
       {drag?.over === 'before' && (
         <div className="absolute left-3 right-3 top-0 h-0.5 rounded-full bg-accent pointer-events-none z-30" />
       )}
@@ -840,6 +858,7 @@ function MemberCard({
                 selectedIds={selectedIds}
                 onToggleSelect={onToggleSelect}
                 canReorder={sort.field === 'seq'}
+                onInsertAiReference={onInsertAiReference}
               />
               <AddTaskRow
                 projectId={projectId}
@@ -865,6 +884,7 @@ function UnassignedCard({
   setSort,
   selectedIds,
   onToggleSelect,
+  onInsertAiReference,
 }: {
   tasks: Task[]
   members: Member[]
@@ -876,6 +896,7 @@ function UnassignedCard({
   >
   selectedIds: Set<string>
   onToggleSelect: (id: string) => void
+  onInsertAiReference?: (text: string) => void
 }) {
   return (
     <Card>
@@ -901,6 +922,7 @@ function UnassignedCard({
               selectedIds={selectedIds}
               onToggleSelect={onToggleSelect}
               canReorder={sort.field === 'seq'}
+              onInsertAiReference={onInsertAiReference}
             />
           </div>
         </div>
@@ -1538,6 +1560,7 @@ function TaskGroupRow({
   collapsed,
   onToggle,
   drag,
+  onInsertAiReference,
 }: {
   task: Task
   childrenTasks: Task[]
@@ -1546,6 +1569,7 @@ function TaskGroupRow({
   collapsed: boolean
   onToggle: () => void
   drag?: RowDrag
+  onInsertAiReference?: (text: string) => void
 }) {
   const { grip, indicator, rowProps, dragging } = useDragHandle(drag)
   const memberById = useMemo(
@@ -1587,6 +1611,11 @@ function TaskGroupRow({
   return (
     <div
       {...rowProps}
+      onContextMenu={(e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        onInsertAiReference?.(taskAiRef(task))
+      }}
       className={`task-row group/row relative flex items-center gap-3 px-4 py-2 text-sm hover:bg-surface-hover transition bg-accent/[0.025] ${
         dragging ? 'opacity-40' : ''
       }`}
@@ -1666,6 +1695,7 @@ function TaskRows({
   selectedIds,
   onToggleSelect,
   canReorder = false,
+  onInsertAiReference,
 }: {
   tasks: Task[]
   members: Member[]
@@ -1679,6 +1709,7 @@ function TaskRows({
   onToggleSelect?: (id: string) => void
   /** Drag-to-reorder is only offered in the default (seq) order. */
   canReorder?: boolean
+  onInsertAiReference?: (text: string) => void
 }) {
   const { topLevel, childrenByParent } = useMemo(() => {
     const idSet = new Set(tasks.map((t) => t.id))
@@ -1844,6 +1875,7 @@ function TaskRows({
                 collapsed={isCollapsed}
                 onToggle={() => toggle(t.id)}
                 drag={dragFor(t)}
+                onInsertAiReference={onInsertAiReference}
               />
               {!isCollapsed &&
                 kids.map((c) => (
@@ -1861,6 +1893,7 @@ function TaskRows({
                       onToggleSelect ? () => onToggleSelect(c.id) : undefined
                     }
                     drag={dragFor(c)}
+                    onInsertAiReference={onInsertAiReference}
                   />
                 ))}
             </Fragment>
@@ -1880,6 +1913,7 @@ function TaskRows({
               onToggleSelect ? () => onToggleSelect(t.id) : undefined
             }
             drag={dragFor(t)}
+            onInsertAiReference={onInsertAiReference}
           />
         )
       })}
@@ -1898,6 +1932,7 @@ function TaskRow({
   selected = false,
   onToggleSelect,
   drag,
+  onInsertAiReference,
 }: {
   task: Task
   members: Member[]
@@ -1910,6 +1945,7 @@ function TaskRow({
   selected?: boolean
   onToggleSelect?: () => void
   drag?: RowDrag
+  onInsertAiReference?: (text: string) => void
 }) {
   const { grip, indicator, rowProps, dragging } = useDragHandle(drag)
   // Canonical user-edit funnel → records a change-log entry per changed field
@@ -1941,6 +1977,11 @@ function TaskRow({
     <div
       {...rowProps}
       data-task-id={task.id}
+      onContextMenu={(e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        onInsertAiReference?.(taskAiRef(task))
+      }}
       className={`task-row group/row relative flex items-center gap-3 px-4 py-2 text-sm transition ${
         selected ? 'bg-accent-soft' : 'hover:bg-surface-hover'
       } ${dragging ? 'opacity-40' : ''}`}

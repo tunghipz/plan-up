@@ -60,6 +60,7 @@ Non-obvious behaviors, defaults, persistence keys.
 | [sprint-cadence.md](./sprint-cadence.md) | Sprint start locked to Monday + fixed 2-week duration (Monday-strip picker, derived read-only end) |
 | [sprint-archive.md](./sprint-archive.md) | Reversible archive to declutter the sprint list (collapsible `Archived (N)` section, hover action, out of active flow) |
 | [collections.md](./collections.md) | Task ngoài sprint — collection tự đặt tên, nhiều bảng (sections), view List (giống sprint, tap-to-edit) + Calendar liền mạch, status do user tự tạo per-collection |
+| [backlog.md](./backlog.md) | Project Backlog — system collection for unscheduled tasks + AI moves into Backlog / next sprint |
 | [sprint-rollover.md](./sprint-rollover.md) | Move unfinished tasks to next sprint — preview popover |
 | [members-and-days-off.md](./members-and-days-off.md) | Member labels, colors, off-days |
 | [member-title.md](./member-title.md) | Optional per-member role label (free-text), shown in settings + sprint header |

@@ -1,7 +1,7 @@
 # Data model
 
 **Status:** Implemented
-**Last updated:** 2026-06-20
+**Last updated:** 2026-06-23 (Backlog uses optional `Collection.kind`)
 **Code:** `app/src/db.ts`
 
 ## Purpose
@@ -49,6 +49,10 @@ Nine IndexedDB tables (Dexie database name **`plan-up`**): `projects`, `members`
 - `archivedAt?` is an **optional, non-indexed** epoch-ms timestamp (absent = active) —
   again **no Dexie version bump**. Set/cleared via `setSprintArchived`; archived sprints
   leave the active flow. See [sprint-archive.md](./sprint-archive.md).
+- Sprint edit/delete adds no schema fields. `updateSprint` changes `startDate`,
+  derived `endDate`, and/or `note`; `deleteSprint` removes the sprint, its tasks, and
+  its events, then strips deleted task IDs from remaining tasks' dependencies. See
+  [sprints.md](./sprints.md).
 
 ### `Task` (`db.ts:45`)
 `id` · `projectId` · `sequence` (number, per-sprint) · `title` · `assigneeId` (`string|null`) ·
@@ -72,8 +76,15 @@ Nine IndexedDB tables (Dexie database name **`plan-up`**): `projects`, `members`
 
 ### `Collection` (`db.ts:115`)
 `id` · `projectId` · `name` · `order` (number, fractional sidebar position) ·
-`sections: Section[]` · `statuses: CollectionStatus[]` · `createdAt` (number)
+`sections: Section[]` · `statuses: CollectionStatus[]` · `createdAt` (number) ·
+`kind?` (`'backlog'`)
 - `sections` and `statuses` are **embedded arrays** (not separate tables) — ordered, not indexed. A new collection is seeded with 1 section "All" and a default status set the user can edit.
+- `kind?` is optional, non-indexed system metadata. `kind: 'backlog'` marks the
+  single Backlog collection for a project; adding it needs no Dexie version bump.
+- Collection tasks may retain `assigneeId`, `startDate`, `dueDate`, and
+  `estimate` so the user can triage owner/date information before assigning the
+  work to a sprint. Backlog is the system collection that uses this behavior by
+  default, but user-created collections can use the same fields.
 
 ### `Section` (embedded in Collection)
 `id` · `name` · `color?` (optional hex from COLLECTION_PALETTE)
@@ -87,15 +98,17 @@ Nine IndexedDB tables (Dexie database name **`plan-up`**): `projects`, `members`
 `id` · `projectId` · `sprintId` · `taskId` (`string|null`) · `taskSeq` (`number|null`) ·
 `taskTitle` (`string|null`) · `kind` · `field?` (`LoggableField`) · `from` (`string|null`) ·
 `to` (`string|null`) · `ts` (number)
-- **Append-only, uncapped** sprint activity log (see
+- **Append-only, capped** sprint activity log (see
   [sprint-activity-log.md](./sprint-activity-log.md)) — the **sole** edit-history surface
   (the per-task `Task.changeLog` it once complemented was removed in v11). Lives in its
   **own table**, so events survive task deletion and aggregate sprint-wide. Collection tasks
   (no sprint) are never logged.
-- `kind`: `'created' | 'edit' | 'rolled_over' | 'sprint_started'`. `field`/`from`/`to` are
-  only meaningful for `'edit'` and reuse the `ChangeLogEntry` grammar (assignee freezes the
-  member NAME; `dependsOn` freezes a seq-range label). `taskSeq`/`taskTitle` are **frozen at
-  write time** so the log stays readable after renumbering or deletion.
+- `kind`: `'created' | 'edit' | 'rolled_over' | 'sprint_started' | 'sprint_archived' |
+  'sprint_unarchived'`. `field`/`from`/`to` are only meaningful for `'edit'` and reuse the
+  `ChangeLogEntry` grammar (assignee freezes the member NAME; `dependsOn` freezes a
+  seq-range label). `taskSeq`/`taskTitle` are **frozen at write time** so the log stays
+  readable after renumbering or task deletion; deleting a whole sprint removes that sprint's
+  events with it.
 - Indexes: `id, sprintId, ts, projectId`.
 
 ### `Person` (`db.ts`, table `people`)

@@ -11,7 +11,7 @@ const SETTINGS_KEY = 'plan-up:ai-chat-settings'
 
 export const DEFAULT_AI_SETTINGS: AiChatSettings = {
   provider: 'openai_login',
-  model: 'gpt-5.5',
+  model: 'gpt-5.2',
   apiKey: '',
   proxyUrl: '/api/ai/chat',
   authUrl: '/api/auth/openai/start',
@@ -28,6 +28,13 @@ function normalizeProvider(provider: unknown): AiChatSettings['provider'] {
   return DEFAULT_AI_SETTINGS.provider
 }
 
+function normalizeModel(model: unknown, provider: AiChatSettings['provider']) {
+  if (typeof model !== 'string' || !model.trim()) return DEFAULT_AI_SETTINGS.model
+  const trimmed = model.trim()
+  if (provider === 'openai_login' && trimmed === 'gpt-5.5') return DEFAULT_AI_SETTINGS.model
+  return trimmed
+}
+
 export function loadAiSettings(): AiChatSettings {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY)
@@ -36,7 +43,7 @@ export function loadAiSettings(): AiChatSettings {
     const provider = normalizeProvider(parsed.provider)
     return {
       provider,
-      model: typeof parsed.model === 'string' && parsed.model.trim() ? parsed.model : DEFAULT_AI_SETTINGS.model,
+      model: normalizeModel(parsed.model, provider),
       apiKey: provider === 'deepseek' && typeof parsed.apiKey === 'string' ? parsed.apiKey : '',
       proxyUrl:
         typeof parsed.proxyUrl === 'string' && parsed.proxyUrl.trim()
@@ -75,12 +82,12 @@ function endpointFor(settings: AiChatSettings): string {
   return 'https://api.deepseek.com/chat/completions'
 }
 
-function extractJson(text: string): unknown {
+function extractJson(text: string): unknown | null {
   try {
     return JSON.parse(text)
   } catch {
     const match = text.match(/\{[\s\S]*\}/)
-    if (!match) throw new Error('Model response was not JSON.')
+    if (!match) return null
     return JSON.parse(match[0])
   }
 }
@@ -95,7 +102,9 @@ function proposalFromUnknown(value: unknown): AiAssistantProposal {
   const message = first?.message as Record<string, unknown> | undefined
   const content = typeof message?.content === 'string' ? message.content : ''
   if (content.trim()) {
-    return proposalFromUnknown(extractJson(content))
+    const json = extractJson(content)
+    if (json) return proposalFromUnknown(json)
+    return { reply: content.trim(), actions: [] }
   }
   return {
     reply:
@@ -167,13 +176,42 @@ export async function callAiProvider({
   const first = choices[0] as Record<string, unknown> | undefined
   const message = first?.message as Record<string, unknown> | undefined
   const content = typeof message?.content === 'string' ? message.content : ''
-  return proposalFromUnknown(extractJson(content))
+  const json = extractJson(content)
+  if (json) return proposalFromUnknown(json)
+  return {
+    reply: content.trim() || 'The model returned an empty response.',
+    actions: [],
+  }
 }
 
 function quotedTitle(text: string): string | null {
   const quoted = text.match(/["“”']([^"“”']{2,})["“”']/)
   if (quoted?.[1]) return quoted[1].trim()
   return null
+}
+
+function mentionedMemberName(text: string, context: AiRuntimeContext): string | null {
+  const lower = text.toLowerCase()
+  return (
+    context.members.find((m) => lower.includes(m.name.toLowerCase()))?.name ??
+    quotedTitle(text)
+  )
+}
+
+function mentionedSprint(text: string, context: AiRuntimeContext): { id: string; name: string } | null {
+  const lower = text.toLowerCase()
+  return (
+    context.sprints.find((s) => lower.includes(s.name.toLowerCase())) ??
+    null
+  )
+}
+
+function mentionedCollection(text: string, context: AiRuntimeContext): { id: string; name: string } | null {
+  const lower = text.toLowerCase()
+  return (
+    context.collections.find((c) => lower.includes(c.name.toLowerCase())) ??
+    null
+  )
 }
 
 function localPlan(input: string, context: AiRuntimeContext): AiAssistantProposal {
@@ -197,6 +235,178 @@ function localPlan(input: string, context: AiRuntimeContext): AiAssistantProposa
     return inferred
       ? { reply: `Mình sẽ tạo task “${inferred}”.`, actions: [{ type: 'create_task', title: inferred }] }
       : { reply: 'Bạn muốn tạo task tên gì?', actions: [] }
+  }
+  if (/\b(sprint)\b/.test(lower) && /\b(add|create|thêm|tao|tạo)\b/.test(lower)) {
+    return {
+      reply: 'Mình sẽ tạo sprint mới theo cadence hiện tại.',
+      actions: [{ type: 'create_sprint' }],
+    }
+  }
+  if (/\b(collection|list|danh sách|danh sach)\b/.test(lower) && /\b(add|create|thêm|tao|tạo)\b/.test(lower)) {
+    const name = title ?? text.replace(/^(add|create|thêm|tao|tạo)\s+/i, '').replace(/\b(collection|list|danh sách|danh sach)\b/gi, '').trim()
+    return name
+      ? { reply: `Mình sẽ tạo collection “${name}”.`, actions: [{ type: 'create_collection', name }] }
+      : { reply: 'Bạn muốn tạo collection tên gì?', actions: [] }
+  }
+  if (/\b(collection|list|danh sách|danh sach)\b/.test(lower) && /\b(rename|edit|update|đổi tên|doi ten|sửa|sua)\b/.test(lower)) {
+    const collection = mentionedCollection(text, context)
+    const quoted = Array.from(text.matchAll(/["“”']([^"“”']{2,})["“”']/g)).map((m) => m[1].trim())
+    const name = quoted[1] ?? quoted[0]
+    if (name && collection) {
+      return {
+        reply: `Mình sẽ đổi tên collection “${collection.name}” thành “${name}”.`,
+        actions: [{ type: 'update_collection', collectionId: collection.id, name }],
+      }
+    }
+    return { reply: 'Bạn muốn đổi collection nào thành tên gì?', actions: [] }
+  }
+  if (/\b(collection|list|danh sách|danh sach)\b/.test(lower) && /\b(delete|remove|xoá|xóa|xoa)\b/.test(lower)) {
+    const collection = mentionedCollection(text, context)
+    const collectionName = collection?.name ?? title ?? undefined
+    return collectionName
+      ? {
+          reply: `Mình sẽ xoá collection “${collectionName}”.`,
+          actions: [collection ? { type: 'delete_collection', collectionId: collection.id } : { type: 'delete_collection', collectionName }],
+        }
+      : { reply: 'Bạn muốn xoá collection nào?', actions: [] }
+  }
+  if (/\b(day off|days off|off day|nghỉ|nghi|leave|vacation)\b/.test(lower)) {
+    const date = text.match(/\b\d{4}-\d{2}-\d{2}\b/)?.[0]
+    const memberName = mentionedMemberName(text, context)
+    if (!date || !memberName) {
+      return { reply: 'Bạn muốn đánh dấu day off cho member nào và ngày nào? Hãy dùng ngày ISO YYYY-MM-DD.', actions: [] }
+    }
+    if (/\b(remove|delete|xoá|xóa|xoa|bỏ|bo)\b/.test(lower)) {
+      return {
+        reply: `Mình sẽ xoá day off của ${memberName} vào ${date}.`,
+        actions: [{ type: 'remove_member_day_off', memberName, date }],
+      }
+    }
+    const halfDay = /\b(am|morning|sáng|sang)\b/.test(lower)
+      ? 'am'
+      : /\b(pm|afternoon|chiều|chieu)\b/.test(lower)
+        ? 'pm'
+        : 'all'
+    return {
+      reply: `Mình sẽ đánh dấu ${memberName} nghỉ ${halfDay === 'all' ? 'cả ngày' : halfDay.toUpperCase()} vào ${date}.`,
+      actions: [{ type: 'set_member_day_off', memberName, date, halfDay }],
+    }
+  }
+  if (/\b(task|việc|todo)\b/.test(lower) && /\b(delete|remove|xoá|xóa|xoa)\b/.test(lower)) {
+    const seq = text.match(/#?\b(\d+)\b/)?.[1]
+    const taskTitle = title ?? undefined
+    if (seq || taskTitle) {
+      return {
+        reply: seq
+          ? `Mình sẽ xoá task #${seq}.`
+          : `Mình sẽ xoá task “${taskTitle}”.`,
+        actions: [
+          seq
+            ? { type: 'delete_task', taskSeq: Number(seq) }
+            : { type: 'delete_task', taskTitle },
+        ],
+      }
+    }
+    return { reply: 'Bạn muốn xoá task số mấy hoặc tên gì?', actions: [] }
+  }
+  if (/\b(task|việc|todo)\b/.test(lower) && /\b(move|chuyển|chuyen|đưa|dua)\b/.test(lower) && /\b(next sprint|sprint kế tiếp|sprint ke tiep|sprint tiếp|sprint tiep)\b/.test(lower)) {
+    const seq = text.match(/#?\b(\d+)\b/)?.[1]
+    const taskTitle = title ?? undefined
+    if (seq || taskTitle) {
+      return {
+        reply: seq
+          ? `Mình sẽ chuyển task #${seq} sang sprint kế tiếp.`
+          : `Mình sẽ chuyển task “${taskTitle}” sang sprint kế tiếp.`,
+        actions: [
+          seq
+            ? { type: 'move_task_to_next_sprint', taskSeq: Number(seq) }
+            : { type: 'move_task_to_next_sprint', taskTitle },
+        ],
+      }
+    }
+    return { reply: 'Bạn muốn chuyển task số mấy hoặc tên gì sang sprint kế tiếp?', actions: [] }
+  }
+  if (/\b(task|việc|todo)\b/.test(lower) && /\b(move|chuyển|chuyen|đưa|dua|add|thêm|them)\b/.test(lower) && /\bsprint\b/.test(lower)) {
+    const sprint = mentionedSprint(text, context)
+    const seq = text.match(/#?\b(\d+)\b/)?.[1]
+    const taskTitle = title ?? undefined
+    if (sprint && (seq || taskTitle)) {
+      return {
+        reply: seq
+          ? `Mình sẽ chuyển task #${seq} vào ${sprint.name}.`
+          : `Mình sẽ chuyển task “${taskTitle}” vào ${sprint.name}.`,
+        actions: [
+          seq
+            ? { type: 'move_task_to_sprint', taskSeq: Number(seq), sprintId: sprint.id }
+            : { type: 'move_task_to_sprint', taskTitle, sprintId: sprint.id },
+        ],
+      }
+    }
+    return { reply: 'Bạn muốn chuyển task nào vào sprint nào?', actions: [] }
+  }
+  if (/\b(task|việc|todo)\b/.test(lower) && /\b(move|chuyển|chuyen|đưa|dua|add|thêm|them)\b/.test(lower) && /\b(collection|list|danh sách|danh sach)\b/.test(lower)) {
+    const collection = mentionedCollection(text, context)
+    const seq = text.match(/#?\b(\d+)\b/)?.[1]
+    const taskTitle = title ?? undefined
+    if (collection && (seq || taskTitle)) {
+      return {
+        reply: seq
+          ? `Mình sẽ chuyển task #${seq} vào collection ${collection.name}.`
+          : `Mình sẽ chuyển task “${taskTitle}” vào collection ${collection.name}.`,
+        actions: [
+          seq
+            ? { type: 'move_task_to_collection', taskSeq: Number(seq), collectionId: collection.id }
+            : { type: 'move_task_to_collection', taskTitle, collectionId: collection.id },
+        ],
+      }
+    }
+    return { reply: 'Bạn muốn chuyển task nào vào collection nào?', actions: [] }
+  }
+  if (/\b(task|việc|todo)\b/.test(lower) && /\b(move|chuyển|chuyen|đưa|dua)\b/.test(lower) && /\b(backlog)\b/.test(lower)) {
+    const seq = text.match(/#?\b(\d+)\b/)?.[1]
+    const taskTitle = title ?? undefined
+    if (seq || taskTitle) {
+      return {
+        reply: seq
+          ? `Mình sẽ chuyển task #${seq} vào Backlog.`
+          : `Mình sẽ chuyển task “${taskTitle}” vào Backlog.`,
+        actions: [
+          seq
+            ? { type: 'move_task_to_backlog', taskSeq: Number(seq) }
+            : { type: 'move_task_to_backlog', taskTitle },
+        ],
+      }
+    }
+    return { reply: 'Bạn muốn chuyển task số mấy hoặc tên gì vào Backlog?', actions: [] }
+  }
+  if (/\b(milestone|mốc)\b/.test(lower) && /\b(delete|remove|xoá|xóa|xoa)\b/.test(lower)) {
+    const seq = text.match(/#?\b(\d+)\b/)?.[1]
+    const taskTitle = title ?? undefined
+    if (seq || taskTitle) {
+      return {
+        reply: seq
+          ? `Mình sẽ xoá milestone #${seq}.`
+          : `Mình sẽ xoá milestone “${taskTitle}”.`,
+        actions: [
+          seq
+            ? { type: 'delete_milestone', taskSeq: Number(seq) }
+            : { type: 'delete_milestone', taskTitle },
+        ],
+      }
+    }
+    return { reply: 'Bạn muốn xoá milestone số mấy hoặc tên gì?', actions: [] }
+  }
+  if (/\b(member|thành viên|nguoi|người)\b/.test(lower) && /\b(delete|remove|xoá|xóa|xoa)\b/.test(lower)) {
+    const memberName = title ?? text.replace(/^(delete|remove|xoá|xóa|xoa)\s+/i, '').replace(/\b(member|thành viên|người)\b/gi, '').trim()
+    return memberName
+      ? { reply: `Mình sẽ xoá member “${memberName}”.`, actions: [{ type: 'delete_member', memberName }] }
+      : { reply: 'Bạn muốn xoá member tên gì?', actions: [] }
+  }
+  if (/\b(sprint)\b/.test(lower) && /\b(delete|remove|xoá|xóa|xoa)\b/.test(lower)) {
+    return {
+      reply: 'Mình sẽ xoá sprint đang chọn.',
+      actions: [{ type: 'delete_sprint' }],
+    }
   }
   const taskCount = context.tasks.length
   return {

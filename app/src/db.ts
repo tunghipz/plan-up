@@ -1,5 +1,13 @@
 import Dexie, { type Table } from 'dexie'
-import { formatSeqRanges, defaultSprintDates, todayLocalISO } from './lib'
+import {
+  defaultSprintDates,
+  formatSeqRanges,
+  latestActiveSprint,
+  nextSprintNumber,
+  snapToMonday,
+  sprintEndForStart,
+  todayLocalISO,
+} from './lib'
 import { remapBundle, type ProjectBundle } from './project-io'
 import { buildPersonBackfill, normalizePersonName } from './people'
 
@@ -229,6 +237,8 @@ export interface CollectionStatus {
 export interface Collection {
   id: string
   projectId: string
+  /** Optional system marker. `backlog` is the project's unscheduled task list. */
+  kind?: 'backlog'
   name: string
   /** Thứ tự hiển thị trong sidebar (fractional/integer). */
   order: number
@@ -574,6 +584,39 @@ export async function createCollection(
   return col
 }
 
+export function isBacklogCollection(collection: Collection): boolean {
+  return collection.kind === 'backlog'
+}
+
+export async function ensureProjectBacklog(projectId: string): Promise<Collection> {
+  return db.transaction('rw', db.collections, async () => {
+    const collections = await db.collections.where('projectId').equals(projectId).toArray()
+    const existing =
+      collections.find((c) => c.kind === 'backlog') ??
+      collections.find((c) => c.name.trim().toLowerCase() === 'backlog')
+    if (existing) {
+      if (existing.kind !== 'backlog') {
+        await db.collections.update(existing.id, { kind: 'backlog' })
+        return { ...existing, kind: 'backlog' }
+      }
+      return existing
+    }
+
+    const backlog: Collection = {
+      id: uid(),
+      projectId,
+      kind: 'backlog',
+      name: 'Backlog',
+      order: collections.reduce((m, c) => Math.min(m, c.order), 0) - 1,
+      sections: [{ id: uid(), name: 'Backlog' }],
+      statuses: defaultStatuses(),
+      createdAt: Date.now(),
+    }
+    await db.collections.add(backlog)
+    return backlog
+  })
+}
+
 /** Đổi tên collection (trim, bỏ qua nếu rỗng). */
 export async function renameCollection(id: string, name: string): Promise<void> {
   const n = name.trim()
@@ -750,6 +793,72 @@ export async function setSprintNote(
   await db.sprints.update(sprintId, { note: trimmed || undefined })
 }
 
+export async function updateSprint(input: {
+  sprintId: string
+  startDate: string
+  note?: string | null
+}): Promise<Sprint | null> {
+  return db.transaction('rw', db.sprints, async () => {
+    const sprint = await db.sprints.get(input.sprintId)
+    if (!sprint) return null
+    if (input.startDate !== snapToMonday(input.startDate)) {
+      throw new Error('Sprint start must be a Monday.')
+    }
+    const note = input.note?.trim()
+    const patch: Partial<Sprint> = {
+      startDate: input.startDate,
+      endDate: sprintEndForStart(input.startDate),
+      note: note || undefined,
+    }
+    await db.sprints.update(input.sprintId, patch)
+    return { ...sprint, ...patch }
+  })
+}
+
+export async function createSprint(input: {
+  projectId: string
+  startDate?: string | null
+  note?: string | null
+  today?: string
+}): Promise<Sprint> {
+  return db.transaction('rw', db.sprints, db.events, async () => {
+    const sprints = await db.sprints
+      .where('projectId')
+      .equals(input.projectId)
+      .sortBy('startDate')
+    const defaults = defaultSprintDates(
+      latestActiveSprint(sprints)?.endDate ?? null,
+      input.today ?? todayLocalISO()
+    )
+    const startDate = input.startDate ?? defaults.startDate
+    if (startDate !== snapToMonday(startDate)) {
+      throw new Error('Sprint start must be a Monday.')
+    }
+    const note = input.note?.trim()
+    const sprint: Sprint = {
+      id: uid(),
+      projectId: input.projectId,
+      name: `Sprint ${nextSprintNumber(sprints)}`,
+      startDate,
+      endDate: sprintEndForStart(startDate),
+      ...(note ? { note } : {}),
+    }
+    await db.sprints.add(sprint)
+    await logEvent({
+      projectId: input.projectId,
+      sprintId: sprint.id,
+      taskId: null,
+      taskSeq: null,
+      taskTitle: null,
+      kind: 'sprint_started',
+      from: null,
+      to: null,
+      ts: Date.now(),
+    })
+    return sprint
+  })
+}
+
 /**
  * Archive (or unarchive) a sprint — a reversible hide, not a delete. Sets/clears
  * `archivedAt` and records a sprint-level activity event. Archived sprints leave
@@ -778,6 +887,30 @@ export async function setSprintArchived(
       ts: Date.now(),
     })
   })
+}
+
+export async function deleteSprint(sprintId: string): Promise<void> {
+  const touched: string[] = []
+  await db.transaction('rw', db.sprints, db.tasks, db.events, async () => {
+    const tasks = await db.tasks.where('sprintId').equals(sprintId).toArray()
+    const deletedTaskIds = new Set(tasks.map((t) => t.id))
+
+    await db.tasks.where('sprintId').equals(sprintId).delete()
+    await db.events.where('sprintId').equals(sprintId).delete()
+    await db.sprints.delete(sprintId)
+
+    if (deletedTaskIds.size === 0) return
+    const dependents = await db.tasks
+      .filter((t) => t.dependsOn?.some((id) => deletedTaskIds.has(id)))
+      .toArray()
+    for (const d of dependents) {
+      await db.tasks.update(d.id, {
+        dependsOn: d.dependsOn.filter((id) => !deletedTaskIds.has(id)),
+      })
+      touched.push(d.id)
+    }
+  })
+  for (const id of touched) await recomputeDates(id)
 }
 
 /** Next sequence number within a sprint. Sequences are never reused. */
@@ -1584,6 +1717,170 @@ export async function moveUnfinishedToNextSprint(
 
     return { movedCount: unfinished.length, targetSprintId: target.id }
   })
+}
+
+export async function moveTaskToNextSprint(
+  taskId: string,
+  sourceSprintId?: string | null
+): Promise<{ moved: boolean; targetSprintId: string | null; targetSprintName?: string }> {
+  return db.transaction('rw', db.tasks, db.members, db.sprints, db.events, async () => {
+    const task = await db.tasks.get(taskId)
+    if (!task) return { moved: false, targetSprintId: null }
+    const sourceId = task.sprintId ?? sourceSprintId ?? null
+    if (!sourceId) return { moved: false, targetSprintId: null }
+
+    const sprints = await db.sprints
+      .where('projectId')
+      .equals(task.projectId)
+      .sortBy('startDate')
+    const sourceIdx = sprints.findIndex((s) => s.id === sourceId)
+    if (sourceIdx === -1) return { moved: false, targetSprintId: null }
+    const source = sprints[sourceIdx]
+    const target = sprints.slice(sourceIdx + 1).find((s) => s.archivedAt == null)
+    if (!target) return { moved: false, targetSprintId: null }
+
+    const sequence = await nextSequence(target.id)
+    const patch: Partial<Task> = {
+      sprintId: target.id,
+      collectionId: null,
+      sectionId: null,
+      collectionStatusId: null,
+      sequence,
+      boardOrder: undefined,
+      listOrder: undefined,
+    }
+    if (!task.startDate || task.startDate < target.startDate) {
+      patch.startDate = target.startDate
+    }
+    await db.tasks.update(task.id, patch)
+    await logEvent({
+      projectId: task.projectId,
+      sprintId: target.id,
+      taskId: task.id,
+      taskSeq: sequence,
+      taskTitle: task.title,
+      kind: 'rolled_over',
+      from: source.name,
+      to: target.name,
+      ts: Date.now(),
+    })
+    await recomputeDates(task.id)
+
+    return { moved: true, targetSprintId: target.id, targetSprintName: target.name }
+  })
+}
+
+export async function moveTaskToBacklog(
+  taskId: string
+): Promise<{ moved: boolean; backlogId: string | null }> {
+  const task = await db.tasks.get(taskId)
+  if (!task) return { moved: false, backlogId: null }
+  const backlog = await ensureProjectBacklog(task.projectId)
+  const result = await moveTaskToCollection(taskId, backlog.id)
+  return { moved: result.moved, backlogId: result.moved ? backlog.id : null }
+}
+
+export async function moveTaskToCollection(
+  taskId: string,
+  collectionId: string
+): Promise<{ moved: boolean; targetCollectionId: string | null; targetCollectionName?: string }> {
+  const touched: string[] = []
+  const result = await db.transaction('rw', db.collections, db.tasks, async () => {
+    const [task, collection] = await Promise.all([
+      db.tasks.get(taskId),
+      db.collections.get(collectionId),
+    ])
+    if (!task || !collection) return { moved: false, targetCollectionId: null }
+    if (collection.projectId !== task.projectId) {
+      return { moved: false, targetCollectionId: null }
+    }
+    const sectionId = collection.sections[0]?.id ?? null
+
+    await db.tasks.update(task.id, {
+      sprintId: null,
+      collectionId: collection.id,
+      sectionId,
+      collectionStatusId: collection.statuses[0]?.id ?? null,
+      dependsOn: [],
+      parentId: null,
+      boardOrder: undefined,
+      listOrder: undefined,
+    })
+
+    const dependents = await db.tasks
+      .filter((t) => t.id !== task.id && t.dependsOn?.includes(task.id))
+      .toArray()
+    for (const dependent of dependents) {
+      await db.tasks.update(dependent.id, {
+        dependsOn: dependent.dependsOn.filter((id) => id !== task.id),
+      })
+      if (dependent.sprintId) touched.push(dependent.id)
+    }
+
+    return {
+      moved: true,
+      targetCollectionId: collection.id,
+      targetCollectionName: collection.name,
+    }
+  })
+  for (const id of touched) await recomputeDates(id)
+  return result
+}
+
+export async function moveTaskToSprint(
+  taskId: string,
+  sprintId: string
+): Promise<{ moved: boolean; targetSprintId: string | null; targetSprintName?: string }> {
+  return db.transaction(
+    'rw',
+    db.collections,
+    db.tasks,
+    db.members,
+    db.sprints,
+    db.events,
+    async () => {
+      const [task, target] = await Promise.all([
+        db.tasks.get(taskId),
+        db.sprints.get(sprintId),
+      ])
+      if (!task || !target) return { moved: false, targetSprintId: null }
+      if (target.projectId !== task.projectId || target.archivedAt != null) {
+        return { moved: false, targetSprintId: null }
+      }
+
+      const [sourceSprint, sourceCollection] = await Promise.all([
+        task.sprintId ? db.sprints.get(task.sprintId) : Promise.resolve(undefined),
+        task.collectionId ? db.collections.get(task.collectionId) : Promise.resolve(undefined),
+      ])
+      const sequence = await nextSequence(target.id)
+      const patch: Partial<Task> = {
+        sprintId: target.id,
+        collectionId: null,
+        sectionId: null,
+        collectionStatusId: null,
+        sequence,
+        boardOrder: undefined,
+        listOrder: undefined,
+      }
+      if (!task.startDate) patch.startDate = target.startDate
+
+      await db.tasks.update(task.id, patch)
+      await logEvent({
+        projectId: task.projectId,
+        sprintId: target.id,
+        taskId: task.id,
+        taskSeq: sequence,
+        taskTitle: task.title,
+        kind: 'rolled_over',
+        from: sourceSprint?.name ?? sourceCollection?.name ?? 'Backlog',
+        to: target.name,
+        ts: Date.now(),
+      })
+      await recomputeDates(task.id)
+
+      return { moved: true, targetSprintId: target.id, targetSprintName: target.name }
+    }
+  )
 }
 
 export async function setMemberDaysOff(

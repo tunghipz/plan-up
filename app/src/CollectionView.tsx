@@ -1,13 +1,24 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { ChevronDown, X, Plus, GripVertical, Layers, Pencil } from 'lucide-react'
+import {
+  CalendarPlus,
+  ChevronDown,
+  X,
+  Plus,
+  GripVertical,
+  Layers,
+  Pencil,
+  Inbox,
+  Search,
+} from 'lucide-react'
 import {
   db,
   addSection,
   renameSection,
   deleteSection,
   addCollectionItem,
+  moveTaskToSprint,
   renameCollection,
   moveTaskToSection,
   addStatus,
@@ -15,8 +26,11 @@ import {
   recolorStatus,
   deleteStatus,
   COLLECTION_PALETTE,
+  isBacklogCollection,
   type Collection,
   type CollectionStatus,
+  type Member,
+  type Sprint,
   type Task,
 } from './db'
 import { CollectionCalendar } from './CollectionCalendar'
@@ -32,17 +46,19 @@ const EMPTY_ITEMS: Task[] = []
 
 /**
  * Column widths shared by the column-header row and each item row — mirrors the
- * sprint list view's `COL` (SprintView.tsx) so Collections feel identical, minus
- * the scheduling columns (no seq/assignee/effort/prereq). Flex, not grid: the
- * title absorbs the slack via flex-1; the rest are fixed and shrink-0.
+ * sprint list view's `COL` (SprintView.tsx) so Collections feel identical, with
+ * light planning metadata for moving collection items into sprints. Flex, not
+ * grid: the title absorbs the slack via flex-1; the rest are fixed and shrink-0.
  */
 const COL = {
   lead: 'w-5 shrink-0 flex justify-center items-center',
   dot: 'w-4 shrink-0 flex justify-center',
   title: 'flex-1 min-w-[150px]',
+  member: 'w-32 flex justify-start shrink-0',
   start: 'w-28 flex justify-end shrink-0',
   due: 'w-28 flex justify-end shrink-0',
   status: 'w-28 flex justify-start shrink-0 pl-2',
+  sprint: 'w-36 flex justify-end shrink-0',
 }
 
 /** Floating-shadow surface for popovers/menus (design-system §4.2). */
@@ -68,11 +84,13 @@ function useOutsideClose(
 export function CollectionView({
   collectionId,
   view,
+  currentSprintId,
   onViewInList,
 }: {
   collectionId: string
   /** Controlled view — driven by the single adaptive toggle in App's top bar. */
   view: 'list' | 'calendar'
+  currentSprintId?: string | null
   /** Calendar's "View in list →" callback (App flips the top-bar toggle). */
   onViewInList: () => void
 }) {
@@ -80,13 +98,41 @@ export function CollectionView({
     () => db.collections.get(collectionId),
     [collectionId]
   )
-  const items =
-    useLiveQuery<Task[]>(
-      () => db.tasks.where('collectionId').equals(collectionId).toArray(),
-      [collectionId]
+  const liveItems = useLiveQuery<Task[]>(
+    () => db.tasks.where('collectionId').equals(collectionId).toArray(),
+    [collectionId]
+  )
+  const items = useMemo(() => liveItems ?? [], [liveItems])
+  const projectMembers =
+    useLiveQuery<Member[]>(
+      () =>
+        collection
+          ? db.members.where('projectId').equals(collection.projectId).toArray()
+          : Promise.resolve([]),
+      [collection?.projectId]
+    ) ?? []
+  const projectSprints =
+    useLiveQuery<Sprint[]>(
+      () =>
+        collection
+          ? db.sprints.where('projectId').equals(collection.projectId).sortBy('startDate')
+          : Promise.resolve([]),
+      [collection?.projectId]
     ) ?? []
 
   const [addingTable, setAddingTable] = useState(false)
+  const activeSprints = useMemo(
+    () =>
+      projectSprints
+        .filter((s) => s.archivedAt == null)
+        .slice()
+        .sort((a, b) => a.startDate.localeCompare(b.startDate)),
+    [projectSprints]
+  )
+  const memberById = useMemo(
+    () => new Map(projectMembers.map((m) => [m.id, m])),
+    [projectMembers]
+  )
 
   const statusById = useMemo(
     () => new Map((collection?.statuses ?? []).map((s) => [s.id, s])),
@@ -100,7 +146,8 @@ export function CollectionView({
     for (const t of items) {
       const k = t.sectionId ?? ''
       const arr = m.get(k)
-      arr ? arr.push(t) : m.set(k, [t])
+      if (arr) arr.push(t)
+      else m.set(k, [t])
     }
     return m
   }, [items])
@@ -126,6 +173,9 @@ export function CollectionView({
               items={itemsBySectionMap.get(sec.id) ?? EMPTY_ITEMS}
               statusById={statusById}
               statuses={collection.statuses}
+              memberById={memberById}
+              sprints={activeSprints}
+              currentSprintId={currentSprintId ?? null}
             />
           ))}
           <AddGroupButton
@@ -213,13 +263,23 @@ function CollectionSummary({
 
 /** Inline-rename collection name (mirrors SprintNameEditor in App.tsx). */
 function CollectionTitle({ collection }: { collection: Collection }) {
+  if (isBacklogCollection(collection)) {
+    return (
+      <h2 className="min-w-0 font-semibold text-ink display-tight">
+        <span className="truncate">Backlog</span>
+      </h2>
+    )
+  }
+  return <EditableCollectionTitle collection={collection} />
+}
+
+function EditableCollectionTitle({ collection }: { collection: Collection }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(collection.name)
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (editing) {
-      setDraft(collection.name)
       requestAnimationFrame(() => {
         inputRef.current?.focus()
         inputRef.current?.select()
@@ -261,7 +321,10 @@ function CollectionTitle({ collection }: { collection: Collection }) {
   return (
     <h2
       className="group/title inline-flex items-center gap-1.5 min-w-0 font-semibold text-ink display-tight cursor-text"
-      onClick={() => setEditing(true)}
+      onClick={() => {
+        setDraft(collection.name)
+        setEditing(true)
+      }}
       title="Click to rename"
     >
       <span className="truncate">{collection.name}</span>
@@ -361,7 +424,11 @@ export function CollectionBarIdentity({
     ) ?? []
   return (
     <div className="flex items-center gap-2.5 min-w-0">
-      <Layers size={15} className="text-ink-faint shrink-0" aria-hidden />
+      {isBacklogCollection(collection) ? (
+        <Inbox size={15} className="text-ink-faint shrink-0" aria-hidden />
+      ) : (
+        <Layers size={15} className="text-ink-faint shrink-0" aria-hidden />
+      )}
       <CollectionTitle collection={collection} />
       <CollectionSummary items={items} statuses={collection.statuses} />
     </div>
@@ -375,6 +442,9 @@ function SectionCard({
   statusById,
   statuses,
   canDelete,
+  memberById,
+  sprints,
+  currentSprintId,
 }: {
   collectionId: string
   section: { id: string; name: string; color?: string }
@@ -382,6 +452,9 @@ function SectionCard({
   statusById: Map<string, CollectionStatus>
   statuses: CollectionStatus[]
   canDelete: boolean
+  memberById: Map<string, Member>
+  sprints: Sprint[]
+  currentSprintId: string | null
 }) {
   const [collapsed, setCollapsed] = useState(
     () =>
@@ -504,6 +577,9 @@ function SectionCard({
               <div className={`${COL.title} text-[11px] tracking-normal text-ink-faint font-medium`}>
                 Name
               </div>
+              <div className={`${COL.member} text-[11px] tracking-normal text-ink-faint font-medium`}>
+                Member
+              </div>
               <div className={`${COL.start} text-[11px] tracking-normal text-ink-faint font-medium`}>
                 Start
               </div>
@@ -512,6 +588,9 @@ function SectionCard({
               </div>
               <div className={`${COL.status} text-[11px] tracking-normal text-ink-faint font-medium`}>
                 Status
+              </div>
+              <div className={`${COL.sprint} text-[11px] tracking-normal text-ink-faint font-medium text-right`}>
+                Sprint
               </div>
             </div>
           )}
@@ -529,9 +608,15 @@ function SectionCard({
                 task={t}
                 statusById={statusById}
                 statuses={statuses}
+                assignee={t.assigneeId ? memberById.get(t.assigneeId) ?? null : null}
+                sprints={sprints}
+                currentSprintId={currentSprintId}
               />
             ))}
-            <AddItemRow collectionId={collectionId} sectionId={section.id} />
+            <AddItemRow
+              collectionId={collectionId}
+              sectionId={section.id}
+            />
           </div>
         </div>
       )}
@@ -553,7 +638,6 @@ function SectionName({
 
   useEffect(() => {
     if (editing) {
-      setDraft(section.name)
       requestAnimationFrame(() => {
         inputRef.current?.focus()
         inputRef.current?.select()
@@ -598,6 +682,7 @@ function SectionName({
       className="group/sname inline-flex items-center gap-1.5 min-w-0 text-[15.5px] font-semibold text-ink tracking-[-0.01em] cursor-text"
       onClick={(e) => {
         e.stopPropagation()
+        setDraft(section.name)
         setEditing(true)
       }}
       title="Click to rename"
@@ -616,10 +701,16 @@ function ItemRow({
   task,
   statusById,
   statuses,
+  assignee,
+  sprints,
+  currentSprintId,
 }: {
   task: Task
   statusById: Map<string, CollectionStatus>
   statuses: CollectionStatus[]
+  assignee: Member | null
+  sprints: Sprint[]
+  currentSprintId: string | null
 }) {
   const status = task.collectionStatusId
     ? statusById.get(task.collectionStatusId)
@@ -681,6 +772,9 @@ function ItemRow({
         />
       </div>
       <ItemTitle task={task} />
+      <div className={COL.member}>
+        <CollectionAssignee assignee={assignee} />
+      </div>
       <div className={COL.start}>
         <DatePickCell
           value={task.startDate}
@@ -700,7 +794,175 @@ function ItemRow({
       <div className={COL.status}>
         <StatusPill task={task} status={status} statuses={statuses} />
       </div>
+      <div className={COL.sprint}>
+        <AddToSprintMenu
+          task={task}
+          sprints={sprints}
+          currentSprintId={currentSprintId}
+        />
+      </div>
     </div>
+  )
+}
+
+function CollectionAssignee({ assignee }: { assignee: Member | null }) {
+  if (!assignee) {
+    return (
+      <span className="text-[12.5px] font-medium text-ink-faint truncate">
+        Unassigned
+      </span>
+    )
+  }
+  return (
+    <span className="inline-flex min-w-0 items-center gap-1.5 text-[12.5px] font-medium text-ink-muted">
+      <span
+        className="w-5 h-5 rounded-full grid place-items-center text-[10px] font-bold text-white shrink-0"
+        style={{ background: assignee.color }}
+        aria-hidden
+      >
+        {assignee.name.slice(0, 1).toUpperCase()}
+      </span>
+      <span className="truncate">{assignee.name}</span>
+    </span>
+  )
+}
+
+function AddToSprintMenu({
+  task,
+  sprints,
+  currentSprintId,
+}: {
+  task: Task
+  sprints: Sprint[]
+  currentSprintId: string | null
+}) {
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const anchorRef = useRef<HTMLButtonElement>(null)
+  const popRef = useRef<HTMLDivElement>(null)
+  const [pos, setPos] = useState({ top: -9999, left: -9999 })
+  const MENU_W = 260
+
+  const suggestions = useMemo(() => {
+    if (sprints.length === 0) return []
+    const currentIdx = currentSprintId
+      ? sprints.findIndex((s) => s.id === currentSprintId)
+      : -1
+    const startIdx = currentIdx >= 0 ? currentIdx : 0
+    return sprints.slice(startIdx, startIdx + 3)
+  }, [currentSprintId, sprints])
+
+  const visible = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (!q) return suggestions
+    return sprints.filter(
+      (s) =>
+        s.name.toLowerCase().includes(q) ||
+        s.startDate.includes(q) ||
+        s.endDate.includes(q)
+    )
+  }, [query, sprints, suggestions])
+
+  useLayoutEffect(() => {
+    if (!open) return
+    const pin = () => {
+      const r = anchorRef.current?.getBoundingClientRect()
+      if (!r) return
+      let left = r.right - MENU_W
+      left = Math.min(left, window.innerWidth - MENU_W - 8)
+      left = Math.max(8, left)
+      const top = Math.min(r.bottom + 6, window.innerHeight - 320)
+      setPos({ top: Math.max(8, top), left })
+    }
+    pin()
+    window.addEventListener('scroll', pin, true)
+    window.addEventListener('resize', pin)
+    return () => {
+      window.removeEventListener('scroll', pin, true)
+      window.removeEventListener('resize', pin)
+    }
+  }, [open])
+
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node
+      if (popRef.current?.contains(t) || anchorRef.current?.contains(t)) return
+      setOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  const move = async (sprint: Sprint) => {
+    setOpen(false)
+    setQuery('')
+    await moveTaskToSprint(task.id, sprint.id)
+  }
+
+  return (
+    <>
+      <button
+        ref={anchorRef}
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        disabled={sprints.length === 0}
+        className="inline-flex items-center gap-1.5 rounded-[7px] border border-border bg-surface px-2.5 py-1 text-[12px] font-semibold text-ink-muted hover:text-accent hover:border-accent/40 disabled:opacity-40 disabled:hover:text-ink-muted disabled:hover:border-border transition"
+      >
+        <CalendarPlus size={13} />
+        Add
+      </button>
+      {open &&
+        createPortal(
+          <div
+            ref={popRef}
+            style={{ position: 'fixed', top: pos.top, left: pos.left, width: MENU_W }}
+            className={`z-50 bg-surface rounded-[12px] p-2 ${FLOAT_SHADOW}`}
+          >
+            <label className="flex items-center gap-2 rounded-[8px] border border-border bg-canvas-sunk/40 px-2.5 py-1.5">
+              <Search size={14} className="text-ink-faint shrink-0" aria-hidden />
+              <input
+                autoFocus
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search sprint"
+                className="min-w-0 flex-1 bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-faint"
+              />
+            </label>
+            <div className="mt-2 max-h-[230px] overflow-y-auto py-1">
+              {visible.length === 0 ? (
+                <div className="px-2.5 py-3 text-[13px] text-ink-faint">
+                  No matching sprint
+                </div>
+              ) : (
+                visible.map((sprint) => (
+                  <button
+                    key={sprint.id}
+                    type="button"
+                    onClick={() => void move(sprint)}
+                    className="w-full rounded-[8px] px-2.5 py-2 text-left hover:bg-surface-hover transition"
+                  >
+                    <span className="block text-[13px] font-semibold text-ink truncate">
+                      {sprint.name}
+                    </span>
+                    <span className="block text-[11.5px] text-ink-faint tabular-nums">
+                      {sprint.startDate} → {sprint.endDate}
+                    </span>
+                  </button>
+                ))
+              )}
+            </div>
+          </div>,
+          document.body
+        )}
+    </>
   )
 }
 
@@ -769,9 +1031,11 @@ function AddItemRow({
         className={`${COL.title} editable placeholder:text-ink-faint bg-transparent`}
         aria-label="Add item"
       />
+      <div className={COL.member} />
       <div className={COL.start} />
       <div className={COL.due} />
       <div className={COL.status} />
+      <div className={COL.sprint} />
     </div>
   )
 }

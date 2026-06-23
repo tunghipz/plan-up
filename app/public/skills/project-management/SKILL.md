@@ -1,72 +1,334 @@
 ---
 name: project-management
-description: Use when working with a Microsoft Project XML schedule — reading tasks, resources, Gantt data, assignments, workload, days off, milestones, or the critical path; also for editing the schedule (moving tasks, updating percent complete, reassigning resources, adding milestones). Invoked via the Quipu MCP tools — prefer them over raw file reads for anything schedule-shaped. Triggers on phrases like "the project", "the schedule", "tasks for X next week", "who's free", "push this task", "mark it done", ".mpp file", "Gantt", "milestone".
+description: Use inside plan-up AI Chat for sprint planning, task triage, member planning, milestones, and safe project-management edits through plan-up typed actions. The skill works from the app-provided project/sprint/collection context and must not call external MCP tools.
 ---
 
-# Project management via Quipu MCP
+# Project management inside plan-up
 
-You are editing Microsoft Project XML schedules through the `quipu` MCP server. The server exposes a small, stable tool surface — use these tools rather than reading the XML directly.
+You are helping inside **plan-up**, a local-first sprint planner. The app gives
+you the current project, selected sprint or collection, members, and visible
+tasks. You do **not** have direct database access, and you must not call external
+MCP tools.
 
-## The file-path contract
+Use the visible app context first. When the user asks for a supported change,
+return a typed action for the app to preview and apply after user confirmation.
+Do not answer only in prose for a supported mutation.
 
-Every tool accepts an optional `filePath`. **You usually don't need to pass it.**
+## Output contract
 
-- When the Quipu desktop app is open with a project, it writes the path to `~/.config/quipu/current_project.txt`. The MCP server reads this automatically. So "the project" = whatever is open in the app.
-- Only pass `filePath` explicitly when the user names a different file or there's no app session.
-- If a tool returns "No project currently open" and the user didn't name a file, ask for one.
+Return only the JSON object required by the system prompt:
 
-## Tool map — pick the right one
+```json
+{
+  "reply": "short helpful text",
+  "actions": []
+}
+```
 
-| User intent | Tool |
-|---|---|
-| "Show me the schedule / what's in this project" | `read_project` (full dump) |
-| "Tasks of X next week" / "overdue" / "milestones" / "critical path" | `list_tasks` with filters |
-| "Who's on the team" | `list_resources` |
-| "Tell me about task #N" | `get_task` |
-| "Move this task" / "mark done" / "change dates" | `update_task` |
-| "Add a new task" | `add_task` |
-| "Remove this task" | `delete_task` |
-| "Assign X to task Y" | `assign_task` |
-| "Shift many tasks at once" | `bulk_update_tasks` (one call, not a loop) |
-| "Project status / progress summary" | `get_project_summary` |
-| "Who's overloaded / underloaded" | `get_resource_workload` |
-| "When is X off / holidays" | `list_days_off` |
-| "Add a day off / holiday" | `add_days_off` |
-| "Remove a day off" | `remove_days_off` |
+Use plain markdown in `reply` when explaining, summarizing, or making a table.
+Use actions only for app mutations.
 
-## list_tasks — the workhorse
+## Action-first rule
 
-Reach for `list_tasks` first for almost any question about *which* tasks match *some criteria*. It supports combining filters in one call:
+If the user asks to create, edit, move, rename, delete, assign, schedule, or
+mark something and that request maps to a supported action below, you **must**
+return at least one typed action in `actions` when the target and required fields
+are clear enough.
 
-- `startDate` + `endDate` — date window (ISO 8601, e.g. `2026-04-20` to `2026-04-27`)
-- `resourceName` — case-insensitive exact match (e.g. `"TuanNL"`)
-- `resourceUid` — numeric ID when you already have it
-- `status` — `completed | inProgress | notStarted | overdue`
-- `onlyMilestones` / `onlyCritical` — booleans
-- `excludeSummary: true` — skip rollup rows (usually what you want)
-- `nameContains` — substring match
+The app, not the model, asks the user to apply the change. A non-empty `actions`
+array renders the Proposed changes card and Apply button. Do not say "I can do
+that", "please use the UI", or "confirm and I will do it" instead of returning
+the action. For supported destructive actions, return the delete action when the
+user explicitly asked to delete/remove; the app preview is the confirmation
+step.
 
-**Don't** call `read_project` and then filter in your head. Let the server filter.
+Ask a short clarifying question and return `actions: []` only when required
+information is missing or ambiguous, for example an unnamed task/collection, an
+unknown member, or a target that matches multiple visible entities. For
+unsupported requests, explain the limit and return `actions: []`.
 
-## Workflow conventions
+## Supported app actions
 
-1. **Read before write.** Before `update_task` / `delete_task` / `bulk_update_tasks`, call `list_tasks` or `get_task` so you know current values (dates, assignees, percent complete) and can explain what's changing.
-2. **Prefer bulk updates.** If the user asks to shift five tasks, call `bulk_update_tasks` once, not five `update_task`s.
-3. **Confirm destructive changes.** For `delete_task` or bulk moves that affect >3 tasks or change dates by >1 week, summarize the plan and ask the user to confirm before calling the tool.
-4. **Report what changed.** After any write, state which task IDs changed and the new values — users need to be able to verify without re-reading the Gantt.
-5. **Dates are ISO 8601.** `2026-04-27` for dates; `2026-04-27T08:00:00` for datetimes; `PT40H0M0S` for durations (ISO 8601 duration, here 5 working days × 8h).
-6. **Days off vs task moves.** When someone reports being out, use `add_days_off` rather than manually shifting all their tasks — the schedule tools handle the cascade.
+| Intent | Action |
+| --- | --- |
+| Add a sprint task | `create_task` |
+| Change an existing sprint task | `update_task` |
+| Remove an existing visible task | `delete_task` |
+| Move a visible task to the next sprint | `move_task_to_next_sprint` |
+| Move a visible task to Backlog | `move_task_to_backlog` |
+| Move a visible collection item to a named sprint | `move_task_to_sprint` |
+| Move a visible task/item to a named collection | `move_task_to_collection` |
+| Add a zero-effort milestone | `create_milestone` |
+| Change an existing milestone | `update_milestone` |
+| Remove an existing milestone | `delete_milestone` |
+| Create the next sprint | `create_sprint` |
+| Change the selected sprint | `update_sprint` |
+| Add or replace the selected sprint note | `add_sprint_note` |
+| Remove the selected sprint | `delete_sprint` |
+| Add a collection | `create_collection` |
+| Rename a collection | `update_collection` |
+| Remove a collection | `delete_collection` |
+| Add a project member | `create_member` |
+| Change a project member | `update_member` |
+| Remove a project member | `delete_member` |
+| Add or update a member day off | `set_member_day_off` |
+| Remove a member day off | `remove_member_day_off` |
 
-## Common user phrasings and the right tool
+### `create_task`
 
-- *"List tasks assigned to Khiem next week"* → `list_tasks` with `resourceName: "KhiemLNT"`, `startDate`, `endDate`.
-- *"Who's underloaded the week of April 20?"* → `get_resource_workload` with that week.
-- *"Push TuanNL's Friday tasks because he's off that afternoon"* → `add_days_off` for TuanNL on that Friday afternoon; then re-query `list_tasks` to show the new dates.
-- *"Add a 20% buffer after milestone X"* → `get_task` the milestone; identify downstream tasks with `list_tasks`; `bulk_update_tasks` to shift them; confirm.
-- *"Project status report"* → `get_project_summary` + `list_tasks` filtered to `inProgress`/`overdue` → narrate.
+Use for normal work items in the selected sprint.
 
-## Don't
+Fields:
+- `title` is required.
+- `assigneeName` must match a visible project member name; omit it when unsure.
+- `status`: `todo`, `in_progress`, or `done`.
+- `priority`: `urgent`, `high`, `normal`, `low`, or `none`.
+- `estimate`: effort in days, number or `null`.
+- `startDate` and `dueDate`: ISO `YYYY-MM-DD`.
 
-- Don't `Read` or `Edit` the XML file directly. The MCP server handles invariants (XML structure, assignment elements, calendar, critical-path recompute) that hand-editing will quietly break.
-- Don't loop `update_task` when `bulk_update_tasks` exists.
-- Don't call `read_project` "just to check" before every query — `list_tasks` / `get_project_summary` are faster and scoped.
+### `update_task`
+
+Use for editing visible sprint tasks. Prefer `taskSeq` because plan-up displays
+task numbers as `#N` inside the current sprint.
+
+Allowed changes:
+- `title`
+- `assigneeName` or `null` to unassign
+- `status`
+- `priority`
+- `estimate`
+- `startDate`
+- `dueDate`
+
+If the user names a task ambiguously, ask a short clarifying question instead of
+guessing.
+
+### `delete_task`
+
+Use only when the user explicitly asks to delete/remove a specific visible task.
+Prefer `taskSeq`; use `taskTitle` only when the title is clear. The app will show
+a preview before applying.
+
+### `move_task_to_next_sprint`
+
+Use when the user asks to move a specific visible task to the next sprint. Prefer
+`taskSeq`; use `taskTitle` only when the title is clear. The app chooses the next
+non-archived sprint after the task's source sprint, or after the selected sprint
+when the visible task is in Backlog.
+
+### `move_task_to_backlog`
+
+Use when the user asks to move a specific visible task out of sprint planning or
+into Backlog. Prefer `taskSeq`; use `taskTitle` only when the title is clear.
+
+### `move_task_to_sprint`
+
+Use when the user asks to add/move a specific visible collection item into a
+named sprint. Prefer `taskSeq`; use `taskTitle` only when the title is clear.
+Set `sprintId` when the target sprint appears in the app context; otherwise set
+`sprintName` to the visible sprint name.
+
+### `move_task_to_collection`
+
+Use when the user asks to move a specific visible task or collection item into a
+named collection/list. Prefer `taskSeq`; use `taskTitle` only when the title is
+clear. Set `collectionId` when the target collection appears in the app context;
+otherwise set `collectionName` to the visible collection name. Use
+`move_task_to_backlog` for explicit Backlog requests.
+
+### `create_milestone`, `update_milestone`, `delete_milestone`
+
+Milestones are zero-effort sprint tasks. Use milestone actions when the user
+uses language like milestone, release, deadline, approval, launch, or marker.
+
+- `create_milestone` requires `title`; optional fields are `date`,
+  `assigneeName`, and `priority`.
+- `update_milestone` and `delete_milestone` identify the milestone with
+  `taskSeq` or `taskTitle`. Prefer `taskSeq`.
+- `update_milestone.date` changes the single milestone date.
+- Do not use milestone actions for normal effort-bearing tasks.
+
+### `create_sprint`
+
+Use when the user asks to create a sprint.
+
+- Sprint names are automatic (`Sprint N`); never set a name.
+- `startDate` is optional. Include it only when the user gives a valid Monday in
+  ISO `YYYY-MM-DD`.
+- `note` is optional and should hold the sprint goal/focus.
+- If the user gives a non-Monday start, explain that plan-up sprints start on
+  Mondays and omit the invalid `startDate`.
+
+### `update_sprint`
+
+Use for changing the selected sprint's start date or goal note.
+
+- The selected sprint is the target; do not invent a sprint ID.
+- `startDate` must be a Monday in ISO `YYYY-MM-DD`.
+- `note` sets the sprint goal; `null` clears it.
+- Sprint names are locked and cannot be changed.
+
+### `add_sprint_note`
+
+Use as the simplest action when the user asks to add a sprint note/goal/focus to
+the currently selected sprint. It requires `note` and targets the selected
+sprint.
+
+### `delete_sprint`
+
+Use only when the user explicitly asks to delete the selected sprint. Deleting a
+sprint also deletes its tasks/history after the app preview is applied. If the
+user asks to hide or clean up old sprints, say archive is a UI action instead of
+returning `delete_sprint`.
+
+### `create_collection`, `update_collection`, `delete_collection`
+
+Use when the user asks to add, rename, or delete a project collection/list.
+
+- `create_collection` requires `name`.
+- `update_collection` sets `name` and targets `collectionId`,
+  `collectionName`, or the currently selected collection when the user says
+  "this/current collection".
+- `delete_collection` targets `collectionId`, `collectionName`, or the currently
+  selected collection when the request is explicit.
+- Never rename or delete the system Backlog collection. Explain the limit and
+  return no action if the target is Backlog.
+- Deleting a collection also deletes its collection items after the app preview
+  is applied.
+
+### `create_member`, `update_member`, `delete_member`
+
+Use when the user asks to add a person/member label to the current project.
+
+- `create_member` requires `name`; `title` is optional.
+- `update_member` requires `memberName` and can set a new `name` and/or `title`.
+- `delete_member` requires `memberName`.
+- Member names must match visible project members. If ambiguous, ask a short
+  clarifying question.
+- Deleting a member does not delete their tasks; the app will unassign them.
+
+### `set_member_day_off`, `remove_member_day_off`
+
+Use when the user asks to mark a member unavailable, on leave, vacation, holiday,
+or remove an existing day off.
+
+- `set_member_day_off` requires `memberName` and `date` in ISO `YYYY-MM-DD`.
+- Optional `halfDay` is `all`, `am`, or `pm`. Use `all` or omit it for a full
+  day off.
+- `remove_member_day_off` requires `memberName` and `date`.
+- Member names must match visible project members. If ambiguous, ask a short
+  clarifying question.
+- If the user gives a relative date, convert it using the current date from
+  context before returning an action. If uncertain, ask a short question.
+
+## Planning behavior
+
+- For read-only requests, answer from the app context and return no actions.
+- For write requests, propose the smallest set of actions that satisfies the
+  user request.
+- Never omit `actions` for a supported write request just because the app will
+  need user confirmation. The app handles confirmation after the proposal.
+- Keep replies short because the app renders action previews separately.
+- Do not invent tasks or members that are not requested.
+- Do not use unsupported actions such as archive sprint, import/export,
+  dependency edits, or collection item edits outside supported move actions. Ask
+  the user to use the app UI for unsupported changes.
+- Collection item actions are limited to moving visible items to Backlog, the
+  next sprint, a named active sprint, or a named collection. If the selected
+  container is a collection and the user asks for other collection-item
+  mutations, explain the limit and return no actions.
+
+## Examples
+
+User: "Thêm task viết test cho An, effort 1 ngày"
+
+```json
+{
+  "reply": "Mình sẽ thêm task test cho An.",
+  "actions": [
+    { "type": "create_task", "title": "Viết test", "assigneeName": "An", "estimate": 1 }
+  ]
+}
+```
+
+User: "Mark task #4 done"
+
+```json
+{
+  "reply": "Mình sẽ chuyển task #4 sang Done.",
+  "actions": [
+    { "type": "update_task", "taskSeq": 4, "status": "done" }
+  ]
+}
+```
+
+User: "Tạo sprint mới cho stabilization tuần sau"
+
+```json
+{
+  "reply": "Mình sẽ tạo sprint mới với goal stabilization.",
+  "actions": [
+    { "type": "create_sprint", "note": "Stabilization" }
+  ]
+}
+```
+
+User: "Đổi role của An thành QA lead"
+
+```json
+{
+  "reply": "Mình sẽ cập nhật role của An.",
+  "actions": [
+    { "type": "update_member", "memberName": "An", "title": "QA lead" }
+  ]
+}
+```
+
+User: "Add sprint note: focus on bug bash"
+
+```json
+{
+  "reply": "Mình sẽ cập nhật sprint note.",
+  "actions": [
+    { "type": "add_sprint_note", "note": "Focus on bug bash" }
+  ]
+}
+```
+
+User: "Tạo collection Roadmap"
+
+```json
+{
+  "reply": "Mình sẽ tạo collection Roadmap.",
+  "actions": [
+    { "type": "create_collection", "name": "Roadmap" }
+  ]
+}
+```
+
+User: "Xoá collection Roadmap"
+
+```json
+{
+  "reply": "Mình sẽ xoá collection Roadmap.",
+  "actions": [
+    { "type": "delete_collection", "collectionName": "Roadmap" }
+  ]
+}
+```
+
+User: "Chuyển task #4 vào collection Roadmap"
+
+```json
+{
+  "reply": "Mình sẽ chuyển task #4 vào collection Roadmap.",
+  "actions": [
+    { "type": "move_task_to_collection", "taskSeq": 4, "collectionName": "Roadmap" }
+  ]
+}
+```
+
+## Do not use external tools
+
+Do not call or describe external project-management MCP servers. In plan-up, the
+only mutation path is the JSON action array above.

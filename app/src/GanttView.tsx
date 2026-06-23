@@ -1,7 +1,6 @@
 import {
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -15,7 +14,7 @@ import {
   type Task,
   type Member,
 } from './db'
-import { Avatar } from './members'
+import { Avatar, MemberDaysOffButton } from './members'
 import { STATUS_META, derivedGroupStatus } from './SprintView'
 import { sprintWorkdays, formatShortDate } from './lib'
 
@@ -97,7 +96,8 @@ export function GanttView({
   const toggle = (id: string) =>
     setExpanded((prev) => {
       const next = new Set(prev)
-      next.has(id) ? next.delete(id) : next.add(id)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
       return next
     })
 
@@ -119,7 +119,8 @@ export function GanttView({
     for (const t of tasks) {
       if (!t.parentId) continue
       const arr = m.get(t.parentId)
-      arr ? arr.push(t) : m.set(t.parentId, [t])
+      if (arr) arr.push(t)
+      else m.set(t.parentId, [t])
     }
     return m
   }, [tasks])
@@ -208,11 +209,19 @@ export function GanttView({
               const p = planById.get(c.id)!
               if (p.startDate) {
                 const k = `${p.startDate}T${p.startTime}`
-                if (!minKey || k < minKey) (minKey = k), (sd = p.startDate), (startTime = p.startTime)
+                if (!minKey || k < minKey) {
+                  minKey = k
+                  sd = p.startDate
+                  startTime = p.startTime
+                }
               }
               if (p.dueDate) {
                 const k = `${p.dueDate}T${p.endTime}`
-                if (!maxKey || k > maxKey) (maxKey = k), (dd = p.dueDate), (endTime = p.endTime)
+                if (!maxKey || k > maxKey) {
+                  maxKey = k
+                  dd = p.dueDate
+                  endTime = p.endTime
+                }
               }
             }
           } else {
@@ -474,6 +483,12 @@ export function GanttView({
                           {member.title}
                         </div>
                       )}
+                      <div className="mt-1">
+                        <MemberDaysOffButton
+                          member={member}
+                          range={{ start: sprintStartDate, end: sprintEndDate }}
+                        />
+                      </div>
                       {hasExtra && (
                         <button
                           onClick={() => toggle(member.id)}
@@ -718,17 +733,13 @@ function BarDetailPopover({
 }) {
   const popRef = useRef<HTMLDivElement>(null)
   const W = 236
-  const [pos, setPos] = useState<{ top: number; left: number }>({
-    top: -9999,
-    left: -9999,
-  })
-  useLayoutEffect(() => {
+  const pos = useMemo(() => {
     let left = Math.min(anchorRect.left, window.innerWidth - 8 - W)
     left = Math.max(8, left)
     const H = 150
     let top = anchorRect.bottom + 6
     if (top + H > window.innerHeight - 8) top = Math.max(8, anchorRect.top - H - 6)
-    setPos({ top, left })
+    return { top, left }
   }, [anchorRect])
   useEffect(() => {
     const onDown = (e: MouseEvent) => {

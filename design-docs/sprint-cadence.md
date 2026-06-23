@@ -1,7 +1,7 @@
 # Sprint cadence — start-of-week & fixed duration
 
 **Status:** Implemented (2026-06-17)
-**Last updated:** 2026-06-17
+**Last updated:** 2026-06-23
 **Code:** `app/src/lib.ts` (`snapToMonday`, `nextMondayOnOrAfter`, `defaultSprintDates`,
 `upcomingMondays`; tests in `sprint-cadence.test.ts`), `app/src/App.tsx` (`MondayStrip`,
 `NewSprintDialog`), `app/src/db.ts` (`seedFresh`)
@@ -145,8 +145,9 @@ decision in [sprints.md](./sprints.md)).
 - **Legacy sprints** with non-Monday starts keep their stored dates (display only). The
   lock applies to **new creates**, not a renumber/migration — same philosophy as the
   locked-name decision (2026-06-12).
-- **Editing dates after create:** out of scope here (the dialog is create-only today).
-  If we later add date editing, decide then whether the Monday-lock applies.
+- **Editing dates after create:** uses the same Monday-lock and fixed two-week duration
+  as creation. The edit dialog changes `startDate` and derives `endDate`; it does not
+  rewrite existing task dates.
 - **First sprint mid-week:** the snap means a project's first sprint may start a few
   days "ago" (the current week's Monday). Acceptable and matches ClickUp's feel.
 - **Stale / long-ago last sprint → clamp to this week.** `defaultSprintDates` clamps the
@@ -173,5 +174,3 @@ decision in [sprints.md](./sprints.md)).
 ## Future / open questions
 - **Templates / Sprint Goal parity:** ClickUp's template picker is out of scope; our
   optional note already covers the Goal. No action unless requested.
-- **Editing dates after create:** the dialog is create-only today. If date editing is
-  added later, decide then whether the Monday-lock applies there too.

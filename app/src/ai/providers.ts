@@ -363,8 +363,15 @@ function localPlan(input: string, context: AiRuntimeContext): AiAssistantProposa
     return { reply: 'Bạn muốn chuyển task nào vào collection nào?', actions: [] }
   }
   if (/\b(task|việc|todo)\b/.test(lower) && /\b(move|chuyển|chuyen|đưa|dua)\b/.test(lower) && /\b(backlog)\b/.test(lower)) {
+    const collection = context.collections.find((c) => c.name.trim().toLowerCase() === 'backlog')
     const seq = text.match(/#?\b(\d+)\b/)?.[1]
     const taskTitle = title ?? undefined
+    if (!collection) {
+      return {
+        reply: 'Backlog hiện chỉ là collection thường. Hãy tạo collection tên Backlog trước, hoặc chọn collection đích khác.',
+        actions: [],
+      }
+    }
     if (seq || taskTitle) {
       return {
         reply: seq
@@ -372,8 +379,8 @@ function localPlan(input: string, context: AiRuntimeContext): AiAssistantProposa
           : `Mình sẽ chuyển task “${taskTitle}” vào Backlog.`,
         actions: [
           seq
-            ? { type: 'move_task_to_backlog', taskSeq: Number(seq) }
-            : { type: 'move_task_to_backlog', taskTitle },
+            ? { type: 'move_task_to_collection', taskSeq: Number(seq), collectionId: collection.id }
+            : { type: 'move_task_to_collection', taskTitle, collectionId: collection.id },
         ],
       }
     }

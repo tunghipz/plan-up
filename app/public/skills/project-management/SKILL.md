@@ -55,7 +55,6 @@ unsupported requests, explain the limit and return `actions: []`.
 | Change an existing sprint task | `update_task` |
 | Remove an existing visible task | `delete_task` |
 | Move a visible task to the next sprint | `move_task_to_next_sprint` |
-| Move a visible task to Backlog | `move_task_to_backlog` |
 | Move a visible collection item to a named sprint | `move_task_to_sprint` |
 | Move a visible task/item to a named collection | `move_task_to_collection` |
 | Add a zero-effort milestone | `create_milestone` |
@@ -88,8 +87,9 @@ Fields:
 
 ### `update_task`
 
-Use for editing visible sprint tasks. Prefer `taskSeq` because plan-up displays
-task numbers as `#N` inside the current sprint.
+Use for editing visible sprint tasks or visible collection items. Prefer
+`taskSeq` because plan-up displays task numbers as `#N` in the visible task
+list.
 
 Allowed changes:
 - `title`
@@ -114,12 +114,7 @@ a preview before applying.
 Use when the user asks to move a specific visible task to the next sprint. Prefer
 `taskSeq`; use `taskTitle` only when the title is clear. The app chooses the next
 non-archived sprint after the task's source sprint, or after the selected sprint
-when the visible task is in Backlog.
-
-### `move_task_to_backlog`
-
-Use when the user asks to move a specific visible task out of sprint planning or
-into Backlog. Prefer `taskSeq`; use `taskTitle` only when the title is clear.
+when the visible task is in a collection.
 
 ### `move_task_to_sprint`
 
@@ -134,7 +129,8 @@ Use when the user asks to move a specific visible task or collection item into a
 named collection/list. Prefer `taskSeq`; use `taskTitle` only when the title is
 clear. Set `collectionId` when the target collection appears in the app context;
 otherwise set `collectionName` to the visible collection name. Use
-`move_task_to_backlog` for explicit Backlog requests.
+`move_task_to_collection` with `collectionName: "Backlog"` for explicit Backlog
+requests only when a normal collection named Backlog exists.
 
 ### `create_milestone`, `update_milestone`, `delete_milestone`
 
@@ -191,8 +187,6 @@ Use when the user asks to add, rename, or delete a project collection/list.
   "this/current collection".
 - `delete_collection` targets `collectionId`, `collectionName`, or the currently
   selected collection when the request is explicit.
-- Never rename or delete the system Backlog collection. Explain the limit and
-  return no action if the target is Backlog.
 - Deleting a collection also deletes its collection items after the app preview
   is applied.
 
@@ -231,12 +225,12 @@ or remove an existing day off.
 - Keep replies short because the app renders action previews separately.
 - Do not invent tasks or members that are not requested.
 - Do not use unsupported actions such as archive sprint, import/export,
-  dependency edits, or collection item edits outside supported move actions. Ask
+  dependency edits, or collection item edits outside supported task fields. Ask
   the user to use the app UI for unsupported changes.
-- Collection item actions are limited to moving visible items to Backlog, the
-  next sprint, a named active sprint, or a named collection. If the selected
-  container is a collection and the user asks for other collection-item
-  mutations, explain the limit and return no actions.
+- Collection item actions support `update_task` for normal task fields,
+  `delete_task`, moving visible items to the next sprint, a named active sprint,
+  or a named collection. Do not emit a dedicated Backlog action; Backlog is just
+  a collection name when present.
 
 ## Examples
 

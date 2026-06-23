@@ -27,7 +27,6 @@ import {
   ArchiveRestore,
   FolderSync,
   Layers,
-  Inbox,
   Package,
   Database,
   Check,
@@ -52,8 +51,6 @@ import {
   createProject,
   createSprint,
   createCollection,
-  ensureProjectBacklog,
-  isBacklogCollection,
   deleteCollection,
   type Project,
   type Sprint,
@@ -435,14 +432,6 @@ function App() {
         : undefined,
     [seeded, currentProjectId]
   )
-  const backlogCollection = useMemo(
-    () => collections?.find(isBacklogCollection) ?? null,
-    [collections]
-  )
-  const userCollections = useMemo(
-    () => (collections ?? []).filter((c) => !isBacklogCollection(c)),
-    [collections]
-  )
   const currentCollection =
     collections?.find((c) => c.id === currentCollectionId) ?? null
 
@@ -483,10 +472,6 @@ function App() {
     }
     return counts
   }, [projectTasks])
-  const backlogTaskCount = useMemo(() => {
-    if (!backlogCollection) return 0
-    return (projectTasks ?? []).filter((t) => t.collectionId === backlogCollection.id).length
-  }, [backlogCollection, projectTasks])
   const collectionItemCounts = useMemo(() => {
     const counts: Record<string, number> = {}
     for (const task of projectTasks ?? []) {
@@ -495,12 +480,6 @@ function App() {
     }
     return counts
   }, [projectTasks])
-
-  useEffect(() => {
-    if (!seeded || !currentProjectId || !collections) return
-    if (collections.some(isBacklogCollection)) return
-    void ensureProjectBacklog(currentProjectId)
-  }, [seeded, currentProjectId, collections])
 
   // When project changes (or first loads), reset sprint to latest in project.
   useEffect(() => {
@@ -1180,41 +1159,6 @@ function App() {
               )}
             </div>
             )}
-            {backlogCollection && (
-              <div className="px-[18px] pt-2 pb-1">
-                <button
-                  onClick={() => selectCollection(backlogCollection.id)}
-                  className={`w-full text-left flex items-center gap-2.5 px-2.5 py-2 text-[14px] rounded-lg transition ${
-                    selKind === 'collection' && currentCollectionId === backlogCollection.id
-                      ? 'bg-accent text-white'
-                      : 'text-ink hover:bg-surface-hover'
-                  }`}
-                >
-                  <Inbox
-                    size={15}
-                    strokeWidth={1.9}
-                    className={`shrink-0 ${
-                      selKind === 'collection' && currentCollectionId === backlogCollection.id
-                        ? 'text-white/90'
-                        : 'text-ink-faint'
-                    }`}
-                    aria-hidden
-                  />
-                  <span className="flex-1 min-w-0 truncate font-medium">Backlog</span>
-                  {backlogTaskCount > 0 && (
-                    <span
-                      className={`text-[12px] tabular-nums ${
-                        selKind === 'collection' && currentCollectionId === backlogCollection.id
-                          ? 'text-white/75'
-                          : 'text-ink-faint'
-                      }`}
-                    >
-                      {backlogTaskCount}
-                    </span>
-                  )}
-                </button>
-              </div>
-            )}
             <div
               onClick={toggleCollectionsCollapsed}
               role="button"
@@ -1229,9 +1173,9 @@ function App() {
                 />
                 <Layers size={16} className="shrink-0 text-ink-faint" aria-hidden />
                 Collections
-                {userCollections.length > 0 && (
+                {(collections?.length ?? 0) > 0 && (
                   <span className="text-[13px] tabular-nums font-medium text-ink-faint/70">
-                    {userCollections.length}
+                    {collections?.length ?? 0}
                   </span>
                 )}
               </span>
@@ -1248,7 +1192,7 @@ function App() {
             </div>
             {!collectionsCollapsed && (
             <div className="pl-[26px] pr-2.5 pb-2">
-              {userCollections.map((c) => {
+              {(collections ?? []).map((c) => {
                 const isActive = selKind === 'collection' && c.id === currentCollectionId
                 return (
                   <div key={c.id} className="group relative mb-0.5">
@@ -1292,7 +1236,7 @@ function App() {
                   </div>
                 )
               })}
-              {collections && userCollections.length === 0 && (
+              {collections && collections.length === 0 && (
                 <div className="px-3 py-2 text-[13px] text-ink-faint italic">No collections</div>
               )}
             </div>

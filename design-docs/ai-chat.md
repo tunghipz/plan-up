@@ -1,7 +1,7 @@
 # AI Chat
 
 **Status:** Implemented (MVP)
-**Last updated:** 2026-06-23 (AI can move Backlog tasks into named sprints)
+**Last updated:** 2026-06-23 (Backlog system action removed; collection tasks can be assigned/deleted)
 **Code:** `app/src/AiChatDrawer.tsx`, `app/src/ai/*`, `app/src/App.tsx`, `app/public/skills/project-management/SKILL.md`
 
 ## Purpose
@@ -59,10 +59,9 @@ renders a human-readable preview, and applies them only after the user confirms.
   - update task by sequence or title
   - delete task by sequence or title
   - move task by sequence or title to the next non-archived sprint
-  - move task by sequence or title to Backlog
   - move task by sequence or title to a named collection
-  - move a visible Backlog/collection task by sequence or title to a named
-    sprint
+  - move a visible collection task by sequence or title to a named sprint
+  - assign or delete visible collection tasks
   - create, update, or delete milestone in the current sprint
   - create, update, or delete sprint, with automatic `Sprint N` naming and
     Monday-locked dates
@@ -163,7 +162,7 @@ It does not send the full IndexedDB database by default.
   accepts up to 100 proposed actions per assistant response; anything beyond
   that is ignored so the user still reviews a bounded change set before Apply.
 - Applying actions uses existing DB write functions (`addSprintTask`,
-  `updateTask`, `deleteTask`, `moveTaskToNextSprint`, `moveTaskToBacklog`,
+  `updateTask`, `deleteTask`, `moveTaskToNextSprint`, `moveTaskToCollection`,
   `moveTaskToSprint`, `createSprint`, `updateSprint`, `deleteSprint`,
   `createCollection`, `renameCollection`, `deleteCollection`, `addMember`,
   `deleteMember`) so activity logging, dependency cleanup, member orphaning,
@@ -182,8 +181,8 @@ The bundled skill must describe **plan-up's in-app action contract**, not a
 standalone MCP server. It should guide the model to answer from the visible app
 context and propose only the supported JSON action types (`create_task`,
 `update_task`, `delete_task`, `create_milestone`, `update_milestone`,
-`delete_milestone`, `move_task_to_next_sprint`, `move_task_to_backlog`,
-`move_task_to_sprint`, `move_task_to_collection`, `create_sprint`,
+`delete_milestone`, `move_task_to_next_sprint`, `move_task_to_sprint`,
+`move_task_to_collection`, `create_sprint`,
 `update_sprint`, `add_sprint_note`, `delete_sprint`, `create_collection`,
 `update_collection`,
 `delete_collection`, `create_member`, `update_member`, `delete_member`,
@@ -212,24 +211,24 @@ history marker but send only the base action schema.
 - AI Chat is disabled for writes when no current project exists.
 - Each project owns its own chat threads. Switching projects switches the chat
   list and opens that project's latest thread, or creates one if none exists.
-- Task and milestone create/update/delete actions require a selected sprint.
+- Task and milestone create actions require a selected sprint.
   `update_sprint` and `add_sprint_note` / `delete_sprint` target the selected
-  sprint. Collection item edits are still limited, but visible collection items
-  can be moved to Backlog, the next sprint, or a named active sprint.
+  sprint. `update_task` and `delete_task` can target visible sprint tasks or
+  visible collection tasks; this enables assigning and removing collection
+  items directly from AI Chat.
 - Collection actions target the current project. `create_collection` creates a
   normal user collection. `update_collection` and `delete_collection` target
   either `collectionId`, visible collection name, or the currently selected
-  collection. AI cannot rename or delete the system Backlog collection.
+  collection. A collection named `Backlog` is not special.
 - `move_task_to_next_sprint` targets a visible task and uses the next active
   sprint after the task's source sprint, or after the selected sprint when the
-  task is in Backlog.
-- `move_task_to_backlog` targets a visible task and moves it to the project's
-  Backlog collection.
+  task is in a collection.
 - `move_task_to_sprint` targets a visible task and moves it into a specific
-  active sprint by `sprintId` or visible sprint name. It is intended for Backlog
-  triage, but it can also move other visible collection tasks.
+  active sprint by `sprintId` or visible sprint name.
 - `move_task_to_collection` targets a visible task and moves it into a specific
-  project collection by `collectionId` or visible collection name.
+  project collection by `collectionId` or visible collection name. Use this for
+  a user-created collection named `Backlog`; there is no dedicated Backlog
+  action.
 - Member matching is name-based, case-insensitive.
 - Member day-off actions use `setMemberDaysOff`, so assigned tasks are
   recomputed immediately after Apply.

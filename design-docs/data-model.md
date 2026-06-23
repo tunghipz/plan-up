@@ -1,7 +1,7 @@
 # Data model
 
 **Status:** Implemented
-**Last updated:** 2026-06-23 (Backlog uses optional `Collection.kind`)
+**Last updated:** 2026-06-23 (legacy `Collection.kind` is ignored by active Backlog behavior)
 **Code:** `app/src/db.ts`
 
 ## Purpose
@@ -77,14 +77,14 @@ Nine IndexedDB tables (Dexie database name **`plan-up`**): `projects`, `members`
 ### `Collection` (`db.ts:115`)
 `id` · `projectId` · `name` · `order` (number, fractional sidebar position) ·
 `sections: Section[]` · `statuses: CollectionStatus[]` · `createdAt` (number) ·
-`kind?` (`'backlog'`)
+`kind?` (`'backlog'`, legacy)
 - `sections` and `statuses` are **embedded arrays** (not separate tables) — ordered, not indexed. A new collection is seeded with 1 section "All" and a default status set the user can edit.
-- `kind?` is optional, non-indexed system metadata. `kind: 'backlog'` marks the
-  single Backlog collection for a project; adding it needs no Dexie version bump.
+- `kind?` is optional, non-indexed legacy metadata. Older local data may still
+  contain `kind: 'backlog'`, but active UI/AI behavior ignores it and treats the
+  record as a normal collection.
 - Collection tasks may retain `assigneeId`, `startDate`, `dueDate`, and
   `estimate` so the user can triage owner/date information before assigning the
-  work to a sprint. Backlog is the system collection that uses this behavior by
-  default, but user-created collections can use the same fields.
+  work to a sprint. Any user-created collection can use the same fields.
 
 ### `Section` (embedded in Collection)
 `id` · `name` · `color?` (optional hex from COLLECTION_PALETTE)

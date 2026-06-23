@@ -36,8 +36,7 @@ export function buildAiContext(ctx: AiRuntimeContext): string {
     .sort((a, b) => a.order - b.order)
     .map((c) => {
       const count = ctx.collectionItemCounts?.[c.id]
-      const system = c.kind === 'backlog' ? ' · system backlog' : ''
-      return `- ${c.name} [${c.id}] · ${count ?? 0} items${system}`
+      return `- ${c.name} [${c.id}] · ${count ?? 0} items`
     })
     .join('\n')
   const members = ctx.members
@@ -103,7 +102,6 @@ Return ONLY valid JSON in this exact shape:
     { "type": "update_task", "taskSeq": 12, "taskTitle": "fallback title", "status": "done" },
     { "type": "delete_task", "taskSeq": 12, "taskTitle": "fallback title" },
     { "type": "move_task_to_next_sprint", "taskSeq": 12, "taskTitle": "fallback title" },
-    { "type": "move_task_to_backlog", "taskSeq": 12, "taskTitle": "fallback title" },
     { "type": "move_task_to_sprint", "taskSeq": 12, "taskTitle": "fallback title", "sprintName": "Sprint 2", "sprintId": "optional stable sprint id" },
     { "type": "move_task_to_collection", "taskSeq": 12, "taskTitle": "fallback title", "collectionName": "Roadmap", "collectionId": "optional stable collection id" },
     { "type": "create_milestone", "title": "Milestone title", "date": "YYYY-MM-DD", "assigneeName": "optional member" },
@@ -130,12 +128,11 @@ Rules:
 - Prefer taskSeq when referring to existing tasks.
 - Use delete_task only when the user explicitly asks to delete/remove a specific visible task.
 - Use move_task_to_next_sprint when the user asks to move a specific visible task to the next sprint.
-- Use move_task_to_backlog when the user asks to move a specific visible task out of sprint planning or into Backlog.
 - Use move_task_to_sprint when the user asks to add/move a specific visible collection item to a named sprint.
-- Use move_task_to_collection when the user asks to move a specific visible task/item to a named collection/list.
+- Use move_task_to_collection when the user asks to move a specific visible task/item to a named collection/list. For Backlog requests, use a normal collection named Backlog if it exists.
 - Use milestone actions only for effort-0 milestone tasks.
 - update_sprint, add_sprint_note, and delete_sprint target the currently selected sprint.
-- Use create_collection, update_collection, and delete_collection for project collection/list changes. Never rename or delete the system Backlog collection.
+- Use create_collection, update_collection, and delete_collection for project collection/list changes. A collection named Backlog is not special.
 - update_member and delete_member match members by visible member name.
 - set_member_day_off and remove_member_day_off match members by visible member name. Use halfDay only for half-day off; omit it or use "all" for a full day.
 - Never propose archive/import/export actions.

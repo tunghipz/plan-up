@@ -9,8 +9,8 @@ import {
   GripVertical,
   Layers,
   Pencil,
-  Inbox,
   Search,
+  Trash2,
 } from 'lucide-react'
 import {
   db,
@@ -25,8 +25,9 @@ import {
   renameStatus,
   recolorStatus,
   deleteStatus,
+  deleteTask,
   COLLECTION_PALETTE,
-  isBacklogCollection,
+  updateTask,
   type Collection,
   type CollectionStatus,
   type Member,
@@ -59,6 +60,7 @@ const COL = {
   due: 'w-28 flex justify-end shrink-0',
   status: 'w-28 flex justify-start shrink-0 pl-2',
   sprint: 'w-36 flex justify-end shrink-0',
+  actions: 'w-8 flex justify-end shrink-0',
 }
 
 /** Floating-shadow surface for popovers/menus (design-system §4.2). */
@@ -173,6 +175,7 @@ export function CollectionView({
               items={itemsBySectionMap.get(sec.id) ?? EMPTY_ITEMS}
               statusById={statusById}
               statuses={collection.statuses}
+              members={projectMembers}
               memberById={memberById}
               sprints={activeSprints}
               currentSprintId={currentSprintId ?? null}
@@ -263,13 +266,6 @@ function CollectionSummary({
 
 /** Inline-rename collection name (mirrors SprintNameEditor in App.tsx). */
 function CollectionTitle({ collection }: { collection: Collection }) {
-  if (isBacklogCollection(collection)) {
-    return (
-      <h2 className="min-w-0 font-semibold text-ink display-tight">
-        <span className="truncate">Backlog</span>
-      </h2>
-    )
-  }
   return <EditableCollectionTitle collection={collection} />
 }
 
@@ -424,11 +420,7 @@ export function CollectionBarIdentity({
     ) ?? []
   return (
     <div className="flex items-center gap-2.5 min-w-0">
-      {isBacklogCollection(collection) ? (
-        <Inbox size={15} className="text-ink-faint shrink-0" aria-hidden />
-      ) : (
-        <Layers size={15} className="text-ink-faint shrink-0" aria-hidden />
-      )}
+      <Layers size={15} className="text-ink-faint shrink-0" aria-hidden />
       <CollectionTitle collection={collection} />
       <CollectionSummary items={items} statuses={collection.statuses} />
     </div>
@@ -442,6 +434,7 @@ function SectionCard({
   statusById,
   statuses,
   canDelete,
+  members,
   memberById,
   sprints,
   currentSprintId,
@@ -452,6 +445,7 @@ function SectionCard({
   statusById: Map<string, CollectionStatus>
   statuses: CollectionStatus[]
   canDelete: boolean
+  members: Member[]
   memberById: Map<string, Member>
   sprints: Sprint[]
   currentSprintId: string | null
@@ -592,6 +586,7 @@ function SectionCard({
               <div className={`${COL.sprint} text-[11px] tracking-normal text-ink-faint font-medium text-right`}>
                 Sprint
               </div>
+              <div className={COL.actions} />
             </div>
           )}
 
@@ -608,6 +603,7 @@ function SectionCard({
                 task={t}
                 statusById={statusById}
                 statuses={statuses}
+                members={members}
                 assignee={t.assigneeId ? memberById.get(t.assigneeId) ?? null : null}
                 sprints={sprints}
                 currentSprintId={currentSprintId}
@@ -701,6 +697,7 @@ function ItemRow({
   task,
   statusById,
   statuses,
+  members,
   assignee,
   sprints,
   currentSprintId,
@@ -708,6 +705,7 @@ function ItemRow({
   task: Task
   statusById: Map<string, CollectionStatus>
   statuses: CollectionStatus[]
+  members: Member[]
   assignee: Member | null
   sprints: Sprint[]
   currentSprintId: string | null
@@ -721,6 +719,7 @@ function ItemRow({
   // so inline title editing and the date/status controls are never hijacked.
   const armedRef = useRef(false)
   const [dragging, setDragging] = useState(false)
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
 
   return (
     <div
@@ -743,6 +742,25 @@ function ItemRow({
         dragging ? 'opacity-40' : ''
       }`}
     >
+      {confirmingDelete && (
+        <div className="absolute inset-y-0 right-0 z-20 flex items-center gap-2 bg-red-50/95 border-l border-red-200 px-3 text-[12.5px] shadow-[-8px_0_18px_rgba(255,255,255,0.92)]">
+          <span className="font-medium text-red-600 whitespace-nowrap">Delete item?</span>
+          <button
+            type="button"
+            onClick={() => void deleteTask(task.id)}
+            className="px-2 py-1 rounded-md bg-red-500 text-white font-semibold hover:bg-red-600 transition"
+          >
+            Delete
+          </button>
+          <button
+            type="button"
+            onClick={() => setConfirmingDelete(false)}
+            className="px-2 py-1 rounded-md text-ink-muted hover:bg-surface-hover hover:text-ink transition"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
       {/* Lead gutter — hover-revealed grip; arming a drag here keeps the title
           textarea and date/status controls free to receive normal clicks. */}
       <div className={`${COL.lead} relative self-stretch`}>
@@ -773,7 +791,7 @@ function ItemRow({
       </div>
       <ItemTitle task={task} />
       <div className={COL.member}>
-        <CollectionAssignee assignee={assignee} />
+        <CollectionAssigneePicker task={task} members={members} assignee={assignee} />
       </div>
       <div className={COL.start}>
         <DatePickCell
@@ -801,20 +819,53 @@ function ItemRow({
           currentSprintId={currentSprintId}
         />
       </div>
+      <div className={COL.actions}>
+        <button
+          type="button"
+          onClick={() => setConfirmingDelete(true)}
+          title="Delete item"
+          aria-label={`Delete ${task.title}`}
+          className="grid place-items-center w-7 h-7 rounded-md text-ink-faint opacity-0 group-hover/row:opacity-100 hover:text-red-500 hover:bg-red-500/10 transition"
+        >
+          <Trash2 size={14} strokeWidth={2} />
+        </button>
+      </div>
     </div>
   )
 }
 
-function CollectionAssignee({ assignee }: { assignee: Member | null }) {
+function CollectionAssigneePicker({
+  task,
+  members,
+  assignee,
+}: {
+  task: Task
+  members: Member[]
+  assignee: Member | null
+}) {
+  const label = assignee?.name ?? 'Unassigned'
   if (!assignee) {
     return (
-      <span className="text-[12.5px] font-medium text-ink-faint truncate">
-        Unassigned
-      </span>
+      <label className="relative inline-flex min-w-0 max-w-full items-center text-[12.5px] font-medium text-ink-faint truncate rounded-md px-1 -ml-1 hover:bg-surface-hover transition">
+        <span className="truncate">{label}</span>
+        <select
+          value={task.assigneeId ?? ''}
+          onChange={(e) => void updateTask(task.id, { assigneeId: e.target.value || null })}
+          className="absolute inset-0 opacity-0 cursor-pointer"
+          aria-label={`Assign ${task.title}`}
+        >
+          <option value="">Unassigned</option>
+          {members.map((member) => (
+            <option key={member.id} value={member.id}>
+              {member.name}
+            </option>
+          ))}
+        </select>
+      </label>
     )
   }
   return (
-    <span className="inline-flex min-w-0 items-center gap-1.5 text-[12.5px] font-medium text-ink-muted">
+    <label className="relative inline-flex min-w-0 max-w-full items-center gap-1.5 text-[12.5px] font-medium text-ink-muted rounded-md px-1 -ml-1 hover:bg-surface-hover transition">
       <span
         className="w-5 h-5 rounded-full grid place-items-center text-[10px] font-bold text-white shrink-0"
         style={{ background: assignee.color }}
@@ -823,7 +874,20 @@ function CollectionAssignee({ assignee }: { assignee: Member | null }) {
         {assignee.name.slice(0, 1).toUpperCase()}
       </span>
       <span className="truncate">{assignee.name}</span>
-    </span>
+      <select
+        value={task.assigneeId ?? ''}
+        onChange={(e) => void updateTask(task.id, { assigneeId: e.target.value || null })}
+        className="absolute inset-0 opacity-0 cursor-pointer"
+        aria-label={`Assign ${task.title}`}
+      >
+        <option value="">Unassigned</option>
+        {members.map((member) => (
+          <option key={member.id} value={member.id}>
+            {member.name}
+          </option>
+        ))}
+      </select>
+    </label>
   )
 }
 
@@ -1036,6 +1100,7 @@ function AddItemRow({
       <div className={COL.due} />
       <div className={COL.status} />
       <div className={COL.sprint} />
+      <div className={COL.actions} />
     </div>
   )
 }

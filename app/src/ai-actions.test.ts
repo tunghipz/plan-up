@@ -1,7 +1,7 @@
 import 'fake-indexeddb/auto'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { executeAiActions, normalizeAiActions } from './ai/actions'
-import { createCollection, ensureProjectBacklog } from './db'
+import { addCollectionItem, createCollection } from './db'
 import {
   addMember,
   addSprintTask,
@@ -69,7 +69,6 @@ describe('AI actions', () => {
         { type: 'update_member', memberName: 'An', name: 'An Nguyen', title: null },
         { type: 'update_milestone', taskSeq: '3', date: '2026-06-10' },
         { type: 'move_task_to_next_sprint', taskSeq: '4' },
-        { type: 'move_task_to_backlog', taskTitle: 'Later' },
         { type: 'move_task_to_sprint', taskSeq: '5', sprintName: 'Sprint 2' },
         { type: 'move_task_to_collection', taskSeq: '6', collectionName: 'Roadmap' },
         { type: 'add_sprint_note', note: '  Bug bash  ' },
@@ -80,7 +79,6 @@ describe('AI actions', () => {
       { type: 'update_member', memberName: 'An', name: 'An Nguyen', title: null },
       { type: 'update_milestone', taskSeq: 3, date: '2026-06-10' },
       { type: 'move_task_to_next_sprint', taskSeq: 4 },
-      { type: 'move_task_to_backlog', taskTitle: 'Later' },
       { type: 'move_task_to_sprint', taskSeq: 5, sprintName: 'Sprint 2' },
       { type: 'move_task_to_collection', taskSeq: 6, collectionName: 'Roadmap' },
       { type: 'add_sprint_note', note: 'Bug bash' },
@@ -235,8 +233,8 @@ describe('AI actions', () => {
     expect(await db.collections.get(roadmap!.id)).toBeUndefined()
   })
 
-  it('does not let AI rename or delete the system Backlog collection', async () => {
-    const backlog = await ensureProjectBacklog(P)
+  it('treats a collection named Backlog as a normal collection', async () => {
+    const backlog = await createCollection(P, 'Backlog')
 
     const renameResults = await executeAiActions(
       [{ type: 'update_collection', collectionId: backlog.id, name: 'Ideas' }],
@@ -246,19 +244,58 @@ describe('AI actions', () => {
       }
     )
     const deleteResults = await executeAiActions(
-      [{ type: 'delete_collection', collectionId: backlog.id }],
+      [{ type: 'delete_collection', collectionName: 'Ideas' }],
       {
         ...(await ctx()),
-        collection: backlog,
+        collection: { ...backlog, name: 'Ideas' },
       }
     )
 
-    expect(renameResults[0]).toMatchObject({ ok: false, label: 'Backlog cannot be renamed' })
-    expect(deleteResults[0]).toMatchObject({ ok: false, label: 'Backlog cannot be deleted' })
-    await expect(db.collections.get(backlog.id)).resolves.toMatchObject({
-      name: 'Backlog',
-      kind: 'backlog',
+    expect(renameResults[0]).toMatchObject({
+      ok: true,
+      label: 'Renamed collection “Backlog” to “Ideas”',
     })
+    expect(deleteResults[0]).toMatchObject({ ok: true, label: 'Deleted collection “Ideas”' })
+    expect(await db.collections.get(backlog.id)).toBeUndefined()
+  })
+
+  it('assigns and deletes visible collection tasks', async () => {
+    const [an, collection] = await Promise.all([
+      addMember(P, 'An'),
+      createCollection(P, 'Roadmap'),
+    ])
+    const item = await addCollectionItem(collection.id, collection.sections[0].id, {
+      title: 'Unscheduled work',
+    })
+    const collectionCtx = {
+      ...(await ctx()),
+      containerKind: 'collection' as const,
+      sprint: null,
+      collection,
+      tasks: [item],
+    }
+
+    const assignResults = await executeAiActions(
+      [{ type: 'update_task', taskSeq: item.sequence, assigneeName: 'An' }],
+      collectionCtx
+    )
+
+    expect(assignResults[0]).toMatchObject({ ok: true, label: 'Updated task #1' })
+    await expect(db.tasks.get(item.id)).resolves.toMatchObject({ assigneeId: an.id })
+
+    const deleteResults = await executeAiActions(
+      [{ type: 'delete_task', taskSeq: item.sequence }],
+      {
+        ...collectionCtx,
+        tasks: [(await db.tasks.get(item.id))!],
+      }
+    )
+
+    expect(deleteResults[0]).toMatchObject({
+      ok: true,
+      label: 'Deleted task #1 “Unscheduled work”',
+    })
+    expect(await db.tasks.get(item.id)).toBeUndefined()
   })
 
   it('sets and removes member day off through the canonical scheduler path', async () => {
@@ -348,7 +385,7 @@ describe('AI actions', () => {
     })
   })
 
-  it('moves visible tasks to the next sprint and into backlog', async () => {
+  it('moves visible tasks to the next sprint and into a named collection', async () => {
     await db.sprints.add({
       id: 'sprint-2',
       projectId: P,
@@ -379,8 +416,9 @@ describe('AI actions', () => {
 
     const sprint2 = await db.sprints.get('sprint-2')
     const moved = await db.tasks.where('sprintId').equals('sprint-2').toArray()
-    const backlogResults = await executeAiActions(
-      [{ type: 'move_task_to_backlog', taskSeq: moved[0].sequence }],
+    const backlog = await createCollection(P, 'Backlog')
+    const collectionResults = await executeAiActions(
+      [{ type: 'move_task_to_collection', taskSeq: moved[0].sequence, collectionName: 'Backlog' }],
       {
         ...(await ctx()),
         sprint: sprint2 ?? null,
@@ -388,31 +426,29 @@ describe('AI actions', () => {
       }
     )
 
-    const backlog = await db.collections.where('projectId').equals(P).first()
-    expect(backlogResults[0]).toMatchObject({
+    expect(collectionResults[0]).toMatchObject({
       ok: true,
-      label: 'Moved task #1 “Move me” to Backlog',
+      label: 'Moved task #1 “Move me” to collection Backlog',
     })
     await expect(db.tasks.get(task.id)).resolves.toMatchObject({
       sprintId: null,
-      collectionId: backlog?.id,
-      sectionId: backlog?.sections[0]?.id,
+      collectionId: backlog.id,
+      sectionId: backlog.sections[0]?.id,
       assigneeId: null,
       startDate: '2026-06-15',
       dueDate: null,
       estimate: null,
       dependsOn: [],
     })
-    expect(backlog?.kind).toBe('backlog')
 
-    const backlogTasks = await db.tasks.where('collectionId').equals(backlog!.id).toArray()
+    const backlogTasks = await db.tasks.where('collectionId').equals(backlog.id).toArray()
     const toSprintResults = await executeAiActions(
       [{ type: 'move_task_to_sprint', taskSeq: backlogTasks[0].sequence, sprintName: 'Sprint 2' }],
       {
         ...(await ctx()),
         containerKind: 'collection',
         sprint: null,
-        collection: backlog ?? null,
+        collection: backlog,
         tasks: backlogTasks,
       }
     )

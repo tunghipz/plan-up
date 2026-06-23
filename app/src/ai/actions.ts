@@ -8,9 +8,7 @@ import {
   deleteMember,
   deleteSprint,
   deleteTask,
-  isBacklogCollection,
   memberNameExists,
-  moveTaskToBacklog,
   moveTaskToCollection,
   moveTaskToNextSprint,
   moveTaskToSprint,
@@ -41,7 +39,6 @@ import type {
   CreateMilestoneAction,
   CreateTaskAction,
   DeleteTaskAction,
-  MoveTaskToBacklogAction,
   MoveTaskToCollectionAction,
   MoveTaskToNextSprintAction,
   MoveTaskToSprintAction,
@@ -202,14 +199,6 @@ function normalizeAction(raw: unknown): AiAction | null {
   }
   if (type === 'move_task_to_next_sprint') {
     const action: MoveTaskToNextSprintAction = { type }
-    const taskSeq = cleanTaskSeq(raw.taskSeq)
-    const taskTitle = cleanNullableString(raw.taskTitle)
-    if (taskSeq !== undefined) action.taskSeq = taskSeq
-    if (taskTitle !== undefined) action.taskTitle = taskTitle
-    return action.taskSeq || action.taskTitle ? action : null
-  }
-  if (type === 'move_task_to_backlog') {
-    const action: MoveTaskToBacklogAction = { type }
     const taskSeq = cleanTaskSeq(raw.taskSeq)
     const taskTitle = cleanNullableString(raw.taskTitle)
     if (taskSeq !== undefined) action.taskSeq = taskSeq
@@ -498,11 +487,6 @@ export function describeAiAction(action: AiAction, ctx: AiRuntimeContext): strin
     const target = task ? `#${task.sequence} “${task.title}”` : action.taskSeq ? `#${action.taskSeq}` : `“${action.taskTitle}”`
     return `Move task ${target} to next sprint`
   }
-  if (action.type === 'move_task_to_backlog') {
-    const task = findTask(action, ctx.tasks)
-    const target = task ? `#${task.sequence} “${task.title}”` : action.taskSeq ? `#${action.taskSeq}` : `“${action.taskTitle}”`
-    return `Move task ${target} to Backlog`
-  }
   if (action.type === 'move_task_to_sprint') {
     const task = findTask(action, ctx.tasks)
     const sprint = findSprint(action, ctx.sprints)
@@ -690,10 +674,6 @@ export async function executeAiActions(
           results.push({ ok: false, label: 'Collection not found for update' })
           continue
         }
-        if (isBacklogCollection(collection)) {
-          results.push({ ok: false, label: 'Backlog cannot be renamed' })
-          continue
-        }
         if (collectionNameExists(action.name, ctx, collection.id)) {
           results.push({ ok: false, label: `Collection already exists: ${action.name}` })
           continue
@@ -707,10 +687,6 @@ export async function executeAiActions(
         const collection = findCollection(action, ctx)
         if (!collection) {
           results.push({ ok: false, label: 'Collection not found for delete' })
-          continue
-        }
-        if (isBacklogCollection(collection)) {
-          results.push({ ok: false, label: 'Backlog cannot be deleted' })
           continue
         }
         await deleteCollection(collection.id)
@@ -741,22 +717,6 @@ export async function executeAiActions(
           label: result.moved
             ? `Moved task #${target.sequence} to ${result.targetSprintName ?? 'next sprint'}`
             : 'No next active sprint found for move',
-        })
-        continue
-      }
-
-      if (action.type === 'move_task_to_backlog') {
-        const target = findTask(action, ctx.tasks)
-        if (!target) {
-          results.push({ ok: false, label: 'Task not found for backlog move' })
-          continue
-        }
-        const result = await moveTaskToBacklog(target.id)
-        results.push({
-          ok: result.moved,
-          label: result.moved
-            ? `Moved task #${target.sequence} “${target.title}” to Backlog`
-            : 'Task not found for backlog move',
         })
         continue
       }
@@ -817,6 +777,39 @@ export async function executeAiActions(
         }
         await deleteTask(target.id)
         results.push({ ok: true, label: `Deleted milestone #${target.sequence} “${target.title}”` })
+        continue
+      }
+
+      if (action.type === 'update_task') {
+        const target = findTask(action, ctx.tasks)
+        if (!target) {
+          results.push({ ok: false, label: `Task not found for update` })
+          continue
+        }
+        const patch: Partial<Task> = {}
+        if (action.title) patch.title = action.title
+        if (action.status) patch.status = action.status
+        if (action.priority) patch.priority = action.priority
+        if (action.estimate !== undefined) patch.estimate = action.estimate
+        if (action.startDate !== undefined) patch.startDate = action.startDate
+        if (action.dueDate !== undefined) patch.dueDate = action.dueDate
+        if (action.assigneeName !== undefined) {
+          if (action.assigneeName === null) patch.assigneeId = null
+          else {
+            const assignee = findMemberByName(action.assigneeName, ctx.members)
+            if (!assignee) {
+              results.push({ ok: false, label: `Member not found: ${action.assigneeName}` })
+              continue
+            }
+            patch.assigneeId = assignee.id
+          }
+        }
+        if (!Object.keys(patch).length) {
+          results.push({ ok: false, label: `No valid changes for #${target.sequence}` })
+          continue
+        }
+        await updateTask(target.id, patch)
+        results.push({ ok: true, label: `Updated task #${target.sequence}` })
         continue
       }
 
@@ -901,35 +894,6 @@ export async function executeAiActions(
         continue
       }
 
-      const target = findTask(action, ctx.tasks)
-      if (!target) {
-        results.push({ ok: false, label: `Task not found for update` })
-        continue
-      }
-      const patch: Partial<Task> = {}
-      if (action.title) patch.title = action.title
-      if (action.status) patch.status = action.status
-      if (action.priority) patch.priority = action.priority
-      if (action.estimate !== undefined) patch.estimate = action.estimate
-      if (action.startDate !== undefined) patch.startDate = action.startDate
-      if (action.dueDate !== undefined) patch.dueDate = action.dueDate
-      if (action.assigneeName !== undefined) {
-        if (action.assigneeName === null) patch.assigneeId = null
-        else {
-          const assignee = findMemberByName(action.assigneeName, ctx.members)
-          if (!assignee) {
-            results.push({ ok: false, label: `Member not found: ${action.assigneeName}` })
-            continue
-          }
-          patch.assigneeId = assignee.id
-        }
-      }
-      if (!Object.keys(patch).length) {
-        results.push({ ok: false, label: `No valid changes for #${target.sequence}` })
-        continue
-      }
-      await updateTask(target.id, patch)
-      results.push({ ok: true, label: `Updated task #${target.sequence}` })
     } catch (err) {
       results.push({
         ok: false,

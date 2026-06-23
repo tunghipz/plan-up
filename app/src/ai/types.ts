@@ -105,12 +105,6 @@ export type MoveTaskToNextSprintAction = {
   taskTitle?: string | null
 }
 
-export type MoveTaskToBacklogAction = {
-  type: 'move_task_to_backlog'
-  taskSeq?: number | null
-  taskTitle?: string | null
-}
-
 export type MoveTaskToSprintAction = {
   type: 'move_task_to_sprint'
   taskSeq?: number | null
@@ -205,7 +199,6 @@ export type AiAction =
   | UpdateTaskAction
   | DeleteTaskAction
   | MoveTaskToNextSprintAction
-  | MoveTaskToBacklogAction
   | MoveTaskToSprintAction
   | MoveTaskToCollectionAction
   | CreateSprintAction

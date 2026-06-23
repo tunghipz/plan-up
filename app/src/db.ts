@@ -237,7 +237,7 @@ export interface CollectionStatus {
 export interface Collection {
   id: string
   projectId: string
-  /** Optional system marker. `backlog` is the project's unscheduled task list. */
+  /** Legacy optional marker from the removed system Backlog feature. */
   kind?: 'backlog'
   name: string
   /** Thứ tự hiển thị trong sidebar (fractional/integer). */
@@ -582,39 +582,6 @@ export async function createCollection(
   }
   await db.collections.add(col)
   return col
-}
-
-export function isBacklogCollection(collection: Collection): boolean {
-  return collection.kind === 'backlog'
-}
-
-export async function ensureProjectBacklog(projectId: string): Promise<Collection> {
-  return db.transaction('rw', db.collections, async () => {
-    const collections = await db.collections.where('projectId').equals(projectId).toArray()
-    const existing =
-      collections.find((c) => c.kind === 'backlog') ??
-      collections.find((c) => c.name.trim().toLowerCase() === 'backlog')
-    if (existing) {
-      if (existing.kind !== 'backlog') {
-        await db.collections.update(existing.id, { kind: 'backlog' })
-        return { ...existing, kind: 'backlog' }
-      }
-      return existing
-    }
-
-    const backlog: Collection = {
-      id: uid(),
-      projectId,
-      kind: 'backlog',
-      name: 'Backlog',
-      order: collections.reduce((m, c) => Math.min(m, c.order), 0) - 1,
-      sections: [{ id: uid(), name: 'Backlog' }],
-      statuses: defaultStatuses(),
-      createdAt: Date.now(),
-    }
-    await db.collections.add(backlog)
-    return backlog
-  })
 }
 
 /** Đổi tên collection (trim, bỏ qua nếu rỗng). */
@@ -1770,16 +1737,6 @@ export async function moveTaskToNextSprint(
   })
 }
 
-export async function moveTaskToBacklog(
-  taskId: string
-): Promise<{ moved: boolean; backlogId: string | null }> {
-  const task = await db.tasks.get(taskId)
-  if (!task) return { moved: false, backlogId: null }
-  const backlog = await ensureProjectBacklog(task.projectId)
-  const result = await moveTaskToCollection(taskId, backlog.id)
-  return { moved: result.moved, backlogId: result.moved ? backlog.id : null }
-}
-
 export async function moveTaskToCollection(
   taskId: string,
   collectionId: string
@@ -1872,7 +1829,7 @@ export async function moveTaskToSprint(
         taskSeq: sequence,
         taskTitle: task.title,
         kind: 'rolled_over',
-        from: sourceSprint?.name ?? sourceCollection?.name ?? 'Backlog',
+        from: sourceSprint?.name ?? sourceCollection?.name ?? 'Collection',
         to: target.name,
         ts: Date.now(),
       })

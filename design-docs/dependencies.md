@@ -31,7 +31,13 @@ UI can flag blocked work.
   The valid entries still save; only the rejected ones are dropped, and the field snaps to
   the saved (range-collapsed) set.
 - A task waiting on an unfinished prereq is **blocked** (row tooltip: "Blocked — waiting on
-  a prerequisite task").
+  a prerequisite task"). A prereq that is a **group (parent) task** counts as done only when
+  **every child** of that group is done.
+- **A group can be a prerequisite** — `dependsOn` may reference a parent task's sequence; the
+  dependent starts after the group's rolled-up end. Because depending on a group means
+  depending on all its children, the cycle check treats `parent → children` as edges (a child
+  can't depend back on a task that waits on its own group). You still cannot set a prereq *on*
+  a group. See [task-groups.md](./task-groups.md) "Group as a prerequisite".
 
 ### Why a cycle gets rejected (the common confusion)
 Dependencies form a DAG. If task 6 already depends on 7, you cannot also make 7 depend on
@@ -49,8 +55,8 @@ chain them, remove the back-edge first (here: clear 6's dependency on 7).
   duplicates, unknown IDs, and cycles with a **cumulative** check (so a batch can't sneak a
   cycle past via ordering). Returns the cleaned set; triggers `recomputeDates`.
 - `addDependency` / `removeDependency` — single-edge helpers, each recomputes.
-- `isTaskBlocked(task, tasksById)` (`db.ts:796`) — `true` if not done AND any prereq isn't
-  done. Done tasks never report blocked.
+- `isTaskBlocked(task, tasksById)` — `true` if not done AND any prereq isn't done. A prereq
+  that is a **parent** is "done" only when all its children are done. Done tasks never report blocked.
 - `PrereqInput` parses input via `parsePrereqSeqs` (list + ranges), resolves sequence→ID
   **within the same sprint only** (sequences are per-sprint; cross-sprint deps survive but
   can't be typed by number), then diffs the requested set against what `setDependencies`

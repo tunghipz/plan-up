@@ -760,6 +760,40 @@ describe('date computation', () => {
     expect(c?.dueDate).toBe('2026-06-04')
   })
 
+  it('re-linking to an unscheduled prereq clears the stale derived start', async () => {
+    // Regression: the start is purely prereq-derived when prereqs exist (the
+    // cell is locked). Re-linking from a scheduled prereq to one with no due
+    // date must NOT leave the old derived start lingering.
+    await db.tasks.bulkAdd([
+      {
+        id: 'a', projectId: P, sequence: 1, title: 'a', assigneeId: null, sprintId: 's',
+        status: 'todo', priority: 'normal',
+        startDate: '2026-06-05', dueDate: '2026-06-05', // Fri, scheduled
+        estimate: 1, createdAt: 0, dependsOn: [],
+      },
+      {
+        id: 'b', projectId: P, sequence: 2, title: 'b', assigneeId: null, sprintId: 's',
+        status: 'todo', priority: 'normal',
+        startDate: null, dueDate: null, // unscheduled → no anchor
+        estimate: null, createdAt: 1, dependsOn: [],
+      },
+      {
+        id: 't', projectId: P, sequence: 3, title: 't', assigneeId: null, sprintId: 's',
+        status: 'todo', priority: 'normal',
+        startDate: null, dueDate: null,
+        estimate: 2, createdAt: 2, dependsOn: [],
+      },
+    ])
+    await setDependencies('t', ['a'])
+    expect((await db.tasks.get('t'))?.startDate).toBe('2026-06-08') // Mon after Fri
+    await setDependencies('t', ['b'])
+    expect((await db.tasks.get('t'))?.startDate).toBeNull()
+    // And once b gets scheduled, t's start follows the new prereq.
+    await db.tasks.update('b', { startDate: '2026-06-15', dueDate: '2026-06-15', estimate: 1 })
+    await recomputeDates('b')
+    expect((await db.tasks.get('t'))?.startDate).toBe('2026-06-16')
+  })
+
   it('setDependencies drops cycles silently', async () => {
     await db.tasks.bulkAdd([
       {
@@ -777,6 +811,67 @@ describe('date computation', () => {
     ])
     // Cycle attempt: b depends on a, but a already depends on b.
     const saved = await setDependencies('b', ['a'])
+    expect(saved).toEqual([])
+  })
+})
+
+describe('group (parent) task as a prerequisite', () => {
+  // Parent G with two children; C2 ends latest (Wed 06-03). A dependent T anchors
+  // on the group's rolled-up end. See design-docs/task-groups.md.
+  const base = {
+    projectId: P, assigneeId: null, sprintId: 's',
+    status: 'todo' as const, priority: 'normal' as const,
+    startDate: null as string | null, dueDate: null as string | null,
+    estimate: null as number | null, createdAt: 0, dependsOn: [] as string[],
+  }
+  async function seedGroup() {
+    await db.tasks.bulkAdd([
+      { ...base, id: 'G', sequence: 1, title: 'Group' }, // parent (has children)
+      { ...base, id: 'C1', sequence: 2, title: 'c1', parentId: 'G', startDate: '2026-06-01', estimate: 1 }, // Mon → 06-01
+      { ...base, id: 'C2', sequence: 3, title: 'c2', parentId: 'G', startDate: '2026-06-01', estimate: 3 }, // Mon..Wed → 06-03
+      { ...base, id: 'T', sequence: 4, title: 't', estimate: 1, createdAt: 1 },
+    ])
+  }
+
+  it('a task depending on a group starts after the group’s latest child end', async () => {
+    await seedGroup()
+    await setDependencies('T', ['G'])
+    const t = await db.tasks.get('T')
+    expect(t?.startDate).toBe('2026-06-04') // Thu, after C2 ends Wed 06-03
+    expect(t?.dueDate).toBe('2026-06-04')
+  })
+
+  it('editing a child re-flows the dependent (cascade through the parent)', async () => {
+    await seedGroup()
+    await setDependencies('T', ['G'])
+    expect((await db.tasks.get('T'))?.startDate).toBe('2026-06-04')
+    // Extend C2 to 4 days → ends Thu 06-04 → T must move to Fri 06-05.
+    await db.tasks.update('C2', { estimate: 4 })
+    await recomputeDates('C2')
+    expect((await db.tasks.get('T'))?.startDate).toBe('2026-06-05')
+  })
+
+  it('a task is blocked until every child of its group-prereq is done', async () => {
+    await seedGroup()
+    await setDependencies('T', ['G'])
+    const blocked = async () => {
+      const byId = new Map((await db.tasks.toArray()).map((x) => [x.id, x]))
+      return isTaskBlocked(byId.get('T')!, byId)
+    }
+    expect(await blocked()).toBe(true)
+    await db.tasks.update('C1', { status: 'done' })
+    expect(await blocked()).toBe(true) // C2 still open
+    await db.tasks.update('C2', { status: 'done' })
+    expect(await blocked()).toBe(false) // whole group done
+  })
+
+  it('rejects a cycle formed through group membership', async () => {
+    await seedGroup()
+    await setDependencies('T', ['G']) // T waits for the group (incl. C1)
+    // C1 trying to depend on T closes the loop T → G → C1 → T.
+    const tasks = await db.tasks.toArray()
+    expect(wouldCreateCycle('C1', 'T', tasks)).toBe(true)
+    const saved = await setDependencies('C1', ['T'])
     expect(saved).toEqual([])
   })
 })

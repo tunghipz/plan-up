@@ -1025,15 +1025,80 @@ interface TaskPlan {
   dueFraction: number
 }
 
+type PlanCtx = { children: Map<string, string[]>; inProgress: Set<string> }
+const NULL_PLAN: TaskPlan = { startDate: null, dueDate: null, startOffset: 0, dueFraction: 1 }
+
+/** parentId → child ids (only children whose parent exists in the map). */
+function childrenByParent(byId: Map<string, Task>): Map<string, string[]> {
+  const m = new Map<string, string[]>()
+  for (const t of byId.values()) {
+    if (t.parentId && byId.has(t.parentId)) {
+      const a = m.get(t.parentId)
+      a ? a.push(t.id) : m.set(t.parentId, [t.id])
+    }
+  }
+  return m
+}
+
+/**
+ * Memoized plan with a cycle guard + parent roll-up. A task that HAS children is
+ * scheduled as the SPAN of its children (earliest child start → latest child
+ * end+fraction) — which is also what lets a group act as a prereq anchor. Leaf
+ * tasks go through `leafPlan`. The `inProgress` set breaks any cycle introduced
+ * via group membership (returns NULL_PLAN instead of recursing forever).
+ * See design-docs/scheduling.md + task-groups.md.
+ */
 function planFor(
   task: Task,
   byId: Map<string, Task>,
   memberById: Map<string, Member> | undefined,
-  cache: Map<string, TaskPlan>
+  cache: Map<string, TaskPlan>,
+  ctx?: PlanCtx
 ): TaskPlan {
-  const hit = cache.get(task.id)
-  if (hit) return hit
+  const c = ctx ?? { children: childrenByParent(byId), inProgress: new Set<string>() }
+  const cached = cache.get(task.id)
+  if (cached) return cached
+  if (c.inProgress.has(task.id)) return NULL_PLAN
+  c.inProgress.add(task.id)
+  let plan: TaskPlan
+  const kids = c.children.get(task.id)
+  if (kids && kids.length) {
+    // Parent: roll up the children's span. Own estimate/start/deps are ignored.
+    let minStart: string | null = null
+    let bestEnd: string | null = null
+    let bestFrac = 0
+    for (const cid of kids) {
+      const child = byId.get(cid)
+      if (!child) continue
+      const cp = planFor(child, byId, memberById, cache, c)
+      if (cp.startDate && (minStart === null || cp.startDate < minStart)) minStart = cp.startDate
+      if (
+        cp.dueDate &&
+        (bestEnd === null ||
+          cp.dueDate > bestEnd ||
+          (cp.dueDate === bestEnd && cp.dueFraction > bestFrac))
+      ) {
+        bestEnd = cp.dueDate
+        bestFrac = cp.dueFraction
+      }
+    }
+    plan = { startDate: minStart, dueDate: bestEnd, startOffset: 0, dueFraction: bestEnd ? bestFrac : 1 }
+  } else {
+    plan = leafPlan(task, byId, memberById, cache, c)
+  }
+  c.inProgress.delete(task.id)
+  cache.set(task.id, plan)
+  return plan
+}
 
+/** Schedule a LEAF task (no children): manual/prereq start + effort walk. */
+function leafPlan(
+  task: Task,
+  byId: Map<string, Task>,
+  memberById: Map<string, Member> | undefined,
+  cache: Map<string, TaskPlan>,
+  ctx: PlanCtx
+): TaskPlan {
   const member = task.assigneeId ? memberById?.get(task.assigneeId) : undefined
   const halfByDate = new Map<string, 'am' | 'pm'>()
   const contribByDate = new Map<string, 0 | 0.5>()
@@ -1069,12 +1134,18 @@ function planFor(
   let start: string | null = task.startDate
   let startOffset = 0
   if (task.dependsOn?.length > 0) {
+    // The start is PURELY prereq-derived when prereqs exist (the cell is locked
+    // in the UI). Don't seed it with the stored value — that's a leftover from a
+    // PREVIOUS prereq, and would linger if the new prereq can't anchor a date
+    // (e.g. you re-link to an unscheduled task). Until a prereq has a due date,
+    // there's no anchor → start clears. See design-docs/scheduling.md.
+    start = null
     let bestDate: string | null = null
     let bestFrac = 0
     for (const id of task.dependsOn) {
       const p = byId.get(id)
       if (!p) continue
-      const pPlan = planFor(p, byId, memberById, cache)
+      const pPlan = planFor(p, byId, memberById, cache, ctx)
       if (!pPlan.dueDate) continue
       if (
         bestDate === null ||
@@ -1102,14 +1173,7 @@ function planFor(
   }
 
   if (!start) {
-    const plan: TaskPlan = {
-      startDate: null,
-      dueDate: task.dueDate,
-      startOffset: 0,
-      dueFraction: 1,
-    }
-    cache.set(task.id, plan)
-    return plan
+    return { startDate: null, dueDate: task.dueDate, startOffset: 0, dueFraction: 1 }
   }
 
   // Step 2: normalize start past off days when caller set it on one.
@@ -1122,14 +1186,7 @@ function planFor(
 
   // No effort → end stays manual.
   if (!task.estimate || task.estimate <= 0) {
-    const plan: TaskPlan = {
-      startDate: start,
-      dueDate: task.dueDate,
-      startOffset,
-      dueFraction: 1,
-    }
-    cache.set(task.id, plan)
-    return plan
+    return { startDate: start, dueDate: task.dueDate, startOffset, dueFraction: 1 }
   }
 
   // Step 3: walk forward consuming effort.
@@ -1154,9 +1211,7 @@ function planFor(
     if (remaining > EPS) d = addDays(d, 1)
   }
   const dueFraction = Math.min(1, lastWallStart + lastUse)
-  const plan: TaskPlan = { startDate: start, dueDate: end, startOffset, dueFraction }
-  cache.set(task.id, plan)
-  return plan
+  return { startDate: start, dueDate: end, startOffset, dueFraction }
 }
 
 /**
@@ -1426,8 +1481,16 @@ export async function recomputeDates(taskId: string): Promise<void> {
           dueDate: next.dueDate,
         })
       }
+      // Re-flow dependents of this task — and, if it's a group child, dependents
+      // of its PARENT too (the group's rolled-up end shifts when a child does, so
+      // anything depending on the group must recompute). See task-groups.md.
+      const parentId = task.parentId
       for (const t of all) {
-        if (t.dependsOn?.includes(id) && !visited.has(t.id)) {
+        if (visited.has(t.id)) continue
+        if (
+          t.dependsOn?.includes(id) ||
+          (parentId && t.dependsOn?.includes(parentId))
+        ) {
           queue.push(t.id)
         }
       }
@@ -1748,6 +1811,9 @@ export function wouldCreateCycle(
 ): boolean {
   if (taskId === newDepId) return true
   const byId = new Map(tasks.map((t) => [t.id, t]))
+  // Depending on a group means depending on all its children, so treat
+  // `parent → children` as edges too. See design-docs/task-groups.md.
+  const kidsOf = childrenByParent(byId)
   const stack = [newDepId]
   const seen = new Set<string>()
   while (stack.length) {
@@ -1757,6 +1823,8 @@ export function wouldCreateCycle(
     seen.add(cur)
     const t = byId.get(cur)
     if (t) stack.push(...t.dependsOn)
+    const kids = kidsOf.get(cur)
+    if (kids) stack.push(...kids)
   }
   return false
 }
@@ -1776,6 +1844,7 @@ export function findCyclePath(
 ): string[] | null {
   if (taskId === newDepId) return [newDepId]
   const byId = new Map(tasks.map((t) => [t.id, t]))
+  const kidsOf = childrenByParent(byId)
   const parent = new Map<string, string | null>([[newDepId, null]])
   const queue = [newDepId]
   while (queue.length) {
@@ -1790,8 +1859,9 @@ export function findCyclePath(
       return path
     }
     const t = byId.get(cur)
-    if (!t) continue
-    for (const d of t.dependsOn) {
+    // `parent → children` are edges too (depending on a group ⇒ on its children).
+    const next = [...(t?.dependsOn ?? []), ...(kidsOf.get(cur) ?? [])]
+    for (const d of next) {
       if (!parent.has(d)) {
         parent.set(d, cur)
         queue.push(d)
@@ -1909,7 +1979,13 @@ export function isTaskBlocked(task: Task, byId: Map<string, Task>): boolean {
   if (!task.dependsOn || task.dependsOn.length === 0) return false
   return task.dependsOn.some((id) => {
     const dep = byId.get(id)
-    return dep && dep.status !== 'done'
+    if (!dep) return false
+    // A group (parent) prereq is "done" only when EVERY child is done — its own
+    // stored status is derived/ignored. See design-docs/task-groups.md.
+    const kids: Task[] = []
+    for (const t of byId.values()) if (t.parentId === id) kids.push(t)
+    if (kids.length) return !kids.every((k) => k.status === 'done')
+    return dep.status !== 'done'
   })
 }
 

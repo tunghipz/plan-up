@@ -1,7 +1,7 @@
 # Task groups (parent task with nested children)
 
 **Status:** Implemented
-**Last updated:** 2026-06-05
+**Last updated:** 2026-06-25
 **Code:** `app/src/db.ts` (`Task.parentId`, `createGroupFromSelection`, `setTaskParent`),
 `app/src/SprintView.tsx` (`MemberCard` task tree render, `TaskGroupRow` parent roll-up,
 `SelectionBar` group/ungroup/delete), collapse persisted in `localStorage`
@@ -86,9 +86,28 @@ computes `total`, `done`, overdue, and capacity, it must skip tasks that have ch
 ## Scheduling
 - **Children schedule independently** — each keeps its own `estimate` / `dependsOn` /
   dates and flows through `computeWorkingPlan` exactly as today.
-- `parentId` is **organizational only** — it is **not** a scheduling constraint
-  (distinct from `dependsOn`). Grouping never reorders or blocks the scheduler.
-- The parent's displayed dates are a read-only **span** of its children.
+- `parentId` is **organizational only** for the children — grouping never reorders the
+  children or makes a child wait on a sibling.
+- The parent's dates are a read-only **span** of its children — but that span is now
+  computed inside `planFor` itself (min child start → latest child end+fraction), not just
+  in the row render, so it has ONE source and can be **used as a prereq anchor** (below).
+
+### Group as a prerequisite (2026-06-25)
+A normal task can depend on a **group (parent) task** — `dependsOn` may reference a parent's
+sequence number. The dependent then starts after the group's rolled-up **end** (the latest
+child finish), exactly as if it depended on the latest child. Mechanics:
+- `planFor(parent)` returns the rolled-up span (it recurses into children), so a dependent
+  reads a real `dueDate` to anchor on. If **no** child has a date yet, the span end is null →
+  the dependent has no anchor and its start clears (same rule as any unscheduled prereq).
+- **Blocked state**: a task whose prereq is a group is *blocked* until **every child** of that
+  group is done (not the parent's stale stored status). See [dependencies.md](./dependencies.md).
+- **Cascade**: editing a child re-flows tasks that depend on the child's parent (the group's
+  end shifted) — `recomputeDates` enqueues dependents of the changed task's `parentId` too.
+- **Cycle safety**: depending on a group means depending on all its children, so the cycle
+  check treats `parent → children` as edges. A child that tries to depend back on a task which
+  waits on its own group is rejected inline like any other cycle.
+- **Out of scope**: you still cannot set a prereq *on* a group (the parent row's prereq cell
+  stays empty) — a group is a container, not a schedulable unit with its own dependency.
 
 ## Implementation notes
 1. **`db.ts`** — add `parentId?: string | null` to `Task`. No `.stores()` change.
@@ -145,8 +164,10 @@ is now the only group/delete affordance). Verified with `npx tsc --noEmit && npm
 `done/total` + capacity exclude parents.
 
 ## Future / open questions
-- **Roll-up of parent dates/effort**: shipped as display-only span/sum — revisit if a
-  stored, schedulable parent is ever wanted.
+- **Roll-up of parent dates/effort**: span/sum. The date span is now also a **prereq anchor**
+  (a task can depend on a group; see "Group as a prerequisite") — computed on the fly in
+  `planFor`, still **not persisted** on the parent. Setting a prereq *on* a group, or a
+  stored/schedulable parent, remains out of scope.
 - **Multi-level nesting** (groups within groups): deliberately cut for calm; revisit
   only on real need.
 - **Board view grouping**: deferred.

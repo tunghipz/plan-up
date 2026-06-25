@@ -1,8 +1,8 @@
 # Date picker (custom calendar)
 
 **Status:** Implemented
-**Last updated:** 2026-06-05
-**Code:** `app/src/DatePicker.tsx` (component) · consumers: `SprintView.tsx` (List), `BoardView.tsx` (Board quick-edit), `App.tsx` (sprint dialog), `members.tsx` (days-off)
+**Last updated:** 2026-06-25
+**Code:** `app/src/DatePicker.tsx` (component) · consumers: `SprintView.tsx` (List), `BoardView.tsx` (Board quick-edit), `App.tsx` (sprint dialog), `members.tsx` (days-off), `CollectionView.tsx` (collection items — **range** mode)
 
 ## Purpose
 Replace the native `<input type="date">` (browser chrome — inconsistent across
@@ -40,12 +40,44 @@ browsers, not Cupertino, not dark-aware, can't show planning context) with a sin
 | Board quick-edit | `DatePickCell` (BoardView `DatePopover`) | assignee `daysOff` · same lock/time · **sprint range shaded, shade only** (context) |
 | Sprint create/edit | `DateField` (App `NewSprintDialog`) | plain (no range/days-off — it's *defining* the sprint) |
 | Member days-off | `DateField` (members popover) | `min`/`max` = sprint range · `sprintRange` shade · existing days as `daysOff` dots. The AM/PM/All `<select>` + Add stay as-is |
+| Collection item start/end | `DateRangePickCell` (CollectionView item rows) | **range** mode — one popover sets both `startDate` + `dueDate`; no sprint range / days-off / time |
+
+## Range mode (collection items) — 2026-06-25
+Collection items span a **date range** (`[startDate … dueDate]`, **no time-of-day** — the
+user explicitly didn't want clock times). A single calendar popover picks **both** endpoints
+in two clicks, replacing the two independent single-date cells. Opt-in only — sprint/board/
+days-off keep the single-date behavior unchanged.
+
+- **Trigger** — `DateRangePickCell` renders the same right-aligned cell as `DatePickCell`.
+  Two cells share one range: the **Start** cell shows `startDate`, the **End** cell shows
+  `dueDate`; **both open the same range popover**. Empty cells show the quiet dashed pill
+  (`＋ Start` / `＋ End`) via the existing `emptyHint`.
+- **Two-click cycle** (`RangeCalendarPopover`):
+  1. Click 1 → set **start**, clear end, wait for end.
+  2. Click 2 → if `≥ start`: set **end**, write `{startDate, dueDate}` once, close. If `< start`:
+     treat as a new start (re-pick). Clicking the **same day twice** = a 1-day event (start = end).
+  - **Init**: have start but no end → open straight into "waiting for end"; have both → reopening
+     starts a fresh range (old range stays highlighted so re-picking is easy); have neither → wait
+     for start.
+  - **Closing mid-pick** (outside-click / Esc) commits the draft as-is (start may have no end).
+- **Grid visuals** — `CalendarGrid` gains optional `rangeStart` / `rangeEnd` / `selectingEnd`:
+  the two endpoints fill accent (white text), days **between** tint `accent-soft` (same tint as
+  the sprint shade), and while waiting for the end click the grid shows a **hover preview** band
+  from start to the hovered day. Absent these props → single-date rendering, byte-for-byte as before.
+- **Footer (range mode)** — left shows a live hint (`Pick a start` → `Jul 3 – …` → `Jul 3 – Jul 5`);
+  right is **Clear** (clears *both* endpoints). **No "Today"** in range mode (a single jump-select
+  is meaningless for a range).
 
 ## Component API (`DatePicker.tsx`)
 - `CalendarGrid` (internal) — the month grid + keyboard nav. Props: `value`, `onSelect`,
-  `min?`, `max?`, `sprintRange?`, `daysOff?`.
+  `min?`, `max?`, `sprintRange?`, `daysOff?`, plus optional range props `rangeStart?`,
+  `rangeEnd?`, `selectingEnd?` (range mode: endpoint fills + `accent-soft` band + hover preview).
 - `CalendarPopover` (internal) — portal + positioning + outside-click/Esc + footer
   (Today / Clear). Wraps `CalendarGrid`.
+- `RangeCalendarPopover` (internal) — same portal/positioning as `CalendarPopover`, but runs
+  the two-click range state machine + range footer (hint + Clear). Wraps `CalendarGrid` in range mode.
+- **`DateRangePickCell`** (exported) — collection range trigger: `which: 'start'|'end'`,
+  `start: string|null`, `end: string|null`, `onChange({start, end})`, `ariaLabel`, `emptyHint?`.
 - **`DatePickCell`** (exported; re-exported from `SprintView` for back-compat) — task
   date trigger: `value: string|null`, `onChange(v|null)`, `time?`, `highlight?: 'overdue'`,
   `locked?`, `ariaLabel`, `sprintRange?`, `daysOff?`. Trigger visuals unchanged (right-aligned

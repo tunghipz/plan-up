@@ -58,7 +58,7 @@ Non-obvious behaviors, defaults, persistence keys.
 | [sprints.md](./sprints.md) | Sprint CRUD, biweekly defaults, per-sprint sequence, locked `Sprint N` name + optional goal note |
 | [sprint-cadence.md](./sprint-cadence.md) | Sprint start locked to Monday + fixed 2-week duration (Monday-strip picker, derived read-only end) |
 | [sprint-archive.md](./sprint-archive.md) | Reversible archive to declutter the sprint list (collapsible `Archived (N)` section, hover action, out of active flow) |
-| [collections.md](./collections.md) | Task ngoài sprint — collection tự đặt tên, nhiều bảng (sections), view List (giống sprint, tap-to-edit) + Calendar liền mạch, status do user tự tạo per-collection |
+| [collections.md](./collections.md) | Task ngoài sprint — collection tự đặt tên, nhiều bảng (sections), view List (giống sprint, tap-to-edit, **sortable columns** + **date-range picker**) + Calendar liền mạch, status do user tự tạo per-collection |
 | [sprint-rollover.md](./sprint-rollover.md) | Move unfinished tasks to next sprint — preview popover |
 | [members-and-days-off.md](./members-and-days-off.md) | Member labels, colors, off-days |
 | [member-title.md](./member-title.md) | Optional per-member role label (free-text), shown in settings + sprint header |
@@ -73,7 +73,7 @@ Non-obvious behaviors, defaults, persistence keys.
 | [conflict-warning.md](./conflict-warning.md) | Warn when a member is double-booked (same start/end/prereq) |
 | [dependencies.md](./dependencies.md) | Prerequisites, cycle prevention, blocked state |
 | [status-and-priority.md](./status-and-priority.md) | Status circle/pill, priority chip |
-| [date-picker.md](./date-picker.md) | Custom Cupertino calendar picker (sprint-aware, days-off dots + list) |
+| [date-picker.md](./date-picker.md) | Custom Cupertino calendar picker (sprint-aware, days-off dots + list; **range mode** for collection items) |
 | [list-view.md](./list-view.md) | Grouped cards, sortable columns, column widths, drag-to-reorder |
 | [member-header-summary.md](./member-header-summary.md) | Progress ring, overdue, next deadline, days off |
 | [board-view.md](./board-view.md) | Cupertino kanban |

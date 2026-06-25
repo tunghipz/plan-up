@@ -8,7 +8,7 @@ import {
   type CalItem,
 } from './lib'
 import { db, type Collection, type CollectionStatus, type Task } from './db'
-import { DatePickCell } from './DatePicker'
+import { DatePickCell, DateRangePickCell } from './DatePicker'
 
 const MONTHS_LONG = [
   'January',
@@ -389,7 +389,13 @@ function BarPopover({
 
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
-      if (popRef.current && !popRef.current.contains(e.target as Node)) onClose()
+      const t = e.target as Node
+      if (popRef.current && popRef.current.contains(t)) return
+      // The date picker portals its calendar to <body> (outside popRef). Clicks
+      // there must count as "inside" — else picking a day closes this editor
+      // before the selection registers. Marked via [data-calendar-popover].
+      if (t instanceof Element && t.closest('[data-calendar-popover]')) return
+      onClose()
     }
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose()
@@ -458,9 +464,13 @@ function BarPopover({
       <div className="flex items-center justify-between gap-2 text-[12.5px]">
         <span className="text-ink-faint">Start</span>
         <span className="w-[96px]">
-          <DatePickCell
-            value={task.startDate}
-            onChange={(v) => db.tasks.update(task.id, { startDate: v })}
+          <DateRangePickCell
+            which="start"
+            start={task.startDate}
+            end={task.dueDate}
+            onChange={({ start, end }) =>
+              db.tasks.update(task.id, { startDate: start, dueDate: end })
+            }
             ariaLabel="Start date"
             emptyHint="Start"
           />
@@ -469,10 +479,14 @@ function BarPopover({
       <div className="flex items-center justify-between gap-2 text-[12.5px]">
         <span className="text-ink-faint">End</span>
         <span className="w-[96px]">
-          <DatePickCell
-            value={task.dueDate}
-            onChange={(v) => db.tasks.update(task.id, { dueDate: v })}
-            ariaLabel="Due date"
+          <DateRangePickCell
+            which="end"
+            start={task.startDate}
+            end={task.dueDate}
+            onChange={({ start, end }) =>
+              db.tasks.update(task.id, { startDate: start, dueDate: end })
+            }
+            ariaLabel="End date"
             emptyHint="End"
           />
         </span>

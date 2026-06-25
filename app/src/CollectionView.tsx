@@ -20,7 +20,7 @@ import {
   type Task,
 } from './db'
 import { CollectionCalendar } from './CollectionCalendar'
-import { DatePickCell } from './DatePicker'
+import { DateRangePickCell } from './DatePicker'
 import { AddGroupButton } from './AddGroupButton'
 
 const COLLAPSE_KEY = (collectionId: string) =>
@@ -43,6 +43,70 @@ const COL = {
   start: 'w-28 flex justify-end shrink-0',
   due: 'w-28 flex justify-end shrink-0',
   status: 'w-28 flex justify-start shrink-0 pl-2',
+}
+
+// Click-to-sort columns — mirrors the sprint list (SprintView.tsx), minus the
+// scheduling fields. `null` sort = natural (insertion/DB) order. See
+// design-docs/collections.md + list-view.md.
+type CollSortField = 'title' | 'startDate' | 'dueDate' | 'status'
+type CollSort = { field: CollSortField; dir: 'asc' | 'desc' } | null
+// One global sort preference shared across every section card (like the sprint
+// list's global SORT_KEY), so it survives switching collection/view + reload.
+const COLL_SORT_KEY = 'plan-up:collSort'
+const COLL_SORT_FIELDS: CollSortField[] = ['title', 'startDate', 'dueDate', 'status']
+
+function loadCollSort(): CollSort {
+  try {
+    const raw = localStorage.getItem(COLL_SORT_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as Partial<NonNullable<CollSort>>
+    if (
+      parsed &&
+      COLL_SORT_FIELDS.includes(parsed.field as CollSortField) &&
+      (parsed.dir === 'asc' || parsed.dir === 'desc')
+    ) {
+      return { field: parsed.field as CollSortField, dir: parsed.dir }
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
+function saveCollSort(sort: CollSort) {
+  try {
+    if (sort) localStorage.setItem(COLL_SORT_KEY, JSON.stringify(sort))
+    else localStorage.removeItem(COLL_SORT_KEY)
+  } catch {
+    // localStorage unavailable, swallow
+  }
+}
+
+/**
+ * Compare two items for the active sort. Empty dates sort last; status sorts by
+ * the user-defined status order (no status sorts last). JS sort is stable, so
+ * equal items keep their natural order. `statusRank` maps statusId → index.
+ */
+function compareItems(
+  a: Task,
+  b: Task,
+  sort: NonNullable<CollSort>,
+  statusRank: Map<string, number>
+): number {
+  const mul = sort.dir === 'asc' ? 1 : -1
+  const val = (t: Task): string | number =>
+    sort.field === 'title'
+      ? (t.title || '').toLowerCase()
+      : sort.field === 'status'
+        ? t.collectionStatusId
+          ? (statusRank.get(t.collectionStatusId) ?? Number.POSITIVE_INFINITY)
+          : Number.POSITIVE_INFINITY
+        : (t[sort.field] ?? '￿') // startDate / dueDate — empty sorts last
+  const va = val(a)
+  const vb = val(b)
+  if (va < vb) return -1 * mul
+  if (va > vb) return 1 * mul
+  return 0
 }
 
 /** Floating-shadow surface for popovers/menus (design-system §4.2). */
@@ -88,8 +152,19 @@ export function CollectionView({
 
   const [addingTable, setAddingTable] = useState(false)
 
+  // Global sort preference, shared across all section cards (mirrors sprint list).
+  const [sort, setSort] = useState<CollSort>(loadCollSort)
+  useEffect(() => {
+    saveCollSort(sort)
+  }, [sort])
+
   const statusById = useMemo(
     () => new Map((collection?.statuses ?? []).map((s) => [s.id, s])),
+    [collection]
+  )
+  // Rank statuses by their user-defined order so `status` sort follows it.
+  const statusRank = useMemo(
+    () => new Map((collection?.statuses ?? []).map((s, i) => [s.id, i])),
     [collection]
   )
   // Group items by section ONCE per data change instead of re-filtering the full
@@ -126,6 +201,9 @@ export function CollectionView({
               items={itemsBySectionMap.get(sec.id) ?? EMPTY_ITEMS}
               statusById={statusById}
               statuses={collection.statuses}
+              sort={sort}
+              setSort={setSort}
+              statusRank={statusRank}
             />
           ))}
           <AddGroupButton
@@ -375,6 +453,9 @@ function SectionCard({
   statusById,
   statuses,
   canDelete,
+  sort,
+  setSort,
+  statusRank,
 }: {
   collectionId: string
   section: { id: string; name: string; color?: string }
@@ -382,7 +463,25 @@ function SectionCard({
   statusById: Map<string, CollectionStatus>
   statuses: CollectionStatus[]
   canDelete: boolean
+  sort: CollSort
+  setSort: React.Dispatch<React.SetStateAction<CollSort>>
+  statusRank: Map<string, number>
 }) {
+  // Apply the active sort; `null` keeps natural (insertion) order. JS sort is
+  // stable, so a copy preserves order for equal rows. See list-view.md.
+  const sortedItems = useMemo(
+    () =>
+      sort ? [...items].sort((a, b) => compareItems(a, b, sort, statusRank)) : items,
+    [items, sort, statusRank]
+  )
+  // Three-state cycle per column: asc → desc → off (natural order).
+  const onSort = (field: CollSortField) => {
+    setSort((prev) => {
+      if (!prev || prev.field !== field) return { field, dir: 'asc' }
+      if (prev.dir === 'asc') return { field, dir: 'desc' }
+      return null
+    })
+  }
   const [collapsed, setCollapsed] = useState(
     () =>
       localStorage.getItem(`${COLLAPSE_KEY(collectionId)}:${section.id}`) === '1'
@@ -501,18 +600,36 @@ function SectionCard({
             <div className="flex items-center gap-3 px-4 py-1.5 border-b border-border-hair bg-canvas-sunk/40">
               <div className={COL.lead} />
               <div className={COL.dot} />
-              <div className={`${COL.title} text-[11px] tracking-normal text-ink-faint font-medium`}>
-                Name
-              </div>
-              <div className={`${COL.start} text-[11px] tracking-normal text-ink-faint font-medium`}>
-                Start
-              </div>
-              <div className={`${COL.due} text-[11px] tracking-normal text-ink-faint font-medium`}>
-                End
-              </div>
-              <div className={`${COL.status} text-[11px] tracking-normal text-ink-faint font-medium`}>
-                Status
-              </div>
+              <SortHeader
+                className={COL.title}
+                field="title"
+                label="Name"
+                sort={sort}
+                onSort={onSort}
+              />
+              <SortHeader
+                className={COL.start}
+                field="startDate"
+                label="Start"
+                sort={sort}
+                onSort={onSort}
+                align="end"
+              />
+              <SortHeader
+                className={COL.due}
+                field="dueDate"
+                label="End"
+                sort={sort}
+                onSort={onSort}
+                align="end"
+              />
+              <SortHeader
+                className={COL.status}
+                field="status"
+                label="Status"
+                sort={sort}
+                onSort={onSort}
+              />
             </div>
           )}
 
@@ -523,7 +640,7 @@ function SectionCard({
           )}
 
           <div className="divide-y divide-border">
-            {items.map((t) => (
+            {sortedItems.map((t) => (
               <ItemRow
                 key={t.id}
                 task={t}
@@ -536,6 +653,57 @@ function SectionCard({
         </div>
       )}
     </div>
+  )
+}
+
+/**
+ * Clickable column header — same look/cycle as the sprint list's SortHeader, but
+ * over the collection's smaller field set and a nullable sort (off = natural).
+ */
+function SortHeader({
+  className,
+  field,
+  label,
+  sort,
+  onSort,
+  align,
+}: {
+  className: string
+  field: CollSortField
+  label: string
+  sort: CollSort
+  onSort: (f: CollSortField) => void
+  align?: 'start' | 'center' | 'end'
+}) {
+  const isActive = sort?.field === field
+  // Hint the NEXT click in the asc → desc → off cycle.
+  const nextHint = !isActive
+    ? `Sort by ${label}`
+    : sort!.dir === 'asc'
+      ? `Sort by ${label}, descending`
+      : 'Clear sort'
+  return (
+    <button
+      type="button"
+      onClick={() => onSort(field)}
+      className={`${className} group flex items-center gap-1 text-[11px] tracking-normal font-medium select-none py-0.5 hover:bg-black/[0.04] rounded transition ${
+        align === 'end'
+          ? 'justify-end'
+          : align === 'center'
+            ? 'justify-center'
+            : ''
+      } ${isActive ? 'text-accent' : 'text-ink-faint hover:text-ink'}`}
+      aria-label={nextHint}
+      title={nextHint}
+    >
+      <span>{label}</span>
+      <span
+        className={`text-[9px] leading-none ${isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-40'}`}
+        aria-hidden
+      >
+        {isActive ? (sort!.dir === 'asc' ? '▲' : '▼') : '▲'}
+      </span>
+    </button>
   )
 }
 
@@ -682,18 +850,26 @@ function ItemRow({
       </div>
       <ItemTitle task={task} />
       <div className={COL.start}>
-        <DatePickCell
-          value={task.startDate}
-          onChange={(v) => db.tasks.update(task.id, { startDate: v })}
+        <DateRangePickCell
+          which="start"
+          start={task.startDate}
+          end={task.dueDate}
+          onChange={({ start, end }) =>
+            db.tasks.update(task.id, { startDate: start, dueDate: end })
+          }
           ariaLabel="Start date"
           emptyHint="Start"
         />
       </div>
       <div className={COL.due}>
-        <DatePickCell
-          value={task.dueDate}
-          onChange={(v) => db.tasks.update(task.id, { dueDate: v })}
-          ariaLabel="Due date"
+        <DateRangePickCell
+          which="end"
+          start={task.startDate}
+          end={task.dueDate}
+          onChange={({ start, end }) =>
+            db.tasks.update(task.id, { startDate: start, dueDate: end })
+          }
+          ariaLabel="End date"
           emptyHint="End"
         />
       </div>

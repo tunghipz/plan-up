@@ -60,6 +60,9 @@ function CalendarGrid({
   max,
   sprintRange,
   daysOff,
+  rangeStart,
+  rangeEnd,
+  selectingEnd,
 }: {
   value: string | null
   onSelect: (v: string) => void
@@ -67,7 +70,18 @@ function CalendarGrid({
   max?: string
   sprintRange?: DateRange | null
   daysOff?: DayOff[]
+  /**
+   * Range mode (collection items): when `rangeStart` is provided the grid paints
+   * the two endpoints (accent fill) + an `accent-soft` band between them, and —
+   * while `selectingEnd` — a live hover preview from the start to the hovered day.
+   * Absent → single-date rendering, unchanged. See design-docs/date-picker.md.
+   */
+  rangeStart?: string | null
+  rangeEnd?: string | null
+  selectingEnd?: boolean
 }) {
+  const isRange = rangeStart !== undefined
+  const [hover, setHover] = useState<string | null>(null)
   // Initial focus/view: the value if set, else today nudged into the relevant range
   // so an empty picker opens on the sprint month. Uses min/max if present (days-off
   // hard clamp), else the sprintRange (task cells: shade only, still opens there).
@@ -172,18 +186,32 @@ function CalendarGrid({
           </div>
         ))}
         {cells.map((c) => {
-          const sel = c.iso === value
-          const isToday = c.iso === today && !sel
-          const inSprint = !!(sprintRange && c.iso >= sprintRange.start && c.iso <= sprintRange.end) && !sel
-          const isFocus = c.iso === focus && !sel
+          // Range mode: derive the effective end from a committed end, else the
+          // hovered day while we're still waiting for the end click (live preview).
+          const previewEnd =
+            isRange && selectingEnd && rangeStart && hover && !rangeEnd && hover >= rangeStart
+              ? hover
+              : null
+          const effEnd = rangeEnd ?? previewEnd
+          const isStart = isRange && !!rangeStart && c.iso === rangeStart
+          const isEnd = isRange && !!effEnd && c.iso === effEnd && c.iso !== rangeStart
+          const inBand =
+            isRange && !!rangeStart && !!effEnd && c.iso > rangeStart && c.iso < effEnd
+          const endpoint = isStart || isEnd
+
+          const sel = !isRange && c.iso === value
+          const isToday = c.iso === today && !sel && !endpoint
+          const inSprint = !!(sprintRange && c.iso >= sprintRange.start && c.iso <= sprintRange.end) && !sel && !endpoint
+          const isFocus = !isRange && c.iso === focus && !sel
           const dis = disabled(c.iso)
           const off = offByDate.get(c.iso)
           const cls = ['relative h-[30px] rounded-[8px] text-[12.5px] tabular-nums flex items-center justify-center transition']
           if (dis) cls.push('text-ink-faint opacity-30 cursor-default')
-          else if (sel) cls.push('bg-accent text-white font-semibold cursor-pointer')
+          else if (sel || endpoint) cls.push('bg-accent text-white font-semibold cursor-pointer')
           else {
             cls.push('cursor-pointer hover:bg-surface-hover')
-            if (inSprint) cls.push('bg-accent-soft')
+            if (inBand) cls.push('bg-accent-soft')
+            else if (inSprint) cls.push('bg-accent-soft')
             cls.push(c.out ? 'text-ink-faint opacity-40' : c.weekend ? 'text-ink-faint' : 'text-ink')
             if (isToday) cls.push('ring-[1.5px] ring-inset ring-accent')
             else if (isFocus) cls.push('ring-[1.5px] ring-inset ring-accent/40')
@@ -195,8 +223,9 @@ function CalendarGrid({
               tabIndex={-1}
               disabled={dis}
               onClick={() => { if (!dis) onSelect(c.iso) }}
+              onMouseEnter={isRange ? () => setHover(c.iso) : undefined}
               aria-label={c.iso}
-              aria-selected={sel}
+              aria-selected={sel || endpoint}
               className={cls.join(' ')}
             >
               {c.day}
@@ -205,7 +234,7 @@ function CalendarGrid({
                   className="absolute bottom-[3px] left-1/2 -translate-x-1/2 w-[5px] h-[5px] rounded-full"
                   style={
                     off === 'all'
-                      ? { background: sel ? '#fff' : 'var(--color-priority-high)' }
+                      ? { background: sel || endpoint ? '#fff' : 'var(--color-priority-high)' }
                       : {
                           background: 'linear-gradient(90deg, var(--color-priority-high) 50%, transparent 50%)',
                           boxShadow: 'inset 0 0 0 1px var(--color-priority-high)',
@@ -462,6 +491,206 @@ export function DatePickCell({
           onClose={() => setOpen(false)}
           sprintRange={range}
           daysOff={daysOff}
+        />
+      )}
+    </>
+  )
+}
+
+// ---- Range popover + cell (collection items) ----
+/**
+ * Two-click date-range popover. Click 1 sets the start, click 2 sets the end
+ * (a click before the start restarts; the same day twice = a 1-day range).
+ * Closing mid-pick commits the draft as-is (start may have no end). Shares the
+ * portal/positioning of CalendarPopover. See design-docs/date-picker.md.
+ */
+function RangeCalendarPopover({
+  anchorRef,
+  start,
+  end,
+  onChange,
+  onClose,
+}: {
+  anchorRef: React.RefObject<HTMLElement | null>
+  start: string | null
+  end: string | null
+  onChange: (r: { start: string | null; end: string | null }) => void
+  onClose: () => void
+}) {
+  const popRef = useRef<HTMLDivElement>(null)
+  const [pos, setPos] = useState<{ top: number; left: number }>({ top: -9999, left: -9999 })
+  const [draftStart, setDraftStart] = useState<string | null>(start)
+  const [draftEnd, setDraftEnd] = useState<string | null>(end)
+  // Wait for the end click when we already have a start but no end.
+  const [selectingEnd, setSelectingEnd] = useState<boolean>(!!start && !end)
+  const WIDTH = 248
+  const HEIGHT = 340
+
+  // Refs so the commit-on-close handler (bound once) reads the latest draft.
+  const draftStartRef = useRef(draftStart)
+  draftStartRef.current = draftStart
+  const draftEndRef = useRef(draftEnd)
+  draftEndRef.current = draftEnd
+
+  const pick = (iso: string) => {
+    if (!selectingEnd || !draftStart) {
+      // Begin a fresh range.
+      setDraftStart(iso)
+      setDraftEnd(null)
+      setSelectingEnd(true)
+      return
+    }
+    if (iso < draftStart) {
+      // Clicked before the start → treat as a new start, keep waiting for the end.
+      setDraftStart(iso)
+      setDraftEnd(null)
+      return
+    }
+    // Complete the range (iso === start → 1-day). Commit once and close.
+    setDraftEnd(iso)
+    setSelectingEnd(false)
+    onChange({ start: draftStart, end: iso })
+    onClose()
+  }
+
+  useLayoutEffect(() => {
+    const pin = () => {
+      const r = anchorRef.current?.getBoundingClientRect()
+      if (!r) return
+      const h = popRef.current?.offsetHeight || HEIGHT
+      let left = Math.min(r.left, window.innerWidth - 8 - WIDTH)
+      left = Math.max(8, left)
+      let top = r.bottom + 6
+      if (top + h > window.innerHeight - 8) top = Math.max(8, r.top - h - 6)
+      setPos({ top, left })
+    }
+    pin()
+    window.addEventListener('scroll', pin, true)
+    window.addEventListener('resize', pin)
+    return () => {
+      window.removeEventListener('scroll', pin, true)
+      window.removeEventListener('resize', pin)
+    }
+  }, [anchorRef])
+
+  useEffect(() => {
+    // Outside-click / Esc commit the current draft (allows start with no end).
+    const commitClose = () => {
+      onChange({ start: draftStartRef.current, end: draftEndRef.current })
+      onClose()
+    }
+    const onDoc = (e: MouseEvent) => {
+      const t = e.target as Node
+      if (popRef.current && !popRef.current.contains(t) && anchorRef.current && !anchorRef.current.contains(t)) {
+        commitClose()
+      }
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        anchorRef.current?.focus?.()
+        commitClose()
+      }
+    }
+    document.addEventListener('mousedown', onDoc)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDoc)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [anchorRef, onChange, onClose])
+
+  const hint = !draftStart
+    ? 'Pick a start'
+    : selectingEnd || !draftEnd
+      ? `${formatShortDate(draftStart)} – …`
+      : `${formatShortDate(draftStart)} – ${formatShortDate(draftEnd)}`
+
+  return createPortal(
+    <div
+      ref={popRef}
+      data-calendar-popover=""
+      onClick={(e) => e.stopPropagation()}
+      style={{ position: 'fixed', top: pos.top, left: pos.left, width: WIDTH }}
+      className="z-50 bg-surface border border-border-hair rounded-[14px] shadow-[0_12px_40px_rgba(0,0,0,0.18),0_0_0_0.5px_rgba(0,0,0,0.04)] p-3"
+    >
+      <CalendarGrid
+        value={draftStart ?? draftEnd ?? null}
+        onSelect={pick}
+        rangeStart={draftStart}
+        rangeEnd={draftEnd}
+        selectingEnd={selectingEnd}
+      />
+      <div className="flex items-center justify-between mt-2.5 pt-2.5 border-t border-border-hair">
+        <span className="text-[12px] font-medium text-ink-muted tabular-nums px-2">{hint}</span>
+        <button
+          type="button"
+          onClick={() => { onChange({ start: null, end: null }); onClose() }}
+          className="text-[12.5px] text-ink-muted rounded-[7px] px-2 py-1 hover:bg-surface-hover transition"
+        >
+          Clear
+        </button>
+      </div>
+    </div>,
+    document.body
+  )
+}
+
+/**
+ * Collection start/end cell — same trigger look as DatePickCell, but both the
+ * Start and End cells open one shared range popover that writes both endpoints.
+ * `which` picks which endpoint this cell displays.
+ */
+export function DateRangePickCell({
+  which,
+  start,
+  end,
+  onChange,
+  ariaLabel,
+  emptyHint,
+}: {
+  which: 'start' | 'end'
+  start: string | null
+  end: string | null
+  onChange: (r: { start: string | null; end: string | null }) => void
+  ariaLabel: string
+  emptyHint?: string
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLButtonElement>(null)
+  const value = which === 'start' ? start : end
+  const date = value ? formatShortDate(value) : ''
+  const valueCls = value ? 'text-ink-muted' : 'text-ink-faint'
+
+  return (
+    <>
+      <button
+        ref={ref}
+        type="button"
+        onClick={(e) => {
+          e.preventDefault()
+          e.stopPropagation()
+          setOpen((o) => !o)
+        }}
+        aria-label={ariaLabel}
+        className={`group relative inline-flex items-center justify-end w-full h-8 px-2 rounded-md border border-transparent transition cursor-pointer hover:border-border-strong hover:bg-canvas ${valueCls}`}
+      >
+        {value ? (
+          <span className="text-sm whitespace-nowrap">{date}</span>
+        ) : emptyHint ? (
+          <span className="inline-flex items-center rounded-full border border-dashed border-border px-2.5 py-0.5 text-[11.5px] font-medium text-ink-faint group-hover:border-accent group-hover:text-accent transition">
+            ＋ {emptyHint}
+          </span>
+        ) : (
+          <span className="text-sm text-ink-faint">—</span>
+        )}
+      </button>
+      {open && (
+        <RangeCalendarPopover
+          anchorRef={ref}
+          start={start}
+          end={end}
+          onChange={onChange}
+          onClose={() => setOpen(false)}
         />
       )}
     </>

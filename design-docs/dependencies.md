@@ -1,11 +1,11 @@
 # Dependencies (prerequisites)
 
 **Status:** Implemented
-**Last updated:** 2026-06-05
+**Last updated:** 2026-06-25
 **Code:** `app/src/db.ts` (`addDependency`, `removeDependency`, `setDependencies`,
 `wouldCreateCycle`, `findCyclePath`, `isTaskBlocked`), `app/src/SprintView.tsx`
-(`PrereqInput`, `SelectionBar`), `app/src/lib.ts` (`parsePrereqSeqs`, `formatSeqRanges`),
-`app/src/index.css` (`.prereq-chip*` path-trace animation)
+(`PrereqInput`, `SelectionBar`), `app/src/lib.ts` (`parsePrereqSeqs`, `formatSeqRanges`,
+`flattenDisplayOrder`), `app/src/index.css` (`.prereq-chip*` path-trace animation)
 
 ## Purpose
 Express "this can't start until those are done" so the scheduler can chain dates and the
@@ -65,7 +65,11 @@ for free. Single click, **no confirmation** (the sprint activity log records old
 
 - **Chain prereqs** — enabled only with **≥2** selected (else disabled, tooltip "Select ≥2
   tasks to chain"). Orders the selected tasks **top-to-bottom by their displayed order** and,
-  for each adjacent pair (A above B), makes **B depend on A**. Existing prereqs are **kept**
+  for each adjacent pair (A above B), makes **B depend on A**. "Displayed order" is the exact
+  on-screen row order — member lanes in lane order, each lane sorted by the active sort column,
+  group children nested under their head, Unassigned last — computed by `flattenDisplayOrder`
+  (`lib.ts`). It is **not** the raw IndexedDB array order; chaining the raw order would scramble
+  the links versus what the user sees. Existing prereqs are **kept**
   (additive): `setDependencies(B.id, unique([...B.dependsOn, A.id]))`. Only the chain's head
   is left untouched → **N-1** calls, run **sequentially top-to-bottom** so each task's
   recomputed dates are in place before the next link is computed (dates cascade correctly).

@@ -1,7 +1,38 @@
 import { useEffect, useState } from 'react'
-import type { Status, Priority, LoggableField, Sprint } from './db'
+import type { Status, Priority, LoggableField, Sprint, Task } from './db'
 
 const MS = 86400_000
+
+/**
+ * Flatten the on-screen member lanes into one top-to-bottom task list, matching
+ * exactly what the user sees row-by-row. Each `card` is a lane's tasks already
+ * sorted in display order (member lanes in lane order, then the Unassigned
+ * lane); within a card a group head is immediately followed by its children
+ * (same nesting `TaskTable` renders). A child whose parent isn't in its own card
+ * is treated as top-level. Used so bulk "Chain prereqs" links tasks in the order
+ * displayed, not the raw DB array order. See design-docs/dependencies.md.
+ */
+export function flattenDisplayOrder(cards: Task[][]): Task[] {
+  const flat: Task[] = []
+  for (const cardTasks of cards) {
+    const idSet = new Set(cardTasks.map((t) => t.id))
+    const childrenByParent = new Map<string, Task[]>()
+    for (const t of cardTasks) {
+      if (t.parentId && idSet.has(t.parentId)) {
+        const arr = childrenByParent.get(t.parentId) ?? []
+        arr.push(t)
+        childrenByParent.set(t.parentId, arr)
+      }
+    }
+    const isChild = (t: Task) => !!(t.parentId && idSet.has(t.parentId))
+    for (const t of cardTasks.filter((x) => !isChild(x))) {
+      flat.push(t)
+      const kids = childrenByParent.get(t.id)
+      if (kids) flat.push(...kids)
+    }
+  }
+  return flat
+}
 
 /**
  * localStorage that never throws. `setItem` raises QuotaExceededError in Safari

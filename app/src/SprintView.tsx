@@ -54,6 +54,7 @@ import {
   isOverdue,
   parsePrereqSeqs,
   formatSeqRanges,
+  flattenDisplayOrder,
 } from './lib'
 
 // Re-exported so existing importers (BoardView) keep `from './SprintView'`.
@@ -374,6 +375,14 @@ export function SprintView({
     }
   }, [members, tasks, sort])
 
+  // Flat top-to-bottom order exactly as rendered (lanes in order, group children
+  // nested, Unassigned last). The selection bar's "Chain prereqs" links tasks in
+  // this order — NOT the raw `tasks` DB array, which is unsorted. See design-docs/dependencies.md.
+  const orderedTasks = useMemo(
+    () => flattenDisplayOrder([...groups.map((g) => g.tasks), unassigned]),
+    [groups, unassigned]
+  )
+
   if (!members) return <p className="text-ink-muted py-12 text-center">Loading…</p>
 
   const isEmpty = tasks.length === 0 && members.length === 0
@@ -525,7 +534,7 @@ export function SprintView({
       <SelectionBar
         selectedIds={selectedIds}
         tasksById={tasksById}
-        allTasks={tasks}
+        allTasks={orderedTasks}
         onClear={clearSelection}
       />
     </div>
@@ -573,8 +582,9 @@ function SelectionBar({
   const canGroup = sameMember && noneParent
   const anyChild = selected.some((t) => !!t.parentId)
 
-  // Chain follows the displayed top-to-bottom order, so order by the source array
-  // (not Set insertion order). ≥2 needed to form a chain.
+  // Chain follows the displayed top-to-bottom order: `allTasks` arrives already
+  // flattened in render order (flattenDisplayOrder), so filtering it keeps that
+  // order — not Set insertion or raw DB order. ≥2 needed to form a chain.
   const selectedInOrder = allTasks.filter((t) => selectedIds.has(t.id))
   const canChain = selectedInOrder.length >= 2
   const canClearPrereq = selected.some((t) => t.dependsOn.length > 0)

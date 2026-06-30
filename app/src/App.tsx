@@ -1504,6 +1504,7 @@ function App() {
                   sprintStartDate={currentSprint.startDate}
                   sprintEndDate={currentSprint.endDate}
                   tasks={tasks}
+                  projectTasks={projectTasks ?? []}
                   onOpenInList={() => setView('list')}
                 />
               ) : (

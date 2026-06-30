@@ -1,7 +1,7 @@
 # List view
 
 **Status:** Implemented
-**Last updated:** 2026-06-19
+**Last updated:** 2026-06-29
 **Code:** `app/src/SprintView.tsx` (`MemberCard`, `UnassignedCard`, `GroupHeader`,
 `TaskColumnHeader`, `SortHeader`, `COL`, `TaskRows` drag state, `TaskRow` grip),
 `app/src/db.ts` (`orderBetween`, `setListOrder`)
@@ -23,8 +23,14 @@ inset-grouped cards, fully editable inline.
   asc/desc.) Sort is **shared across all member cards** (one preference, not per-member) and
   **persisted** so it survives switching view/sprint/project and a page reload (defaults to
   `seq asc` first run).
-- Member cards omit the **Assignee** column (everyone in the group is the same person);
-  the Unassigned card keeps it.
+- Every task row shows an **Assignee** column, including rows inside member cards. The
+  avatar opens the native assignee picker, so a task can be reassigned inline without
+  leaving List. After reassignment, live grouping moves the row into the destination
+  member card. Add-task rows inside a member card still default the new task to that
+  member.
+- Selecting one or more tasks shows the floating selection bar. Besides group/prereq/delete
+  actions, it includes **Move to sprint**: a searchable active-sprint menu that can move the
+  selected task(s) to any sprint in the project, including an earlier sprint.
 - A task with **Effort = 0** renders as a **milestone**: a `◆ Milestone` pill after the
   title and a single collapsed milestone date (instead of a `Start → End` span). This is
   distinct from Effort `—` (*not estimated*, ⚠). See [milestones.md](./milestones.md).
@@ -41,7 +47,7 @@ is never touched, so task-numbers and prereq references stay stable.
   and a drop just writes a fractional value **between the two displayed neighbours** (e.g.
   between 2 and 3 → 2.5); no global reindex needed.
 - **Within a member card only.** Dropping onto a different card is a no-op (snap back) —
-  reassigning still goes through the assignee picker, not drag.
+  reassigning goes through the Assignee column picker, not drag.
 - **Same level only.** A top-level task reorders among top-level tasks; a child reorders among
   its **siblings under the same parent**; dragging a **group head** moves the whole group (its
   children travel with it). Dragging across levels / into or out of a group is a no-op — use
@@ -62,7 +68,7 @@ they stay aligned.
 
 ## Horizontal scroll
 Each group wraps its header + rows in `overflow-x-auto` with a `min-w` floor (**member
-820px**, **unassigned 896px**) ≥ true content width. On narrow screens the table scrolls
+896px**, **unassigned 896px**) ≥ true content width. On narrow screens the table scrolls
 instead of crushing the Task column, and the grey column-header background still spans the
 full content width (no fall-short on scroll).
 

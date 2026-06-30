@@ -5,27 +5,36 @@ import {
   useRef,
   useState,
 } from 'react'
+import type { PointerEvent as ReactPointerEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
+import { Check, ChevronsUpDown, MoveRight, Search, X } from 'lucide-react'
 import {
   db,
   computeWorkingPlan,
+  moveTaskToSprint,
+  recomputeDates,
+  updateTask,
+  workingFraction,
   compareMembersByOrder,
   type Task,
   type Member,
+  type Sprint,
 } from './db'
 import { Avatar, MemberDaysOffButton } from './members'
 import { STATUS_META, derivedGroupStatus } from './SprintView'
 import { sprintWorkdays, formatShortDate } from './lib'
+import { DateField } from './DatePicker'
 
 /**
- * Timeline — an Apple-Calendar-style swimlane view of the sprint (design DNA:
+ * Timeline — an Apple-Calendar-style swimlane view of the sprint or a selected
+ * date range (design DNA:
  * one calm surface, depth not lines, system status colors). Each member is a
  * swimlane; each scheduled task is a soft-tinted event block placed on the day
  * axis with half-day precision and lane-packed so non-overlapping tasks share a
- * row. Tasks scheduled outside the sprint window, or with no dates, are
- * summarised as a count in the member label (click to expand). Read-only — a
- * pure projection of the auto-scheduler. See design-docs/gantt-view.md.
+ * row. Tasks scheduled outside the window, or with no dates, are summarised as
+ * a count in the member label (click to expand). In Sprint mode, editable leaf
+ * bars support day-level drag/resize. See design-docs/gantt-view.md.
  */
 
 const MGUT = 152 // member label column
@@ -66,6 +75,15 @@ type Ev = {
   isParent: boolean
   /** Effort-0 task → a point marker (diamond) on its date, not a span. */
   isMilestone?: boolean
+  startDate: string | null
+  dueDate: string | null
+}
+
+type TimelineEditMode = 'move' | 'resize-start' | 'resize-end'
+type TimelinePreview = {
+  taskId: string
+  left: number
+  width: number
 }
 
 export function GanttView({
@@ -73,17 +91,24 @@ export function GanttView({
   sprintStartDate,
   sprintEndDate,
   tasks,
+  projectTasks = tasks,
   onOpenInList,
 }: {
   projectId: string
   sprintStartDate: string
   sprintEndDate: string
   tasks: Task[]
+  /** All project tasks, used only by Range mode to show multiple sprint timelines. */
+  projectTasks?: Task[]
   /** Jump to the List view (the bar popover's "Open in List"). */
   onOpenInList?: () => void
 }) {
   const members = useLiveQuery(
     () => db.members.where('projectId').equals(projectId).toArray(),
+    [projectId]
+  )
+  const sprints = useLiveQuery(
+    () => db.sprints.where('projectId').equals(projectId).sortBy('startDate'),
     [projectId]
   )
   // Click a bar → read-only detail popover (Gantt is a scheduler projection).
@@ -92,7 +117,13 @@ export function GanttView({
     status: keyof typeof STATUS_META
     rect: DOMRect
   } | null>(null)
+  const [preview, setPreview] = useState<TimelinePreview | null>(null)
+  const suppressClickRef = useRef<string | null>(null)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [scope, setScope] = useState<'sprint' | 'range'>('sprint')
+  const [rangeStart, setRangeStart] = useState(sprintStartDate)
+  const [rangeEnd, setRangeEnd] = useState(sprintEndDate)
   const toggle = (id: string) =>
     setExpanded((prev) => {
       const next = new Set(prev)
@@ -101,9 +132,19 @@ export function GanttView({
       return next
     })
 
+  useEffect(() => {
+    setRangeStart(sprintStartDate)
+    setRangeEnd(sprintEndDate)
+  }, [sprintStartDate, sprintEndDate])
+
+  const rangeMode = scope === 'range'
+  const windowStartDate = rangeMode ? rangeStart : sprintStartDate
+  const windowEndDate = rangeMode ? rangeEnd : sprintEndDate
+  const hasValidRange = windowStartDate <= windowEndDate
+
   const workdays = useMemo(
-    () => sprintWorkdays(sprintStartDate, sprintEndDate),
-    [sprintStartDate, sprintEndDate]
+    () => (hasValidRange ? sprintWorkdays(windowStartDate, windowEndDate) : []),
+    [hasValidRange, windowStartDate, windowEndDate]
   )
   const seamSet = useMemo(() => {
     const s = new Set<number>()
@@ -111,19 +152,23 @@ export function GanttView({
     return s
   }, [workdays])
 
-  const tasksById = useMemo(() => new Map(tasks.map((t) => [t.id, t])), [tasks])
+  const sourceTasks = useMemo(
+    () => (rangeMode ? projectTasks.filter((t) => !!t.sprintId) : tasks),
+    [projectTasks, rangeMode, tasks]
+  )
+  const tasksById = useMemo(() => new Map(sourceTasks.map((t) => [t.id, t])), [sourceTasks])
   // Parent → children (across all tasks). A parent group has no own dates; its
   // Timeline bar is a summary spanning its children (mirrors the List roll-up).
   const childrenByParent = useMemo(() => {
     const m = new Map<string, Task[]>()
-    for (const t of tasks) {
+    for (const t of sourceTasks) {
       if (!t.parentId) continue
       const arr = m.get(t.parentId)
       if (arr) arr.push(t)
       else m.set(t.parentId, [t])
     }
     return m
-  }, [tasks])
+  }, [sourceTasks])
   const memberById = useMemo(
     () => new Map((members ?? []).map((m) => [m.id, m] as [string, Member])),
     [members]
@@ -142,6 +187,41 @@ export function GanttView({
   const N = workdays.length
   const firstDay = workdays[0]
   const lastDay = workdays[N - 1]
+  const timelineTasks = useMemo(() => {
+    if (!rangeMode) return sourceTasks
+    if (!firstDay || !lastDay) return []
+    return sourceTasks.filter((task) => {
+      const plan = planById.get(task.id)
+      if (!plan?.startDate || !plan.dueDate) return false
+      return plan.dueDate >= firstDay && plan.startDate <= lastDay
+    })
+  }, [firstDay, lastDay, planById, rangeMode, sourceTasks])
+  const visibleTaskIds = useMemo(
+    () => new Set(timelineTasks.map((task) => task.id)),
+    [timelineTasks]
+  )
+  const timelineTasksById = useMemo(
+    () => new Map(timelineTasks.map((task) => [task.id, task] as [string, Task])),
+    [timelineTasks]
+  )
+  const selectedTasks = useMemo(
+    () =>
+      [...selectedIds]
+        .map((id) => timelineTasksById.get(id))
+        .filter((task): task is Task => !!task),
+    [selectedIds, timelineTasksById]
+  )
+
+  useEffect(() => {
+    setSelectedIds((prev) => {
+      const next = new Set([...prev].filter((id) => visibleTaskIds.has(id)))
+      return next.size === prev.size ? prev : next
+    })
+  }, [visibleTaskIds])
+
+  useEffect(() => {
+    setSelectedIds(new Set())
+  }, [scope, rangeStart, rangeEnd, sprintStartDate, sprintEndDate])
 
   // Fluid columns: widen each day to fill the surface so a short sprint leaves no
   // dead white space on the right. Clamped to MIN_DAY → a long sprint scrolls instead.
@@ -160,13 +240,174 @@ export function GanttView({
   }, [])
   const dayW = availW > 0 && N > 0 ? Math.max(MIN_DAY, (availW - MGUT) / N) : MIN_DAY
 
+  const clampIdx = useCallback(
+    (idx: number, min = 0, max = N - 1) => Math.max(min, Math.min(max, idx)),
+    [N]
+  )
+
+  const editableEvent = useCallback((e: Ev) => {
+    // Parent rails and milestones are computed projections; dependency-driven
+    // tasks would be recomputed back from their prereqs and appear to snap back.
+    return (
+      !e.isParent &&
+      !e.isMilestone &&
+      !e.contLeft &&
+      !e.contRight &&
+      (!e.task.dependsOn || e.task.dependsOn.length === 0) &&
+      !!e.startDate &&
+      !!e.dueDate
+    )
+  }, [])
+
+  const toggleSelected = useCallback((taskId: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(taskId)) next.delete(taskId)
+      else next.add(taskId)
+      return next
+    })
+  }, [])
+
+  const moveSelectedToSprint = useCallback(
+    async (target: Sprint) => {
+      const tasksToMove = selectedTasks.filter((task) => task.sprintId !== target.id)
+      for (const task of tasksToMove) {
+        await moveTaskToSprint(task.id, target.id)
+      }
+      setSelectedIds(new Set())
+    },
+    [selectedTasks]
+  )
+
+  const memberWorkdayEstimate = useCallback(
+    (member: Member, startIdx: number, endIdx: number): number => {
+      const contrib = new Map<string, 0 | 0.5>()
+      for (const off of member.daysOff) contrib.set(off.date, off.half ? 0.5 : 0)
+      let total = 0
+      for (let i = startIdx; i <= endIdx; i++) {
+        total += workingFraction(workdays[i], contrib)
+      }
+      return Math.max(0.5, total)
+    },
+    [workdays]
+  )
+
+  const previewForDelta = useCallback(
+    (e: Ev, mode: TimelineEditMode, delta: number): TimelinePreview | null => {
+      if (!e.startDate || !e.dueDate) return null
+      const startIdx = workdays.indexOf(e.startDate)
+      const dueIdx = workdays.indexOf(e.dueDate)
+      if (startIdx < 0 || dueIdx < 0) return null
+
+      let nextStart = startIdx
+      let nextDue = dueIdx
+      if (mode === 'move') {
+        const span = dueIdx - startIdx
+        nextStart = clampIdx(startIdx + delta, 0, N - 1 - span)
+        nextDue = nextStart + span
+      } else if (mode === 'resize-start') {
+        nextStart = clampIdx(startIdx + delta, 0, dueIdx)
+      } else {
+        nextDue = clampIdx(dueIdx + delta, startIdx, N - 1)
+      }
+
+      const left = nextStart * dayW
+      const right = (nextDue + 1) * dayW
+      return { taskId: e.task.id, left, width: Math.max(right - left, 30) }
+    },
+    [N, clampIdx, dayW, workdays]
+  )
+
+  const commitTimelineEdit = useCallback(
+    async (e: Ev, member: Member, mode: TimelineEditMode, delta: number) => {
+      if (!e.startDate || !e.dueDate || delta === 0) return
+      const startIdx = workdays.indexOf(e.startDate)
+      const dueIdx = workdays.indexOf(e.dueDate)
+      if (startIdx < 0 || dueIdx < 0) return
+
+      let nextStart = startIdx
+      let nextDue = dueIdx
+      const patch: Partial<Task> = {}
+      const effortDriven = (e.task.estimate ?? 0) > 0
+
+      if (mode === 'move') {
+        const span = dueIdx - startIdx
+        nextStart = clampIdx(startIdx + delta, 0, N - 1 - span)
+        nextDue = nextStart + span
+        if (nextStart === startIdx) return
+        patch.startDate = workdays[nextStart]
+        if (!effortDriven) patch.dueDate = workdays[nextDue]
+      } else if (mode === 'resize-start') {
+        nextStart = clampIdx(startIdx + delta, 0, dueIdx)
+        if (nextStart === startIdx) return
+        patch.startDate = workdays[nextStart]
+        if (effortDriven) patch.estimate = memberWorkdayEstimate(member, nextStart, dueIdx)
+      } else {
+        nextDue = clampIdx(dueIdx + delta, startIdx, N - 1)
+        if (nextDue === dueIdx) return
+        if (effortDriven) patch.estimate = memberWorkdayEstimate(member, startIdx, nextDue)
+        else patch.dueDate = workdays[nextDue]
+      }
+
+      await updateTask(e.task.id, patch)
+      await recomputeDates(e.task.id)
+    },
+    [N, clampIdx, memberWorkdayEstimate, workdays]
+  )
+
+  const beginTimelineEdit = useCallback(
+    (
+      ev: ReactPointerEvent<HTMLElement>,
+      e: Ev,
+      member: Member,
+      mode: TimelineEditMode
+    ) => {
+      if (!editableEvent(e)) return
+      ev.stopPropagation()
+      setOpenBar(null)
+      const originX = ev.clientX
+      const base = previewForDelta(e, mode, 0)
+      if (base) setPreview(base)
+      document.body.style.cursor = mode === 'move' ? 'grabbing' : 'ew-resize'
+      document.body.style.userSelect = 'none'
+
+      const deltaFrom = (clientX: number) => Math.round((clientX - originX) / dayW)
+      const onMove = (moveEv: PointerEvent) => {
+        const next = previewForDelta(e, mode, deltaFrom(moveEv.clientX))
+        if (next) setPreview(next)
+      }
+      const onUp = (upEv: PointerEvent) => {
+        document.removeEventListener('pointermove', onMove)
+        document.removeEventListener('pointerup', onUp)
+        document.body.style.cursor = ''
+        document.body.style.userSelect = ''
+        const delta = deltaFrom(upEv.clientX)
+        setPreview(null)
+        if (Math.abs(upEv.clientX - originX) > 3) {
+          suppressClickRef.current = e.task.id
+          window.setTimeout(() => {
+            if (suppressClickRef.current === e.task.id) suppressClickRef.current = null
+          }, 0)
+        }
+        if (delta !== 0) {
+          void commitTimelineEdit(e, member, mode, delta).catch((err) => {
+            console.error('Failed to edit timeline task', err)
+          })
+        }
+      }
+      document.addEventListener('pointermove', onMove)
+      document.addEventListener('pointerup', onUp)
+    },
+    [commitTimelineEdit, dayW, editableEvent, previewForDelta]
+  )
+
   const groups = useMemo(() => {
     // Swimlanes follow the manual per-project member order, same as the List
     // view's lanes (drag-to-reorder). See design-docs/member-lane-order.md.
     const ms = (members ?? []).slice().sort(compareMembersByOrder)
     const byMember = new Map<string, Task[]>()
     for (const m of ms) byMember.set(m.id, [])
-    for (const t of tasks) {
+    for (const t of timelineTasks) {
       if (t.assigneeId && byMember.has(t.assigneeId)) byMember.get(t.assigneeId)!.push(t)
     }
     // NOTE (intentional): the Timeline is an assignee-swimlane view, so tasks
@@ -259,6 +500,8 @@ export function GanttView({
               lane: 0,
               isParent: false,
               isMilestone: true,
+              startDate: sd,
+              dueDate: sd,
             })
             continue
           }
@@ -309,6 +552,8 @@ export function GanttView({
             contRight,
             lane: 0,
             isParent,
+            startDate: sd,
+            dueDate: dd,
           })
         }
         // Greedy lane-packing, parents first so a group's summary rail always sits
@@ -362,19 +607,99 @@ export function GanttView({
         const laterN = offWindow.length - earlierN
         return { member: m, evs, rows, offWindow, earlierN, laterN, noDates, offBands }
       })
-  }, [members, tasks, workdays, planById, childrenByParent, N, firstDay, lastDay, dayW])
+  }, [members, timelineTasks, workdays, planById, childrenByParent, N, firstDay, lastDay, dayW])
+  const activeSprints = useMemo(
+    () => (sprints ?? []).filter((sprint) => sprint.archivedAt == null),
+    [sprints]
+  )
 
   if (!members) return <p className="text-ink-muted py-12 text-center">Loading…</p>
+  const scopeToolbar = (
+    <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="inline-flex rounded-[9px] bg-fill p-0.5" aria-label="Timeline scope">
+          <button
+            type="button"
+            onClick={() => setScope('sprint')}
+            aria-pressed={!rangeMode}
+            className={`h-8 rounded-[7px] px-3 text-[12.5px] font-semibold transition ${
+              !rangeMode
+                ? 'bg-surface text-ink shadow-[0_1px_2px_rgba(0,0,0,0.08)]'
+                : 'text-ink-muted hover:text-ink'
+            }`}
+          >
+            Sprint
+          </button>
+          <button
+            type="button"
+            onClick={() => setScope('range')}
+            aria-pressed={rangeMode}
+            className={`h-8 rounded-[7px] px-3 text-[12.5px] font-semibold transition ${
+              rangeMode
+                ? 'bg-surface text-ink shadow-[0_1px_2px_rgba(0,0,0,0.08)]'
+                : 'text-ink-muted hover:text-ink'
+            }`}
+          >
+            Range
+          </button>
+        </div>
+        <span className="text-[12px] text-ink-faint tab-data">
+          {timelineTasks.length} task{timelineTasks.length === 1 ? '' : 's'}
+        </span>
+      </div>
+      {rangeMode && (
+        <div className="flex flex-wrap items-end gap-2">
+          <label className="space-y-1">
+            <span className="block text-[11px] font-semibold text-ink-faint">From</span>
+            <DateField
+              value={rangeStart}
+              onChange={setRangeStart}
+              className="h-8 min-w-[104px] rounded-[8px] border border-border bg-surface px-2.5 text-left text-[12.5px] tab-data transition hover:bg-surface-hover focus:outline-none focus:ring-2 focus:ring-accent/30"
+            />
+          </label>
+          <label className="space-y-1">
+            <span className="block text-[11px] font-semibold text-ink-faint">To</span>
+            <DateField
+              value={rangeEnd}
+              onChange={setRangeEnd}
+              className="h-8 min-w-[104px] rounded-[8px] border border-border bg-surface px-2.5 text-left text-[12.5px] tab-data transition hover:bg-surface-hover focus:outline-none focus:ring-2 focus:ring-accent/30"
+            />
+          </label>
+          <button
+            type="button"
+            onClick={() => {
+              setRangeStart(sprintStartDate)
+              setRangeEnd(sprintEndDate)
+            }}
+            className="h-8 rounded-[8px] px-3 text-[12.5px] font-semibold text-accent hover:bg-accent-soft transition"
+          >
+            This sprint
+          </button>
+        </div>
+      )}
+    </div>
+  )
+
   if (N === 0)
     return (
-      <div className="py-16 text-center text-sm text-ink-muted">
-        This sprint has no working days (weekends only).
+      <div className="pt-4 pb-2 max-w-full">
+        {scopeToolbar}
+        <div className="py-16 text-center text-sm text-ink-muted">
+          {hasValidRange
+            ? rangeMode
+              ? 'This range has no working days (weekends only).'
+              : 'This sprint has no working days (weekends only).'
+            : 'Choose a valid range where From is before To.'}
+        </div>
       </div>
     )
   if (groups.length === 0)
     return (
-      <div className="py-16 text-center text-sm text-ink-muted">
-        No assigned tasks in this sprint yet.
+      <div className="pt-4 pb-2 max-w-full">
+        {scopeToolbar}
+        <div className="py-16 text-center text-sm text-ink-muted">
+          {rangeMode ? 'No assigned tasks in this range yet.' : 'No assigned tasks in this sprint yet.'}
+        </div>
       </div>
     )
 
@@ -384,6 +709,7 @@ export function GanttView({
 
   return (
     <div className="pt-4 pb-2 max-w-full">
+      {scopeToolbar}
       {/* Legend */}
       <div className="flex items-center gap-4 mb-3 text-[12px] text-ink-muted">
         <LegendDot varName="var(--color-status-done)" label="Done" />
@@ -486,7 +812,7 @@ export function GanttView({
                       <div className="mt-1">
                         <MemberDaysOffButton
                           member={member}
-                          range={{ start: sprintStartDate, end: sprintEndDate }}
+                          range={{ start: windowStartDate, end: windowEndDate }}
                         />
                       </div>
                       {hasExtra && (
@@ -527,12 +853,15 @@ export function GanttView({
                     {/* event blocks */}
                     {evs.map((e) => {
                       const v = STATUS_META[e.status].varName
+                      const livePreview = preview?.taskId === e.task.id ? preview : null
+                      const isSelected = selectedIds.has(e.task.id)
                       const box = {
-                        left: e.left + 2,
-                        width: e.width - 4,
+                        left: (livePreview?.left ?? e.left) + 2,
+                        width: (livePreview?.width ?? e.width) - 4,
                         top: PAD_TOP + e.lane * ROWH,
                         height: EVH,
                       }
+                      const canEdit = editableEvent(e)
                       // Parent group → a slim summary rail spanning its children.
                       if (e.isParent) {
                         return (
@@ -606,7 +935,14 @@ export function GanttView({
                       return (
                         <div
                           key={e.task.id}
-                          onClick={(ev) =>
+                          data-timeline-task-bar={e.task.id}
+                          onPointerDown={(ev) => beginTimelineEdit(ev, e, member, 'move')}
+                          onClick={(ev) => {
+                            if (suppressClickRef.current === e.task.id) {
+                              ev.preventDefault()
+                              ev.stopPropagation()
+                              return
+                            }
                             setOpenBar({
                               task: e.task,
                               status: e.status,
@@ -614,11 +950,45 @@ export function GanttView({
                                 ev.currentTarget as HTMLElement
                               ).getBoundingClientRect(),
                             })
+                          }}
+                          className={`group/tbar absolute flex items-center rounded-[7px] overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.08)] hover:brightness-95 transition ${
+                            canEdit ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'
+                          } ${isSelected ? 'ring-2 ring-accent/55' : livePreview ? 'ring-2 ring-accent/35' : ''}`}
+                          style={{ ...box, background: softBg(v), touchAction: canEdit ? 'none' : undefined }}
+                          title={
+                            canEdit
+                              ? `Drag to move · resize edges · ${e.task.title}`
+                              : `${STATUS_META[e.status].label} · ${e.task.title}`
                           }
-                          className="absolute flex items-center rounded-[7px] overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.08)] cursor-pointer hover:brightness-95 transition"
-                          style={{ ...box, background: softBg(v) }}
-                          title={`${STATUS_META[e.status].label} · ${e.task.title}`}
                         >
+                          {canEdit && (
+                            <span
+                              aria-label={`Resize start of ${e.task.title}`}
+                              className="absolute left-0 top-0 bottom-0 z-20 w-2 cursor-ew-resize opacity-0 group-hover/tbar:opacity-100 bg-accent/20"
+                              onPointerDown={(ev) => beginTimelineEdit(ev, e, member, 'resize-start')}
+                            />
+                          )}
+                          <button
+                            type="button"
+                            aria-label={isSelected ? `Deselect #${e.task.sequence}` : `Select #${e.task.sequence}`}
+                            aria-pressed={isSelected}
+                            onPointerDown={(ev) => {
+                              ev.stopPropagation()
+                            }}
+                            onClick={(ev) => {
+                              ev.preventDefault()
+                              ev.stopPropagation()
+                              setOpenBar(null)
+                              toggleSelected(e.task.id)
+                            }}
+                            className={`absolute right-1 top-1/2 z-30 grid h-[18px] w-[18px] -translate-y-1/2 place-items-center rounded-full border transition ${
+                              isSelected
+                                ? 'border-accent bg-accent text-white opacity-100'
+                                : 'border-white/60 bg-surface/85 text-ink-faint opacity-0 shadow-[0_1px_3px_rgba(0,0,0,0.12)] group-hover/tbar:opacity-100 hover:text-accent'
+                            }`}
+                          >
+                            {isSelected && <Check size={12} strokeWidth={3} />}
+                          </button>
                           {e.contLeft && (
                             <span className="text-ink-faint text-[11px] pl-1.5" aria-hidden>
                               ‹
@@ -652,6 +1022,13 @@ export function GanttView({
                             <span className="text-ink-faint text-[11px] pr-1.5" aria-hidden>
                               ›
                             </span>
+                          )}
+                          {canEdit && (
+                            <span
+                              aria-label={`Resize end of ${e.task.title}`}
+                              className="absolute right-0 top-0 bottom-0 z-20 w-2 cursor-ew-resize opacity-0 group-hover/tbar:opacity-100 bg-accent/20"
+                              onPointerDown={(ev) => beginTimelineEdit(ev, e, member, 'resize-end')}
+                            />
                           )}
                         </div>
                       )
@@ -709,6 +1086,156 @@ export function GanttView({
           onOpenInList={onOpenInList}
         />
       )}
+      <TimelineSelectionBar
+        selectedTasks={selectedTasks}
+        sprints={activeSprints}
+        onMove={moveSelectedToSprint}
+        onClear={() => setSelectedIds(new Set())}
+      />
+    </div>
+  )
+}
+
+function TimelineSelectionBar({
+  selectedTasks,
+  sprints,
+  onMove,
+  onClear,
+}: {
+  selectedTasks: Task[]
+  sprints: Sprint[]
+  onMove: (sprint: Sprint) => Promise<void>
+  onClear: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const barRef = useRef<HTMLDivElement>(null)
+  const n = selectedTasks.length
+  const visibleSprints = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (!q) return sprints
+    return sprints.filter((sprint) => {
+      const hay = `${sprint.name} ${sprint.startDate} ${sprint.endDate}`.toLowerCase()
+      return hay.includes(q)
+    })
+  }, [query, sprints])
+
+  useEffect(() => {
+    if (!open) return
+    const onDown = (event: MouseEvent) => {
+      if (barRef.current?.contains(event.target as Node)) return
+      setOpen(false)
+    }
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  useEffect(() => {
+    if (n === 0) {
+      setOpen(false)
+      setQuery('')
+    }
+  }, [n])
+
+  return (
+    <div
+      ref={barRef}
+      className={`fixed left-1/2 bottom-6 z-40 -translate-x-1/2 flex items-center gap-3 rounded-[14px] bg-ink dark:bg-[#2c2c2e] dark:ring-1 dark:ring-white/10 text-white pl-4 pr-2 py-2 shadow-[0_8px_30px_rgba(0,0,0,0.22),0_0_0_0.5px_rgba(0,0,0,0.06)] transition-[opacity,transform] duration-200 ${
+        n > 0
+          ? 'opacity-100 translate-y-0'
+          : 'opacity-0 translate-y-3 pointer-events-none'
+      }`}
+      role="toolbar"
+      aria-label="Selected timeline tasks"
+    >
+      <span className="text-[13.5px]">
+        <b className="font-semibold tabular-nums">{n}</b> selected
+      </span>
+      <div className="relative">
+        <button
+          type="button"
+          onClick={() => setOpen((value) => !value)}
+          disabled={sprints.length === 0}
+          className="inline-flex items-center gap-1.5 rounded-[9px] bg-white px-3 py-1.5 text-[13px] font-semibold text-[#1d1d1f] hover:bg-white/90 disabled:opacity-45 disabled:cursor-not-allowed transition"
+        >
+          <MoveRight size={14} />
+          Move to sprint
+          <ChevronsUpDown size={13} className="opacity-60" />
+        </button>
+        {open && (
+          <div className="absolute bottom-[calc(100%+10px)] left-1/2 w-[290px] -translate-x-1/2 rounded-[12px] bg-surface p-2 text-ink shadow-[0_18px_50px_rgba(0,0,0,0.22),0_0_0_0.5px_rgba(0,0,0,0.08)]">
+            <label className="flex items-center gap-2 rounded-[8px] border border-border bg-canvas-sunk/40 px-2.5 py-1.5">
+              <Search size={14} className="shrink-0 text-ink-faint" aria-hidden />
+              <input
+                autoFocus
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Search sprint"
+                className="min-w-0 flex-1 bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-faint"
+              />
+            </label>
+            <div className="mt-2 max-h-[240px] overflow-y-auto py-1">
+              {visibleSprints.length === 0 ? (
+                <div className="px-2.5 py-3 text-[13px] text-ink-faint">
+                  No matching sprint
+                </div>
+              ) : (
+                visibleSprints.map((sprint) => {
+                  const alreadyHere = selectedTasks.every((task) => task.sprintId === sprint.id)
+                  const hereCount = selectedTasks.filter((task) => task.sprintId === sprint.id).length
+                  return (
+                    <button
+                      key={sprint.id}
+                      type="button"
+                      disabled={alreadyHere}
+                      onClick={() => {
+                        setOpen(false)
+                        setQuery('')
+                        void onMove(sprint)
+                      }}
+                      className="w-full rounded-[8px] px-2.5 py-2 text-left hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent transition"
+                    >
+                      <span className="flex items-center justify-between gap-2">
+                        <span className="min-w-0 truncate text-[13px] font-semibold text-ink">
+                          {sprint.name}
+                        </span>
+                        {alreadyHere ? (
+                          <span className="shrink-0 text-[11px] font-semibold text-ink-faint">
+                            Current
+                          </span>
+                        ) : hereCount > 0 ? (
+                          <span className="shrink-0 text-[11px] font-semibold text-ink-faint">
+                            {hereCount} here
+                          </span>
+                        ) : null}
+                      </span>
+                      <span className="block text-[11.5px] text-ink-faint tabular-nums">
+                        {sprint.startDate} → {sprint.endDate}
+                      </span>
+                    </button>
+                  )
+                })
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+      <span className="w-px self-stretch bg-white/15" aria-hidden />
+      <button
+        type="button"
+        onClick={onClear}
+        className="grid h-8 w-8 place-items-center rounded-[9px] text-white/70 hover:bg-white/10 hover:text-white transition"
+        aria-label="Clear timeline selection"
+      >
+        <X size={15} />
+      </button>
     </div>
   )
 }

@@ -20,6 +20,9 @@ import {
   Link2,
   Link2Off,
   GripVertical,
+  MoveRight,
+  ChevronsUpDown,
+  Search,
 } from 'lucide-react'
 import {
   db,
@@ -28,6 +31,7 @@ import {
   setTaskParent,
   createGroupFromSelection,
   setDependencies,
+  moveTaskToSprint,
   orderBetween,
   setListOrder,
   renormalizeListOrder,
@@ -42,6 +46,7 @@ import {
   addSprintTask,
   type Member,
   type Task,
+  type Sprint,
   type Status,
 } from './db'
 import { Avatar, MemberDaysOffButton } from './members'
@@ -532,6 +537,7 @@ export function SprintView({
       />
 
       <SelectionBar
+        projectId={projectId}
         selectedIds={selectedIds}
         tasksById={tasksById}
         allTasks={tasks}
@@ -553,17 +559,26 @@ export function SprintView({
  * See design-docs/task-groups.md and design-docs/dependencies.md.
  */
 function SelectionBar({
+  projectId,
   selectedIds,
   tasksById,
   allTasks,
   onClear,
 }: {
+  projectId: string
   selectedIds: Set<string>
   tasksById: Map<string, Task>
   allTasks: Task[]
   onClear: () => void
 }) {
   const confirm = useConfirm()
+  const sprints = useLiveQuery(
+    () => db.sprints.where('projectId').equals(projectId).sortBy('startDate'),
+    [projectId]
+  )
+  const [moveOpen, setMoveOpen] = useState(false)
+  const [moveQuery, setMoveQuery] = useState('')
+  const barRef = useRef<HTMLDivElement>(null)
   const n = selectedIds.size
   const parentIds = useMemo(() => {
     const s = new Set<string>()
@@ -587,6 +602,41 @@ function SelectionBar({
   const selectedInOrder = allTasks.filter((t) => selectedIds.has(t.id))
   const canChain = selectedInOrder.length >= 2
   const canClearPrereq = selected.some((t) => t.dependsOn.length > 0)
+  const activeSprints = useMemo(
+    () => (sprints ?? []).filter((sprint) => sprint.archivedAt == null),
+    [sprints]
+  )
+  const visibleMoveSprints = useMemo(() => {
+    const q = moveQuery.trim().toLowerCase()
+    if (!q) return activeSprints
+    return activeSprints.filter((sprint) =>
+      `${sprint.name} ${sprint.startDate} ${sprint.endDate}`.toLowerCase().includes(q)
+    )
+  }, [activeSprints, moveQuery])
+
+  useEffect(() => {
+    if (!moveOpen) return
+    const onDown = (event: MouseEvent) => {
+      if (barRef.current?.contains(event.target as Node)) return
+      setMoveOpen(false)
+    }
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMoveOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [moveOpen])
+
+  useEffect(() => {
+    if (n === 0) {
+      setMoveOpen(false)
+      setMoveQuery('')
+    }
+  }, [n])
 
   const doGroup = async () => {
     if (!canGroup) return
@@ -611,6 +661,13 @@ function SelectionBar({
     for (const t of selected) {
       if (t.dependsOn.length > 0) await setDependencies(t.id, [])
     }
+    onClear()
+  }
+  const doMoveToSprint = async (target: Sprint) => {
+    setMoveOpen(false)
+    setMoveQuery('')
+    const moving = selected.filter((t) => t.sprintId !== target.id)
+    for (const task of moving) await moveTaskToSprint(task.id, target.id)
     onClear()
   }
   const doUngroup = async () => {
@@ -638,6 +695,7 @@ function SelectionBar({
 
   return (
     <div
+      ref={barRef}
       className={`fixed left-1/2 bottom-6 z-40 -translate-x-1/2 flex items-center gap-3 rounded-[14px] bg-ink dark:bg-[#2c2c2e] dark:ring-1 dark:ring-white/10 text-white pl-4 pr-2 py-2 shadow-[0_8px_30px_rgba(0,0,0,0.22),0_0_0_0.5px_rgba(0,0,0,0.06)] transition-[opacity,transform] duration-200 ${
         n > 0
           ? 'opacity-100 translate-y-0'
@@ -673,6 +731,70 @@ function SelectionBar({
       >
         <Link2Off size={14} /> Clear prereqs
       </button>
+      <div className="relative">
+        <button
+          type="button"
+          onClick={() => setMoveOpen((value) => !value)}
+          disabled={activeSprints.length === 0}
+          className="inline-flex items-center gap-1.5 text-[13px] text-white/80 hover:text-white px-2.5 py-1.5 rounded-[9px] hover:bg-white/10 transition disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+        >
+          <MoveRight size={14} /> Move to sprint
+          <ChevronsUpDown size={13} className="opacity-60" />
+        </button>
+        {moveOpen && (
+          <div className="absolute bottom-[calc(100%+10px)] left-1/2 w-[290px] -translate-x-1/2 rounded-[12px] bg-surface p-2 text-ink shadow-[0_18px_50px_rgba(0,0,0,0.22),0_0_0_0.5px_rgba(0,0,0,0.08)]">
+            <label className="flex items-center gap-2 rounded-[8px] border border-border bg-canvas-sunk/40 px-2.5 py-1.5">
+              <Search size={14} className="shrink-0 text-ink-faint" aria-hidden />
+              <input
+                autoFocus
+                value={moveQuery}
+                onChange={(event) => setMoveQuery(event.target.value)}
+                placeholder="Search sprint"
+                className="min-w-0 flex-1 bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-faint"
+              />
+            </label>
+            <div className="mt-2 max-h-[240px] overflow-y-auto py-1">
+              {visibleMoveSprints.length === 0 ? (
+                <div className="px-2.5 py-3 text-[13px] text-ink-faint">
+                  No matching sprint
+                </div>
+              ) : (
+                visibleMoveSprints.map((sprint) => {
+                  const alreadyHere = selected.every((task) => task.sprintId === sprint.id)
+                  const hereCount = selected.filter((task) => task.sprintId === sprint.id).length
+                  return (
+                    <button
+                      key={sprint.id}
+                      type="button"
+                      disabled={alreadyHere}
+                      onClick={() => void doMoveToSprint(sprint)}
+                      className="w-full rounded-[8px] px-2.5 py-2 text-left hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent transition"
+                    >
+                      <span className="flex items-center justify-between gap-2">
+                        <span className="min-w-0 truncate text-[13px] font-semibold text-ink">
+                          {sprint.name}
+                        </span>
+                        {alreadyHere ? (
+                          <span className="shrink-0 text-[11px] font-semibold text-ink-faint">
+                            Current
+                          </span>
+                        ) : hereCount > 0 ? (
+                          <span className="shrink-0 text-[11px] font-semibold text-ink-faint">
+                            {hereCount} here
+                          </span>
+                        ) : null}
+                      </span>
+                      <span className="block text-[11.5px] text-ink-faint tabular-nums">
+                        {sprint.startDate} → {sprint.endDate}
+                      </span>
+                    </button>
+                  )
+                })
+              )}
+            </div>
+          </div>
+        )}
+      </div>
       <button
         onClick={doGroup}
         disabled={!canGroup}
@@ -840,12 +962,10 @@ function MemberCard({
       {!collapsed && (
         // Horizontal scroll on narrow screens: fixed-width columns keep their
         // size and the table scrolls instead of crushing the title column.
-        // Assignee column is omitted — every row in a member group is the same
-        // person (shown in the group header avatar).
         <div className="overflow-x-auto">
-          <div className="min-w-[820px]">
+          <div className="min-w-[896px]">
             {tasks.length > 0 && (
-              <TaskColumnHeader sort={sort} setSort={setSort} showAssignee={false} />
+              <TaskColumnHeader sort={sort} setSort={setSort} />
             )}
             <div className="divide-y divide-border">
               <TaskRows
@@ -853,7 +973,6 @@ function MemberCard({
                 members={members}
                 allTasks={allTasks}
                 tasksById={tasksById}
-                showAssignee={false}
                 conflictTips={conflictTips}
                 selectedIds={selectedIds}
                 onToggleSelect={onToggleSelect}
@@ -865,7 +984,6 @@ function MemberCard({
                 sprintId={sprintId}
                 sprintStartDate={sprintStartDate}
                 assigneeId={member.id}
-                showAssignee={false}
               />
             </div>
           </div>

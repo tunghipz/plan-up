@@ -1,7 +1,7 @@
 # Task groups (parent task with nested children)
 
 **Status:** Implemented
-**Last updated:** 2026-06-05
+**Last updated:** 2026-06-29
 **Code:** `app/src/db.ts` (`Task.parentId`, `createGroupFromSelection`, `setTaskParent`),
 `app/src/SprintView.tsx` (`MemberCard` task tree render, `TaskGroupRow` parent roll-up,
 `SelectionBar` group/ungroup/delete), collapse persisted in `localStorage`
@@ -18,7 +18,7 @@ separate epic/tag system. Approach **B** chosen 2026-06-04 (see
 - **Create a group (multi-select):** hover a task row → a **checkbox** appears in the
   left gutter; check several tasks **of the same member**. A **floating action bar**
   slides up at the bottom (English labels): *"N selected · [Ungroup] · [Chain prereqs] ·
-  [Clear prereqs] · [Group] · [Delete] · [Cancel]"*.
+  [Clear prereqs] · [Move to sprint] · [Group] · [Delete] · [Cancel]"*.
   - **Group** creates a **new parent task** titled `New group` (rename inline) and
     nests the selected tasks under it. Enabled only when ≥2 are selected, all share the
     same assignee, and none is already a group head (one level).
@@ -26,6 +26,10 @@ separate epic/tag system. Approach **B** chosen 2026-06-04 (see
     selection contains ≥1 grouped task.
   - **Chain prereqs** / **Clear prereqs** set or clear prerequisites across the selection —
     see [dependencies.md](./dependencies.md#bulk-actions-multi-select).
+  - **Move to sprint** opens a searchable sprint menu with every active sprint in the
+    project, including earlier sprints. Choosing a target moves all selected tasks that are
+    not already in that sprint through `moveTaskToSprint`, which renumbers them in the
+    target sprint, logs the move, and recomputes dates. Selection clears after the move.
   - **Delete** deletes the selected tasks (confirm first; works on a multi-select).
     Deleting a group head ungroups its children rather than cascade-deleting them; the
     confirm copy says so when the selection contains a group head. Deletes run
@@ -112,7 +116,7 @@ computes `total`, `done`, overdue, and capacity, it must skip tasks that have ch
 3. **Collapse** — local state keyed by parentId, persisted to
    `localStorage['plan-up:taskgroup-collapsed:'+parentId]`; reset semantics like the
    member-group collapse.
-4. **Selection bar** — group/ungroup/delete all live on `SelectionBar` (the floating
+4. **Selection bar** — group/ungroup/move/delete all live on `SelectionBar` (the floating
    bar). There is no per-row kebab/`RowActionsMenu` and no actions column on the row.
 
 ## Rules & edge cases

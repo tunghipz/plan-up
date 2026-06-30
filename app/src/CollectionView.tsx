@@ -18,8 +18,8 @@ import {
   renameSection,
   deleteSection,
   addCollectionItem,
-  moveTaskToSprint,
   renameCollection,
+  moveTaskToSprint,
   moveTaskToSection,
   addStatus,
   renameStatus,
@@ -35,8 +35,8 @@ import {
   type Task,
 } from './db'
 import { CollectionCalendar } from './CollectionCalendar'
-import { DatePickCell } from './DatePicker'
 import { AddGroupButton } from './AddGroupButton'
+import { EffortCell } from './SprintView'
 
 const COLLAPSE_KEY = (collectionId: string) =>
   `plan-up:collCollapsed:${collectionId}`
@@ -48,17 +48,14 @@ const EMPTY_ITEMS: Task[] = []
 /**
  * Column widths shared by the column-header row and each item row — mirrors the
  * sprint list view's `COL` (SprintView.tsx) so Collections feel identical, with
- * light planning metadata for moving collection items into sprints. Flex, not
- * grid: the title absorbs the slack via flex-1; the rest are fixed and shrink-0.
+ * only member + editable duration surfaced. Flex, not grid: the title absorbs
+ * the slack via flex-1; the rest are fixed and shrink-0.
  */
 const COL = {
   lead: 'w-5 shrink-0 flex justify-center items-center',
-  dot: 'w-4 shrink-0 flex justify-center',
   title: 'flex-1 min-w-[150px]',
   member: 'w-32 flex justify-start shrink-0',
-  start: 'w-28 flex justify-end shrink-0',
-  due: 'w-28 flex justify-end shrink-0',
-  status: 'w-28 flex justify-start shrink-0 pl-2',
+  duration: 'w-24 flex justify-center shrink-0',
   sprint: 'w-36 flex justify-end shrink-0',
   actions: 'w-8 flex justify-end shrink-0',
 }
@@ -113,6 +110,10 @@ export function CollectionView({
           : Promise.resolve([]),
       [collection?.projectId]
     ) ?? []
+  const memberById = useMemo(
+    () => new Map(projectMembers.map((m) => [m.id, m])),
+    [projectMembers]
+  )
   const projectSprints =
     useLiveQuery<Sprint[]>(
       () =>
@@ -121,8 +122,6 @@ export function CollectionView({
           : Promise.resolve([]),
       [collection?.projectId]
     ) ?? []
-
-  const [addingTable, setAddingTable] = useState(false)
   const activeSprints = useMemo(
     () =>
       projectSprints
@@ -131,15 +130,8 @@ export function CollectionView({
         .sort((a, b) => a.startDate.localeCompare(b.startDate)),
     [projectSprints]
   )
-  const memberById = useMemo(
-    () => new Map(projectMembers.map((m) => [m.id, m])),
-    [projectMembers]
-  )
+  const [addingTable, setAddingTable] = useState(false)
 
-  const statusById = useMemo(
-    () => new Map((collection?.statuses ?? []).map((s) => [s.id, s])),
-    [collection]
-  )
   // Group items by section ONCE per data change instead of re-filtering the full
   // item list for every section on every render — that was O(sections × items)
   // per keystroke, since item titles persist on every keystroke.
@@ -173,8 +165,6 @@ export function CollectionView({
               canDelete={collection.sections.length > 1}
               section={sec}
               items={itemsBySectionMap.get(sec.id) ?? EMPTY_ITEMS}
-              statusById={statusById}
-              statuses={collection.statuses}
               members={projectMembers}
               memberById={memberById}
               sprints={activeSprints}
@@ -431,8 +421,6 @@ function SectionCard({
   collectionId,
   section,
   items,
-  statusById,
-  statuses,
   canDelete,
   members,
   memberById,
@@ -442,8 +430,6 @@ function SectionCard({
   collectionId: string
   section: { id: string; name: string; color?: string }
   items: Task[]
-  statusById: Map<string, CollectionStatus>
-  statuses: CollectionStatus[]
   canDelete: boolean
   members: Member[]
   memberById: Map<string, Member>
@@ -567,21 +553,14 @@ function SectionCard({
           {items.length > 0 && (
             <div className="flex items-center gap-3 px-4 py-1.5 border-b border-border-hair bg-canvas-sunk/40">
               <div className={COL.lead} />
-              <div className={COL.dot} />
               <div className={`${COL.title} text-[11px] tracking-normal text-ink-faint font-medium`}>
                 Name
               </div>
               <div className={`${COL.member} text-[11px] tracking-normal text-ink-faint font-medium`}>
                 Member
               </div>
-              <div className={`${COL.start} text-[11px] tracking-normal text-ink-faint font-medium`}>
-                Start
-              </div>
-              <div className={`${COL.due} text-[11px] tracking-normal text-ink-faint font-medium`}>
-                End
-              </div>
-              <div className={`${COL.status} text-[11px] tracking-normal text-ink-faint font-medium`}>
-                Status
+              <div className={`${COL.duration} text-[11px] tracking-normal text-ink-faint font-medium text-center`}>
+                Duration
               </div>
               <div className={`${COL.sprint} text-[11px] tracking-normal text-ink-faint font-medium text-right`}>
                 Sprint
@@ -601,8 +580,6 @@ function SectionCard({
               <ItemRow
                 key={t.id}
                 task={t}
-                statusById={statusById}
-                statuses={statuses}
                 members={members}
                 assignee={t.assigneeId ? memberById.get(t.assigneeId) ?? null : null}
                 sprints={sprints}
@@ -695,28 +672,19 @@ function SectionName({
 
 function ItemRow({
   task,
-  statusById,
-  statuses,
   members,
   assignee,
   sprints,
   currentSprintId,
 }: {
   task: Task
-  statusById: Map<string, CollectionStatus>
-  statuses: CollectionStatus[]
   members: Member[]
   assignee: Member | null
   sprints: Sprint[]
   currentSprintId: string | null
 }) {
-  const status = task.collectionStatusId
-    ? statusById.get(task.collectionStatusId)
-    : undefined
-  const dotColor = status?.color ?? '#C7C7CC'
-
   // Grip-armed native drag: a drag only starts if it was begun from the grip,
-  // so inline title editing and the date/status controls are never hijacked.
+  // so inline title editing and duration controls are never hijacked.
   const armedRef = useRef(false)
   const [dragging, setDragging] = useState(false)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
@@ -782,35 +750,15 @@ function ItemRow({
           <GripVertical size={14} />
         </button>
       </div>
-      <div className={COL.dot}>
-        <span
-          className="w-3 h-3 rounded-full"
-          style={{ background: dotColor }}
-          aria-hidden
-        />
-      </div>
       <ItemTitle task={task} />
       <div className={COL.member}>
-        <CollectionAssigneePicker task={task} members={members} assignee={assignee} />
+        <CollectionMemberPicker task={task} members={members} assignee={assignee} />
       </div>
-      <div className={COL.start}>
-        <DatePickCell
-          value={task.startDate}
-          onChange={(v) => db.tasks.update(task.id, { startDate: v })}
-          ariaLabel="Start date"
-          emptyHint="Start"
+      <div className={COL.duration}>
+        <EffortCell
+          value={task.estimate}
+          onChange={(estimate) => void updateTask(task.id, { estimate })}
         />
-      </div>
-      <div className={COL.due}>
-        <DatePickCell
-          value={task.dueDate}
-          onChange={(v) => db.tasks.update(task.id, { dueDate: v })}
-          ariaLabel="Due date"
-          emptyHint="End"
-        />
-      </div>
-      <div className={COL.status}>
-        <StatusPill task={task} status={status} statuses={statuses} />
       </div>
       <div className={COL.sprint}>
         <AddToSprintMenu
@@ -834,7 +782,7 @@ function ItemRow({
   )
 }
 
-function CollectionAssigneePicker({
+function CollectionMemberPicker({
   task,
   members,
   assignee,
@@ -844,36 +792,23 @@ function CollectionAssigneePicker({
   assignee: Member | null
 }) {
   const label = assignee?.name ?? 'Unassigned'
-  if (!assignee) {
-    return (
-      <label className="relative inline-flex min-w-0 max-w-full items-center text-[12.5px] font-medium text-ink-faint truncate rounded-md px-1 -ml-1 hover:bg-surface-hover transition">
-        <span className="truncate">{label}</span>
-        <select
-          value={task.assigneeId ?? ''}
-          onChange={(e) => void updateTask(task.id, { assigneeId: e.target.value || null })}
-          className="absolute inset-0 opacity-0 cursor-pointer"
-          aria-label={`Assign ${task.title}`}
-        >
-          <option value="">Unassigned</option>
-          {members.map((member) => (
-            <option key={member.id} value={member.id}>
-              {member.name}
-            </option>
-          ))}
-        </select>
-      </label>
-    )
-  }
   return (
-    <label className="relative inline-flex min-w-0 max-w-full items-center gap-1.5 text-[12.5px] font-medium text-ink-muted rounded-md px-1 -ml-1 hover:bg-surface-hover transition">
-      <span
-        className="w-5 h-5 rounded-full grid place-items-center text-[10px] font-bold text-white shrink-0"
-        style={{ background: assignee.color }}
-        aria-hidden
-      >
-        {assignee.name.slice(0, 1).toUpperCase()}
-      </span>
-      <span className="truncate">{assignee.name}</span>
+    <label
+      className={`relative inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-md px-1 -ml-1 text-[12.5px] font-medium transition hover:bg-surface-hover ${
+        assignee ? 'text-ink-muted' : 'text-ink-faint'
+      }`}
+      title={label}
+    >
+      {assignee && (
+        <span
+          className="w-5 h-5 rounded-full grid place-items-center text-[10px] font-bold text-white shrink-0"
+          style={{ background: assignee.color }}
+          aria-hidden
+        >
+          {assignee.name.slice(0, 1).toUpperCase()}
+        </span>
+      )}
+      <span className="truncate">{label}</span>
       <select
         value={task.assigneeId ?? ''}
         onChange={(e) => void updateTask(task.id, { assigneeId: e.target.value || null })}
@@ -1083,8 +1018,7 @@ function AddItemRow({
   }
   return (
     <div className="flex items-center gap-3 px-4 py-2 text-sm">
-      <div className={COL.lead} />
-      <div className={COL.dot}>
+      <div className={COL.lead}>
         <Plus size={14} className="text-ink-faint" />
       </div>
       <input
@@ -1096,157 +1030,10 @@ function AddItemRow({
         aria-label="Add item"
       />
       <div className={COL.member} />
-      <div className={COL.start} />
-      <div className={COL.due} />
-      <div className={COL.status} />
+      <div className={COL.duration} />
       <div className={COL.sprint} />
       <div className={COL.actions} />
     </div>
-  )
-}
-
-/** Click-to-assign status pill. */
-function StatusPill({
-  task,
-  status,
-  statuses,
-}: {
-  task: Task
-  status?: CollectionStatus
-  statuses: CollectionStatus[]
-}) {
-  const [open, setOpen] = useState(false)
-  const anchorRef = useRef<HTMLButtonElement>(null)
-  const popRef = useRef<HTMLDivElement>(null)
-  const [pos, setPos] = useState<{ top: number; left: number }>({
-    top: -9999,
-    left: -9999,
-  })
-  const MENU_W = 160
-
-  // Pin a fixed-position menu to the pill — portalled to <body> so the card's
-  // `overflow-hidden` (rounded corners) can't clip it. Mirrors DatePicker.
-  useLayoutEffect(() => {
-    if (!open) return
-    const pin = () => {
-      const r = anchorRef.current?.getBoundingClientRect()
-      if (!r) return
-      let left = Math.min(r.left, window.innerWidth - 8 - MENU_W)
-      left = Math.max(8, left)
-      const menuH = (statuses.length + 1) * 34 + 16
-      let top = r.bottom + 4
-      if (top + menuH > window.innerHeight - 8)
-        top = Math.max(8, r.top - menuH - 4)
-      setPos({ top, left })
-    }
-    pin()
-    window.addEventListener('scroll', pin, true)
-    window.addEventListener('resize', pin)
-    return () => {
-      window.removeEventListener('scroll', pin, true)
-      window.removeEventListener('resize', pin)
-    }
-  }, [open, statuses.length])
-
-  // Close on outside click (anchor OR menu excluded) and Escape.
-  useEffect(() => {
-    if (!open) return
-    const onDown = (e: MouseEvent) => {
-      const t = e.target as Node
-      if (
-        popRef.current?.contains(t) ||
-        anchorRef.current?.contains(t)
-      )
-        return
-      setOpen(false)
-    }
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false)
-    }
-    document.addEventListener('mousedown', onDown)
-    document.addEventListener('keydown', onKey)
-    return () => {
-      document.removeEventListener('mousedown', onDown)
-      document.removeEventListener('keydown', onKey)
-    }
-  }, [open])
-
-  const assign = async (id: string | null) => {
-    setOpen(false)
-    await db.tasks.update(task.id, { collectionStatusId: id })
-  }
-
-  return (
-    <>
-      <button
-        ref={anchorRef}
-        onClick={() => setOpen((p) => !p)}
-        className="cursor-pointer hover:opacity-80 transition"
-        aria-label="Assign status"
-      >
-        {status ? (
-          <span
-            className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11.5px] font-semibold leading-none w-fit"
-            style={{
-              background: `color-mix(in srgb, ${status.color} 16%, transparent)`,
-              color: status.color,
-            }}
-          >
-            <span
-              className="w-1.5 h-1.5 rounded-full"
-              style={{ background: status.color }}
-              aria-hidden
-            />
-            {status.name}
-          </span>
-        ) : (
-          <span className="inline-flex items-center gap-1 rounded-full border border-dashed border-border px-2.5 py-1 text-[11.5px] font-medium leading-none text-ink-faint hover:border-accent hover:text-accent transition">
-            ＋ Status
-          </span>
-        )}
-      </button>
-      {open &&
-        createPortal(
-          <div
-            ref={popRef}
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              position: 'fixed',
-              top: pos.top,
-              left: pos.left,
-              width: MENU_W,
-            }}
-            className={`z-50 bg-surface rounded-[10px] py-1 ${FLOAT_SHADOW}`}
-          >
-            {statuses.map((s) => (
-              <button
-                key={s.id}
-                onClick={() => void assign(s.id)}
-                className="w-full flex items-center gap-2 px-3 py-1.5 text-[13px] text-ink hover:bg-surface-hover transition"
-              >
-                <span
-                  className="w-2.5 h-2.5 rounded-full shrink-0"
-                  style={{ background: s.color }}
-                  aria-hidden
-                />
-                {s.name}
-              </button>
-            ))}
-            <div className="border-t border-border-hair my-1" />
-            <button
-              onClick={() => void assign(null)}
-              className="w-full flex items-center gap-2 px-3 py-1.5 text-[13px] text-ink-muted hover:bg-surface-hover transition"
-            >
-              <span
-                className="w-2.5 h-2.5 rounded-full border border-border shrink-0"
-                aria-hidden
-              />
-              No status
-            </button>
-          </div>,
-          document.body
-        )}
-    </>
   )
 }
 

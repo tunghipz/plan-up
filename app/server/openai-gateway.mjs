@@ -4,7 +4,7 @@ import { createReadStream, existsSync, readFileSync } from 'node:fs'
 import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, extname, join, normalize, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { randomBytes } from 'node:crypto'
+import { randomBytes, randomUUID } from 'node:crypto'
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url))
 const root = resolve(__dirname, '..')
@@ -74,6 +74,25 @@ async function handleApi(req, res) {
       ok: true,
       exportedAt: saved.exportedAt,
       projectCount: Array.isArray(saved.projects) ? saved.projects.length : 0,
+    })
+    return true
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/actions/apply') {
+    const body = await readJson(req)
+    const snapshot = await readServerSnapshot()
+    if (!snapshot) {
+      json(res, 409, { error: 'Server snapshot is empty. Open the app once first.' })
+      return true
+    }
+    const result = applyPlanupActions(snapshot, body)
+    if (!body?.dryRun && result.changed) await writeServerSnapshot(result.snapshot)
+    json(res, 200, {
+      ok: result.results.every((item) => item.ok),
+      changed: result.changed,
+      dryRun: Boolean(body?.dryRun),
+      exportedAt: result.snapshot.exportedAt,
+      results: result.results,
     })
     return true
   }
@@ -299,6 +318,610 @@ function projectBundleFromSnapshot(snapshot, projectId) {
     events: (snapshot.events ?? []).filter((row) => row.projectId === projectId),
     aiThreads: (snapshot.aiThreads ?? []).filter((row) => row.projectId === projectId),
     aiMessages: (snapshot.aiMessages ?? []).filter((row) => row.projectId === projectId),
+  }
+}
+
+function applyPlanupActions(sourceSnapshot, request) {
+  const snapshot = structuredCloneJson(sourceSnapshot)
+  const projectId = cleanString(request?.projectId)
+  const project = (snapshot.projects ?? []).find((p) => p.id === projectId)
+  if (!project) {
+    return {
+      snapshot,
+      changed: false,
+      results: [{ ok: false, label: `Project not found: ${projectId ?? 'missing'}` }],
+    }
+  }
+
+  normalizeSnapshotArrays(snapshot)
+  const actions = normalizePlanupActions(request?.actions)
+  const ctx = buildActionContext(snapshot, project.id, {
+    sprintId: cleanString(request?.sprintId),
+    collectionId: cleanString(request?.collectionId),
+  })
+  const results = []
+  let changed = false
+  for (const action of actions) {
+    try {
+      const before = JSON.stringify(snapshot)
+      const result = applyOnePlanupAction(snapshot, ctx, action)
+      results.push(result)
+      if (result.ok && JSON.stringify(snapshot) !== before) {
+        changed = true
+        refreshActionContext(ctx, snapshot)
+      }
+    } catch (err) {
+      results.push({
+        ok: false,
+        label: `${action.type} failed`,
+        detail: err instanceof Error ? err.message : String(err),
+      })
+    }
+  }
+  if (!actions.length) {
+    results.push({ ok: false, label: 'No valid actions supplied.' })
+  }
+  if (changed) snapshot.exportedAt = new Date().toISOString()
+  return { snapshot, changed, results }
+}
+
+function structuredCloneJson(value) {
+  return JSON.parse(JSON.stringify(value))
+}
+
+function normalizeSnapshotArrays(snapshot) {
+  snapshot.projects ??= []
+  snapshot.members ??= []
+  snapshot.sprints ??= []
+  snapshot.collections ??= []
+  snapshot.tasks ??= []
+  snapshot.events ??= []
+  snapshot.people ??= []
+  snapshot.aiThreads ??= []
+  snapshot.aiMessages ??= []
+}
+
+function buildActionContext(snapshot, projectId, selection) {
+  const sprints = snapshot.sprints
+    .filter((s) => s.projectId === projectId)
+    .sort((a, b) => String(a.startDate).localeCompare(String(b.startDate)))
+  const collections = snapshot.collections
+    .filter((c) => c.projectId === projectId)
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+  const sprint =
+    sprints.find((s) => s.id === selection.sprintId) ??
+    latestActiveSprintFromList(sprints) ??
+    sprints.at(-1) ??
+    null
+  const collection = collections.find((c) => c.id === selection.collectionId) ?? null
+  return {
+    projectId,
+    sprintId: sprint?.id ?? null,
+    collectionId: collection?.id ?? null,
+    project: snapshot.projects.find((p) => p.id === projectId) ?? null,
+    sprints,
+    collections,
+    members: snapshot.members.filter((m) => m.projectId === projectId),
+    tasks: snapshot.tasks.filter((t) => t.projectId === projectId),
+  }
+}
+
+function refreshActionContext(ctx, snapshot) {
+  const next = buildActionContext(snapshot, ctx.projectId, {
+    sprintId: ctx.sprintId,
+    collectionId: ctx.collectionId,
+  })
+  Object.assign(ctx, next)
+}
+
+function applyOnePlanupAction(snapshot, ctx, action) {
+  if (action.type === 'create_member') {
+    if (findMemberByName(action.name, ctx.members)) {
+      return { ok: false, label: `Member already exists: ${action.name}` }
+    }
+    const member = {
+      id: uid(),
+      projectId: ctx.projectId,
+      name: action.name,
+      color: colorForName(action.name),
+      daysOff: [],
+      order: nextMemberOrder(ctx.members),
+      ...(action.title ? { title: action.title } : {}),
+    }
+    snapshot.members.push(member)
+    return { ok: true, label: `Created member "${member.name}"` }
+  }
+
+  if (action.type === 'update_member') {
+    const member = findMemberByName(action.memberName, ctx.members)
+    if (!member) return { ok: false, label: `Member not found: ${action.memberName}` }
+    if (action.name && findMemberByName(action.name, ctx.members, member.id)) {
+      return { ok: false, label: `Member already exists: ${action.name}` }
+    }
+    if (action.name) member.name = action.name
+    if (action.title !== undefined) member.title = action.title ?? ''
+    return { ok: true, label: `Updated member "${action.memberName}"` }
+  }
+
+  if (action.type === 'delete_member') {
+    const member = findMemberByName(action.memberName, ctx.members)
+    if (!member) return { ok: false, label: `Member not found: ${action.memberName}` }
+    snapshot.members = snapshot.members.filter((m) => m.id !== member.id)
+    for (const task of snapshot.tasks) {
+      if (task.assigneeId === member.id) task.assigneeId = null
+    }
+    return { ok: true, label: `Deleted member "${member.name}"` }
+  }
+
+  if (action.type === 'set_member_day_off') {
+    const member = findMemberByName(action.memberName, ctx.members)
+    if (!member) return { ok: false, label: `Member not found: ${action.memberName}` }
+    const dayOff = action.halfDay === 'am' || action.halfDay === 'pm'
+      ? { date: action.date, half: action.halfDay }
+      : { date: action.date }
+    member.daysOff = [...(member.daysOff ?? []).filter((d) => d.date !== action.date), dayOff]
+      .sort((a, b) => a.date.localeCompare(b.date))
+    return { ok: true, label: `Set ${member.name} day off on ${action.date}` }
+  }
+
+  if (action.type === 'remove_member_day_off') {
+    const member = findMemberByName(action.memberName, ctx.members)
+    if (!member) return { ok: false, label: `Member not found: ${action.memberName}` }
+    const before = member.daysOff?.length ?? 0
+    member.daysOff = (member.daysOff ?? []).filter((d) => d.date !== action.date)
+    return {
+      ok: before !== member.daysOff.length,
+      label: before !== member.daysOff.length
+        ? `Removed ${member.name} day off on ${action.date}`
+        : `${member.name} has no day off on ${action.date}`,
+    }
+  }
+
+  if (action.type === 'create_sprint') {
+    const startDate = action.startDate ?? defaultSprintDatesFor(ctx.sprints).startDate
+    if (!isMonday(startDate)) return { ok: false, label: 'Sprint start must be a Monday.' }
+    const sprint = {
+      id: uid(),
+      projectId: ctx.projectId,
+      name: `Sprint ${nextSprintNumber(ctx.sprints)}`,
+      startDate,
+      endDate: sprintEndForStart(startDate),
+      ...(action.note ? { note: action.note } : {}),
+    }
+    snapshot.sprints.push(sprint)
+    snapshot.events.push(sprintEvent(ctx.projectId, sprint.id, 'sprint_started'))
+    return { ok: true, label: `Created ${sprint.name}` }
+  }
+
+  if (action.type === 'update_sprint' || action.type === 'add_sprint_note') {
+    const sprint = ctx.sprints.find((s) => s.id === ctx.sprintId)
+    if (!sprint) return { ok: false, label: 'Select a sprint before updating it' }
+    if (action.type === 'update_sprint' && action.startDate !== undefined) {
+      if (!isMonday(action.startDate)) return { ok: false, label: 'Sprint start must be a Monday.' }
+      sprint.startDate = action.startDate
+      sprint.endDate = sprintEndForStart(action.startDate)
+    }
+    const note = action.type === 'add_sprint_note' ? action.note : action.note
+    if (note !== undefined) sprint.note = note?.trim() || undefined
+    return { ok: true, label: `Updated ${sprint.name}` }
+  }
+
+  if (action.type === 'delete_sprint') {
+    const sprint = ctx.sprints.find((s) => s.id === ctx.sprintId)
+    if (!sprint) return { ok: false, label: 'Select a sprint before deleting it' }
+    const deletedTaskIds = new Set(snapshot.tasks.filter((t) => t.sprintId === sprint.id).map((t) => t.id))
+    snapshot.sprints = snapshot.sprints.filter((s) => s.id !== sprint.id)
+    snapshot.tasks = snapshot.tasks.filter((t) => t.sprintId !== sprint.id)
+    snapshot.events = snapshot.events.filter((e) => e.sprintId !== sprint.id)
+    stripDanglingTaskReferences(snapshot, deletedTaskIds)
+    return { ok: true, label: `Deleted ${sprint.name}` }
+  }
+
+  if (action.type === 'create_collection') {
+    if (findCollectionByName(action.name, ctx.collections)) {
+      return { ok: false, label: `Collection already exists: ${action.name}` }
+    }
+    const collection = {
+      id: uid(),
+      projectId: ctx.projectId,
+      name: action.name,
+      order: nextCollectionOrder(ctx.collections),
+      sections: [{ id: uid(), name: 'All' }],
+      statuses: [
+        { id: uid(), name: 'FEATURE', color: '#FF9500' },
+        { id: uid(), name: 'EVENT', color: '#0071E3' },
+      ],
+      createdAt: Date.now(),
+    }
+    snapshot.collections.push(collection)
+    return { ok: true, label: `Created collection "${collection.name}"` }
+  }
+
+  if (action.type === 'update_collection') {
+    const collection = findCollection(action, ctx)
+    if (!collection) return { ok: false, label: 'Collection not found for update' }
+    const dupe = findCollectionByName(action.name, ctx.collections, collection.id)
+    if (dupe) return { ok: false, label: `Collection already exists: ${action.name}` }
+    const from = collection.name
+    collection.name = action.name
+    return { ok: true, label: `Renamed collection "${from}" to "${collection.name}"` }
+  }
+
+  if (action.type === 'delete_collection') {
+    const collection = findCollection(action, ctx)
+    if (!collection) return { ok: false, label: 'Collection not found for delete' }
+    const deletedTaskIds = new Set(snapshot.tasks.filter((t) => t.collectionId === collection.id).map((t) => t.id))
+    snapshot.collections = snapshot.collections.filter((c) => c.id !== collection.id)
+    snapshot.tasks = snapshot.tasks.filter((t) => t.collectionId !== collection.id)
+    stripDanglingTaskReferences(snapshot, deletedTaskIds)
+    return { ok: true, label: `Deleted collection "${collection.name}"` }
+  }
+
+  if (action.type === 'create_task' || action.type === 'create_milestone') {
+    const sprint = ctx.sprints.find((s) => s.id === ctx.sprintId)
+    if (!sprint) return { ok: false, label: 'Select a sprint before creating tasks' }
+    const assignee = findMemberByName(action.assigneeName, ctx.members)
+    if (action.assigneeName && !assignee) {
+      return { ok: false, label: `Member not found: ${action.assigneeName}` }
+    }
+    const milestoneDate = action.type === 'create_milestone' ? (action.date ?? sprint.startDate) : null
+    const task = {
+      id: uid(),
+      projectId: ctx.projectId,
+      sequence: nextTaskSequence(snapshot.tasks, sprint.id),
+      title: action.title,
+      assigneeId: assignee?.id ?? null,
+      sprintId: sprint.id,
+      status: action.status ?? 'todo',
+      priority: action.priority ?? 'normal',
+      startDate: milestoneDate ?? action.startDate ?? sprint.startDate,
+      dueDate: milestoneDate ?? action.dueDate ?? null,
+      estimate: action.type === 'create_milestone' ? 0 : (action.estimate ?? null),
+      createdAt: Date.now(),
+      dependsOn: [],
+    }
+    snapshot.tasks.push(task)
+    snapshot.events.push(taskEvent(task, sprint.id, 'created'))
+    return { ok: true, label: `Created ${action.type === 'create_milestone' ? 'milestone' : 'task'} #${task.sequence} "${task.title}"` }
+  }
+
+  if (action.type === 'update_task' || action.type === 'update_milestone') {
+    const task = action.type === 'update_milestone'
+      ? findMilestone(action, ctx)
+      : findTask(action, ctx)
+    if (!task) return { ok: false, label: `${action.type === 'update_milestone' ? 'Milestone' : 'Task'} not found for update` }
+    const patch = {}
+    if (action.title) patch.title = action.title
+    if (action.status) patch.status = action.status
+    if (action.priority) patch.priority = action.priority
+    if ('estimate' in action && action.estimate !== undefined) patch.estimate = action.estimate
+    if ('startDate' in action && action.startDate !== undefined) patch.startDate = action.startDate
+    if ('dueDate' in action && action.dueDate !== undefined) patch.dueDate = action.dueDate
+    if ('date' in action && action.date !== undefined) {
+      patch.startDate = action.date
+      patch.dueDate = action.date
+    }
+    if (action.assigneeName !== undefined) {
+      if (action.assigneeName === null) patch.assigneeId = null
+      else {
+        const assignee = findMemberByName(action.assigneeName, ctx.members)
+        if (!assignee) return { ok: false, label: `Member not found: ${action.assigneeName}` }
+        patch.assigneeId = assignee.id
+      }
+    }
+    if (!Object.keys(patch).length) return { ok: false, label: `No valid changes for #${task.sequence}` }
+    Object.assign(task, patch)
+    return { ok: true, label: `Updated ${action.type === 'update_milestone' ? 'milestone' : 'task'} #${task.sequence}` }
+  }
+
+  if (action.type === 'delete_task' || action.type === 'delete_milestone') {
+    const task = action.type === 'delete_milestone' ? findMilestone(action, ctx) : findTask(action, ctx)
+    if (!task) return { ok: false, label: `${action.type === 'delete_milestone' ? 'Milestone' : 'Task'} not found for delete` }
+    snapshot.tasks = snapshot.tasks.filter((t) => t.id !== task.id)
+    stripDanglingTaskReferences(snapshot, new Set([task.id]))
+    for (const child of snapshot.tasks) if (child.parentId === task.id) child.parentId = null
+    return { ok: true, label: `Deleted ${action.type === 'delete_milestone' ? 'milestone' : 'task'} #${task.sequence} "${task.title}"` }
+  }
+
+  if (action.type === 'move_task_to_next_sprint') {
+    const task = findTask(action, ctx)
+    if (!task) return { ok: false, label: 'Task not found for move' }
+    const sourceId = task.sprintId ?? ctx.sprintId
+    const sourceIndex = ctx.sprints.findIndex((s) => s.id === sourceId)
+    const target = sourceIndex >= 0 ? ctx.sprints.slice(sourceIndex + 1).find((s) => s.archivedAt == null) : null
+    if (!target) return { ok: false, label: 'No next active sprint found for move' }
+    moveTaskIntoSprint(snapshot, task, target)
+    return { ok: true, label: `Moved task #${task.sequence} to ${target.name}` }
+  }
+
+  if (action.type === 'move_task_to_sprint') {
+    const task = findTask(action, ctx)
+    if (!task) return { ok: false, label: 'Task not found for sprint move' }
+    const sprint = findSprint(action, ctx.sprints)
+    if (!sprint || sprint.archivedAt != null) {
+      return { ok: false, label: `Sprint not found: ${action.sprintName ?? action.sprintId ?? 'unknown'}` }
+    }
+    moveTaskIntoSprint(snapshot, task, sprint)
+    return { ok: true, label: `Moved task #${task.sequence} to ${sprint.name}` }
+  }
+
+  if (action.type === 'move_task_to_collection') {
+    const task = findTask(action, ctx)
+    if (!task) return { ok: false, label: 'Task not found for collection move' }
+    const collection = findCollection(action, ctx)
+    if (!collection) {
+      return { ok: false, label: `Collection not found: ${action.collectionName ?? action.collectionId ?? 'unknown'}` }
+    }
+    task.sprintId = null
+    task.collectionId = collection.id
+    task.sectionId = collection.sections?.[0]?.id ?? null
+    task.collectionStatusId = collection.statuses?.[0]?.id ?? null
+    task.dependsOn = []
+    task.parentId = null
+    delete task.boardOrder
+    delete task.listOrder
+    stripDanglingTaskReferences(snapshot, new Set([task.id]))
+    return { ok: true, label: `Moved task #${task.sequence} to collection ${collection.name}` }
+  }
+
+  return { ok: false, label: `Unsupported action: ${action.type}` }
+}
+
+function normalizePlanupActions(value) {
+  return (Array.isArray(value) ? value : []).map(normalizePlanupAction).filter(Boolean).slice(0, 100)
+}
+
+function normalizePlanupAction(raw) {
+  if (!raw || typeof raw !== 'object') return null
+  const type = raw.type
+  const action = { type }
+  for (const key of [
+    'title', 'taskTitle', 'assigneeName', 'status', 'priority', 'startDate', 'dueDate',
+    'date', 'note', 'sprintId', 'sprintName', 'collectionId', 'collectionName',
+    'name', 'memberName', 'title',
+  ]) {
+    if (raw[key] !== undefined) action[key] = raw[key] === null ? null : cleanString(raw[key])
+  }
+  if (raw.taskSeq !== undefined) action.taskSeq = cleanPositiveInt(raw.taskSeq)
+  if (raw.estimate !== undefined) action.estimate = raw.estimate === null ? null : cleanNonNegativeNumber(raw.estimate)
+  if (raw.halfDay !== undefined || raw.half !== undefined) action.halfDay = cleanHalfDay(raw.halfDay ?? raw.half)
+  if (raw.type === 'create_task' && action.title) return action
+  if (raw.type === 'create_milestone' && action.title) return action
+  if (raw.type === 'update_task' && (action.taskSeq || action.taskTitle)) return action
+  if (raw.type === 'delete_task' && (action.taskSeq || action.taskTitle)) return action
+  if (raw.type === 'update_milestone' && (action.taskSeq || action.taskTitle)) return action
+  if (raw.type === 'delete_milestone' && (action.taskSeq || action.taskTitle)) return action
+  if (raw.type === 'move_task_to_next_sprint' && (action.taskSeq || action.taskTitle)) return action
+  if (raw.type === 'move_task_to_sprint' && (action.taskSeq || action.taskTitle) && (action.sprintId || action.sprintName)) return action
+  if (raw.type === 'move_task_to_collection' && (action.taskSeq || action.taskTitle) && (action.collectionId || action.collectionName)) return action
+  if (raw.type === 'create_sprint') return action
+  if (raw.type === 'update_sprint' && (action.startDate !== undefined || action.note !== undefined)) return action
+  if (raw.type === 'add_sprint_note' && action.note) return action
+  if (raw.type === 'delete_sprint') return action
+  if (raw.type === 'create_collection' && action.name) return action
+  if (raw.type === 'update_collection' && action.name) return action
+  if (raw.type === 'delete_collection') return action
+  if (raw.type === 'create_member' && action.name) return action
+  if (raw.type === 'update_member' && action.memberName && (action.name || action.title !== undefined)) return action
+  if (raw.type === 'delete_member' && action.memberName) return action
+  if (raw.type === 'set_member_day_off' && action.memberName && action.date) return action
+  if (raw.type === 'remove_member_day_off' && action.memberName && action.date) return action
+  return null
+}
+
+function cleanString(value) {
+  if (typeof value !== 'string') return undefined
+  const trimmed = value.trim()
+  return trimmed || undefined
+}
+
+function cleanPositiveInt(value) {
+  const n = typeof value === 'number' ? value : Number(value)
+  return Number.isInteger(n) && n > 0 ? n : undefined
+}
+
+function cleanNonNegativeNumber(value) {
+  const n = typeof value === 'number' ? value : Number(value)
+  return Number.isFinite(n) && n >= 0 ? n : undefined
+}
+
+function cleanHalfDay(value) {
+  const v = cleanString(value)?.toLowerCase()
+  if (!v) return undefined
+  if (['all', 'full', 'day', 'full_day', 'full-day'].includes(v)) return 'all'
+  if (['am', 'morning'].includes(v)) return 'am'
+  if (['pm', 'afternoon'].includes(v)) return 'pm'
+  return undefined
+}
+
+function uid() {
+  return randomUUID()
+}
+
+function colorForName(name) {
+  const palette = ['#a855f7', '#f97316', '#3b82f6', '#10b981', '#ef4444', '#eab308', '#ec4899', '#14b8a6']
+  let h = 0
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) | 0
+  return palette[Math.abs(h) % palette.length]
+}
+
+function findMemberByName(name, members, excludeId) {
+  const q = cleanString(name)?.toLowerCase()
+  if (!q) return null
+  return members.find((m) => m.id !== excludeId && m.name?.toLowerCase() === q) ?? null
+}
+
+function findTask(action, ctx) {
+  const scope = ctx.collectionId
+    ? ctx.tasks.filter((t) => t.collectionId === ctx.collectionId)
+    : ctx.sprintId
+      ? ctx.tasks.filter((t) => t.sprintId === ctx.sprintId)
+      : ctx.tasks
+  if (action.taskSeq) {
+    const bySeq = scope.find((t) => t.sequence === action.taskSeq)
+    if (bySeq) return bySeq
+  }
+  const title = action.taskTitle?.trim().toLowerCase()
+  if (!title) return null
+  return scope.find((t) => t.title.toLowerCase() === title) ?? scope.find((t) => t.title.toLowerCase().includes(title)) ?? null
+}
+
+function findMilestone(action, ctx) {
+  const task = findTask(action, ctx)
+  return task?.estimate === 0 ? task : null
+}
+
+function findSprint(action, sprints) {
+  if (action.sprintId) {
+    const byId = sprints.find((s) => s.id === action.sprintId)
+    if (byId) return byId
+  }
+  const q = action.sprintName?.trim().toLowerCase()
+  if (!q) return null
+  return sprints.find((s) => s.name.toLowerCase() === q) ?? sprints.find((s) => s.name.toLowerCase().includes(q)) ?? null
+}
+
+function findCollection(action, ctx) {
+  if (action.collectionId) {
+    const byId = ctx.collections.find((c) => c.id === action.collectionId)
+    if (byId) return byId
+  }
+  const q = action.collectionName?.trim().toLowerCase()
+  if (q) {
+    return ctx.collections.find((c) => c.name.toLowerCase() === q) ?? ctx.collections.find((c) => c.name.toLowerCase().includes(q)) ?? null
+  }
+  return ctx.collections.find((c) => c.id === ctx.collectionId) ?? null
+}
+
+function findCollectionByName(name, collections, excludeId) {
+  const q = cleanString(name)?.toLowerCase()
+  if (!q) return null
+  return collections.find((c) => c.id !== excludeId && c.name.toLowerCase() === q) ?? null
+}
+
+function nextMemberOrder(members) {
+  return members.reduce((max, m) => Math.max(max, m.order ?? -1), -1) + 1
+}
+
+function nextCollectionOrder(collections) {
+  return collections.reduce((max, c) => Math.max(max, c.order ?? -1), -1) + 1
+}
+
+function nextTaskSequence(tasks, sprintId) {
+  return tasks.filter((t) => t.sprintId === sprintId).reduce((max, t) => Math.max(max, t.sequence ?? 0), 0) + 1
+}
+
+function latestActiveSprintFromList(sprints) {
+  for (let i = sprints.length - 1; i >= 0; i--) {
+    if (sprints[i].archivedAt == null) return sprints[i]
+  }
+  return null
+}
+
+function nextSprintNumber(sprints) {
+  let max = 0
+  for (const sprint of sprints) {
+    const match = String(sprint.name ?? '').match(/Sprint\s+(\d+)/i)
+    if (match) max = Math.max(max, Number(match[1]))
+  }
+  return max > 0 ? max + 1 : sprints.length + 1
+}
+
+function defaultSprintDatesFor(sprints) {
+  const latest = latestActiveSprintFromList(sprints)
+  return defaultSprintDates(latest?.endDate ?? null, todayLocalISO())
+}
+
+function todayLocalISO() {
+  const d = new Date()
+  const p = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+}
+
+function defaultSprintDates(lastEndDate, todayStr) {
+  const thisWeek = snapToMonday(todayStr)
+  let startDate = thisWeek
+  if (lastEndDate) {
+    const d = new Date(`${lastEndDate}T00:00:00Z`)
+    d.setUTCDate(d.getUTCDate() + 1)
+    const afterLast = nextMondayOnOrAfter(d.toISOString().slice(0, 10))
+    startDate = afterLast > thisWeek ? afterLast : thisWeek
+  }
+  return { startDate, endDate: sprintEndForStart(startDate) }
+}
+
+function sprintEndForStart(startDate) {
+  const date = new Date(`${startDate}T00:00:00Z`)
+  date.setUTCDate(date.getUTCDate() + 13)
+  return date.toISOString().slice(0, 10)
+}
+
+function snapToMonday(dateStr) {
+  const date = new Date(`${dateStr}T00:00:00Z`)
+  const delta = (date.getUTCDay() + 6) % 7
+  date.setUTCDate(date.getUTCDate() - delta)
+  return date.toISOString().slice(0, 10)
+}
+
+function nextMondayOnOrAfter(dateStr) {
+  const date = new Date(`${dateStr}T00:00:00Z`)
+  const delta = (8 - date.getUTCDay()) % 7
+  date.setUTCDate(date.getUTCDate() + delta)
+  return date.toISOString().slice(0, 10)
+}
+
+function isMonday(dateStr) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(dateStr) && snapToMonday(dateStr) === dateStr
+}
+
+function sprintEvent(projectId, sprintId, kind) {
+  return {
+    id: uid(),
+    projectId,
+    sprintId,
+    taskId: null,
+    taskSeq: null,
+    taskTitle: null,
+    kind,
+    from: null,
+    to: null,
+    ts: Date.now(),
+  }
+}
+
+function taskEvent(task, sprintId, kind) {
+  return {
+    id: uid(),
+    projectId: task.projectId,
+    sprintId,
+    taskId: task.id,
+    taskSeq: task.sequence,
+    taskTitle: task.title,
+    kind,
+    from: null,
+    to: null,
+    ts: Date.now(),
+  }
+}
+
+function moveTaskIntoSprint(snapshot, task, sprint) {
+  task.sprintId = sprint.id
+  task.collectionId = null
+  task.sectionId = null
+  task.collectionStatusId = null
+  task.sequence = nextTaskSequence(snapshot.tasks, sprint.id)
+  if (!task.startDate || task.startDate < sprint.startDate) task.startDate = sprint.startDate
+  delete task.boardOrder
+  delete task.listOrder
+  snapshot.events.push(taskEvent(task, sprint.id, 'rolled_over'))
+}
+
+function stripDanglingTaskReferences(snapshot, deletedTaskIds) {
+  for (const task of snapshot.tasks) {
+    if (Array.isArray(task.dependsOn)) {
+      task.dependsOn = task.dependsOn.filter((id) => !deletedTaskIds.has(id))
+    }
+    if (deletedTaskIds.has(task.parentId)) task.parentId = null
   }
 }
 

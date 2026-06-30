@@ -2,7 +2,7 @@
 
 **Status:** Implemented
 **Last updated:** 2026-06-30
-**Code:** `app/server/openai-gateway.mjs`, `app/src/server-sync.ts`, `app/src/App.tsx`
+**Code:** `app/server/openai-gateway.mjs`, `app/server/planup-mcp.mjs`, `app/src/server-sync.ts`, `app/src/App.tsx`
 
 ## Purpose
 
@@ -28,6 +28,10 @@ client cache for the existing UI and syncs that cache with the server.
   - `GET /api/projects/:projectId/context`
   - `GET /api/projects/:projectId/export`
   - `GET /api/db/snapshot`
+- Codex/Codex CLI can connect through the stdio MCP server:
+  - `planup_list_projects`
+  - `planup_get_project_context`
+  - `planup_apply_actions`
 
 ## Data
 
@@ -47,6 +51,13 @@ These files are runtime/cache data and are gitignored.
 - The gateway exposes a small DB API alongside the existing OpenAI gateway.
 - The DB API accepts and returns the app's existing full export payload shape
   from `exportAll()` / `importAll()`.
+- `POST /api/actions/apply` accepts the same typed action names used by AI Chat,
+  applies them to the server snapshot, rewrites the cache files, and returns a
+  per-action result list. The endpoint requires `projectId`; `sprintId` or
+  `collectionId` should be supplied for sprint/collection-scoped task actions.
+- `app/server/planup-mcp.mjs` is a dependency-free MCP stdio wrapper around the
+  HTTP gateway. It reads `PLAN_UP_GATEWAY_URL` and defaults to
+  `http://127.0.0.1:5173`.
 - `app/src/server-sync.ts` owns browser-side sync:
   - `loadServerSnapshot()` fetches `/api/db/snapshot`.
   - `saveServerSnapshot()` uploads a full payload with `PUT /api/db/snapshot`.
@@ -55,6 +66,25 @@ These files are runtime/cache data and are gitignored.
 - `App.tsx` hydrates from the server before `seedIfEmpty()`.
 - `App.tsx` watches the full Dexie export payload with `useLiveQuery` and
   debounces sync writes.
+- `App.tsx` also polls the server snapshot while open. If an external MCP tool
+  updates the server, the browser imports the newer snapshot so the UI follows
+  Codex-side changes without a manual reload.
+
+MCP config example:
+
+```json
+{
+  "mcpServers": {
+    "plan-up": {
+      "command": "node",
+      "args": ["/Users/lap15967/Documents/vng/plan-up/app/server/planup-mcp.mjs"],
+      "env": {
+        "PLAN_UP_GATEWAY_URL": "http://127.0.0.1:5173"
+      }
+    }
+  }
+}
+```
 
 ## Rules & edge cases
 
@@ -66,13 +96,16 @@ These files are runtime/cache data and are gitignored.
   with Dexie cache so a temporary gateway issue does not block planning.
 - The cache export is full-snapshot only in this phase. Row-level write APIs and
   conflict resolution are future work.
-- The gateway does not expose destructive write actions yet. External agents
-  should read context from these endpoints and still use the app's typed action
-  confirmation flow for mutations.
+- The MCP write path is intentionally typed actions, not arbitrary JSON editing.
+  Destructive actions such as `delete_task`, `delete_sprint`, `delete_collection`,
+  and `delete_member` are available only through explicit action objects.
+- The first MCP action endpoint mutates server snapshot fields and preserves the
+  same entity invariants as the app action contract. The full browser scheduling
+  engine still remains richer than the server helper; future row APIs should
+  converge these implementations.
 
 ## Future / open questions
 
-- Add a dedicated MCP server that wraps these HTTP endpoints as tools.
 - Replace full-snapshot sync with server row APIs once the UI no longer relies
   directly on Dexie writes.
 - Add optimistic concurrency with snapshot revision IDs before supporting

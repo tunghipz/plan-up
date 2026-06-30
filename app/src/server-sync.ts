@@ -21,8 +21,15 @@ export async function loadServerSnapshot(): Promise<ExportPayload | null> {
   return data.snapshot
 }
 
-export async function saveServerSnapshot(snapshot: ExportPayload): Promise<void> {
-  if (!isServerSyncEnabled()) return
+export async function saveServerSnapshot(
+  snapshot: ExportPayload
+): Promise<{ exportedAt: string; projectCount: number }> {
+  if (!isServerSyncEnabled()) {
+    return {
+      exportedAt: snapshot.exportedAt,
+      projectCount: snapshot.projects?.length ?? 0,
+    }
+  }
   const response = await fetch('/api/db/snapshot', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
@@ -39,4 +46,5 @@ export async function saveServerSnapshot(snapshot: ExportPayload): Promise<void>
     }
     throw new Error(`Server snapshot sync failed (${response.status}).${detail}`)
   }
+  return (await response.json()) as { exportedAt: string; projectCount: number }
 }

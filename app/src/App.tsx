@@ -160,10 +160,16 @@ type ToastState = {
   onUndo?: () => void
 } | null
 
+function snapshotSignature(snapshot: ExportPayload): string {
+  const { exportedAt: _exportedAt, ...stable } = snapshot
+  return JSON.stringify(stable)
+}
+
 function App() {
   const [seedError, setSeedError] = useState<string | null>(null)
   const [seeded, setSeeded] = useState(false)
   const serverSyncTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const serverSnapshotSignature = useRef<string | null>(null)
   const [currentProjectId, setCurrentProjectIdState] = useState<string | null>(
     () => safeStorage.get(CURRENT_PROJECT_KEY)
   )
@@ -374,6 +380,7 @@ function App() {
           const snapshot = await loadServerSnapshot()
           if (snapshot) {
             await importAll(snapshot)
+            serverSnapshotSignature.current = snapshotSignature(snapshot)
             restoredFromServer = true
             console.info('[plan-up] restored Dexie cache from server snapshot')
           }
@@ -411,16 +418,46 @@ function App() {
 
   useEffect(() => {
     if (!seeded || !serverSnapshot || !isServerSyncEnabled()) return
+    const signature = snapshotSignature(serverSnapshot)
+    if (signature === serverSnapshotSignature.current) return
     if (serverSyncTimer.current) clearTimeout(serverSyncTimer.current)
     serverSyncTimer.current = setTimeout(() => {
-      saveServerSnapshot(serverSnapshot).catch((e) => {
-        console.warn('[plan-up] could not sync server snapshot', e)
-      })
+      saveServerSnapshot(serverSnapshot)
+        .then(() => {
+          serverSnapshotSignature.current = signature
+        })
+        .catch((e) => {
+          console.warn('[plan-up] could not sync server snapshot', e)
+        })
     }, 900)
     return () => {
       if (serverSyncTimer.current) clearTimeout(serverSyncTimer.current)
     }
   }, [seeded, serverSnapshot])
+
+  useEffect(() => {
+    if (!seeded || !isServerSyncEnabled()) return
+    let cancelled = false
+    const poll = async () => {
+      try {
+        const snapshot = await loadServerSnapshot()
+        if (!snapshot || cancelled) return
+        const signature = snapshotSignature(snapshot)
+        if (signature !== serverSnapshotSignature.current) {
+          await importAll(snapshot)
+          serverSnapshotSignature.current = signature
+          console.info('[plan-up] pulled updated server snapshot')
+        }
+      } catch (e) {
+        console.warn('[plan-up] could not pull server snapshot', e)
+      }
+    }
+    const id = window.setInterval(poll, 4000)
+    return () => {
+      cancelled = true
+      window.clearInterval(id)
+    }
+  }, [seeded])
 
   // `undefined` (not `[]`) until seeded — an empty array reads as "no projects
   // exist" and would null the restored `currentProjectId` during the load

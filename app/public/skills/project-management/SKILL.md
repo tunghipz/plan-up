@@ -1,20 +1,34 @@
 ---
 name: project-management
-description: Use inside plan-up AI Chat for sprint planning, task triage, member planning, milestones, and safe project-management edits through plan-up typed actions. The skill works from the app-provided project/sprint/collection context and must not call external MCP tools.
+description: Use with plan-up for sprint planning, task triage, member planning, milestones, and safe project-management edits through either in-app typed actions or the plan-up MCP tools.
 ---
 
 # Project management inside plan-up
 
-You are helping inside **plan-up**, a local-first sprint planner. The app gives
-you the current project, selected sprint or collection, members, and visible
-tasks. You do **not** have direct database access, and you must not call external
-MCP tools.
+You are helping with **plan-up**, a sprint planner whose server owns the
+canonical project snapshot.
+
+There are two supported execution modes:
+
+1. **In-app AI Chat mode:** the app gives you the current project, selected
+   sprint or collection, members, and visible tasks. Return JSON typed actions
+   for the app to preview and apply.
+2. **Codex/MCP mode:** use the plan-up MCP tools exposed by the running gateway:
+   `planup_list_projects`, `planup_get_project_context`, and
+   `planup_apply_actions`.
 
 Use the visible app context first. When the user asks for a supported change,
 return a typed action for the app to preview and apply after user confirmation.
 Do not answer only in prose for a supported mutation.
 
+When you are operating through MCP rather than inside the app drawer, call
+`planup_get_project_context` before writing so you can target stable project,
+sprint, collection, member, and task IDs. Then call `planup_apply_actions` with
+the same action objects described below.
+
 ## Output contract
+
+### In-app AI Chat
 
 Return only the JSON object required by the system prompt:
 
@@ -27,6 +41,23 @@ Return only the JSON object required by the system prompt:
 
 Use plain markdown in `reply` when explaining, summarizing, or making a table.
 Use actions only for app mutations.
+
+### Codex/MCP
+
+Use MCP tools instead of returning an app drawer JSON proposal:
+
+- `planup_list_projects` lists known projects from the started gateway.
+- `planup_get_project_context` returns a project bundle with sprints,
+  collections, members, tasks, events, and chat history.
+- `planup_apply_actions` applies typed actions to the server-primary snapshot.
+
+For write requests in MCP mode:
+
+1. Resolve the target project and context.
+2. Prefer stable IDs (`projectId`, `sprintId`, `collectionId`) from context.
+3. Pass `dryRun: true` first when the user did not explicitly ask you to apply
+   immediately.
+4. Pass the final `actions` array to `planup_apply_actions`.
 
 ## Action-first rule
 
@@ -322,7 +353,9 @@ User: "Chuyển task #4 vào collection Roadmap"
 }
 ```
 
-## Do not use external tools
+## Tool boundaries
 
-Do not call or describe external project-management MCP servers. In plan-up, the
-only mutation path is the JSON action array above.
+Use only plan-up's own MCP tools for server-side project control. Do not call or
+describe old external project-management MCP servers. In in-app AI Chat mode,
+the mutation path is still the JSON action array above; in Codex/MCP mode, the
+mutation path is `planup_apply_actions` with that same action array.

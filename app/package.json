@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "node server/openai-gateway.mjs",
     "dev:vite": "vite",
+    "mcp": "node server/planup-mcp.mjs",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "NODE_ENV=production node server/openai-gateway.mjs",

@@ -1,8 +1,8 @@
 # AI Chat
 
 **Status:** Implemented (MVP)
-**Last updated:** 2026-06-23 (Backlog system action removed; collection tasks can be assigned/deleted)
-**Code:** `app/src/AiChatDrawer.tsx`, `app/src/ai/*`, `app/src/App.tsx`, `app/public/skills/project-management/SKILL.md`
+**Last updated:** 2026-06-30 (project-management skill documents plan-up MCP mode)
+**Code:** `app/src/AiChatDrawer.tsx`, `app/src/ai/*`, `app/src/App.tsx`, `app/public/skills/project-management/SKILL.md`, `app/server/planup-mcp.mjs`
 
 ## Purpose
 
@@ -177,9 +177,9 @@ a new chat starts. The loaded markdown is injected into the system prompt as
 skill guidance for the model, but it is still treated as data: it cannot bypass
 the typed action validator/executor.
 
-The bundled skill must describe **plan-up's in-app action contract**, not a
-standalone MCP server. It should guide the model to answer from the visible app
-context and propose only the supported JSON action types (`create_task`,
+The bundled skill must describe **plan-up's action contract**. In the drawer it
+guides the model to answer from the visible app context and propose only the
+supported JSON action types (`create_task`,
 `update_task`, `delete_task`, `create_milestone`, `update_milestone`,
 `delete_milestone`, `move_task_to_next_sprint`, `move_task_to_sprint`,
 `move_task_to_collection`, `create_sprint`,
@@ -190,6 +190,11 @@ context and propose only the supported JSON action types (`create_task`,
 project-management MCP tools such as Quipu, Microsoft Project XML,
 `read_project`, `list_tasks`, or `assign_task` belong outside this app skill and
 should fail regression tests.
+
+The same skill also documents the new plan-up MCP mode for Codex/Codex CLI:
+`planup_list_projects`, `planup_get_project_context`, and
+`planup_apply_actions`. These tools target the plan-up gateway's server-primary
+snapshot and use the same typed action objects as the drawer.
 
 For supported write requests, the skill must be action-first: return at least
 one typed action whenever the target and required fields are clear enough. The

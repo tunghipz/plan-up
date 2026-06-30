@@ -238,8 +238,13 @@ function saveCollapsed(sprintId: string, set: Set<string>) {
   }
 }
 
-type Sort = { field: SortField; dir: 'asc' | 'desc' }
-const DEFAULT_SORT: Sort = { field: 'seq', dir: 'asc' }
+// `field: null` is the NEUTRAL state — no column sorted, rows fall back to the
+// manual order (listOrder ?? sequence) and no header shows an arrow. It's the
+// third stop in every column's asc → desc → off cycle. Keeping it distinct from
+// `seq asc` is what lets the ID/seq column clear its arrow too (off ≠ seq asc
+// visually identical rows, but the indicator disappears). See list-view.md.
+type Sort = { field: SortField | null; dir: 'asc' | 'desc' }
+const DEFAULT_SORT: Sort = { field: null, dir: 'asc' }
 const SORT_FIELDS: SortField[] = [
   'seq',
   'title',
@@ -255,6 +260,14 @@ function loadSort(): Sort {
     const raw = localStorage.getItem(SORT_KEY)
     if (!raw) return DEFAULT_SORT
     const parsed = JSON.parse(raw) as Partial<Sort>
+    // Persisted neutral state (no field) restores as-is.
+    if (parsed && parsed.field == null) return DEFAULT_SORT
+    // Legacy migration: before the neutral state existed, `seq asc` WAS the
+    // default/off state. It renders identically to neutral (manual order), so
+    // map an old persisted `seq asc` onto neutral — otherwise an upgrading user
+    // keeps seeing the ID column stuck with an arrow. An explicit `seq desc` is
+    // a real choice → kept.
+    if (parsed && parsed.field === 'seq' && parsed.dir === 'asc') return DEFAULT_SORT
     if (
       parsed &&
       SORT_FIELDS.includes(parsed.field as SortField) &&
@@ -362,8 +375,10 @@ export function SprintView({
       if (owner) byMember.get(owner)!.push(t)
       else orphan.push(t)
     }
-    // Sort each member's tasks by the user-selected field (defaults to seq asc).
-    const cmp = (a: Task, b: Task) => compareTasks(a, b, sort.field, sort.dir)
+    // Sort each member's tasks by the user-selected field. Neutral (field null)
+    // falls back to the manual order — same as `seq asc`.
+    const cmp = (a: Task, b: Task) =>
+      compareTasks(a, b, sort.field ?? 'seq', sort.field ? sort.dir : 'asc')
     for (const arr of byMember.values()) arr.sort(cmp)
     orphan.sort(cmp)
     const filled = ms.filter((m) => (byMember.get(m.id) ?? []).length > 0)
@@ -400,12 +415,13 @@ export function SprintView({
       laneRaf.current = 0
     }
   }
-  const hoverLane = (targetId: string, el: HTMLElement, clientY: number) => {
-    if (!dragMemberId || targetId === dragMemberId) {
+  const hoverLane = (targetEl: Element | null | undefined, clientY: number) => {
+    const targetId = targetEl instanceof HTMLElement ? targetEl.dataset.laneId : undefined
+    if (!dragMemberId || !targetId || targetId === dragMemberId) {
       if (laneOver) setLaneOver(null)
       return
     }
-    lanePending.current = { id: targetId, el, clientY }
+    lanePending.current = { id: targetId, el: targetEl as HTMLElement, clientY }
     if (laneRaf.current) return
     laneRaf.current = requestAnimationFrame(() => {
       laneRaf.current = 0
@@ -419,14 +435,14 @@ export function SprintView({
       )
     })
   }
-  const dropOnLane = (targetId: string, el: HTMLElement, clientY: number) => {
+  const dropOnLane = (targetEl: Element | null | undefined, clientY: number) => {
     const id = dragMemberId
-    endLaneDrag()
-    if (!id || targetId === id) return
+    const targetId = targetEl instanceof HTMLElement ? targetEl.dataset.laneId : undefined
+    if (!id || !targetId || targetId === id) return
     const arr = laneMembers
     const dragged = arr.find((m) => m.id === id)
     if (!dragged || !arr.some((m) => m.id === targetId)) return
-    const r = el.getBoundingClientRect()
+    const r = (targetEl as HTMLElement).getBoundingClientRect()
     const pos: 'before' | 'after' =
       clientY - r.top > r.height / 2 ? 'after' : 'before'
     const fromIndex = arr.findIndex((m) => m.id === id)
@@ -463,12 +479,13 @@ export function SprintView({
   const laneDragFor = (m: Member): RowDrag => ({
     id: m.id,
     enabled: laneMembers.length > 1,
-    active: dragMemberId !== null,
     dragging: dragMemberId === m.id,
     over: laneOver?.id === m.id ? laneOver.pos : null,
     onStart: () => setDragMemberId(m.id),
-    onOver: (el, clientY) => hoverLane(m.id, el, clientY),
-    onDrop: (el, clientY) => dropOnLane(m.id, el, clientY),
+    onMove: (x, y) =>
+      hoverLane(document.elementFromPoint(x, y)?.closest('[data-lane-id]'), y),
+    onDrop: (x, y) =>
+      dropOnLane(document.elementFromPoint(x, y)?.closest('[data-lane-id]'), y),
     onEnd: endLaneDrag,
   })
 
@@ -755,9 +772,9 @@ function MemberCard({
   tasksById: Map<string, Task>
   collapsed: boolean
   onToggleCollapse: () => void
-  sort: { field: SortField; dir: 'asc' | 'desc' }
+  sort: Sort
   setSort: React.Dispatch<
-    React.SetStateAction<{ field: SortField; dir: 'asc' | 'desc' }>
+    React.SetStateAction<Sort>
   >
   selectedIds: Set<string>
   onToggleSelect: (id: string) => void
@@ -802,7 +819,7 @@ function MemberCard({
     const conflictTips = computeMemberConflicts(leafTasks, tasksById, memberById)
     return { total, done, pct, overdue, nextDue, conflictTips }
   }, [tasks, parentIds, tasksById, memberById])
-  const { grip, rowProps, dragging } = useDragHandle(drag, LANE_GRIP_CLASS)
+  const { grip, rowProps, dragging } = useDragHandle(drag, LANE_GRIP_CLASS, 'data-lane-id')
   return (
     <Card className={`relative ${dragging ? 'opacity-40' : ''}`} {...rowProps}>
       {drag?.over === 'before' && (
@@ -849,7 +866,7 @@ function MemberCard({
                 conflictTips={conflictTips}
                 selectedIds={selectedIds}
                 onToggleSelect={onToggleSelect}
-                canReorder={sort.field === 'seq'}
+                canReorder={sort.field == null || (sort.field === 'seq' && sort.dir === 'asc')}
               />
               <AddTaskRow
                 projectId={projectId}
@@ -880,9 +897,9 @@ function UnassignedCard({
   members: Member[]
   allTasks: Task[]
   tasksById: Map<string, Task>
-  sort: { field: SortField; dir: 'asc' | 'desc' }
+  sort: Sort
   setSort: React.Dispatch<
-    React.SetStateAction<{ field: SortField; dir: 'asc' | 'desc' }>
+    React.SetStateAction<Sort>
   >
   selectedIds: Set<string>
   onToggleSelect: (id: string) => void
@@ -910,7 +927,7 @@ function UnassignedCard({
               tasksById={tasksById}
               selectedIds={selectedIds}
               onToggleSelect={onToggleSelect}
-              canReorder={sort.field === 'seq'}
+              canReorder={sort.field == null || (sort.field === 'seq' && sort.dir === 'asc')}
             />
           </div>
         </div>
@@ -1429,58 +1446,90 @@ function StatusPill({ status }: { status: Status }) {
  */
 /**
  * Per-row drag state handed down from TaskRows. `enabled` gates the whole feature
- * (only in the default seq order); `active` = a drag is in progress in this card.
+ * (only in the manual ascending order). Pointer-based: the grip captures the
+ * pointer and reports cursor coordinates; the owner resolves which row/lane is
+ * under the cursor via `elementFromPoint`. (Replaced the old HTML5 native-drag
+ * wiring, which was browser-fragile — see list-view.md / drag history.)
  */
 type RowDrag = {
   id: string
   enabled: boolean
-  active: boolean
   dragging: boolean
   over: 'before' | 'after' | null
   onStart: () => void
-  onOver: (el: HTMLElement, clientY: number) => void
-  onDrop: (el: HTMLElement, clientY: number) => void
+  onMove: (clientX: number, clientY: number) => void
+  onDrop: (clientX: number, clientY: number) => void
   onEnd: () => void
 }
 
 /**
- * Wires native HTML5 drag to a row. The row is `draggable` ONLY while the grip
- * is held: the grip's pointerdown finds the row (via the `data-drag-row` marker)
- * and flips `el.draggable = true` synchronously, resetting it on release/dragend.
- * At rest the row is not draggable, so its text (task title) stays selectable —
- * a permanently-`draggable` ancestor blocks text selection in WebKit/Safari. The
- * `armedRef` (also set on grip pointerdown) is a belt-and-braces guard so only a
- * grip-initiated dragstart counts. The whole row is the drag image. Returns the
- * grip, the drop-slot indicator line, and the props to spread on the row element.
+ * Wires POINTER-based drag to a row/lane (replaced HTML5 native drag, which was
+ * browser-fragile: dragstart/dragover/`preventDefault` timing and imperative
+ * `draggable` toggling failed unpredictably across browsers — see drag history).
+ * The grip's pointerdown captures the pointer, so every pointermove/up routes to
+ * the grip no matter where the cursor goes; the owner resolves the row/lane under
+ * the cursor via `elementFromPoint` + a data-attr. `grabbedRef` bounds the gesture
+ * to this grip's own down→up. No `draggable`, so row text stays selectable at rest.
+ * Returns the grip, the drop-slot indicator line, and props to spread on the root
+ * (carries the hit-test data-attr for lanes; rows already have `data-task-id`).
  */
 function useDragHandle(
   drag?: RowDrag,
   // Grip positioning/reveal classes. Defaults suit a task row (revealed on
   // `group/row` hover); member lanes pass a `group/card`-scoped variant.
-  gripClassName = 'absolute left-0.5 top-1/2 -translate-y-1/2 z-20 grid place-items-center w-4 h-6 text-ink-faint/70 hover:text-ink-muted opacity-0 group-hover/row:opacity-100 transition-opacity cursor-grab active:cursor-grabbing touch-none'
+  gripClassName = 'absolute left-0.5 top-1/2 -translate-y-1/2 z-20 grid place-items-center w-4 h-6 text-ink-faint/70 hover:text-ink-muted opacity-0 group-hover/row:opacity-100 transition-opacity cursor-grab active:cursor-grabbing touch-none',
+  // When set, the owner's hit-testing finds this element by this data-attr; the
+  // value is the item's id (e.g. 'data-lane-id'). Rows already carry
+  // `data-task-id` on the row div, so they pass nothing here.
+  dataAttr?: string
 ) {
-  const armedRef = useRef(false)
+  // True only between this grip's pointerdown and its pointerup — a ref so the
+  // move/up handlers never read a stale "am I dragging" from a render closure.
+  const grabbedRef = useRef(false)
   const enabled = !!drag?.enabled
   const grip = enabled ? (
     <button
       type="button"
       aria-label="Drag to reorder"
+      // Pointer-based drag: capture the pointer on the grip so every move/up is
+      // delivered here regardless of where the cursor goes; the owner resolves
+      // the row/lane under the cursor via elementFromPoint. No HTML5 native drag
+      // (browser-fragile) and no `draggable` toggling, so row text stays
+      // selectable at rest.
       onPointerDown={(e) => {
+        e.preventDefault()
         e.stopPropagation()
-        armedRef.current = true
-        // The row is NOT draggable at rest, so its text (task title) stays
-        // selectable — a `draggable` ancestor blocks text selection in WebKit/
-        // Safari. Arm draggability imperatively (synchronously, before the
-        // browser's drag decision on the following mousemove) only while the grip
-        // is held; disarm on release whether or not a drag actually happened.
-        const row = (e.currentTarget as HTMLElement).closest<HTMLElement>('[data-drag-row]')
-        if (row) row.draggable = true
-        const off = () => {
-          armedRef.current = false
-          if (row) row.draggable = false
-          window.removeEventListener('pointerup', off)
+        try {
+          ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+        } catch {
+          // setPointerCapture can throw if the pointer is already gone; ignore.
         }
-        window.addEventListener('pointerup', off)
+        grabbedRef.current = true
+        // Suppress text selection across the page while dragging.
+        document.body.style.userSelect = 'none'
+        drag!.onStart()
+      }}
+      onPointerMove={(e) => {
+        if (!grabbedRef.current) return
+        drag!.onMove(e.clientX, e.clientY)
+      }}
+      onPointerUp={(e) => {
+        if (!grabbedRef.current) return
+        grabbedRef.current = false
+        document.body.style.userSelect = ''
+        try {
+          ;(e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId)
+        } catch {
+          // ignore
+        }
+        drag!.onDrop(e.clientX, e.clientY)
+        drag!.onEnd()
+      }}
+      onPointerCancel={() => {
+        if (!grabbedRef.current) return
+        grabbedRef.current = false
+        document.body.style.userSelect = ''
+        drag!.onEnd()
       }}
       onClick={(e) => e.stopPropagation()}
       className={gripClassName}
@@ -1500,42 +1549,8 @@ function useDragHandle(
     </>
   ) : null
 
-  const rowProps: React.HTMLAttributes<HTMLDivElement> & {
-    'data-drag-row'?: string
-  } = enabled
-    ? {
-        // Marker the grip's pointerdown finds via closest() to flip `draggable`.
-        // No static `draggable: true` — that would break text selection (WebKit).
-        'data-drag-row': '',
-        onDragStart: (e) => {
-          // Only a grip-initiated drag counts; anything else (text selection,
-          // dragging an inline control) is cancelled.
-          if (!armedRef.current) {
-            e.preventDefault()
-            return
-          }
-          e.dataTransfer.effectAllowed = 'move'
-          e.dataTransfer.setData('text/plain', drag!.id)
-          drag!.onStart()
-        },
-        onDragOver: (e) => {
-          if (!drag!.active) return
-          e.preventDefault()
-          e.dataTransfer.dropEffect = 'move'
-          drag!.onOver(e.currentTarget, e.clientY)
-        },
-        onDrop: (e) => {
-          if (!drag!.active) return
-          e.preventDefault()
-          drag!.onDrop(e.currentTarget, e.clientY)
-        },
-        onDragEnd: (e) => {
-          armedRef.current = false
-          e.currentTarget.draggable = false
-          drag!.onEnd()
-        },
-      }
-    : {}
+  const rowProps: React.HTMLAttributes<HTMLDivElement> & Record<string, string> =
+    enabled && dataAttr ? { [dataAttr]: drag!.id } : {}
 
   return { grip, indicator, rowProps, dragging: !!drag?.dragging }
 }
@@ -1597,6 +1612,7 @@ function TaskGroupRow({
   return (
     <div
       {...rowProps}
+      data-task-id={task.id}
       className={`task-row group/row relative flex items-center gap-3 px-4 py-2 text-sm hover:bg-surface-hover transition bg-accent/[0.025] ${
         dragging ? 'opacity-40' : ''
       }`}
@@ -1760,15 +1776,18 @@ function TaskRows({
     dragLaneRef.current = laneOf(t)
     setDragId(t.id)
   }
-  const hoverRow = (targetId: string, el: HTMLElement, clientY: number) => {
+  // Hit-testing is owner-side now: the grip captures the pointer and reports
+  // coordinates; we map them to the row under the cursor via `data-task-id`.
+  const hoverRow = (targetEl: Element | null | undefined, clientY: number) => {
     if (!dragId) return
-    const target = tasksById.get(targetId)
+    const targetId = targetEl instanceof HTMLElement ? targetEl.dataset.taskId : undefined
+    const target = targetId ? tasksById.get(targetId) : undefined
     // Only show a slot on a same-lane row that isn't the dragged row itself.
-    if (!target || targetId === dragId || laneOf(target) !== dragLaneRef.current) {
+    if (!targetId || !target || targetId === dragId || laneOf(target) !== dragLaneRef.current) {
       if (over) setOver(null)
       return
     }
-    pendingHit.current = { id: targetId, el, clientY }
+    pendingHit.current = { id: targetId, el: targetEl as HTMLElement, clientY }
     if (overRaf.current) return
     overRaf.current = requestAnimationFrame(() => {
       overRaf.current = 0
@@ -1782,15 +1801,14 @@ function TaskRows({
       )
     })
   }
-  const dropOnRow = (targetId: string, el: HTMLElement, clientY: number) => {
+  const dropOnRow = (targetEl: Element | null | undefined, clientY: number) => {
     const id = dragId
     const lane = dragLaneRef.current
     const dragged = id ? tasksById.get(id) : null
-    const target = tasksById.get(targetId)
-    endDrag()
-    if (!id || !dragged || !target || targetId === id || laneOf(target) !== lane) return
-    // Compute the slot fresh from the drop event (avoids a stale rAF `over`).
-    const r = el.getBoundingClientRect()
+    const targetId = targetEl instanceof HTMLElement ? targetEl.dataset.taskId : undefined
+    const target = targetId ? tasksById.get(targetId) : null
+    if (!id || !dragged || !target || !targetId || targetId === id || laneOf(target) !== lane) return
+    const r = (targetEl as HTMLElement).getBoundingClientRect()
     const pos: 'before' | 'after' = clientY - r.top > r.height / 2 ? 'after' : 'before'
     const arr = laneArray(lane)
     const fromIndex = arr.findIndex((x) => x.id === id)
@@ -1828,12 +1846,13 @@ function TaskRows({
       ? {
           id: t.id,
           enabled: true,
-          active: dragId !== null,
           dragging: dragId === t.id,
           over: over?.id === t.id ? over.pos : null,
           onStart: () => beginDrag(t),
-          onOver: (el, clientY) => hoverRow(t.id, el, clientY),
-          onDrop: (el, clientY) => dropOnRow(t.id, el, clientY),
+          onMove: (x, y) =>
+            hoverRow(document.elementFromPoint(x, y)?.closest('[data-task-id]'), y),
+          onDrop: (x, y) =>
+            dropOnRow(document.elementFromPoint(x, y)?.closest('[data-task-id]'), y),
           onEnd: endDrag,
         }
       : undefined
@@ -2126,9 +2145,9 @@ function TaskColumnHeader({
   setSort,
   showAssignee = true,
 }: {
-  sort: { field: SortField; dir: 'asc' | 'desc' }
+  sort: Sort
   setSort: React.Dispatch<
-    React.SetStateAction<{ field: SortField; dir: 'asc' | 'desc' }>
+    React.SetStateAction<Sort>
   >
   showAssignee?: boolean
 }) {
@@ -2220,20 +2239,18 @@ function SortHeader({
   className: string
   field: SortField
   label: string
-  sort: { field: SortField; dir: 'asc' | 'desc' }
+  sort: Sort
   onSort: (f: SortField) => void
   align?: 'start' | 'center' | 'end'
 }) {
   const isActive = sort.field === field
-  // Hint the NEXT click in the asc → desc → off cycle (off only clears a
-  // non-seq column, since seq is the default order). See list-view.md.
+  // Hint the NEXT click in the asc → desc → off cycle. "Off" is the neutral
+  // state (no column sorted) — reachable from every column, ID included.
   const nextHint = !isActive
     ? `Sort by ${label}`
     : sort.dir === 'asc'
       ? `Sort by ${label}, descending`
-      : field === 'seq'
-        ? `Sort by ${label}, ascending`
-        : 'Clear sort'
+      : 'Clear sort'
   return (
     <button
       type="button"

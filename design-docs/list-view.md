@@ -1,7 +1,7 @@
 # List view
 
 **Status:** Implemented
-**Last updated:** 2026-06-19
+**Last updated:** 2026-06-30
 **Code:** `app/src/SprintView.tsx` (`MemberCard`, `UnassignedCard`, `GroupHeader`,
 `TaskColumnHeader`, `SortHeader`, `COL`, `TaskRows` drag state, `TaskRow` grip),
 `app/src/db.ts` (`orderBetween`, `setListOrder`)
@@ -16,13 +16,15 @@ inset-grouped cards, fully editable inline.
   + an "Add task" row.
 - **Collapse** a member card by clicking its header (persisted per sprint).
 - **Sort** by any column via its header (`ID, Task, Effort, Start, End, Status, Prereq`);
-  clicking a column **cycles three states: asc → desc → off**. "Off" clears the sort back to
-  the default `seq asc` (manual order), which also re-enables drag-to-reorder. The active
-  column shows an arrow (▲/▼); cleared columns show none. (The `ID`/`seq` column is the manual
-  order itself, so its "off" state is identical to `seq asc` — it effectively just toggles
-  asc/desc.) Sort is **shared across all member cards** (one preference, not per-member) and
-  **persisted** so it survives switching view/sprint/project and a page reload (defaults to
-  `seq asc` first run).
+  clicking a column **cycles three states: asc → desc → off**. "Off" is a NEUTRAL state
+  (`sort.field === null`) where **no column shows an arrow** and rows fall back to the manual
+  order (`listOrder ?? sequence`), which also re-enables drag-to-reorder. The active column
+  shows an arrow (▲/▼); cleared/neutral columns show none. Every column — including `ID`/`seq`
+  — can reach neutral, so its arrow can always be turned off. (Neutral and an explicit `seq asc`
+  render the same row order — `seq` IS the manual order — the only difference is whether the
+  ID header shows an arrow.) Sort is **shared across all member cards** (one preference, not
+  per-member) and **persisted** so it survives switching view/sprint/project and a page reload
+  (defaults to neutral first run).
 - Member cards omit the **Assignee** column (everyone in the group is the same person);
   the Unassigned card keeps it.
 - A task with **Effort = 0** renders as a **milestone**: a `◆ Milestone` pill after the
@@ -35,9 +37,13 @@ task to a new position — like ClickUp. Manual order is stored in `Task.listOrd
 falls back to `sequence` when unset) and is **never logged** (arrangement, not data). `sequence`
 is never touched, so task-numbers and prereq references stay stable.
 
-- **Only enabled in the default order** (`sort.field === 'seq'`). Under any other sort
-  (name/date/…) the grip is hidden and rows aren't draggable — that arrangement is read-only.
-  The default view sorts by `listOrder ?? sequence` (tiebreak `sequence`), so it's monotonic
+- **Only enabled in the manual ascending order** — neutral (`sort.field === null`) or an
+  explicit `seq asc`. Under any other sort — name/date/… **or even `seq DESC`** — the grip is
+  hidden and rows aren't draggable. (Descending matters: the drop math writes a fractional
+  `listOrder` *between the two displayed neighbours*, which only resolves correctly when the
+  display is ascending; in a descending view `before > after`, so the value can't separate and
+  the drag would silently scramble/no-op. So drag is gated to the ascending manual order only.)
+  That order sorts by `listOrder ?? sequence` (tiebreak `sequence`), so it's monotonic
   and a drop just writes a fractional value **between the two displayed neighbours** (e.g.
   between 2 and 3 → 2.5); no global reindex needed.
 - **Within a member card only.** Dropping onto a different card is a no-op (snap back) —
@@ -46,11 +52,16 @@ is never touched, so task-numbers and prereq references stay stable.
   its **siblings under the same parent**; dragging a **group head** moves the whole group (its
   children travel with it). Dragging across levels / into or out of a group is a no-op — use
   Group / Ungroup (selection bar) to reparent. (See [task-groups.md](./task-groups.md).)
-- **Mechanics:** native HTML5 DnD (same as the Board). Drag is armed only from the grip
-  (`onPointerDown` flips the row `draggable`, reset on `dragend`), so the whole row is the drag
-  image but plain clicks elsewhere never start a drag. A 2px accent **insertion line** marks the
-  drop slot, computed once per frame from the pointer vs each row's mid-height (mirrors the
-  Board's `over` slot). `orderBetween(prev, next)` (db.ts) returns the fractional value;
+- **Mechanics:** **Pointer Events** (not native HTML5 DnD). The grip's `onPointerDown`
+  captures the pointer (`setPointerCapture`), so every move/up routes to the grip wherever
+  the cursor goes; the owner resolves the row under the cursor via
+  `document.elementFromPoint(...).closest('[data-task-id]')` (lanes use `[data-lane-id]`).
+  *Replaced native HTML5 drag (2026-06-30): the old approach toggled the row `draggable`
+  imperatively and relied on `dragover`→`preventDefault` timing, which silently failed in
+  some browsers (the row showed the "dragging" fade but never dropped). Pointer events are
+  consistent cross-browser and don't touch `draggable`, so row text stays selectable.* A 2px
+  accent **insertion line** marks the drop slot, computed from the pointer vs each row's
+  mid-height. `orderBetween(prev, next)` (db.ts) returns the fractional value;
   `setListOrder(id, order)` persists it raw.
 
 ## Column widths (`COL`)

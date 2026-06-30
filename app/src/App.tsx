@@ -71,6 +71,11 @@ import { ProjectSettingsView } from './ProjectSettingsView'
 import { HomeDashboard } from './HomeDashboard'
 import { AiChatDrawer } from './AiChatDrawer'
 import { Avatar } from './members'
+import {
+  isServerSyncEnabled,
+  loadServerSnapshot,
+  saveServerSnapshot,
+} from './server-sync'
 import type { AiRuntimeContext } from './ai/types'
 import { MarkdownContent } from './ai/markdown'
 import {
@@ -158,6 +163,7 @@ type ToastState = {
 function App() {
   const [seedError, setSeedError] = useState<string | null>(null)
   const [seeded, setSeeded] = useState(false)
+  const serverSyncTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [currentProjectId, setCurrentProjectIdState] = useState<string | null>(
     () => safeStorage.get(CURRENT_PROJECT_KEY)
   )
@@ -360,31 +366,61 @@ function App() {
   }
 
   useEffect(() => {
-    seedIfEmpty()
-      .then(() => dedupeSprints())
-      .then((removed) => {
+    let cancelled = false
+    async function boot() {
+      try {
+        let restoredFromServer = false
+        try {
+          const snapshot = await loadServerSnapshot()
+          if (snapshot) {
+            await importAll(snapshot)
+            restoredFromServer = true
+            console.info('[plan-up] restored Dexie cache from server snapshot')
+          }
+        } catch (e) {
+          console.warn('[plan-up] server snapshot unavailable; using local cache', e)
+        }
+        if (!restoredFromServer) await seedIfEmpty()
+        const removed = await dedupeSprints()
         if (removed > 0) {
           console.info(
             `[plan-up] cleaned up ${removed} duplicate sprint${removed === 1 ? '' : 's'} (legacy seed-race artifact)`
           )
         }
-        setSeeded(true)
-      })
-      // Heal any stored task dates that drifted out of sync (e.g. computed
-      // under an older off-day state). Runs in the background after seeding;
-      // liveQuery picks up the corrected rows.
-      .then(() => recomputeAllDates())
-      .then((healed) => {
+        const healed = await recomputeAllDates()
         if (healed > 0) {
           console.info(
             `[plan-up] healed ${healed} task date${healed === 1 ? '' : 's'} that were out of sync`
           )
         }
-      })
-      .catch((e: unknown) =>
-        setSeedError(e instanceof Error ? e.message : String(e))
-      )
+        if (!cancelled) setSeeded(true)
+      } catch (e: unknown) {
+        if (!cancelled) setSeedError(e instanceof Error ? e.message : String(e))
+      }
+    }
+    boot()
+    return () => {
+      cancelled = true
+    }
   }, [])
+
+  const serverSnapshot = useLiveQuery<ExportPayload | undefined>(
+    () => (seeded && isServerSyncEnabled() ? exportAll() : undefined),
+    [seeded]
+  )
+
+  useEffect(() => {
+    if (!seeded || !serverSnapshot || !isServerSyncEnabled()) return
+    if (serverSyncTimer.current) clearTimeout(serverSyncTimer.current)
+    serverSyncTimer.current = setTimeout(() => {
+      saveServerSnapshot(serverSnapshot).catch((e) => {
+        console.warn('[plan-up] could not sync server snapshot', e)
+      })
+    }, 900)
+    return () => {
+      if (serverSyncTimer.current) clearTimeout(serverSyncTimer.current)
+    }
+  }, [seeded, serverSnapshot])
 
   // `undefined` (not `[]`) until seeded — an empty array reads as "no projects
   // exist" and would null the restored `currentProjectId` during the load

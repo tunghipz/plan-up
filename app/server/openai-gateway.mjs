@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 import { createServer as createHttpServer } from 'node:http'
 import { createReadStream, existsSync, readFileSync } from 'node:fs'
-import { stat } from 'node:fs/promises'
-import { extname, join, normalize, relative, resolve } from 'node:path'
+import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { dirname, extname, join, normalize, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { randomBytes } from 'node:crypto'
 
@@ -19,6 +19,10 @@ const sessionCookie = 'planup_openai_gateway'
 const sessionMaxAgeSeconds = 60 * 60 * 24 * 7
 const defaultModel = process.env.OPENAI_MODEL || 'gpt-5.2'
 const sessions = new Map()
+const serverDataDir = resolve(process.env.PLAN_UP_DATA_DIR || join(root, '.plan-up'))
+const serverDbFile = join(serverDataDir, 'server-db.json')
+const projectCacheDir = join(serverDataDir, 'cache', 'projects')
+const projectIndexFile = join(serverDataDir, 'cache', 'projects.json')
 
 async function main() {
   const vite = isProduction ? null : await createDevViteServer()
@@ -34,7 +38,7 @@ async function main() {
     } catch (err) {
       vite?.ssrFixStacktrace(err)
       console.error(err)
-      json(res, 500, { error: 'Gateway server error.' })
+      json(res, err?.statusCode ?? 500, { error: err?.message ?? 'Gateway server error.' })
     }
   })
 
@@ -55,6 +59,54 @@ async function createDevViteServer() {
 async function handleApi(req, res) {
   const url = requestUrl(req)
   if (!url.pathname.startsWith('/api/')) return false
+
+  if (req.method === 'GET' && url.pathname === '/api/db/snapshot') {
+    const snapshot = await readServerSnapshot()
+    json(res, 200, snapshot ? { hasSnapshot: true, snapshot } : { hasSnapshot: false })
+    return true
+  }
+
+  if (req.method === 'PUT' && url.pathname === '/api/db/snapshot') {
+    const body = await readJson(req)
+    const snapshot = isExportPayloadLike(body?.snapshot) ? body.snapshot : body
+    const saved = await writeServerSnapshot(snapshot)
+    json(res, 200, {
+      ok: true,
+      exportedAt: saved.exportedAt,
+      projectCount: Array.isArray(saved.projects) ? saved.projects.length : 0,
+    })
+    return true
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/projects') {
+    const snapshot = await readServerSnapshot()
+    const projects = snapshot ? projectIndexFromSnapshot(snapshot) : []
+    json(res, 200, {
+      projects,
+      snapshotUpdatedAt: snapshot?.exportedAt ?? null,
+    })
+    return true
+  }
+
+  if (req.method === 'GET') {
+    const route = projectApiRoute(url.pathname)
+    if (route) {
+      const snapshot = await readServerSnapshot()
+      const bundle = snapshot ? projectBundleFromSnapshot(snapshot, route.projectId) : null
+      if (!bundle) {
+        json(res, 404, { error: 'Project not found.' })
+        return true
+      }
+      json(
+        res,
+        200,
+        route.kind === 'context'
+          ? { projectId: route.projectId, exportedAt: bundle.exportedAt, bundle }
+          : bundle
+      )
+      return true
+    }
+  }
 
   if (req.method === 'GET' && url.pathname === '/api/auth/session') {
     const authenticated = Boolean(validSession(req))
@@ -129,6 +181,125 @@ async function handleApi(req, res) {
 
   json(res, 404, { error: 'Unknown API route.' })
   return true
+}
+
+async function readServerSnapshot() {
+  try {
+    const raw = await readFile(serverDbFile, 'utf8')
+    const snapshot = JSON.parse(raw)
+    if (!isExportPayloadLike(snapshot)) return null
+    return snapshot
+  } catch (err) {
+    if (err?.code === 'ENOENT') return null
+    throw err
+  }
+}
+
+async function writeServerSnapshot(value) {
+  if (!isExportPayloadLike(value)) {
+    const err = new Error('Not a valid plan-up snapshot.')
+    err.statusCode = 400
+    throw err
+  }
+  const snapshot = {
+    ...value,
+    exportedAt:
+      typeof value.exportedAt === 'string' && value.exportedAt.trim()
+        ? value.exportedAt
+        : new Date().toISOString(),
+  }
+  await mkdir(serverDataDir, { recursive: true })
+  await writeJsonAtomic(serverDbFile, snapshot)
+  await writeProjectCache(snapshot)
+  return snapshot
+}
+
+async function writeProjectCache(snapshot) {
+  await rm(projectCacheDir, { recursive: true, force: true })
+  await mkdir(projectCacheDir, { recursive: true })
+  const index = projectIndexFromSnapshot(snapshot)
+  await writeJsonAtomic(projectIndexFile, {
+    exportedAt: snapshot.exportedAt,
+    projects: index,
+  })
+  for (const project of Array.isArray(snapshot.projects) ? snapshot.projects : []) {
+    const bundle = projectBundleFromSnapshot(snapshot, project.id)
+    if (!bundle) continue
+    await writeJsonAtomic(join(projectCacheDir, `${encodeURIComponent(project.id)}.json`), bundle)
+  }
+}
+
+async function writeJsonAtomic(file, value) {
+  await mkdir(dirname(file), { recursive: true })
+  const tmp = `${file}.${process.pid}.${Date.now()}.tmp`
+  await writeFile(tmp, `${JSON.stringify(value, null, 2)}\n`, 'utf8')
+  await rename(tmp, file)
+}
+
+function isExportPayloadLike(value) {
+  return (
+    value &&
+    typeof value === 'object' &&
+    [1, 2, 3, 4, 5].includes(value.version) &&
+    typeof value.exportedAt === 'string' &&
+    Array.isArray(value.members) &&
+    Array.isArray(value.sprints) &&
+    Array.isArray(value.tasks) &&
+    (value.projects === undefined || Array.isArray(value.projects)) &&
+    (value.collections === undefined || Array.isArray(value.collections)) &&
+    (value.events === undefined || Array.isArray(value.events)) &&
+    (value.aiThreads === undefined || Array.isArray(value.aiThreads)) &&
+    (value.aiMessages === undefined || Array.isArray(value.aiMessages))
+  )
+}
+
+function projectIndexFromSnapshot(snapshot) {
+  const projects = Array.isArray(snapshot.projects) ? snapshot.projects : []
+  return projects
+    .map((project) => ({
+      id: project.id,
+      name: project.name,
+      createdAt: project.createdAt,
+      description: project.description ?? '',
+      color: project.color,
+      icon: project.icon,
+      memberCount: countByProject(snapshot.members, project.id),
+      sprintCount: countByProject(snapshot.sprints, project.id),
+      collectionCount: countByProject(snapshot.collections ?? [], project.id),
+      taskCount: countByProject(snapshot.tasks, project.id),
+    }))
+    .sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0))
+}
+
+function countByProject(rows, projectId) {
+  return rows.filter((row) => row?.projectId === projectId).length
+}
+
+function projectApiRoute(pathname) {
+  const match = pathname.match(/^\/api\/projects\/([^/]+)\/(context|export)$/)
+  if (!match) return null
+  return {
+    projectId: decodeURIComponent(match[1]),
+    kind: match[2],
+  }
+}
+
+function projectBundleFromSnapshot(snapshot, projectId) {
+  const project = (snapshot.projects ?? []).find((p) => p.id === projectId)
+  if (!project) return null
+  return {
+    version: 5,
+    kind: 'project',
+    exportedAt: snapshot.exportedAt,
+    project,
+    members: snapshot.members.filter((row) => row.projectId === projectId),
+    sprints: snapshot.sprints.filter((row) => row.projectId === projectId),
+    collections: (snapshot.collections ?? []).filter((row) => row.projectId === projectId),
+    tasks: snapshot.tasks.filter((row) => row.projectId === projectId),
+    events: (snapshot.events ?? []).filter((row) => row.projectId === projectId),
+    aiThreads: (snapshot.aiThreads ?? []).filter((row) => row.projectId === projectId),
+    aiMessages: (snapshot.aiMessages ?? []).filter((row) => row.projectId === projectId),
+  }
 }
 
 async function callOpenAiResponses({ model, messages }) {

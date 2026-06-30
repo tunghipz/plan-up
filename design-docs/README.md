@@ -49,6 +49,7 @@ Non-obvious behaviors, defaults, persistence keys.
 | --- | --- |
 | [data-model.md](./data-model.md) | IndexedDB tables, fields, Dexie schema versioning |
 | [persistence-and-backup.md](./persistence-and-backup.md) | Local-first storage, export/import JSON, seeding |
+| [server-handoff.md](./server-handoff.md) | Server-primary JSON snapshot + HTTP handoff endpoints for Codex/MCP access |
 | [project-export-import.md](./project-export-import.md) | Per-project export to a portable file + non-destructive "add as new project" import (auto-detected alongside full backup) |
 | [app-shell-and-navigation.md](./app-shell-and-navigation.md) | Layout, icon rail, resizable sprint panel, capacity stats |
 | [home-dashboard.md](./home-dashboard.md) | Read-first Home screen: all-projects grid (active-sprint progress/overdue) + cross-project People roster (Dexie v13 `people` table) |

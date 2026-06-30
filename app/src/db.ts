@@ -1547,6 +1547,58 @@ export async function recomputeAllDates(): Promise<number> {
  *   are then recomputed (effort + off-days + prereq chain still apply).
  * - dependsOn links survive across sprints — prereq IDs stay valid.
  */
+/**
+ * Pure planner for a sprint rollover: given every task currently in the source
+ * sprint, decide what moves to the next sprint while keeping task GROUPS
+ * cohesive (a group must never be split across sprints — see
+ * design-docs/sprint-rollover.md). A group is judged by its leaf children's
+ * done-ness, NOT the parent's own stored `status` (a derived/container field):
+ *   - ≥1 unfinished child → parent + unfinished children move; each done child
+ *     stays behind and is UNGROUPED (`parentId → null`).
+ *   - all children done → whole group stays put (parent never moves alone).
+ *   - standalone task (no parent, no children) → moves iff not done.
+ *
+ * Returns id sets so the DB move and the preview popover share one source of
+ * truth. `parentIds` are the container parents inside `moveIds` — excluded from
+ * the user-facing "N tasks" count (leaf work items only).
+ */
+export function planSprintRollover(sprintTasks: Task[]): {
+  moveIds: Set<string>
+  ungroupIds: Set<string>
+  parentIds: Set<string>
+} {
+  const idSet = new Set(sprintTasks.map((t) => t.id))
+  const childrenByParent = new Map<string, Task[]>()
+  for (const t of sprintTasks) {
+    if (t.parentId && idSet.has(t.parentId)) {
+      const a = childrenByParent.get(t.parentId)
+      a ? a.push(t) : childrenByParent.set(t.parentId, [t])
+    }
+  }
+  const moveIds = new Set<string>()
+  const ungroupIds = new Set<string>()
+  const parentIds = new Set<string>()
+  for (const t of sprintTasks) {
+    const kids = childrenByParent.get(t.id)
+    if (kids && kids.length) {
+      // Container parent: roll the group over iff any child is still unfinished.
+      if (kids.some((k) => k.status !== 'done')) {
+        moveIds.add(t.id)
+        parentIds.add(t.id)
+        for (const k of kids) {
+          if (k.status !== 'done') moveIds.add(k.id)
+          else ungroupIds.add(k.id) // done child left behind → cut its parent link
+        }
+      }
+      // else: fully-done group → nothing moves, stays grouped as-is.
+    } else if (!(t.parentId && idSet.has(t.parentId))) {
+      // Standalone leaf (children are handled by their parent branch above).
+      if (t.status !== 'done') moveIds.add(t.id)
+    }
+  }
+  return { moveIds, ungroupIds, parentIds }
+}
+
 export async function moveUnfinishedToNextSprint(
   sourceSprintId: string
 ): Promise<{ movedCount: number; targetSprintId: string | null }> {
@@ -1554,7 +1606,18 @@ export async function moveUnfinishedToNextSprint(
   // close) midway must NOT leave the source sprint half-emptied with inconsistent
   // sequences. recomputeDates nests safely — its scope (tasks+members) is a subset.
   return db.transaction('rw', db.tasks, db.members, db.sprints, db.events, async () => {
-    const sprints = await db.sprints.orderBy('startDate').toArray()
+    // Scope to the SOURCE sprint's project. orderBy('startDate') across the whole
+    // table mixes in other projects' sprints — a foreign sprint sharing (or
+    // sorting near) the start date would be picked as the "next" sprint, so the
+    // roll-over silently lands tasks in a DIFFERENT project (and the current
+    // project's real next sprint stays empty). Must match App.tsx `nextSprint`,
+    // which is already per-project. See design-docs/sprint-rollover.md.
+    const sourceSprint = await db.sprints.get(sourceSprintId)
+    if (!sourceSprint) return { movedCount: 0, targetSprintId: null }
+    const sprints = await db.sprints
+      .where('projectId')
+      .equals(sourceSprint.projectId)
+      .sortBy('startDate')
     const sourceIdx = sprints.findIndex((s) => s.id === sourceSprintId)
     if (sourceIdx === -1) return { movedCount: 0, targetSprintId: null }
     const source = sprints[sourceIdx]
@@ -1563,14 +1626,16 @@ export async function moveUnfinishedToNextSprint(
     const target = sprints.slice(sourceIdx + 1).find((s) => s.archivedAt == null)
     if (!target) return { movedCount: 0, targetSprintId: null }
 
-    const unfinished = await db.tasks
-      .where('sprintId')
-      .equals(sourceSprintId)
-      .filter((t) => t.status !== 'done')
-      .toArray()
+    const sprintTasks = await db.tasks.where('sprintId').equals(sourceSprintId).toArray()
+    const { moveIds, ungroupIds, parentIds } = planSprintRollover(sprintTasks)
 
+    // Done children that stay behind lose their (now cross-sprint) parent link
+    // so they don't render as orphans nested under an absent group head.
+    for (const id of ungroupIds) await db.tasks.update(id, { parentId: null })
+
+    const toMove = sprintTasks.filter((t) => moveIds.has(t.id))
     const rolledAt = Date.now()
-    for (const t of unfinished) {
+    for (const t of toMove) {
       // Sequence is per-sprint, so a moved task must be renumbered into the
       // target — otherwise it keeps its source number and collides with an
       // existing task there. Awaited in-loop so each call sees the prior insert.
@@ -1583,7 +1648,9 @@ export async function moveUnfinishedToNextSprint(
         patch.startDate = target.startDate
       }
       await db.tasks.update(t.id, patch)
-      // Record the carry-over on the TARGET sprint's activity log.
+      // Record the carry-over on the TARGET sprint's activity log — leaf work
+      // items only (container parents tag along silently; leaf-based counting).
+      if (parentIds.has(t.id)) continue
       await logEvent({
         projectId: t.projectId,
         sprintId: target.id,
@@ -1598,9 +1665,10 @@ export async function moveUnfinishedToNextSprint(
     }
     // Recompute after the bulk move so prereq chains settle in their new
     // home (and assignee off-days reapply).
-    for (const t of unfinished) await recomputeDates(t.id)
+    for (const t of toMove) await recomputeDates(t.id)
 
-    return { movedCount: unfinished.length, targetSprintId: target.id }
+    const movedCount = toMove.filter((t) => !parentIds.has(t.id)).length
+    return { movedCount, targetSprintId: target.id }
   })
 }
 

@@ -1008,6 +1008,78 @@ describe('moveUnfinishedToNextSprint', () => {
     expect(new Set(seqs).size).toBe(4) // all unique — no collision
     expect(seqs).toEqual([1, 2, 3, 4]) // moved tasks appended after existing max
   })
+
+  // ── Groups must never split across sprints (see sprint-rollover.md) ──────
+  const sg1 = { id: 's1', projectId: P, name: 'A', startDate: '2026-06-01', endDate: '2026-06-14' }
+  const sg2 = { id: 's2', projectId: P, name: 'B', startDate: '2026-06-15', endDate: '2026-06-28' }
+  const grp = (o: Partial<Task> & { id: string }): Task => ({
+    projectId: P, sequence: o.id.charCodeAt(0), title: o.id, assigneeId: null, sprintId: 's1',
+    status: 'todo', priority: 'normal', startDate: '2026-06-01', dueDate: null,
+    estimate: null, createdAt: 0, dependsOn: [], parentId: null, ...o,
+  })
+
+  it('moves the parent + unfinished children together; done child stays and is ungrouped', async () => {
+    await db.sprints.bulkAdd([sg1, sg2])
+    await db.tasks.bulkAdd([
+      grp({ id: 'P' }),                              // group head (container)
+      grp({ id: 'A', parentId: 'P', status: 'todo' }),
+      grp({ id: 'B', parentId: 'P', status: 'done' }), // done → stays, ungrouped
+    ])
+    const r = await moveUnfinishedToNextSprint('s1')
+    expect(r.targetSprintId).toBe('s2')
+    expect(r.movedCount).toBe(1) // leaf work items moved (A); container P not counted
+    const [pT, aT, bT] = await Promise.all(['P', 'A', 'B'].map((id) => db.tasks.get(id)))
+    expect(pT?.sprintId).toBe('s2') // parent followed its unfinished child
+    expect(aT?.sprintId).toBe('s2')
+    expect(aT?.parentId).toBe('P') // still grouped under P in the new sprint
+    expect(bT?.sprintId).toBe('s1') // done child left behind
+    expect(bT?.parentId).toBeNull() // …and ungrouped — no cross-sprint parent link
+  })
+
+  it('leaves a fully-done group put — parent never rolls over on its own stored status', async () => {
+    await db.sprints.bulkAdd([sg1, sg2])
+    await db.tasks.bulkAdd([
+      grp({ id: 'P', status: 'todo' }),               // stored todo, but it's a container
+      grp({ id: 'A', parentId: 'P', status: 'done' }),
+      grp({ id: 'B', parentId: 'P', status: 'done' }),
+    ])
+    const r = await moveUnfinishedToNextSprint('s1')
+    expect(r.movedCount).toBe(0) // whole group is done → nothing moves
+    const [pT, aT, bT] = await Promise.all(['P', 'A', 'B'].map((id) => db.tasks.get(id)))
+    expect(pT?.sprintId).toBe('s1')
+    expect(aT?.sprintId).toBe('s1')
+    expect(bT?.sprintId).toBe('s1')
+    expect(aT?.parentId).toBe('P') // stays grouped, untouched
+  })
+
+  it('targets the SOURCE project only — never another project sharing a start date', async () => {
+    // porting-game sprints
+    await db.sprints.bulkAdd([sg1, sg2])
+    // a SECOND project whose sprint starts the SAME day as the real target (s2):
+    // the old unscoped orderBy('startDate') could pick THIS as the next sprint
+    // and silently roll tasks into the wrong project.
+    await db.projects.add({ id: 'P2', name: 'Other', createdAt: 0 })
+    await db.sprints.add({ id: 'foreign', projectId: 'P2', name: 'Foreign', startDate: '2026-06-15', endDate: '2026-06-28' })
+    await db.tasks.add(grp({ id: 'a', sprintId: 's1', status: 'todo' }))
+
+    const r = await moveUnfinishedToNextSprint('s1')
+    expect(r.targetSprintId).toBe('s2') // the same-project next sprint, NOT 'foreign'
+    expect((await db.tasks.get('a'))?.sprintId).toBe('s2')
+    expect((await db.tasks.where('sprintId').equals('foreign').count())).toBe(0)
+  })
+
+  it('drags a done parent along when a child is still unfinished (no orphans)', async () => {
+    await db.sprints.bulkAdd([sg1, sg2])
+    await db.tasks.bulkAdd([
+      grp({ id: 'P', status: 'done' }),               // parent marked done…
+      grp({ id: 'A', parentId: 'P', status: 'todo' }), // …but child isn't
+    ])
+    await moveUnfinishedToNextSprint('s1')
+    const [pT, aT] = await Promise.all(['P', 'A'].map((id) => db.tasks.get(id)))
+    expect(pT?.sprintId).toBe('s2') // group cohesion wins over parent's stored status
+    expect(aT?.sprintId).toBe('s2')
+    expect(aT?.parentId).toBe('P')
+  })
 })
 
 describe('addSprintTask', () => {

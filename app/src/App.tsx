@@ -43,6 +43,7 @@ import {
   setSprintArchived,
   recomputeAllDates,
   moveUnfinishedToNextSprint,
+  planSprintRollover,
   logEvent,
   createProject,
   createCollection,
@@ -673,15 +674,16 @@ function App() {
     // moveUnfinishedToNextSprint in db.ts). See sprint-archive.md.
     return sprints.slice(idx + 1).find((s) => s.archivedAt == null) ?? null
   }, [sprints, currentSprint])
-  // Unfinished tasks = the exact set that rolls over (matches
-  // moveUnfinishedToNextSprint). Sorted by sequence for a stable preview list.
-  const unfinishedTasks = useMemo(
-    () =>
-      (tasks ?? [])
-        .filter((t) => t.status !== 'done')
-        .sort((a, b) => a.sequence - b.sequence),
-    [tasks]
-  )
+  // Preview = the exact LEAF work items that roll over — computed by the same
+  // planner the DB move uses (planSprintRollover), so the preview and the actual
+  // move can never disagree. Container parents tag along silently and are not
+  // listed/counted (leaf-based counting). Sorted by sequence for a stable list.
+  const unfinishedTasks = useMemo(() => {
+    const { moveIds, parentIds } = planSprintRollover(tasks ?? [])
+    return (tasks ?? [])
+      .filter((t) => moveIds.has(t.id) && !parentIds.has(t.id))
+      .sort((a, b) => a.sequence - b.sequence)
+  }, [tasks])
   const unfinishedCount = unfinishedTasks.length
 
   // Roll over is a preview popover anchored to its button (not a center modal):

@@ -1,9 +1,9 @@
 # Sprint rollover
 
 **Status:** Implemented
-**Last updated:** 2026-06-12
+**Last updated:** 2026-06-30
 **Code:** `app/src/App.tsx` (`RolloverPopover`, Roll over button), `app/src/db.ts`
-(`moveUnfinishedToNextSprint`, `dedupeSprints`)
+(`planSprintRollover`, `moveUnfinishedToNextSprint`, `dedupeSprints`)
 
 ## Purpose
 At sprint's end, carry everything not finished into the next sprint in one click,
@@ -31,17 +31,52 @@ without manual re-entry.
 ## Data
 Mutates moved `Task` rows: `sprintId`, `sequence`, sometimes `startDate`.
 
+## Task groups (parent + children)
+A group must never be **split across sprints** — every view nests children under their
+parent, so a child stranded in a sprint without its parent (or vice-versa) renders nowhere
+(Board/Timeline) or as a stray top-level row (List). Rollover therefore treats a group as a
+unit, using the **leaf children's** done-ness — *not* the parent's own stored `status`,
+which is a derived/container field (see `task-groups.md`):
+
+- **Group with ≥1 unfinished child** → the **parent + all unfinished children** move to the
+  target together. Each **done child stays in the source sprint and is ungrouped**
+  (`parentId → null`), becoming a normal standalone task there. *(Decision 2026-06-30:
+  done work is left behind as the rest of the group advances, matching the per-task
+  "done stays put" rule — but the group itself is never torn apart.)*
+- **Fully-done group** (every child done) → the whole group stays put, parent included.
+  The parent never rolls over on its own stored status alone.
+- **Standalone task** (no parent, no children) → unchanged: moves iff not done.
+
+The move-set is computed once by the pure helper **`planSprintRollover(tasks)`**, shared by
+both the DB move and the preview popover so the previewed list and the actual move can never
+disagree.
+
 ## Implementation
-`moveUnfinishedToNextSprint(sourceSprintId)` (`db.ts:631`):
-1. Find the next sprint by `startDate`; bail (null target) if none.
-2. For each not-done task: set `sprintId = target`, assign **`sequence = nextSequence(target)`**
+`planSprintRollover(sprintTasks)` (`db.ts`) → `{ moveIds, ungroupIds, parentIds }` (all
+`Set<string>`), applying the group rules above. The user-facing count / preview is
+`moveIds − parentIds` (leaf work items; container parents tag along silently).
+
+`moveUnfinishedToNextSprint(sourceSprintId)` (`db.ts`):
+1. Find the next non-archived sprint by `startDate` **within the source sprint's
+   project**; bail (null target) if none. *(The sprint scan is scoped to
+   `projectId` — an unscoped `orderBy('startDate')` over the whole table would let
+   a foreign project's sprint sharing/near the start date win, silently rolling
+   tasks into a different project while the real next sprint stays empty.
+   Must match App.tsx `nextSprint`, which is already per-project.)*
+2. `planSprintRollover` the source sprint's tasks. Clear `parentId` on every `ungroupIds`
+   task (done children that stay).
+3. For each `moveIds` task: set `sprintId = target`, assign **`sequence = nextSequence(target)`**
    (awaited in-loop so each sees the prior insert), and bump `startDate` up to the target
    sprint's start if it was earlier.
-3. `recomputeDates()` each moved task so prereq chains + off-days resettle in the new home.
-- Done tasks stay put. `dependsOn` links survive (they reference task IDs, not sequence).
+4. `recomputeDates()` each moved task so prereq chains + off-days resettle in the new home.
+- `dependsOn` links survive (they reference task IDs, not sequence). `movedCount` returned =
+  leaf tasks moved (excludes container parents).
 
 ## Rules & edge cases
 - **Renumbering on move is essential**: sequence is per-sprint, so a bare `sprintId` swap
   would carry the source number over and collide with an existing task in the target
   (two rows showing the same `#N`). The same renumber applies in `dedupeSprints`.
-- Covered by tests in `app/src/db.test.ts` (collision repro for both rollover and merge).
+- **Groups are never split** (see above) — this is the reason rollover can't just filter on
+  per-task `status`.
+- Covered by tests in `app/src/db.test.ts` (collision repro for both rollover and merge;
+  group cohesion: split-group, done-child ungroup, fully-done group stays, parent-not-alone).

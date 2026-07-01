@@ -598,6 +598,23 @@ export async function moveTaskToSection(taskId: string, sectionId: string): Prom
   await db.tasks.update(taskId, { sectionId })
 }
 
+/**
+ * Move a collection item to `sectionId` AND set its manual `listOrder` in one
+ * update — the drop half of the pointer-based drag in CollectionView. Reordering
+ * within the same table and moving across tables are the same gesture, so both
+ * fields are written together (target section may equal the current one). Order
+ * comes from `orderBetween` over the target table's neighbours; collisions fall
+ * back to `renormalizeListOrder`. Arrangement only — not logged. See
+ * design-docs/collections.md.
+ */
+export async function moveCollectionItem(
+  taskId: string,
+  sectionId: string,
+  listOrder: number
+): Promise<void> {
+  await db.tasks.update(taskId, { sectionId, listOrder })
+}
+
 export async function addStatus(
   collectionId: string,
   name: string,

@@ -3,9 +3,9 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import { db } from './db'
 import {
   createCollection, renameCollection, deleteCollection, COLLECTION_PALETTE,
-  addSection, deleteSection, moveTaskToSection,
+  addSection, deleteSection, moveTaskToSection, moveCollectionItem,
   addStatus, renameStatus, recolorStatus, deleteStatus,
-  addCollectionItem,
+  addCollectionItem, deleteTask,
   exportAll, importAll,
 } from './db'
 
@@ -136,6 +136,26 @@ describe('section CRUD', () => {
     })
     await moveTaskToSection('t1', b.id)
     expect((await db.tasks.get('t1'))?.sectionId).toBe(b.id)
+  })
+
+  it('moveCollectionItem sets sectionId + listOrder together (pointer-drag drop)', async () => {
+    const c = await setup()
+    await addSection(c.id, 'B')
+    const fresh = await db.collections.get(c.id)
+    const b = fresh!.sections[1]
+    const t = await addCollectionItem(c.id, fresh!.sections[0].id, { title: 'a' })
+    expect(t.listOrder).toBeUndefined() // new items rely on sequence until dragged
+    await moveCollectionItem(t.id, b.id, 1.5)
+    const moved = await db.tasks.get(t.id)
+    expect(moved?.sectionId).toBe(b.id)
+    expect(moved?.listOrder).toBe(1.5)
+  })
+
+  it('deleteTask removes a collection item', async () => {
+    const c = await setup()
+    const t = await addCollectionItem(c.id, c.sections[0].id, { title: 'gone' })
+    await deleteTask(t.id)
+    expect(await db.tasks.get(t.id)).toBeUndefined()
   })
 })
 

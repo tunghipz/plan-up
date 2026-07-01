@@ -61,10 +61,13 @@ Seven IndexedDB tables (Dexie database name **`plan-up`**): `projects`, `members
   now lives sprint-wide in the `events` table (`ActivityEvent`, below).
 - `boardOrder` / `listOrder` are **optional, non-indexed** fractional ordering fields —
   manual drag position on the **Board** (per status column) and in the **List** (default
-  order, within a member card) respectively. Both fall back to `sequence` when unset, are
-  **never logged** (arrangement, not data), and need **no Dexie version bump**. `sequence`
-  itself is immutable (task-number + prereq reference) and reordering never touches it.
-  See [board-view.md](./board-view.md) and [list-view.md](./list-view.md).
+  order, within a member card). `listOrder` is **also** the manual order for **collection
+  items within a section** (the pointer-drag reorder in [collections.md](./collections.md);
+  moving an item across tables writes `sectionId` + `listOrder` together). Both fall back to
+  `sequence` when unset, are **never logged** (arrangement, not data), and need **no Dexie
+  version bump**. `sequence` itself is immutable (task-number + prereq reference) and
+  reordering never touches it. See [board-view.md](./board-view.md) and
+  [list-view.md](./list-view.md).
 - `sprintId` is now `string | null` — `null` when the task belongs to a collection.
 - `collectionId?` (`string | null`) — **indexed**. The collection this task belongs to; `null` for sprint tasks. **Invariant: exactly one of `sprintId` / `collectionId` is non-null.**
 - `sectionId?` (`string | null`) — non-indexed. The `Section.id` within the collection (arrangement only, never logged).

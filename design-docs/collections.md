@@ -1,7 +1,7 @@
 # Collections (task ngoài sprint)
 
 **Status:** Implemented
-**Last updated:** 2026-06-25
+**Last updated:** 2026-07-01
 **Code:** `app/src/db.ts` (schema v9 + collection/section/status/item CRUD, export v3),
 `app/src/lib.ts` (buildMonthGrid/assignLanes/computeBarSegments — pure calendar helpers),
 `app/src/CollectionView.tsx` (List card-per-section + status editor + click-assign +
@@ -46,7 +46,15 @@ theo section do user tạo). Mỗi bảng:
   cuối. Mũi tên ▲/▼ chỉ chiều sort đang active.
 - "＋ Add item" riêng từng bảng (inline: gõ + Enter); "＋ Add table" ở cuối mở **modal "New Table"**
   (cùng sheet Cupertino name-only với New Sprint/Collection — qua component dùng chung `NameModal`).
-- Kéo-thả item **giữa các bảng** để chuyển section (dùng lại drag-reorder hiện có).
+- **Xoá item:** ô chấm-màu status ở đầu dòng **hoán thành nút thùng rác (`Trash2`) khi hover** row
+  (cùng slot → không thêm cột đuôi, không xô lệch lưới; tách khỏi grip kéo ở lead-gutter); click →
+  xoá ngay (1 click, không confirm). Item lẻ nhẹ, dễ gõ lại — đúng DNA "speed > breadth, ≤1 click".
+  Dùng lại `deleteTask` (an toàn cho collection-item: không children/deps).
+- **Kéo-thả item = pointer-based** (dùng chung `useDragHandle`/`RowDrag` với sprint list — xem
+  [list-view.md](./list-view.md)), thay HTML5 DnD cũ (browser-fragile). Grip hiện khi hover trong
+  lead-gutter. Kéo để **sắp-xếp-lại thứ tự trong cùng bảng** *và* **chuyển sang bảng khác** — cùng
+  một cử chỉ; thả vào bảng rỗng cũng được (thả cuối bảng). Chỉ bật khi **sort = off** (thứ tự
+  natural); đang sort theo cột thì ẩn grip (giống `canReorder` của sprint).
 
 ### Hai view: List | Calendar
 Toggle sống trên **top bar** (một *context bar* duy nhất), **không** lặp trong nội dung. Top bar
@@ -171,7 +179,9 @@ collection-item (`sprintId = null`) tự động không bị đụng tới. Khô
 ## Implementation
 - **`db.ts`** — interface `Collection`/`Section`; `version(9).stores(...).upgrade(...)`;
   CRUD: `createCollection(projectId, name)`, `renameCollection`, `deleteCollection`,
-  `addSection(collectionId, name)`, `renameSection`, `deleteSection`, `moveTaskToSection`;
+  `addSection(collectionId, name)`, `renameSection`, `deleteSection`,
+  `moveCollectionItem(taskId, sectionId, listOrder)` (đổi section + đặt lại thứ tự trong 1 update;
+  tái dùng `orderBetween`/`renormalizeListOrder` sẵn có);
   `addStatus(collectionId, name, color)`, `renameStatus`, `recolorStatus`, `deleteStatus`;
   `addCollectionItem(collectionId, sectionId, patch)`; cập nhật export/import +
   `seedFresh` (seed status mặc định cho collection mới).
@@ -183,9 +193,14 @@ collection-item (`sprintId = null`) tự động không bị đụng tới. Khô
   Start `w-28` · End `w-28` · Status `w-28`), cùng column-header `bg-canvas-sunk/40` + nhãn
   `text-[11px] text-ink-faint`, các row trong `divide-y divide-border`. **Title luôn ở chế độ sửa**
   (tap-to-edit qua `<textarea>` `field-sizing:content`, Enter để commit — không còn double-click).
-  **Add item inline** (gõ + Enter ngay trong card, không dùng `window.prompt`). Kéo-thả item giữa
-  các bảng (section) qua HTML5 DnD + hover grip trong lead-gutter — gọi `moveTaskToSection` để cập
-  nhật `sectionId`. Status vẫn là pill click-to-assign (popover) theo bộ status per-collection.
+  **Add item inline** (gõ + Enter ngay trong card, không dùng `window.prompt`). **Kéo-thả item =
+  pointer-based** (dùng chung `useDragHandle`/`RowDrag` với sprint list): drag-owner sống ở
+  `CollectionView` (bao trùm mọi SectionCard) để hit-test **xuyên bảng** — reorder trong bảng *và*
+  chuyển section cùng một cử chỉ; item-row mang `data-item-id`, card mang `data-section-id`, thả
+  vào vùng bảng rỗng = thả cuối bảng. Thứ tự natural sort theo `effOrder = listOrder ?? sequence`
+  (khớp sprint). Drop gọi `moveCollectionItem`. Reorder chỉ bật khi sort = off. **Xoá item:** chấm-màu
+  đầu dòng hoán thành `Trash2` khi hover row → `deleteTask` ngay. Status vẫn là pill click-to-assign
+  (popover) theo bộ status per-collection.
 - **`CollectionCalendar.tsx`** — month grid + lane packing + segment-theo-tuần + chevron đa tháng +
   Soft bar; nav tháng; dùng lại token màu status.
 - **`App.tsx`** — sidebar mục SPRINTS / COLLECTIONS; tạo collection qua `NewCollectionDialog`
@@ -211,7 +226,11 @@ collection-item (`sprintId = null`) tự động không bị đụng tới. Khô
   section cuối cùng (luôn còn ≥1).
 - **Xoá collection** → confirm (liệt kê số item); xoá collection + toàn bộ item của nó (destructive,
   có confirm — theo §6.4 design-system).
-- **Kéo-thả item** giữa section: chỉ đổi `sectionId` (arrangement, không log như drag-reorder list).
+- **Kéo-thả item** (pointer-based): reorder trong bảng đặt lại `listOrder`; chuyển sang bảng khác
+  đổi `sectionId` + `listOrder` cùng lúc (`moveCollectionItem`). Arrangement — không log như task
+  change-log. Chỉ bật khi sort = off (natural order).
+- **Xoá item:** hover row → chấm-màu đầu dòng hoán thành nút thùng rác → xoá ngay (không confirm;
+  item lẻ nhẹ). Khác với xoá bảng/status/collection (có confirm) vì mức độ thấp hơn nhiều.
 - **Calendar:** lane assignment **deterministic** (sort start, dài-trước) để render ổn định.
 - **Status không ràng buộc thời lượng** — item ở status nào cũng có thể 1 ngày hoặc nhiều ngày; item
   1 ngày hiện End "—".

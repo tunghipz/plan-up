@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { ChevronDown, X, Plus, GripVertical, Layers, Pencil } from 'lucide-react'
+import { ChevronDown, X, Plus, Trash2, Layers, Pencil } from 'lucide-react'
 import {
   db,
   addSection,
@@ -9,7 +9,10 @@ import {
   deleteSection,
   addCollectionItem,
   renameCollection,
-  moveTaskToSection,
+  moveCollectionItem,
+  deleteTask,
+  orderBetween,
+  renormalizeListOrder,
   addStatus,
   renameStatus,
   recolorStatus,
@@ -22,6 +25,10 @@ import {
 import { CollectionCalendar } from './CollectionCalendar'
 import { DateRangePickCell } from './DatePicker'
 import { AddGroupButton } from './AddGroupButton'
+import { useDragHandle, type RowDrag } from './DragHandle'
+
+/** Effective manual order for a collection item — mirrors the sprint list. */
+const effOrder = (t: Task) => t.listOrder ?? t.sequence
 
 const COLLAPSE_KEY = (collectionId: string) =>
   `plan-up:collCollapsed:${collectionId}`
@@ -169,7 +176,9 @@ export function CollectionView({
   )
   // Group items by section ONCE per data change instead of re-filtering the full
   // item list for every section on every render — that was O(sections × items)
-  // per keystroke, since item titles persist on every keystroke.
+  // per keystroke, since item titles persist on every keystroke. Each section's
+  // array is natural-sorted by effOrder (listOrder ?? sequence) — the order the
+  // pointer-drag reorders within, and the display order when no column sort is on.
   const itemsBySectionMap = useMemo(() => {
     const m = new Map<string, Task[]>()
     for (const t of items) {
@@ -177,8 +186,139 @@ export function CollectionView({
       const arr = m.get(k)
       arr ? arr.push(t) : m.set(k, [t])
     }
+    for (const arr of m.values()) arr.sort((a, b) => effOrder(a) - effOrder(b))
     return m
   }, [items])
+  const itemsById = useMemo(() => new Map(items.map((t) => [t.id, t])), [items])
+
+  // ── Pointer-based drag-to-reorder (shared useDragHandle with the sprint list) ─
+  // The owner lives HERE (not per-card) so hit-testing spans every SectionCard:
+  // reordering within a table and moving an item to another table are the same
+  // gesture. Only offered in the natural order (sort === null), like the sprint
+  // list's `canReorder`. See design-docs/collections.md.
+  const canReorder = sort === null
+  const [dragId, setDragId] = useState<string | null>(null)
+  const [over, setOver] = useState<{ id: string; pos: 'before' | 'after' } | null>(
+    null
+  )
+  // Section under the cursor — highlights an empty table (which has no row to show
+  // a drop-slot line on) as a valid drop target.
+  const [overSectionId, setOverSectionId] = useState<string | null>(null)
+  const overRaf = useRef(0)
+  const pendingHit = useRef<{ id: string; el: HTMLElement; clientY: number } | null>(
+    null
+  )
+
+  const endDrag = () => {
+    setDragId(null)
+    setOver(null)
+    setOverSectionId(null)
+    if (overRaf.current) {
+      cancelAnimationFrame(overRaf.current)
+      overRaf.current = 0
+    }
+  }
+
+  // Hover: resolve the item + section under the cursor (elementFromPoint), show a
+  // before/after slot line on the hovered row (rAF-throttled like the sprint list).
+  const hoverItem = (x: number, y: number) => {
+    if (!dragId) return
+    const el = document.elementFromPoint(x, y)
+    const secEl = el?.closest('[data-section-id]') as HTMLElement | null
+    setOverSectionId(secEl?.dataset.sectionId ?? null)
+    const itemEl = el?.closest('[data-item-id]') as HTMLElement | null
+    const targetId = itemEl?.dataset.itemId
+    if (!targetId || targetId === dragId) {
+      if (over) setOver(null)
+      return
+    }
+    pendingHit.current = { id: targetId, el: itemEl!, clientY: y }
+    if (overRaf.current) return
+    overRaf.current = requestAnimationFrame(() => {
+      overRaf.current = 0
+      const h = pendingHit.current
+      if (!h || !dragId) return
+      const r = h.el.getBoundingClientRect()
+      const pos: 'before' | 'after' =
+        h.clientY - r.top > r.height / 2 ? 'after' : 'before'
+      setOver((prev) =>
+        prev && prev.id === h.id && prev.pos === pos ? prev : { id: h.id, pos }
+      )
+    })
+  }
+
+  // Drop: place the dragged item into the target section at the resolved slot,
+  // writing sectionId + listOrder together (moveCollectionItem). Dropping on a
+  // section's empty area appends to its end. Renormalizes on float-precision
+  // collision, mirroring the sprint list's drop.
+  const dropOnItem = (x: number, y: number) => {
+    const id = dragId
+    const dragged = id ? itemsById.get(id) : null
+    if (!id || !dragged) return
+    const el = document.elementFromPoint(x, y)
+    const itemEl = el?.closest('[data-item-id]') as HTMLElement | null
+    const secEl = el?.closest('[data-section-id]') as HTMLElement | null
+    const targetId = itemEl?.dataset.itemId
+    const targetSectionId =
+      (targetId ? itemsById.get(targetId)?.sectionId : undefined) ??
+      secEl?.dataset.sectionId
+    if (!targetSectionId) return
+    const arr = itemsBySectionMap.get(targetSectionId) ?? []
+    const rest = arr.filter((x) => x.id !== id)
+    let insertAt: number
+    if (targetId && targetId !== id) {
+      const r = itemEl!.getBoundingClientRect()
+      const pos: 'before' | 'after' = y - r.top > r.height / 2 ? 'after' : 'before'
+      insertAt = rest.findIndex((x) => x.id === targetId)
+      if (insertAt < 0) return
+      if (pos === 'after') insertAt += 1
+    } else {
+      // Dropped on the section's empty/below-rows area → append to the end.
+      insertAt = rest.length
+    }
+    const before = rest[insertAt - 1] ?? null
+    const after = rest[insertAt] ?? null
+    // No-op if it lands back in its own gap within the same table.
+    if (dragged.sectionId === targetSectionId) {
+      const fromIndex = arr.findIndex((x) => x.id === id)
+      const left = arr[fromIndex - 1] ?? null
+      const right = arr[fromIndex + 1] ?? null
+      if (
+        (before?.id ?? null) === (left?.id ?? null) &&
+        (after?.id ?? null) === (right?.id ?? null)
+      )
+        return
+    }
+    const beforeOrder = before ? effOrder(before) : null
+    const afterOrder = after ? effOrder(after) : null
+    const newOrder = orderBetween(beforeOrder, afterOrder)
+    const collides =
+      (beforeOrder != null && newOrder <= beforeOrder) ||
+      (afterOrder != null && newOrder >= afterOrder)
+    if (collides) {
+      const orderedIds = rest.map((x) => x.id)
+      orderedIds.splice(insertAt, 0, id)
+      if (dragged.sectionId !== targetSectionId)
+        void db.tasks.update(id, { sectionId: targetSectionId })
+      void renormalizeListOrder(orderedIds)
+    } else {
+      void moveCollectionItem(id, targetSectionId, newOrder)
+    }
+  }
+
+  const dragFor = (t: Task): RowDrag | undefined =>
+    canReorder
+      ? {
+          id: t.id,
+          enabled: true,
+          dragging: dragId === t.id,
+          over: over?.id === t.id ? over.pos : null,
+          onStart: () => setDragId(t.id),
+          onMove: hoverItem,
+          onDrop: dropOnItem,
+          onEnd: endDrag,
+        }
+      : undefined
 
   if (!collection) {
     return <div className="p-6 text-ink-muted">Loading…</div>
@@ -204,6 +344,8 @@ export function CollectionView({
               sort={sort}
               setSort={setSort}
               statusRank={statusRank}
+              dragFor={dragFor}
+              dropHint={dragId !== null && overSectionId === sec.id}
             />
           ))}
           <AddGroupButton
@@ -456,6 +598,8 @@ function SectionCard({
   sort,
   setSort,
   statusRank,
+  dragFor,
+  dropHint,
 }: {
   collectionId: string
   section: { id: string; name: string; color?: string }
@@ -466,6 +610,10 @@ function SectionCard({
   sort: CollSort
   setSort: React.Dispatch<React.SetStateAction<CollSort>>
   statusRank: Map<string, number>
+  /** Pointer-drag wiring from CollectionView (undefined row → not draggable). */
+  dragFor: (t: Task) => RowDrag | undefined
+  /** True while a drag hovers this card — highlights it as a drop target. */
+  dropHint: boolean
 }) {
   // Apply the active sort; `null` keeps natural (insertion) order. JS sort is
   // stable, so a copy preserves order for equal rows. See list-view.md.
@@ -497,40 +645,18 @@ function SectionCard({
     })
   }
 
-  // Drop target for items dragged in from another section.
-  const [dropActive, setDropActive] = useState(false)
   // Inline (in-DNA) delete confirm — replaces window.confirm (§8).
   const [confirmingDelete, setConfirmingDelete] = useState(false)
 
   return (
     <div
       data-section-card
-      data-section-drop
-      onDragOver={(e) => {
-        // Allow drops carrying a collection item id.
-        if (e.dataTransfer.types.includes('text/plain')) {
-          e.preventDefault()
-          e.dataTransfer.dropEffect = 'move'
-          if (!dropActive) setDropActive(true)
-        }
-      }}
-      onDragLeave={(e) => {
-        // Only clear when the pointer actually leaves the card (not a child).
-        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
-          setDropActive(false)
-        }
-      }}
-      onDrop={(e) => {
-        e.preventDefault()
-        setDropActive(false)
-        const id = e.dataTransfer.getData('text/plain')
-        // No-op if dropped onto the section it already belongs to.
-        if (id && !items.some((t) => t.id === id)) {
-          void moveTaskToSection(id, section.id)
-        }
-      }}
+      // Hit-test anchor for the pointer-drag owner (CollectionView): identifies
+      // this table so an item can be dropped into it — including onto its empty
+      // area, which has no row to land on.
+      data-section-id={section.id}
       className={`bg-surface rounded-[14px] shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_22px_rgba(0,0,0,0.05)] overflow-hidden transition-shadow ${
-        dropActive ? 'ring-2 ring-accent/40' : ''
+        dropHint ? 'ring-2 ring-accent/40' : ''
       }`}
     >
       {/* Whole header toggles collapse (mirrors the sprint group card). The
@@ -646,6 +772,7 @@ function SectionCard({
                 task={t}
                 statusById={statusById}
                 statuses={statuses}
+                drag={dragFor(t)}
               />
             ))}
             <AddItemRow collectionId={collectionId} sectionId={section.id} />
@@ -784,69 +911,57 @@ function ItemRow({
   task,
   statusById,
   statuses,
+  drag,
 }: {
   task: Task
   statusById: Map<string, CollectionStatus>
   statuses: CollectionStatus[]
+  /** Pointer-drag wiring (undefined → not draggable, e.g. a column sort is on). */
+  drag?: RowDrag
 }) {
   const status = task.collectionStatusId
     ? statusById.get(task.collectionStatusId)
     : undefined
   const dotColor = status?.color ?? '#C7C7CC'
 
-  // Grip-armed native drag: a drag only starts if it was begun from the grip,
-  // so inline title editing and the date/status controls are never hijacked.
-  const armedRef = useRef(false)
-  const [dragging, setDragging] = useState(false)
+  // Pointer-based drag (shared with the sprint list). The grip is rendered
+  // absolutely at the row's left edge and only *it* starts a drag, so the title
+  // textarea + date/status controls keep receiving normal clicks. `data-item-id`
+  // is how the owner's elementFromPoint hit-test finds this row.
+  const { grip, indicator, dragging } = useDragHandle(drag)
 
   return (
     <div
-      data-item-row
-      draggable
-      onDragStart={(e) => {
-        if (!armedRef.current) {
-          e.preventDefault()
-          return
-        }
-        e.dataTransfer.effectAllowed = 'move'
-        e.dataTransfer.setData('text/plain', task.id)
-        setDragging(true)
-      }}
-      onDragEnd={() => {
-        armedRef.current = false
-        setDragging(false)
-      }}
+      data-item-id={task.id}
       className={`task-row group/row relative flex items-center gap-3 px-4 py-2 text-sm transition hover:bg-surface-hover ${
         dragging ? 'opacity-40' : ''
       }`}
     >
-      {/* Lead gutter — hover-revealed grip; arming a drag here keeps the title
-          textarea and date/status controls free to receive normal clicks. */}
-      <div className={`${COL.lead} relative self-stretch`}>
-        <button
-          type="button"
-          aria-label="Drag to another table"
-          onPointerDown={(e) => {
-            e.stopPropagation()
-            armedRef.current = true
-            const off = () => {
-              armedRef.current = false
-              window.removeEventListener('pointerup', off)
-            }
-            window.addEventListener('pointerup', off)
-          }}
-          onClick={(e) => e.stopPropagation()}
-          className="absolute inset-0 grid place-items-center text-ink-faint/70 hover:text-ink-muted opacity-0 group-hover/row:opacity-100 transition-opacity cursor-grab active:cursor-grabbing touch-none"
-        >
-          <GripVertical size={14} />
-        </button>
-      </div>
-      <div className={COL.dot}>
+      {grip}
+      {indicator}
+      <div className={COL.lead} />
+      {/* Status dot at rest ↔ delete at hover, in the same slot — keeps the
+          control "up front" without a trailing cell that would offset the column
+          grid, and clear of the drag grip (which lives in the lead gutter). One
+          click, no confirm: a collection item is lightweight (§ speed > breadth). */}
+      <div className={`${COL.dot} relative`}>
         <span
-          className="w-3 h-3 rounded-full"
+          className="w-3 h-3 rounded-full group-hover/row:opacity-0 transition-opacity"
           style={{ background: dotColor }}
           aria-hidden
         />
+        <button
+          type="button"
+          aria-label="Delete item"
+          title="Delete item"
+          onClick={(e) => {
+            e.stopPropagation()
+            void deleteTask(task.id)
+          }}
+          className="absolute inset-0 grid place-items-center rounded text-ink-faint/70 opacity-0 group-hover/row:opacity-100 hover:text-red-500 transition"
+        >
+          <Trash2 size={13} />
+        </button>
       </div>
       <ItemTitle task={task} />
       <div className={COL.start}>

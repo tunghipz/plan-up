@@ -44,7 +44,7 @@ import {
   recomputeAllDates,
   moveUnfinishedToNextSprint,
   planSprintRollover,
-  logEvent,
+  createSprint,
   createProject,
   createCollection,
   deleteCollection,
@@ -1904,18 +1904,7 @@ function NewSprintDialog({
       endDate,
       ...(noteTrimmed ? { note: noteTrimmed } : {}),
     }
-    await db.sprints.add(sprint)
-    await logEvent({
-      projectId,
-      sprintId: sprint.id,
-      taskId: null,
-      taskSeq: null,
-      taskTitle: null,
-      kind: 'sprint_started',
-      from: null,
-      to: null,
-      ts: Date.now(),
-    })
+    await createSprint(sprint)
     onCreate(sprint)
   }
 

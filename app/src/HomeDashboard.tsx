@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { Users, MoreHorizontal, AlertTriangle, CalendarOff } from 'lucide-react'
@@ -14,11 +14,24 @@ import {
 } from './db'
 import { Avatar, ColorSwatchRow } from './members'
 import { useConfirm } from './ConfirmDialog'
-import { latestActiveSprint, formatSprintRange, formatShortDate, todayLocalISO } from './lib'
+import {
+  latestActiveSprint,
+  formatSprintRange,
+  formatShortDate,
+  todayLocalISO,
+  firstGrapheme,
+} from './lib'
 import { personLoad, personProjectCount, nextDayOff, taskOverdue } from './people'
 
 // Read-first portfolio overview: every project's active-sprint status + a
 // cross-project People roster. See design-docs/home-dashboard.md.
+
+// Loading-state fallbacks for the live queries — module-level so their identity
+// never changes (a fresh `[]` per render would defeat the memos below).
+const EMPTY_SPRINTS: never[] = []
+const EMPTY_TASKS: never[] = []
+const EMPTY_MEMBERS: never[] = []
+const EMPTY_PEOPLE: never[] = []
 
 interface RosterEntry {
   person: Person
@@ -35,67 +48,79 @@ export function HomeDashboard({
   projects: Project[]
   onOpenProject: (id: string) => void
 }) {
-  const sprints = useLiveQuery(() => db.sprints.toArray(), []) ?? []
-  const tasks = useLiveQuery(() => db.tasks.toArray(), []) ?? []
-  const members = useLiveQuery(() => db.members.toArray(), []) ?? []
-  const people = useLiveQuery(() => db.people.toArray(), []) ?? []
+  // Stable `?? EMPTY` fallbacks (not fresh `[]`) so the memos below don't see a
+  // new array identity on every render while the live queries are still loading.
+  const sprints = useLiveQuery(() => db.sprints.toArray(), []) ?? EMPTY_SPRINTS
+  const tasks = useLiveQuery(() => db.tasks.toArray(), []) ?? EMPTY_TASKS
+  const members = useLiveQuery(() => db.members.toArray(), []) ?? EMPTY_MEMBERS
+  const people = useLiveQuery(() => db.people.toArray(), []) ?? EMPTY_PEOPLE
   const today = todayLocalISO()
 
-  // A task is a leaf unless some other task names it as parent (parents are
-  // excluded from progress/overdue so a group isn't double-counted).
-  const parentIds = new Set<string>()
-  for (const t of tasks) if (t.parentId) parentIds.add(t.parentId)
-  const isLeaf = (t: Task) => !parentIds.has(t.id)
+  const projectsById = useMemo(
+    () => new Map(projects.map((p) => [p.id, p])),
+    [projects]
+  )
 
-  const projColor = (pid: string) => {
-    const pr = projects.find((x) => x.id === pid)
-    return pr ? pr.color ?? colorForName(pr.name) : 'var(--color-status-todo)'
-  }
+  // Both scans below are O(projects × tasks) and the dashboard re-renders on
+  // every live-query tick, so they're memoized on the tables they read.
+  const cards = useMemo(() => {
+    // A task is a leaf unless some other task names it as parent (parents are
+    // excluded from progress/overdue so a group isn't double-counted).
+    const parentIds = new Set<string>()
+    for (const t of tasks) if (t.parentId) parentIds.add(t.parentId)
+    const isLeaf = (t: Task) => !parentIds.has(t.id)
 
-  const cards = projects.map((p) => {
-    const pSprints = sprints
-      .filter((s) => s.projectId === p.id)
-      .sort((a, b) => (a.startDate < b.startDate ? -1 : a.startDate > b.startDate ? 1 : 0))
-    const active = latestActiveSprint(pSprints)
-    let total = 0
-    let done = 0
-    if (active) {
-      for (const t of tasks) {
-        if (t.sprintId === active.id && isLeaf(t)) {
-          total++
-          if (t.status === 'done') done++
+    return projects.map((p) => {
+      const pSprints = sprints
+        .filter((s) => s.projectId === p.id)
+        .sort((a, b) => (a.startDate < b.startDate ? -1 : a.startDate > b.startDate ? 1 : 0))
+      const active = latestActiveSprint(pSprints)
+      let total = 0
+      let done = 0
+      if (active) {
+        for (const t of tasks) {
+          if (t.sprintId === active.id && isLeaf(t)) {
+            total++
+            if (t.status === 'done') done++
+          }
         }
       }
-    }
-    const pct = total ? Math.round((done / total) * 100) : 0
-    const overdue = tasks.filter(
-      (t) => t.projectId === p.id && isLeaf(t) && taskOverdue(t, today)
-    ).length
-    const pMembers = members
-      .filter((m) => m.projectId === p.id)
-      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
-    return { p, active, total, pct, remaining: total - done, overdue, pMembers }
-  })
-
-  const roster: RosterEntry[] = people
-    .map((person) => ({ person, pm: members.filter((m) => m.personId === person.id) }))
-    .filter((r) => r.pm.length > 0) // zero-member people are kept in db but hidden
-    .map(({ person, pm }) => {
-      const memberIds = new Set(pm.map((m) => m.id))
-      return {
-        person,
-        load: personLoad(memberIds, tasks),
-        projectCount: personProjectCount(pm),
-        off: nextDayOff(pm, today),
-        projColors: [...new Set(pm.map((m) => m.projectId))].map(projColor),
-      }
+      const pct = total ? Math.round((done / total) * 100) : 0
+      const overdue = tasks.filter(
+        (t) => t.projectId === p.id && isLeaf(t) && taskOverdue(t, today)
+      ).length
+      const pMembers = members
+        .filter((m) => m.projectId === p.id)
+        .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+      return { p, active, total, pct, remaining: total - done, overdue, pMembers }
     })
-    .sort(
-      (a, b) =>
-        b.load.taskCount - a.load.taskCount ||
-        b.load.effort - a.load.effort ||
-        a.person.name.localeCompare(b.person.name)
-    )
+  }, [projects, sprints, tasks, members, today])
+
+  const roster: RosterEntry[] = useMemo(() => {
+    const projColor = (pid: string) => {
+      const pr = projectsById.get(pid)
+      return pr ? pr.color ?? colorForName(pr.name) : 'var(--color-status-todo)'
+    }
+    return people
+      .map((person) => ({ person, pm: members.filter((m) => m.personId === person.id) }))
+      .filter((r) => r.pm.length > 0) // zero-member people are kept in db but hidden
+      .map(({ person, pm }) => {
+        const memberIds = new Set(pm.map((m) => m.id))
+        return {
+          person,
+          load: personLoad(memberIds, tasks),
+          projectCount: personProjectCount(pm),
+          off: nextDayOff(pm, today),
+          projColors: [...new Set(pm.map((m) => m.projectId))].map(projColor),
+        }
+      })
+      .sort(
+        (a, b) =>
+          b.load.taskCount - a.load.taskCount ||
+          b.load.effort - a.load.effort ||
+          a.person.name.localeCompare(b.person.name)
+      )
+  }, [people, members, tasks, projectsById, today])
 
   if (projects.length === 0) {
     return (
@@ -287,7 +312,7 @@ function PersonRow({ entry, allPeople }: { entry: RosterEntry; allPeople: Person
         className="shrink-0 w-[34px] h-[34px] rounded-full inline-flex items-center justify-center text-white text-[14px] font-semibold select-none"
         style={{ background: person.color || colorForName(person.name) }}
       >
-        {person.name.trim().charAt(0).toUpperCase() || '·'}
+        {firstGrapheme(person.name).toUpperCase() || '·'}
       </span>
       <div className="flex-1 min-w-0">
         <div className="text-[14px] font-medium text-ink truncate">{person.name}</div>
@@ -388,7 +413,7 @@ function PersonRow({ entry, allPeople }: { entry: RosterEntry; allPeople: Person
                         className="shrink-0 w-5 h-5 rounded-full inline-flex items-center justify-center text-white text-[10px] font-semibold"
                         style={{ background: o.color || colorForName(o.name) }}
                       >
-                        {o.name.trim().charAt(0).toUpperCase() || '·'}
+                        {firstGrapheme(o.name).toUpperCase() || '·'}
                       </span>
                       <span className="text-[13px] text-ink truncate">{o.name}</span>
                     </button>

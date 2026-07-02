@@ -76,7 +76,7 @@ export function Avatar({
           {member.avatarEmoji}
         </span>
       ) : (
-        member.name.slice(0, 1).toUpperCase()
+        firstGrapheme(member.name).toUpperCase()
       )}
     </span>
   )
@@ -182,10 +182,7 @@ export function AvatarPicker({ member }: { member: Member }) {
   // (the popover is taller than a viewport bottom edge can hold). Re-pin on
   // scroll/resize and whenever the panel's height changes (tab / state).
   useLayoutEffect(() => {
-    if (!open) {
-      setPos(null)
-      return
-    }
+    if (!open) return
     const W = 264
     const GAP = 8
     const pin = () => {
@@ -231,15 +228,6 @@ export function AvatarPicker({ member }: { member: Member }) {
     }
   }, [open])
 
-  // Reset the active tab to the member's current state each time it opens.
-  useEffect(() => {
-    if (open) {
-      setTab(member.avatarImage ? 'photo' : 'emoji')
-      setError(null)
-      setEmojiQuery('')
-    }
-  }, [open, member.avatarImage])
-
   const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0]
     e.target.value = '' // allow re-picking the same file
@@ -268,7 +256,16 @@ export function AvatarPicker({ member }: { member: Member }) {
         type="button"
         onClick={(e) => {
           e.stopPropagation()
-          setOpen((v) => !v)
+          if (!open) {
+            // Opening: start unmeasured (opacity-0 until pinned) and reset the
+            // panel to the member's current state. Done here at the trigger —
+            // not in an effect — so there's no post-render state cascade.
+            setPos(null)
+            setTab(member.avatarImage ? 'photo' : 'emoji')
+            setError(null)
+            setEmojiQuery('')
+          }
+          setOpen(!open)
         }}
         aria-label="Change avatar"
         title="Change avatar"

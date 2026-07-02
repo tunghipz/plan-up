@@ -922,9 +922,10 @@ export async function updateProject(
 }
 
 /**
- * Delete a project and everything it owns: members, sprints, tasks. Tasks
- * in this project that are referenced as dependsOn by tasks in OTHER
- * projects (rare) are stripped from those references.
+ * Delete a project and everything it owns: members, sprints, tasks,
+ * collections and activity events (the projectId index on events exists for
+ * exactly this wipe). Tasks in this project that are referenced as dependsOn
+ * by tasks in OTHER projects (rare) are stripped from those references.
  */
 export async function deleteProject(projectId: string): Promise<void> {
   await db.transaction(
@@ -933,6 +934,8 @@ export async function deleteProject(projectId: string): Promise<void> {
     db.members,
     db.sprints,
     db.tasks,
+    db.collections,
+    db.events,
     async () => {
       const taskIds = (
         await db.tasks.where('projectId').equals(projectId).toArray()
@@ -951,6 +954,8 @@ export async function deleteProject(projectId: string): Promise<void> {
       await db.tasks.where('projectId').equals(projectId).delete()
       await db.sprints.where('projectId').equals(projectId).delete()
       await db.members.where('projectId').equals(projectId).delete()
+      await db.collections.where('projectId').equals(projectId).delete()
+      await db.events.where('projectId').equals(projectId).delete()
       await db.projects.delete(projectId)
     }
   )
@@ -1359,6 +1364,30 @@ async function pruneSprintEvents(sprintId: string): Promise<void> {
 export async function logEvent(e: Omit<ActivityEvent, 'id'>): Promise<void> {
   await db.events.add({ id: uid(), ...e })
   await pruneSprintEvents(e.sprintId)
+}
+
+/**
+ * Canonical sprint creation: the row and its `sprint_started` activity event
+ * commit in ONE transaction — a crash between them can't leave a sprint with
+ * no birth entry. Every creation path goes through here (the New Sprint
+ * dialog; seeding logs no event by design).
+ */
+export async function createSprint(sprint: Sprint): Promise<Sprint> {
+  await db.transaction('rw', db.sprints, db.events, async () => {
+    await db.sprints.add(sprint)
+    await logEvent({
+      projectId: sprint.projectId,
+      sprintId: sprint.id,
+      taskId: null,
+      taskSeq: null,
+      taskTitle: null,
+      kind: 'sprint_started',
+      from: null,
+      to: null,
+      ts: Date.now(),
+    })
+  })
+  return sprint
 }
 
 /** A sprint's activity, newest-first (ts desc). */
@@ -1808,14 +1837,23 @@ export async function setTaskParent(
     return
   }
   if (parentId === childId) return
-  const [parent, hasChildren] = await Promise.all([
-    db.tasks.get(parentId),
-    // parentId is non-indexed → filter, not where()
-    db.tasks.filter((t) => t.parentId === childId).count(),
-  ])
-  // Guard: target must exist & be top-level; child must not be a parent itself.
-  if (!parent || parent.parentId || hasChildren > 0) return
-  await db.tasks.update(childId, { parentId })
+  // Transactional so the guards below can't go stale between the reads and
+  // the write (two overlapping group edits would otherwise TOCTOU past them).
+  await db.transaction('rw', db.tasks, async () => {
+    const [child, parent, hasChildren] = await Promise.all([
+      db.tasks.get(childId),
+      db.tasks.get(parentId),
+      // parentId is non-indexed → filter, not where()
+      db.tasks.filter((t) => t.parentId === childId).count(),
+    ])
+    // Guard: target must exist & be top-level; child must not be a parent
+    // itself; both must live in the SAME sprint — a cross-sprint parent link
+    // would break rollover cohesion (planSprintRollover assumes a group moves
+    // as one unit within its sprint).
+    if (!child || !parent || parent.parentId || hasChildren > 0) return
+    if (child.sprintId !== parent.sprintId) return
+    await db.tasks.update(childId, { parentId })
+  })
 }
 
 /**
@@ -1969,25 +2007,33 @@ export async function addDependency(
   depId: string
 ): Promise<boolean> {
   if (taskId === depId) return false
-  const tasks = await db.tasks.toArray()
-  if (wouldCreateCycle(taskId, depId, tasks)) return false
-  const task = tasks.find((t) => t.id === taskId)
-  if (!task) return false
-  if (task.dependsOn.includes(depId)) return true // already there
-  await db.tasks.update(taskId, {
-    dependsOn: [...task.dependsOn, depId],
+  // One transaction: the cycle check, the dependsOn read-modify-write and the
+  // recompute must not interleave with another dependency edit (a stale-array
+  // overwrite would silently drop an edge) or split on a mid-write crash.
+  return db.transaction('rw', db.tasks, db.members, async () => {
+    const tasks = await db.tasks.toArray()
+    if (wouldCreateCycle(taskId, depId, tasks)) return false
+    const task = tasks.find((t) => t.id === taskId)
+    if (!task) return false
+    if (task.dependsOn.includes(depId)) return true // already there
+    await db.tasks.update(taskId, {
+      dependsOn: [...task.dependsOn, depId],
+    })
+    await recomputeDates(taskId)
+    return true
   })
-  await recomputeDates(taskId)
-  return true
 }
 
 export async function removeDependency(taskId: string, depId: string) {
-  const task = await db.tasks.get(taskId)
-  if (!task) return
-  await db.tasks.update(taskId, {
-    dependsOn: task.dependsOn.filter((id) => id !== depId),
+  // Same transaction rationale as addDependency.
+  await db.transaction('rw', db.tasks, db.members, async () => {
+    const task = await db.tasks.get(taskId)
+    if (!task) return
+    await db.tasks.update(taskId, {
+      dependsOn: task.dependsOn.filter((id) => id !== depId),
+    })
+    await recomputeDates(taskId)
   })
-  await recomputeDates(taskId)
 }
 
 /**
@@ -1999,64 +2045,69 @@ export async function setDependencies(
   taskId: string,
   depIds: string[]
 ): Promise<string[]> {
-  const tasks = await db.tasks.toArray()
-  const task = tasks.find((t) => t.id === taskId)
-  if (!task) return []
-  const clean: string[] = []
-  // Build cumulatively so a later dep can't bypass a cycle check via an
-  // earlier dep we're about to add in the same call.
-  const probe = { ...task, dependsOn: [] as string[] }
-  const byId = new Map(tasks.map((t) => [t.id, t]))
-  byId.set(taskId, probe)
-  for (const id of depIds) {
-    if (id === taskId) continue
-    if (clean.includes(id)) continue
-    if (!byId.has(id)) continue
-    if (wouldCreateCycle(taskId, id, Array.from(byId.values()))) continue
-    clean.push(id)
-    probe.dependsOn = clean
-  }
-  const changed =
-    task.dependsOn.length !== clean.length ||
-    task.dependsOn.some((d) => !clean.includes(d))
-
-  // Snapshot this task's own dates BEFORE recompute so we can log the old→new
-  // shift the prereq change causes on THIS task (the direct consequence of the
-  // user's edit). Indirect ripple onto OTHER tasks stays unlogged (premise #2).
-  const oldStart = task.startDate
-  const oldDue = task.dueDate
-
-  await db.tasks.update(taskId, { dependsOn: clean })
-  await recomputeDates(taskId)
-
-  if (changed) {
-    const after = await db.tasks.get(taskId)
-    if (after) {
-      const label = (ids: string[]): string | null => {
-        const seqs = ids
-          .map((id) => byId.get(id)?.sequence)
-          .filter((n): n is number => typeof n === 'number')
-        return seqs.length ? formatSeqRanges(seqs) : null
-      }
-      const ts = Date.now()
-      // Built so the prereq entry ends up newest (top): the date entries are
-      // unshifted first, then dependsOn. seq is frozen (per-sprint renumbering).
-      const entries: ChangeLogEntry[] = []
-      if (after.startDate !== oldStart)
-        entries.push({ field: 'startDate', from: oldStart, to: after.startDate, ts })
-      if (after.dueDate !== oldDue)
-        entries.push({ field: 'dueDate', from: oldDue, to: after.dueDate, ts })
-      entries.push({
-        field: 'dependsOn',
-        from: label(task.dependsOn),
-        to: label(clean),
-        ts,
-      })
-      // Record prereq + caused date shifts into the sprint activity log.
-      await logTaskEdits(task, entries)
+  // One transaction spanning the deps write, the recompute AND the activity
+  // log: logTaskEdits' own contract requires db.events in scope, and a crash
+  // between the write and the log must not leave deps changed with no entry.
+  return db.transaction('rw', db.tasks, db.members, db.events, async () => {
+    const tasks = await db.tasks.toArray()
+    const task = tasks.find((t) => t.id === taskId)
+    if (!task) return []
+    const clean: string[] = []
+    // Build cumulatively so a later dep can't bypass a cycle check via an
+    // earlier dep we're about to add in the same call.
+    const probe = { ...task, dependsOn: [] as string[] }
+    const byId = new Map(tasks.map((t) => [t.id, t]))
+    byId.set(taskId, probe)
+    for (const id of depIds) {
+      if (id === taskId) continue
+      if (clean.includes(id)) continue
+      if (!byId.has(id)) continue
+      if (wouldCreateCycle(taskId, id, Array.from(byId.values()))) continue
+      clean.push(id)
+      probe.dependsOn = clean
     }
-  }
-  return clean
+    const changed =
+      task.dependsOn.length !== clean.length ||
+      task.dependsOn.some((d) => !clean.includes(d))
+
+    // Snapshot this task's own dates BEFORE recompute so we can log the old→new
+    // shift the prereq change causes on THIS task (the direct consequence of the
+    // user's edit). Indirect ripple onto OTHER tasks stays unlogged (premise #2).
+    const oldStart = task.startDate
+    const oldDue = task.dueDate
+
+    await db.tasks.update(taskId, { dependsOn: clean })
+    await recomputeDates(taskId)
+
+    if (changed) {
+      const after = await db.tasks.get(taskId)
+      if (after) {
+        const label = (ids: string[]): string | null => {
+          const seqs = ids
+            .map((id) => byId.get(id)?.sequence)
+            .filter((n): n is number => typeof n === 'number')
+          return seqs.length ? formatSeqRanges(seqs) : null
+        }
+        const ts = Date.now()
+        // Built so the prereq entry ends up newest (top): the date entries are
+        // unshifted first, then dependsOn. seq is frozen (per-sprint renumbering).
+        const entries: ChangeLogEntry[] = []
+        if (after.startDate !== oldStart)
+          entries.push({ field: 'startDate', from: oldStart, to: after.startDate, ts })
+        if (after.dueDate !== oldDue)
+          entries.push({ field: 'dueDate', from: oldDue, to: after.dueDate, ts })
+        entries.push({
+          field: 'dependsOn',
+          from: label(task.dependsOn),
+          to: label(clean),
+          ts,
+        })
+        // Record prereq + caused date shifts into the sprint activity log.
+        await logTaskEdits(task, entries)
+      }
+    }
+    return clean
+  })
 }
 
 /**
@@ -2102,6 +2153,12 @@ export async function memberNameExists(
 // (it may still belong to other projects; a zero-member person is hidden from
 // the roster, not deleted — design-docs/home-dashboard.md).
 export async function deleteMember(memberId: string) {
+  // Tasks scheduled around this member's daysOff keep those pushed-out dates
+  // once unassigned — recompute them (and their dependents) right away instead
+  // of leaving stale dates until the next app-load heal pass.
+  const affected = (
+    await db.tasks.where('assigneeId').equals(memberId).toArray()
+  ).map((t) => t.id)
   await db.transaction('rw', db.members, db.tasks, async () => {
     await db.tasks
       .where('assigneeId')
@@ -2109,6 +2166,7 @@ export async function deleteMember(memberId: string) {
       .modify({ assigneeId: null })
     await db.members.delete(memberId)
   })
+  for (const id of affected) await recomputeDates(id)
 }
 
 // ---- People (cross-project identity) — design-docs/home-dashboard.md ----
@@ -2186,7 +2244,7 @@ export async function recolorPerson(personId: string, color: string): Promise<vo
 }
 
 export interface ExportPayload {
-  version: 1 | 2 | 3 | 4
+  version: 1 | 2 | 3 | 4 | 5
   exportedAt: string
   /** v2 introduces multi-project. v1 payloads have no `projects` field. */
   projects?: Project[]
@@ -2197,19 +2255,26 @@ export interface ExportPayload {
   tasks: Task[]
   /** v4 introduces the sprint activity log. Older payloads have no `events`. */
   events?: ActivityEvent[]
+  /**
+   * v5 carries People (cross-project identity). Without it a restore rebuilds
+   * people from member names, silently undoing merges, renames and colors.
+   */
+  people?: Person[]
 }
 
 export async function exportAll(): Promise<ExportPayload> {
-  const [projects, members, sprints, collections, tasks, events] = await Promise.all([
-    db.projects.toArray(),
-    db.members.toArray(),
-    db.sprints.toArray(),
-    db.collections.toArray(),
-    db.tasks.toArray(),
-    db.events.toArray(),
-  ])
+  const [projects, members, sprints, collections, tasks, events, people] =
+    await Promise.all([
+      db.projects.toArray(),
+      db.members.toArray(),
+      db.sprints.toArray(),
+      db.collections.toArray(),
+      db.tasks.toArray(),
+      db.events.toArray(),
+      db.people.toArray(),
+    ])
   return {
-    version: 4,
+    version: 5,
     exportedAt: new Date().toISOString(),
     projects,
     members,
@@ -2217,11 +2282,12 @@ export async function exportAll(): Promise<ExportPayload> {
     collections,
     tasks,
     events,
+    people,
   }
 }
 
 export async function importAll(data: ExportPayload) {
-  if (!data || ![1, 2, 3, 4].includes(data.version)) {
+  if (!data || ![1, 2, 3, 4, 5].includes(data.version)) {
     throw new Error('Unsupported export version')
   }
   // Validate shape BEFORE the transaction clears anything. A payload can carry
@@ -2236,7 +2302,8 @@ export async function importAll(data: ExportPayload) {
     !Array.isArray(data.tasks) ||
     (data.projects !== undefined && !Array.isArray(data.projects)) ||
     (data.collections !== undefined && !Array.isArray(data.collections)) ||
-    (data.events !== undefined && !Array.isArray(data.events))
+    (data.events !== undefined && !Array.isArray(data.events)) ||
+    (data.people !== undefined && !Array.isArray(data.people))
   ) {
     throw new Error('Not a valid plan-up backup')
   }
@@ -2277,13 +2344,45 @@ export async function importAll(data: ExportPayload) {
         )
         return { ...m, projectId: pidOf(m), daysOff }
       })
-      // Rebuild People fresh from the imported members (any personId in the
-      // payload references the source DB and is meaningless here) — group by
-      // normalized name so a person recurring across projects re-unifies.
-      const { people, links } = buildPersonBackfill(members, uid, colorForName, Date.now())
-      const personByMember = new Map(links.map((l) => [l.memberId, l.personId]))
-      for (const m of members) m.personId = personByMember.get(m.id)
-      if (people.length) await db.people.bulkAdd(people)
+      if (data.version >= 5 && Array.isArray(data.people)) {
+        // v5+: People travel with the backup — restore them verbatim so
+        // merges, renames and colors survive the round-trip. Members keep
+        // their personId links; a dangling link (hand-edited/truncated file)
+        // re-links by normalized name or gets a fresh person, so every
+        // member ends up linked either way.
+        const people = [...data.people]
+        const validIds = new Set(people.map((p) => p.id))
+        const idByName = new Map(
+          people.map((p) => [normalizePersonName(p.name), p.id])
+        )
+        for (const m of members) {
+          if (m.personId && validIds.has(m.personId)) continue
+          const key = normalizePersonName(m.name)
+          let pid = idByName.get(key)
+          if (!pid) {
+            pid = uid()
+            idByName.set(key, pid)
+            validIds.add(pid)
+            people.push({
+              id: pid,
+              name: m.name.trim(),
+              color: m.color || colorForName(m.name),
+              createdAt: Date.now(),
+            })
+          }
+          m.personId = pid
+        }
+        if (people.length) await db.people.bulkAdd(people)
+      } else {
+        // Pre-v5 payloads carry no People — rebuild them from the imported
+        // members (any personId in the payload references the source DB and
+        // is meaningless here), grouped by normalized name so a person
+        // recurring across projects re-unifies.
+        const { people, links } = buildPersonBackfill(members, uid, colorForName, Date.now())
+        const personByMember = new Map(links.map((l) => [l.memberId, l.personId]))
+        for (const m of members) m.personId = personByMember.get(m.id)
+        if (people.length) await db.people.bulkAdd(people)
+      }
       await db.members.bulkAdd(members)
 
       const sprints: Sprint[] = data.sprints.map((s) => ({
@@ -2467,7 +2566,7 @@ export function __resetSeedLockForTests() {
  * Returns the number of duplicate sprints removed.
  */
 export async function dedupeSprints(): Promise<number> {
-  return db.transaction('rw', db.sprints, db.tasks, async () => {
+  return db.transaction('rw', db.sprints, db.tasks, db.events, async () => {
     const sprints = await db.sprints.toArray()
     const tasks = await db.tasks.toArray()
 
@@ -2504,6 +2603,9 @@ export async function dedupeSprints(): Promise<number> {
             sequence: await nextSequence(keeper.id),
           })
         }
+        // The dup's activity rows would reference a deleted sprintId forever —
+        // no view loads them and exports would ship the orphans. Drop them.
+        await db.events.where('sprintId').equals(dup.id).delete()
         await db.sprints.delete(dup.id)
         removed++
       }

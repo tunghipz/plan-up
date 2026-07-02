@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo } from 'react'
+import { useState, useRef, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { Users, MoreHorizontal, AlertTriangle, CalendarOff } from 'lucide-react'
@@ -14,6 +14,7 @@ import {
 } from './db'
 import { Avatar, ColorSwatchRow } from './members'
 import { useConfirm } from './confirm-context'
+import { usePinnedPopover } from './usePinnedPopover'
 import {
   latestActiveSprint,
   formatSprintRange,
@@ -265,13 +266,14 @@ function PersonRow({ entry, allPeople }: { entry: RosterEntry; allPeople: Person
   // The People panel has `overflow-hidden` (rounded corners), so an absolutely
   // positioned popover inside it gets CLIPPED. Portal it to <body> and pin it to
   // the trigger's screen rect — same idiom as MemberDaysOffButton/CalendarPopover.
-  const [pos, setPos] = useState<{ top: number; left: number }>({ top: -9999, left: -9999 })
-
-  useEffect(() => {
-    if (!menu) return
-    const pin = () => {
+  const pos = usePinnedPopover({
+    open: menu,
+    onClose: () => setMenu(false),
+    anchorRef: btnRef,
+    popRef,
+    place: () => {
       const r = btnRef.current?.getBoundingClientRect()
-      if (!r) return
+      if (!r) return null
       // Right-align to the trigger, clamped into the viewport.
       let left = Math.min(r.right - MENU_W, window.innerWidth - 8 - MENU_W)
       left = Math.max(8, left)
@@ -279,32 +281,9 @@ function PersonRow({ entry, allPeople }: { entry: RosterEntry; allPeople: Person
       const h = popRef.current?.offsetHeight ?? 280
       let top = r.bottom + 6
       if (top + h > window.innerHeight - 8) top = Math.max(8, r.top - 6 - h)
-      setPos({ top, left })
-    }
-    pin()
-    const onDown = (e: MouseEvent) => {
-      const t = e.target as Node
-      if (
-        popRef.current && !popRef.current.contains(t) &&
-        btnRef.current && !btnRef.current.contains(t)
-      ) {
-        setMenu(false)
-      }
-    }
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setMenu(false)
-    }
-    window.addEventListener('scroll', pin, true)
-    window.addEventListener('resize', pin)
-    document.addEventListener('mousedown', onDown)
-    document.addEventListener('keydown', onKey)
-    return () => {
-      window.removeEventListener('scroll', pin, true)
-      window.removeEventListener('resize', pin)
-      document.removeEventListener('mousedown', onDown)
-      document.removeEventListener('keydown', onKey)
-    }
-  }, [menu])
+      return { top, left }
+    },
+  }) ?? { top: -9999, left: -9999 }
 
   return (
     <div className="group/row flex items-center gap-3 px-4 py-3 border-b border-border-hair last:border-b-0">

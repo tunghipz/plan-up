@@ -9,6 +9,7 @@ import {
   type CalItem,
 } from './lib'
 import { db, type Collection, type CollectionStatus, type Task } from './db'
+import { usePinnedPopover } from './usePinnedPopover'
 import { DatePickCell, DateRangePickCell } from './DatePicker'
 
 const MONTHS_LONG = [
@@ -431,36 +432,16 @@ function BarPopover({
     return { top, left }
   })()
 
-  useEffect(() => {
-    const onDown = (e: MouseEvent) => {
-      const t = e.target as Node
-      if (popRef.current && popRef.current.contains(t)) return
-      // The date picker portals its calendar to <body> (outside popRef). Clicks
-      // there must count as "inside" — else picking a day closes this editor
-      // before the selection registers. Marked via [data-calendar-popover].
-      if (t instanceof Element && t.closest('[data-calendar-popover]')) return
-      onClose()
-    }
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-    }
-    // The popover anchors to a snapshot rect, so it can't follow a scrolling
-    // anchor — close it on scroll rather than leave it floating detached.
-    // capture=true so it fires for any scroll container, not just window.
-    const onScroll = () => onClose()
-    // Defer so the opening click doesn't immediately close it.
-    const id = window.setTimeout(() => {
-      document.addEventListener('mousedown', onDown)
-      document.addEventListener('keydown', onKey)
-      window.addEventListener('scroll', onScroll, true)
-    }, 0)
-    return () => {
-      window.clearTimeout(id)
-      document.removeEventListener('mousedown', onDown)
-      document.removeEventListener('keydown', onKey)
-      window.removeEventListener('scroll', onScroll, true)
-    }
-  }, [onClose])
+  // Anchored to a snapshot rect → close on scroll (can't follow the anchor);
+  // deferred listeners so the opening bar-click can't self-close; the date
+  // picker's <body>-portaled calendar counts as "inside" via outsideIgnore.
+  usePinnedPopover({
+    onClose,
+    popRef,
+    onScroll: 'close',
+    deferListeners: true,
+    outsideIgnore: '[data-calendar-popover]',
+  })
 
   return createPortal(
     <div

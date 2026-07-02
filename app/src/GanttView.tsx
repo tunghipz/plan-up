@@ -1,6 +1,5 @@
 import {
   useCallback,
-  useEffect,
   useMemo,
   useRef,
   useState,
@@ -16,6 +15,7 @@ import {
 } from './db'
 import { Avatar } from './members'
 import { STATUS_META, derivedGroupStatus } from './sprint-logic'
+import { usePinnedPopover } from './usePinnedPopover'
 import { sprintWorkdays, formatShortDate } from './lib'
 
 /**
@@ -777,27 +777,14 @@ function BarDetailPopover({
   if (posTop + H > window.innerHeight - 8)
     posTop = Math.max(8, anchorRect.top - H - 6)
   const pos = { top: posTop, left: posLeft }
-  useEffect(() => {
-    const onDown = (e: MouseEvent) => {
-      if (popRef.current && !popRef.current.contains(e.target as Node)) onClose()
-    }
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-    }
-    // Anchored to a snapshot rect — close on scroll instead of floating detached.
-    const onScroll = () => onClose()
-    const id = window.setTimeout(() => {
-      document.addEventListener('mousedown', onDown)
-      document.addEventListener('keydown', onKey)
-      window.addEventListener('scroll', onScroll, true)
-    }, 0)
-    return () => {
-      window.clearTimeout(id)
-      document.removeEventListener('mousedown', onDown)
-      document.removeEventListener('keydown', onKey)
-      window.removeEventListener('scroll', onScroll, true)
-    }
-  }, [onClose])
+  // Anchored to a snapshot rect — close on scroll instead of floating
+  // detached; deferred listeners so the opening bar-click can't self-close.
+  usePinnedPopover({
+    onClose,
+    popRef,
+    onScroll: 'close',
+    deferListeners: true,
+  })
 
   const meta = STATUS_META[status]
   const v = meta.varName

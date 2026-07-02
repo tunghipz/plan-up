@@ -26,6 +26,7 @@ import { CollectionCalendar } from './CollectionCalendar'
 import { DateRangePickCell } from './DatePicker'
 import { AddGroupButton } from './AddGroupButton'
 import { useDragHandle, type RowDrag } from './DragHandle'
+import { usePinnedPopover } from './usePinnedPopover'
 
 /** Effective manual order for a collection item — mirrors the sprint list. */
 const effOrder = (t: Task) => t.listOrder ?? t.sequence
@@ -121,22 +122,6 @@ function compareItems(
 /** Floating-shadow surface for popovers/menus (design-system §4.2). */
 const FLOAT_SHADOW =
   'shadow-[0_8px_30px_rgba(0,0,0,0.18),0_0_0_0.5px_rgba(0,0,0,0.06)]'
-
-/** Close `ref` element when a click lands outside it. */
-function useOutsideClose(
-  ref: React.RefObject<HTMLElement | null>,
-  open: boolean,
-  close: () => void
-) {
-  useEffect(() => {
-    if (!open) return
-    const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) close()
-    }
-    document.addEventListener('mousedown', onDown)
-    return () => document.removeEventListener('mousedown', onDown)
-  }, [ref, open, close])
-}
 
 export function CollectionView({
   collectionId,
@@ -1117,58 +1102,27 @@ function StatusPill({
   const [open, setOpen] = useState(false)
   const anchorRef = useRef<HTMLButtonElement>(null)
   const popRef = useRef<HTMLDivElement>(null)
-  const [pos, setPos] = useState<{ top: number; left: number }>({
-    top: -9999,
-    left: -9999,
-  })
   const MENU_W = 160
 
   // Pin a fixed-position menu to the pill — portalled to <body> so the card's
   // `overflow-hidden` (rounded corners) can't clip it. Mirrors DatePicker.
-  useLayoutEffect(() => {
-    if (!open) return
-    const pin = () => {
+  const pos = usePinnedPopover({
+    open,
+    onClose: () => setOpen(false),
+    anchorRef,
+    popRef,
+    place: () => {
       const r = anchorRef.current?.getBoundingClientRect()
-      if (!r) return
+      if (!r) return null
       let left = Math.min(r.left, window.innerWidth - 8 - MENU_W)
       left = Math.max(8, left)
       const menuH = (statuses.length + 1) * 34 + 16
       let top = r.bottom + 4
       if (top + menuH > window.innerHeight - 8)
         top = Math.max(8, r.top - menuH - 4)
-      setPos({ top, left })
-    }
-    pin()
-    window.addEventListener('scroll', pin, true)
-    window.addEventListener('resize', pin)
-    return () => {
-      window.removeEventListener('scroll', pin, true)
-      window.removeEventListener('resize', pin)
-    }
-  }, [open, statuses.length])
-
-  // Close on outside click (anchor OR menu excluded) and Escape.
-  useEffect(() => {
-    if (!open) return
-    const onDown = (e: MouseEvent) => {
-      const t = e.target as Node
-      if (
-        popRef.current?.contains(t) ||
-        anchorRef.current?.contains(t)
-      )
-        return
-      setOpen(false)
-    }
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false)
-    }
-    document.addEventListener('mousedown', onDown)
-    document.addEventListener('keydown', onKey)
-    return () => {
-      document.removeEventListener('mousedown', onDown)
-      document.removeEventListener('keydown', onKey)
-    }
-  }, [open])
+      return { top, left }
+    },
+  }) ?? { top: -9999, left: -9999 }
 
   const assign = async (id: string | null) => {
     setOpen(false)
@@ -1255,10 +1209,18 @@ export function StatusEditor({ collection }: { collection: Collection }) {
   const [paletteFor, setPaletteFor] = useState<string | null>(null)
   const [confirmId, setConfirmId] = useState<string | null>(null)
   const ref = useRef<HTMLDivElement>(null)
-  useOutsideClose(ref, open, () => {
-    setOpen(false)
-    setPaletteFor(null)
-    setConfirmId(null)
+  // Outside-close only (ref wraps trigger + menu; absolute-positioned so it
+  // scrolls with the header — no pin). Escape deliberately doesn't close: the
+  // inline rename/palette strips inside own their Escape.
+  usePinnedPopover({
+    open,
+    onClose: () => {
+      setOpen(false)
+      setPaletteFor(null)
+      setConfirmId(null)
+    },
+    popRef: ref,
+    onEscape: null,
   })
 
   return (

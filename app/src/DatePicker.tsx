@@ -1,7 +1,8 @@
-import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { formatShortDate } from './lib'
+import { usePinnedPopover } from './usePinnedPopover'
 
 /**
  * Custom Cupertino calendar picker — replaces the native <input type="date">
@@ -280,7 +281,6 @@ function CalendarPopover({
   daysOff?: DayOff[]
 }) {
   const popRef = useRef<HTMLDivElement>(null)
-  const [pos, setPos] = useState<{ top: number; left: number }>({ top: -9999, left: -9999 })
   // Off-days inside the sprint, listed under the grid with their time detail (req #2).
   const offs = (daysOff ?? [])
     .filter((d) => !sprintRange || (d.date >= sprintRange.start && d.date <= sprintRange.end))
@@ -292,50 +292,29 @@ function CalendarPopover({
   // can't clip the footer/header that the estimate omits.
   const HEIGHT = 320 + offs.length * 22
 
-  useLayoutEffect(() => {
-    const pin = () => {
+  const pos = usePinnedPopover({
+    onClose,
+    anchorRef,
+    popRef,
+    place: () => {
       const r = anchorRef.current?.getBoundingClientRect()
-      if (!r) return
+      if (!r) return null
       const h = popRef.current?.offsetHeight || HEIGHT
       let left = Math.min(r.left, window.innerWidth - 8 - WIDTH)
       left = Math.max(8, left)
       let top = r.bottom + 6
       if (top + h > window.innerHeight - 8) top = Math.max(8, r.top - h - 6)
-      setPos({ top, left })
-    }
-    pin()
-    window.addEventListener('scroll', pin, true)
-    window.addEventListener('resize', pin)
-    return () => {
-      window.removeEventListener('scroll', pin, true)
-      window.removeEventListener('resize', pin)
-    }
-  }, [anchorRef, HEIGHT])
-
-  useEffect(() => {
-    const onDoc = (e: MouseEvent) => {
-      const t = e.target as Node
-      if (popRef.current && !popRef.current.contains(t) && anchorRef.current && !anchorRef.current.contains(t)) {
-        onClose()
-      }
-    }
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        // Return focus to the trigger on keyboard dismiss (a11y) — safe because
-        // focus is inside the picker here. We deliberately do NOT do this on
-        // outside-click/select, which would yank focus away from wherever the
-        // user just clicked.
-        anchorRef.current?.focus?.()
-        onClose()
-      }
-    }
-    document.addEventListener('mousedown', onDoc)
-    document.addEventListener('keydown', onKey)
-    return () => {
-      document.removeEventListener('mousedown', onDoc)
-      document.removeEventListener('keydown', onKey)
-    }
-  }, [anchorRef, onClose])
+      return { top, left }
+    },
+    // Return focus to the trigger on keyboard dismiss (a11y) — safe because
+    // focus is inside the picker here. We deliberately do NOT do this on
+    // outside-click/select, which would yank focus away from wherever the
+    // user just clicked.
+    onEscape: () => {
+      anchorRef.current?.focus?.()
+      onClose()
+    },
+  }) ?? { top: -9999, left: -9999 }
 
   return createPortal(
     <div
@@ -526,7 +505,6 @@ function RangeCalendarPopover({
   onClose: () => void
 }) {
   const popRef = useRef<HTMLDivElement>(null)
-  const [pos, setPos] = useState<{ top: number; left: number }>({ top: -9999, left: -9999 })
   const [draftStart, setDraftStart] = useState<string | null>(start)
   const [draftEnd, setDraftEnd] = useState<string | null>(end)
   // Wait for the end click when we already have a start but no end.
@@ -566,51 +544,30 @@ function RangeCalendarPopover({
     onClose()
   }
 
-  useLayoutEffect(() => {
-    const pin = () => {
+  // Outside-click / Esc commit the current draft (allows start with no end).
+  const commitClose = () => {
+    onChange({ start: draftStartRef.current, end: draftEndRef.current })
+    onClose()
+  }
+  const pos = usePinnedPopover({
+    onClose: commitClose,
+    anchorRef,
+    popRef,
+    place: () => {
       const r = anchorRef.current?.getBoundingClientRect()
-      if (!r) return
+      if (!r) return null
       const h = popRef.current?.offsetHeight || HEIGHT
       let left = Math.min(r.left, window.innerWidth - 8 - WIDTH)
       left = Math.max(8, left)
       let top = r.bottom + 6
       if (top + h > window.innerHeight - 8) top = Math.max(8, r.top - h - 6)
-      setPos({ top, left })
-    }
-    pin()
-    window.addEventListener('scroll', pin, true)
-    window.addEventListener('resize', pin)
-    return () => {
-      window.removeEventListener('scroll', pin, true)
-      window.removeEventListener('resize', pin)
-    }
-  }, [anchorRef])
-
-  useEffect(() => {
-    // Outside-click / Esc commit the current draft (allows start with no end).
-    const commitClose = () => {
-      onChange({ start: draftStartRef.current, end: draftEndRef.current })
-      onClose()
-    }
-    const onDoc = (e: MouseEvent) => {
-      const t = e.target as Node
-      if (popRef.current && !popRef.current.contains(t) && anchorRef.current && !anchorRef.current.contains(t)) {
-        commitClose()
-      }
-    }
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        anchorRef.current?.focus?.()
-        commitClose()
-      }
-    }
-    document.addEventListener('mousedown', onDoc)
-    document.addEventListener('keydown', onKey)
-    return () => {
-      document.removeEventListener('mousedown', onDoc)
-      document.removeEventListener('keydown', onKey)
-    }
-  }, [anchorRef, onChange, onClose])
+      return { top, left }
+    },
+    onEscape: () => {
+      anchorRef.current?.focus?.()
+      commitClose()
+    },
+  }) ?? { top: -9999, left: -9999 }
 
   const hint = !draftStart
     ? 'Pick a start'

@@ -1,6 +1,7 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Calendar, X, Upload, Trash2 } from 'lucide-react'
+import { usePinnedPopover } from './usePinnedPopover'
 import {
   db,
   setMemberDaysOff,
@@ -182,19 +183,20 @@ export function AvatarPicker({ member }: { member: Member }) {
   const fileRef = useRef<HTMLInputElement>(null)
   // Popover lives in a portal with fixed positioning (like MemberDaysOffButton)
   // so it escapes the settings drawer's `overflow-auto` scroll container, which
-  // would otherwise clip it. See design-docs/member-avatars.md.
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
-
-  // Pin the popover to the trigger, flipping above when there's no room below
-  // (the popover is taller than a viewport bottom edge can hold). Re-pin on
-  // scroll/resize and whenever the panel's height changes (tab / state).
-  useLayoutEffect(() => {
-    if (!open) return
-    const W = 264
-    const GAP = 8
-    const pin = () => {
+  // would otherwise clip it. Pins to the trigger, flipping above when there's
+  // no room below; the hook re-pins after every committed render, so a panel
+  // height change (tab / busy / error / emoji search) re-anchors automatically.
+  // See design-docs/member-avatars.md.
+  const pos = usePinnedPopover({
+    open,
+    onClose: () => setOpen(false),
+    anchorRef: btnRef,
+    popRef,
+    place: () => {
+      const W = 264
+      const GAP = 8
       const br = btnRef.current?.getBoundingClientRect()
-      if (!br) return
+      if (!br) return null
       const h = popRef.current?.offsetHeight ?? 320
       let top = br.bottom + GAP
       if (top + h > window.innerHeight - GAP) top = br.top - GAP - h // flip up
@@ -202,38 +204,9 @@ export function AvatarPicker({ member }: { member: Member }) {
       let left = br.left
       if (left + W > window.innerWidth - GAP) left = window.innerWidth - W - GAP
       if (left < GAP) left = GAP
-      setPos({ top, left })
-    }
-    pin()
-    window.addEventListener('scroll', pin, true)
-    window.addEventListener('resize', pin)
-    return () => {
-      window.removeEventListener('scroll', pin, true)
-      window.removeEventListener('resize', pin)
-    }
-  }, [open, tab, busy, savings, error, emojiQuery, member.avatarImage, member.avatarEmoji])
-
-  useEffect(() => {
-    if (!open) return
-    const onDown = (e: MouseEvent) => {
-      const t = e.target as Node
-      if (
-        btnRef.current && !btnRef.current.contains(t) &&
-        popRef.current && !popRef.current.contains(t)
-      ) {
-        setOpen(false)
-      }
-    }
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false)
-    }
-    document.addEventListener('mousedown', onDown)
-    document.addEventListener('keydown', onKey)
-    return () => {
-      document.removeEventListener('mousedown', onDown)
-      document.removeEventListener('keydown', onKey)
-    }
-  }, [open])
+      return { top, left }
+    },
+  })
 
   const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0]
@@ -264,10 +237,11 @@ export function AvatarPicker({ member }: { member: Member }) {
         onClick={(e) => {
           e.stopPropagation()
           if (!open) {
-            // Opening: start unmeasured (opacity-0 until pinned) and reset the
-            // panel to the member's current state. Done here at the trigger —
-            // not in an effect — so there's no post-render state cascade.
-            setPos(null)
+            // Opening: reset the panel to the member's current state. Done
+            // here at the trigger — not in an effect — so there's no
+            // post-render state cascade. (Positioning is the pin hook's job;
+            // it re-pins pre-paint, so a stale pos from the last open never
+            // shows.)
             setTab(member.avatarImage ? 'photo' : 'emoji')
             setError(null)
             setEmojiQuery('')
@@ -548,21 +522,9 @@ export function EmojiPickerRow({
 export function MemberColorDot({ member }: { member: Member }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    if (!open) return
-    const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
-    }
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false)
-    }
-    document.addEventListener('mousedown', onDown)
-    document.addEventListener('keydown', onKey)
-    return () => {
-      document.removeEventListener('mousedown', onDown)
-      document.removeEventListener('keydown', onKey)
-    }
-  }, [open])
+  // Outside-click / Escape close; absolute-positioned (scrolls with its row),
+  // so no pin — the ref wraps trigger + palette.
+  usePinnedPopover({ open, onClose: () => setOpen(false), popRef: ref })
   return (
     <div ref={ref} className="relative shrink-0">
       <button
@@ -614,51 +576,26 @@ export function MemberDaysOffButton({
   const [draftHalf, setDraftHalf] = useState<'all' | 'am' | 'pm'>('all')
   const popRef = useRef<HTMLDivElement>(null)
   const btnRef = useRef<HTMLButtonElement>(null)
-  // Popover lives in a portal (escapes Card's overflow-hidden). We track the
-  // trigger's screen position and re-pin on scroll/resize so it stays glued.
-  const [pos, setPos] = useState<{ top: number; right: number }>({ top: 0, right: 0 })
-
-  useEffect(() => {
-    if (!open) return
-    const pin = () => {
+  // Popover lives in a portal (escapes Card's overflow-hidden), pinned to the
+  // trigger. `outsideIgnore`: the date picker's calendar is portaled to <body>,
+  // so it sits OUTSIDE popRef — without the guard, clicking a day would close
+  // this popover and unmount the calendar before the day's click lands.
+  // See design-docs/members-and-days-off.md.
+  const pos = usePinnedPopover({
+    open,
+    onClose: () => setOpen(false),
+    anchorRef: btnRef,
+    popRef,
+    outsideIgnore: '[data-calendar-popover]',
+    place: () => {
       const rect = btnRef.current?.getBoundingClientRect()
-      if (rect) {
-        setPos({
-          top: rect.bottom + 4,
-          right: Math.max(8, window.innerWidth - rect.right),
-        })
+      if (!rect) return null
+      return {
+        top: rect.bottom + 4,
+        right: Math.max(8, window.innerWidth - rect.right),
       }
-    }
-    pin()
-    const onClick = (e: MouseEvent) => {
-      const target = e.target as Node
-      // The date picker's calendar is portaled to <body>, so it sits OUTSIDE
-      // popRef. Without this guard, clicking a day fires this mousedown first,
-      // closes the popover, and unmounts the calendar before the day's click
-      // lands — so a day off can never be picked. Treat calendar clicks as
-      // inside. See design-docs/members-and-days-off.md.
-      if (target instanceof Element && target.closest('[data-calendar-popover]')) return
-      if (
-        popRef.current && !popRef.current.contains(target) &&
-        btnRef.current && !btnRef.current.contains(target)
-      ) {
-        setOpen(false)
-      }
-    }
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false)
-    }
-    window.addEventListener('scroll', pin, true)
-    window.addEventListener('resize', pin)
-    document.addEventListener('mousedown', onClick)
-    document.addEventListener('keydown', onKey)
-    return () => {
-      window.removeEventListener('scroll', pin, true)
-      window.removeEventListener('resize', pin)
-      document.removeEventListener('mousedown', onClick)
-      document.removeEventListener('keydown', onKey)
-    }
-  }, [open])
+    },
+  }) ?? { top: 0, right: 0 }
 
   // Full list drives mutations (date-keyed); the sprint view only displays and
   // counts the subset within its range. Out-of-range days stay untouched.

@@ -1,5 +1,6 @@
 import {
   Fragment,
+  memo,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -38,11 +39,13 @@ import {
   recomputeDates,
   updateTask,
   computeWorkingPlan,
+  computeAllWorkingPlans,
   isTaskBlocked,
   addSprintTask,
   type Member,
   type Task,
   type Status,
+  type WorkingPlan,
 } from './db'
 import { Avatar, MemberDaysOffButton } from './members'
 import { DatePickCell, SprintRangeContext } from './DatePicker'
@@ -61,6 +64,16 @@ import {
 export { DatePickCell }
 
 const WELCOME_PREFIX = 'Welcome —'
+
+// Fallback for a row whose task somehow isn't in the view's planById pass
+// (never expected — the pass covers every sprint task). Matches planFor's
+// NULL_PLAN rendering: no dates, default day-part times.
+const NULL_WORKING_PLAN: WorkingPlan = {
+  startDate: null,
+  dueDate: null,
+  startTime: '08:00',
+  endTime: '12:00',
+}
 
 type SortField =
   | 'seq'
@@ -347,6 +360,18 @@ export function SprintView({
   // Dependency picker + blocked check need a full lookup so a task's prereq is
   // always resolvable.
   const tasksById = useMemo(() => new Map(tasks.map((t) => [t.id, t])), [tasks])
+  const memberById = useMemo(
+    () => new Map((members ?? []).map((m) => [m.id, m])),
+    [members]
+  )
+  // ONE plan pass for every row in the view, recomputed only when data changes.
+  // Rows used to call computeWorkingPlan inline — each call re-walked its full
+  // prereq/group chain with a fresh cache, on EVERY render (drag hover, select,
+  // sidebar resize), which visibly janked large sprints.
+  const planById = useMemo(
+    () => computeAllWorkingPlans(tasks, tasksById, memberById),
+    [tasks, tasksById, memberById]
+  )
 
   // ── Member-lane drag-to-reorder (per project) ───────────────────────────
   // Mirrors the row drag in TaskRows: state lives here, scoped to this view.
@@ -506,6 +531,7 @@ export function SprintView({
           members={members}
           allTasks={tasks}
           tasksById={tasksById}
+          planById={planById}
           collapsed={collapsed.has(member.id)}
           onToggleCollapse={() => toggleCollapse(member.id)}
           sort={sort}
@@ -522,6 +548,7 @@ export function SprintView({
           members={members}
           allTasks={tasks}
           tasksById={tasksById}
+          planById={planById}
           sort={sort}
           setSort={setSort}
           selectedIds={selectedIds}
@@ -753,6 +780,7 @@ function MemberCard({
   members,
   allTasks,
   tasksById,
+  planById,
   collapsed,
   onToggleCollapse,
   sort,
@@ -770,6 +798,7 @@ function MemberCard({
   members: Member[]
   allTasks: Task[]
   tasksById: Map<string, Task>
+  planById: Map<string, WorkingPlan>
   collapsed: boolean
   onToggleCollapse: () => void
   sort: Sort
@@ -806,7 +835,7 @@ function MemberCard({
     let nextDue: string | null = null
     for (const t of leafTasks) {
       if (t.status === 'done') continue
-      const plan = computeWorkingPlan(t, tasksById, memberById)
+      const plan = planById.get(t.id) ?? computeWorkingPlan(t, tasksById, memberById)
       // Milestones (effort 0) have no due span — their deadline is the milestone
       // date (start), so they count toward overdue / next-due like any task.
       const due = t.estimate === 0 ? plan.startDate : plan.dueDate
@@ -818,7 +847,7 @@ function MemberCard({
     // design-docs/conflict-warning.md). Cheap O(n²) over a member's tasks.
     const conflictTips = computeMemberConflicts(leafTasks, tasksById, memberById)
     return { total, done, pct, overdue, nextDue, conflictTips }
-  }, [tasks, parentIds, tasksById, memberById])
+  }, [tasks, parentIds, tasksById, memberById, planById])
   const { grip, rowProps, dragging } = useDragHandle(drag, LANE_GRIP_CLASS, 'data-lane-id')
   return (
     <Card className={`relative ${dragging ? 'opacity-40' : ''}`} {...rowProps}>
@@ -862,6 +891,7 @@ function MemberCard({
                 members={members}
                 allTasks={allTasks}
                 tasksById={tasksById}
+                planById={planById}
                 showAssignee={false}
                 conflictTips={conflictTips}
                 selectedIds={selectedIds}
@@ -888,6 +918,7 @@ function UnassignedCard({
   members,
   allTasks,
   tasksById,
+  planById,
   sort,
   setSort,
   selectedIds,
@@ -897,6 +928,7 @@ function UnassignedCard({
   members: Member[]
   allTasks: Task[]
   tasksById: Map<string, Task>
+  planById: Map<string, WorkingPlan>
   sort: Sort
   setSort: React.Dispatch<
     React.SetStateAction<Sort>
@@ -925,6 +957,7 @@ function UnassignedCard({
               members={members}
               allTasks={allTasks}
               tasksById={tasksById}
+              planById={planById}
               selectedIds={selectedIds}
               onToggleSelect={onToggleSelect}
               canReorder={sort.field == null || (sort.field === 'seq' && sort.dir === 'asc')}
@@ -1449,6 +1482,7 @@ function TaskGroupRow({
   childrenTasks,
   members,
   tasksById,
+  planById,
   collapsed,
   onToggle,
   drag,
@@ -1457,6 +1491,7 @@ function TaskGroupRow({
   childrenTasks: Task[]
   members: Member[]
   tasksById: Map<string, Task>
+  planById: Map<string, WorkingPlan>
   collapsed: boolean
   onToggle: () => void
   drag?: RowDrag
@@ -1478,7 +1513,7 @@ function TaskGroupRow({
   let minKey: string | null = null
   let maxKey: string | null = null
   for (const c of childrenTasks) {
-    const plan = computeWorkingPlan(c, tasksById, memberById)
+    const plan = planById.get(c.id) ?? computeWorkingPlan(c, tasksById, memberById)
     if (plan.startDate) {
       const k = `${plan.startDate}T${plan.startTime ?? ''}`
       if (!minKey || k < minKey) {
@@ -1576,6 +1611,7 @@ function TaskRows({
   members,
   allTasks,
   tasksById,
+  planById,
   showAssignee = true,
   conflictTips,
   selectedIds,
@@ -1586,6 +1622,7 @@ function TaskRows({
   members: Member[]
   allTasks: Task[]
   tasksById: Map<string, Task>
+  planById: Map<string, WorkingPlan>
   showAssignee?: boolean
   /** taskId → conflict tooltip (member double-booking); absent map = no warnings. */
   conflictTips?: Map<string, string>
@@ -1609,31 +1646,30 @@ function TaskRows({
     return { topLevel: tasks.filter((t) => !isChild(t)), childrenByParent }
   }, [tasks])
 
-  // Collapse state per parent, persisted to localStorage. Seed once for the
-  // parents present; newly-created groups default to expanded.
-  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set())
-  useEffect(() => {
-    setCollapsed((prev) => {
-      const next = new Set(prev)
-      for (const pid of childrenByParent.keys()) {
-        if (localStorage.getItem(GROUP_COLLAPSE_KEY(pid)) === '1') next.add(pid)
-      }
-      return next
-    })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-  const toggle = (id: string) =>
-    setCollapsed((prev) => {
-      const next = new Set(prev)
-      if (next.has(id)) {
-        next.delete(id)
-        localStorage.removeItem(GROUP_COLLAPSE_KEY(id))
-      } else {
-        next.add(id)
-        localStorage.setItem(GROUP_COLLAPSE_KEY(id), '1')
-      }
-      return next
-    })
+  // Collapse state per parent: localStorage is the source of truth, in-session
+  // toggles overlay it. DERIVED (not seeded once into state) so a sprint
+  // switch — which swaps the parent set without remounting this component —
+  // picks up each parent's persisted flag instead of ignoring it. Reading
+  // localStorage per parent per render is a handful of cheap sync gets.
+  const [collapseOverrides, setCollapseOverrides] = useState<
+    Map<string, boolean>
+  >(() => new Map())
+  const collapsed = useMemo(() => {
+    const s = new Set<string>()
+    for (const pid of childrenByParent.keys()) {
+      const c =
+        collapseOverrides.get(pid) ??
+        localStorage.getItem(GROUP_COLLAPSE_KEY(pid)) === '1'
+      if (c) s.add(pid)
+    }
+    return s
+  }, [childrenByParent, collapseOverrides])
+  const toggle = (id: string) => {
+    const next = !collapsed.has(id)
+    if (next) localStorage.setItem(GROUP_COLLAPSE_KEY(id), '1')
+    else localStorage.removeItem(GROUP_COLLAPSE_KEY(id))
+    setCollapseOverrides((prev) => new Map(prev).set(id, next))
+  }
 
   // ── Drag-to-reorder (default order only) ────────────────────────────────
   // State lives here so a drag is naturally scoped to this one card: another
@@ -1672,8 +1708,10 @@ function TaskRows({
     const targetId = targetEl instanceof HTMLElement ? targetEl.dataset.taskId : undefined
     const target = targetId ? tasksById.get(targetId) : undefined
     // Only show a slot on a same-lane row that isn't the dragged row itself.
+    // Functional clear: this closure can be a render old (memo'd rows keep
+    // their grip callbacks), so don't trust a captured `over` snapshot.
     if (!targetId || !target || targetId === dragId || laneOf(target) !== dragLaneRef.current) {
-      if (over) setOver(null)
+      setOver((prev) => (prev ? null : prev))
       return
     }
     pendingHit.current = { id: targetId, el: targetEl as HTMLElement, clientY }
@@ -1759,6 +1797,7 @@ function TaskRows({
                 childrenTasks={kids}
                 members={members}
                 tasksById={tasksById}
+                planById={planById}
                 collapsed={isCollapsed}
                 onToggle={() => toggle(t.id)}
                 drag={dragFor(t)}
@@ -1771,6 +1810,7 @@ function TaskRows({
                     members={members}
                     allTasks={allTasks}
                     tasksById={tasksById}
+                    planById={planById}
                     showAssignee={showAssignee}
                     isChild
                     warn={conflictTips?.get(c.id)}
@@ -1791,6 +1831,7 @@ function TaskRows({
             members={members}
             allTasks={allTasks}
             tasksById={tasksById}
+            planById={planById}
             showAssignee={showAssignee}
             warn={conflictTips?.get(t.id)}
             selected={selectedIds?.has(t.id)}
@@ -1805,22 +1846,12 @@ function TaskRows({
   )
 }
 
-function TaskRow({
-  task,
-  members,
-  allTasks,
-  tasksById,
-  showAssignee = true,
-  isChild = false,
-  warn,
-  selected = false,
-  onToggleSelect,
-  drag,
-}: {
+type TaskRowProps = {
   task: Task
   members: Member[]
   allTasks: Task[]
   tasksById: Map<string, Task>
+  planById: Map<string, WorkingPlan>
   showAssignee?: boolean
   isChild?: boolean
   /** Conflict tooltip — renders an amber warning triangle in the lead gutter. */
@@ -1828,7 +1859,50 @@ function TaskRow({
   selected?: boolean
   onToggleSelect?: () => void
   drag?: RowDrag
-}) {
+}
+
+/**
+ * Row equality for React.memo. Data props compare by identity (they're
+ * memoized upstream and only change when data changes). The two per-render
+ * closures are compared by VALUE instead:
+ * - `drag`: a fresh object every render — compare enabled/dragging/over (what
+ *   the row displays). Its callbacks only ever fire from the row whose grip
+ *   holds the pointer capture, and that row re-renders (dragging flips) and
+ *   gets fresh closures before any of them run.
+ * - `onToggleSelect`: fresh closure over (stable) functional setState — safe
+ *   to keep the old one.
+ */
+function taskRowPropsEqual(prev: TaskRowProps, next: TaskRowProps): boolean {
+  return (
+    prev.task === next.task &&
+    prev.members === next.members &&
+    prev.allTasks === next.allTasks &&
+    prev.tasksById === next.tasksById &&
+    prev.planById === next.planById &&
+    prev.showAssignee === next.showAssignee &&
+    prev.isChild === next.isChild &&
+    prev.warn === next.warn &&
+    prev.selected === next.selected &&
+    (prev.onToggleSelect === undefined) === (next.onToggleSelect === undefined) &&
+    prev.drag?.enabled === next.drag?.enabled &&
+    prev.drag?.dragging === next.drag?.dragging &&
+    prev.drag?.over === next.drag?.over
+  )
+}
+
+const TaskRow = memo(function TaskRow({
+  task,
+  members,
+  allTasks,
+  tasksById,
+  planById,
+  showAssignee = true,
+  isChild = false,
+  warn,
+  selected = false,
+  onToggleSelect,
+  drag,
+}: TaskRowProps) {
   const { grip, indicator, rowProps, dragging } = useDragHandle(drag)
   // Canonical user-edit funnel → records a change-log entry per changed field
   // (design-docs/task-change-log.md). Covers title/status/assignee/effort/dates.
@@ -1836,18 +1910,16 @@ function TaskRow({
   const assignee = members.find((m) => m.id === task.assigneeId) ?? null
   const blocked = isTaskBlocked(task, tasksById)
   const isWelcome = task.title.startsWith(WELCOME_PREFIX)
-  const memberById = useMemo(
-    () => new Map(members.map((m) => [m.id, m])),
-    [members]
-  )
   // Date + time from one live plan so they always agree and reflect current
   // data — never a stale stored dueDate paired with a freshly-computed time.
+  // The plan comes from the view-wide planById pass (one compute per data
+  // change), not a per-row computeWorkingPlan (one per render).
   const {
     startDate: liveStart,
     dueDate: liveDue,
     startTime,
     endTime,
-  } = computeWorkingPlan(task, tasksById, memberById)
+  } = planById.get(task.id) ?? NULL_WORKING_PLAN
   // Effort 0 = milestone (a checkpoint, not a span). Distinct from estimate null
   // (= not estimated). See design-docs/milestones.md.
   const isMilestone = task.estimate === 0
@@ -2022,7 +2094,7 @@ function TaskRow({
       </div>
     </div>
   )
-}
+}, taskRowPropsEqual)
 
 /**
  * Per-group column header rendered inside each MemberCard / UnassignedCard

@@ -1250,11 +1250,18 @@ function leafPlan(
  * Time mapping: fractions → {08:00, 12:00, 13:00, 17:00}. Sub-half-day usage
  * rounds to lunch (12:00) or 17:00.
  */
+export interface WorkingPlan {
+  startDate: string | null
+  dueDate: string | null
+  startTime: string
+  endTime: string
+}
+
 export function computeWorkingPlan(
   task: Task,
   byId: Map<string, Task>,
   memberById?: Map<string, Member>
-): { startDate: string | null; dueDate: string | null; startTime: string; endTime: string } {
+): WorkingPlan {
   const plan = planFor(task, byId, memberById, new Map())
   return {
     startDate: plan.startDate,
@@ -1262,6 +1269,32 @@ export function computeWorkingPlan(
     startTime: plan.startOffset >= 0.5 - EPS ? '13:00' : '08:00',
     endTime: plan.dueFraction > 0.5 + EPS ? '17:00' : '12:00',
   }
+}
+
+/**
+ * Working plans for EVERY task in one pass, sharing a single memo cache and
+ * children map across the whole set. `computeWorkingPlan` re-derives each
+ * task's prereq/group chain from scratch — fine for one cell, quadratic when
+ * a view calls it per row. Views compute this once per data change instead.
+ */
+export function computeAllWorkingPlans(
+  tasks: Task[],
+  byId: Map<string, Task>,
+  memberById?: Map<string, Member>
+): Map<string, WorkingPlan> {
+  const cache = new Map<string, TaskPlan>()
+  const ctx = { children: childrenByParent(byId), inProgress: new Set<string>() }
+  const out = new Map<string, WorkingPlan>()
+  for (const t of tasks) {
+    const plan = planFor(t, byId, memberById, cache, ctx)
+    out.set(t.id, {
+      startDate: plan.startDate,
+      dueDate: plan.dueDate,
+      startTime: plan.startOffset >= 0.5 - EPS ? '13:00' : '08:00',
+      endTime: plan.dueFraction > 0.5 + EPS ? '17:00' : '12:00',
+    })
+  }
+  return out
 }
 
 /**

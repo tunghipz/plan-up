@@ -315,11 +315,25 @@ function App() {
   }, [sidebarWidth])
   const startSidebarResize = (e: React.MouseEvent) => {
     e.preventDefault()
+    // rAF-coalesced: mousemove can fire far above the frame rate, and each
+    // setSidebarWidth re-renders the whole App tree — one write per frame is
+    // all the screen can show anyway.
+    let raf = 0
+    let nextW = 0
     const onMove = (ev: MouseEvent) => {
-      const w = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, ev.clientX - RAIL_W))
-      setSidebarWidth(w)
+      nextW = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, ev.clientX - RAIL_W))
+      if (raf) return
+      raf = requestAnimationFrame(() => {
+        raf = 0
+        setSidebarWidth(nextW)
+      })
     }
     const onUp = () => {
+      if (raf) {
+        cancelAnimationFrame(raf)
+        raf = 0
+        setSidebarWidth(nextW)
+      }
       document.removeEventListener('mousemove', onMove)
       document.removeEventListener('mouseup', onUp)
       document.body.style.userSelect = ''
@@ -425,25 +439,44 @@ function App() {
     [currentProjectId]
   )
 
-  // Per-sprint task counts for the sidebar panel.
-  const projectTasks = useLiveQuery<Task[]>(
+  // Per-sprint task counts for the sidebar panel + the project task total.
+  // The querier aggregates in place and returns a compact JSON STRING: strings
+  // compare by value, so useLiveQuery's setState bails out whenever a task
+  // write didn't actually change any count (title keystrokes, date shifts…)
+  // instead of re-rendering the whole App tree twice per edit. (A toArray()
+  // result is a fresh array every emission — it can never bail.)
+  const sprintCountsJson = useLiveQuery<string>(
     () =>
       seeded && currentProjectId
-        ? db.tasks.where('projectId').equals(currentProjectId).toArray()
-        : Promise.resolve([] as Task[]),
+        ? db.tasks
+            .where('projectId')
+            .equals(currentProjectId)
+            .toArray()
+            .then((rows) => {
+              const counts: Record<string, { total: number; done: number }> = {}
+              for (const t of rows) {
+                if (!t.sprintId) continue
+                const c = (counts[t.sprintId] ??= { total: 0, done: 0 })
+                c.total++
+                if (t.status === 'done') c.done++
+              }
+              return JSON.stringify({ all: rows.length, counts })
+            })
+        : Promise.resolve(''),
     [seeded, currentProjectId]
   )
-  const sprintTaskCounts = useMemo(() => {
-    const counts = new Map<string, { total: number; done: number }>()
-    for (const t of projectTasks ?? []) {
-      if (!t.sprintId) continue
-      const c = counts.get(t.sprintId) ?? { total: 0, done: 0 }
-      c.total++
-      if (t.status === 'done') c.done++
-      counts.set(t.sprintId, c)
+  const { totalProjectTasks, sprintTaskCounts } = useMemo(() => {
+    const empty = new Map<string, { total: number; done: number }>()
+    if (!sprintCountsJson) return { totalProjectTasks: 0, sprintTaskCounts: empty }
+    const parsed = JSON.parse(sprintCountsJson) as {
+      all: number
+      counts: Record<string, { total: number; done: number }>
     }
-    return counts
-  }, [projectTasks])
+    return {
+      totalProjectTasks: parsed.all,
+      sprintTaskCounts: new Map(Object.entries(parsed.counts)),
+    }
+  }, [sprintCountsJson])
 
   // When project changes (or first loads), reset sprint to latest in project.
   useEffect(() => {
@@ -933,8 +966,8 @@ function App() {
               <div className="text-[12.5px] text-ink-faint mt-1">
                 <span className="tab-data">{sprints?.length ?? 0}</span> sprint
                 {(sprints?.length ?? 0) === 1 ? '' : 's'} ·{' '}
-                <span className="tab-data">{projectTasks?.length ?? 0}</span>{' '}
-                task{(projectTasks?.length ?? 0) === 1 ? '' : 's'}
+                <span className="tab-data">{totalProjectTasks}</span>{' '}
+                task{totalProjectTasks === 1 ? '' : 's'}
               </div>
             </div>
             <div className="flex-1 overflow-auto">

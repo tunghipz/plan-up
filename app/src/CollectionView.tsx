@@ -540,7 +540,9 @@ function NameModal({
             value={name}
             onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') submit()
+              // isComposing: Enter inside an IME composition (Vietnamese telex,
+              // CJK) confirms the composition, not the form.
+              if (e.key === 'Enter' && !e.nativeEvent.isComposing) submit()
               else if (e.key === 'Escape') onClose()
             }}
             placeholder={placeholder}
@@ -1007,21 +1009,39 @@ function ItemRow({
  */
 function ItemTitle({ task }: { task: Task }) {
   const ref = useRef<HTMLTextAreaElement>(null)
+  // Draft-while-focused: binding value={task.title} straight to the liveQuery
+  // row makes every keystroke round-trip through Dexie's ASYNC echo — a slow
+  // echo re-renders the textarea to an older value mid-burst (dropped chars,
+  // caret jump). The row stays the source of truth whenever not editing.
+  const [draft, setDraft] = useState(task.title)
+  const focusedRef = useRef(false)
+  useEffect(() => {
+    if (!focusedRef.current) setDraft(task.title)
+  }, [task.title])
   const resize = () => {
     const el = ref.current
     if (!el) return
     el.style.height = 'auto'
     el.style.height = el.scrollHeight + 'px'
   }
-  useLayoutEffect(resize, [task.title])
+  useLayoutEffect(resize, [draft])
 
   return (
     <div className={`${COL.title} flex items-start`}>
       <textarea
         ref={ref}
-        value={task.title}
+        value={draft}
         rows={1}
-        onChange={(e) => void db.tasks.update(task.id, { title: e.target.value })}
+        onFocus={() => {
+          focusedRef.current = true
+        }}
+        onBlur={() => {
+          focusedRef.current = false
+        }}
+        onChange={(e) => {
+          setDraft(e.target.value)
+          void db.tasks.update(task.id, { title: e.target.value })
+        }}
         onKeyDown={(e) => {
           if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault()

@@ -374,6 +374,37 @@ function UnscheduledChip({ task, color }: { task: Task; color: string }) {
  * `overflow-hidden`), mirrors the StatusPill / DatePicker popover pattern. Edit
  * title · status · start/end, or jump to the List tab.
  */
+/**
+ * Draft-while-focused title input. Binding value={task.title} straight to the
+ * liveQuery row round-trips every keystroke through Dexie's ASYNC echo — a
+ * slow echo re-renders the input to an older value mid-burst (dropped chars,
+ * caret jump). The row stays the source of truth whenever not editing.
+ */
+function TitleInput({ task }: { task: Task }) {
+  const [draft, setDraft] = useState(task.title)
+  const focusedRef = useRef(false)
+  useEffect(() => {
+    if (!focusedRef.current) setDraft(task.title)
+  }, [task.title])
+  return (
+    <input
+      value={draft}
+      onFocus={() => {
+        focusedRef.current = true
+      }}
+      onBlur={() => {
+        focusedRef.current = false
+      }}
+      onChange={(e) => {
+        setDraft(e.target.value)
+        void db.tasks.update(task.id, { title: e.target.value })
+      }}
+      className="w-full text-[14px] font-semibold text-ink bg-transparent border-b border-transparent focus:border-accent focus:outline-none pb-0.5"
+      aria-label="Item title"
+    />
+  )
+}
+
 function BarPopover({
   task,
   statuses,
@@ -438,12 +469,7 @@ function BarPopover({
       style={{ position: 'fixed', top: pos.top, left: pos.left, width: W }}
       className="z-50 bg-surface border border-border-hair rounded-[14px] shadow-[0_12px_40px_rgba(0,0,0,0.18),0_0_0_0.5px_rgba(0,0,0,0.04)] p-3 space-y-2.5"
     >
-      <input
-        value={task.title}
-        onChange={(e) => db.tasks.update(task.id, { title: e.target.value })}
-        className="w-full text-[14px] font-semibold text-ink bg-transparent border-b border-transparent focus:border-accent focus:outline-none pb-0.5"
-        aria-label="Item title"
-      />
+      <TitleInput task={task} />
       <div className="flex flex-wrap gap-1.5">
         {statuses.map((s) => {
           const active = task.collectionStatusId === s.id

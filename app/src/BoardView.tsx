@@ -285,17 +285,25 @@ export function BoardView({
     setOver(null)
   }, [])
   // Fractional index between the slot's display neighbours (skipping the dragged
-  // card). null → column has no other tasks, leave order untouched.
-  const orderForDrop = (status: Status, index: number, id: string): number | null => {
+  // card). null → column has no other tasks, leave order untouched. `collides`
+  // flags a midpoint that can't separate from a neighbour — repeated drops into
+  // the same gap exhaust float precision (`(a+b)/2 === a`) and the cheap
+  // one-card write would make two cards silently share an order.
+  const orderForDrop = (
+    status: Status,
+    index: number,
+    id: string
+  ): { order: number; collides: boolean } | null => {
     const L = byStatus[status]
     let before: Task | undefined
     let after: Task | undefined
     for (let i = index - 1; i >= 0; i--) if (L[i].id !== id) { before = L[i]; break }
     for (let i = index; i < L.length; i++) if (L[i].id !== id) { after = L[i]; break }
     if (!before && !after) return null
-    if (!before) return orderOf(after!) - 1
-    if (!after) return orderOf(before!) + 1
-    return (orderOf(before!) + orderOf(after!)) / 2
+    if (!before) return { order: orderOf(after!) - 1, collides: false }
+    if (!after) return { order: orderOf(before!) + 1, collides: false }
+    const order = (orderOf(before) + orderOf(after)) / 2
+    return { order, collides: order <= orderOf(before) || order >= orderOf(after) }
   }
   const handleDrop = (status: Status, id: string, index: number) => {
     const t = tasksById.get(id)
@@ -305,11 +313,33 @@ export function BoardView({
       // plus a logged status change if it crossed columns. boardOrder is written
       // raw (not loggable); status goes through logStatusChange so the move shows
       // in the card's change log (parity with the List status control).
-      const order = orderForDrop(status, index, id)
+      const drop = orderForDrop(status, index, id)
       const crossed = t.status !== status
+      if (drop?.collides) {
+        // Midpoint exhausted — same guard as the List row drag / member-lane
+        // drag, but renormalizeListOrder writes `listOrder`, not `boardOrder`,
+        // so reindex inline: clean integer boardOrder over the column's display
+        // order with the card spliced in at the slot, in one transaction (same
+        // shape as the sorted-column reindex below).
+        const cur = byStatus[status]
+        const rest = cur.filter((x) => x.id !== id)
+        let pos = 0
+        for (let i = 0; i < index && i < cur.length; i++) if (cur[i].id !== id) pos++
+        rest.splice(Math.min(pos, rest.length), 0, t)
+        void db
+          .transaction('rw', db.tasks, async () => {
+            for (let i = 0; i < rest.length; i++) {
+              if (rest[i].boardOrder !== i) await db.tasks.update(rest[i].id, { boardOrder: i })
+            }
+          })
+          .then(() => {
+            if (crossed) void logStatusChange(id, t.status, status)
+          })
+        return
+      }
       void (async () => {
-        if (order != null && order !== t.boardOrder)
-          await db.tasks.update(id, { boardOrder: order })
+        if (drop != null && drop.order !== t.boardOrder)
+          await db.tasks.update(id, { boardOrder: drop.order })
         if (crossed) await logStatusChange(id, t.status, status)
       })()
       return

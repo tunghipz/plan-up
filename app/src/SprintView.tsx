@@ -58,6 +58,7 @@ import {
   parsePrereqSeqs,
   formatSeqRanges,
   flattenDisplayOrder,
+  PRIORITY_TAG,
 } from './lib'
 
 // Re-exported so existing importers (BoardView) keep `from './SprintView'`.
@@ -1261,14 +1262,11 @@ const COL = {
 
 /**
  * Cupertino priority tag — soft-tint pill, only for urgent/high. Normal/Low/None
- * are the silent default (no tag), keeping the title row calm.
+ * are the silent default (no tag), keeping the title row calm. Colors come
+ * from the shared PRIORITY_TAG map (also used by the rollover preview).
  */
-const PRIORITY_STICKER: Record<string, { label: string; bg: string; fg: string }> = {
-  urgent: { label: 'Urgent', bg: 'rgba(255,59,48,0.12)', fg: 'color-mix(in srgb, var(--color-priority-urgent) 100%, #000 22%)' },
-  high: { label: 'High', bg: 'rgba(255,149,0,0.15)', fg: 'color-mix(in srgb, var(--color-priority-high) 100%, #000 22%)' },
-}
 function PriorityChip({ priority }: { priority: string }) {
-  const meta = PRIORITY_STICKER[priority]
+  const meta = PRIORITY_TAG[priority]
   if (!meta) return null
   return (
     <span
@@ -2434,8 +2432,11 @@ export function EffortCell({
   onChange: (v: number | null) => void
 }) {
   const [draft, setDraft] = useState(value == null ? '' : String(value))
+  const focusedRef = useRef(false)
   useEffect(() => {
-    setDraft(value == null ? '' : String(value))
+    // Don't clobber in-flight typing when an external write (recompute,
+    // import) lands mid-edit — same focused guard as TitleTextarea/PrereqInput.
+    if (!focusedRef.current) setDraft(value == null ? '' : String(value))
   }, [value])
   const commit = () => {
     const trimmed = draft.trim()
@@ -2454,7 +2455,13 @@ export function EffortCell({
     <input
       value={draft}
       onChange={(e) => setDraft(e.target.value.replace(/[^0-9.]/g, ''))}
-      onBlur={commit}
+      onFocus={() => {
+        focusedRef.current = true
+      }}
+      onBlur={() => {
+        focusedRef.current = false
+        commit()
+      }}
       onKeyDown={(e) => {
         if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
         if (e.key === 'Escape') {

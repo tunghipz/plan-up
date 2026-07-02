@@ -17,12 +17,9 @@ import {
   recomputeDates,
   recomputeAllDates,
   addDays,
-  addBusinessDays,
-  nextBusinessDay,
   isWeekend,
   setMemberDaysOff,
   setMemberAvatar,
-  computeWorkingTimes,
   moveUnfinishedToNextSprint,
   createProject,
   deleteProject,
@@ -311,21 +308,6 @@ describe('date computation', () => {
     expect(isWeekend('2026-06-08')).toBe(false) // Mon
   })
 
-  it('nextBusinessDay: weekday unchanged, weekend → next Monday', () => {
-    expect(nextBusinessDay('2026-06-05')).toBe('2026-06-05') // Fri
-    expect(nextBusinessDay('2026-06-06')).toBe('2026-06-08') // Sat → Mon
-    expect(nextBusinessDay('2026-06-07')).toBe('2026-06-08') // Sun → Mon
-  })
-
-  it('addBusinessDays skips weekends', () => {
-    // Mon 06-01 + 4 business days = Fri 06-05
-    expect(addBusinessDays('2026-06-01', 4)).toBe('2026-06-05')
-    // Fri 06-05 + 1 business day = Mon 06-08 (skips Sat/Sun)
-    expect(addBusinessDays('2026-06-05', 1)).toBe('2026-06-08')
-    // Mon 06-01 + 5 business days = Mon 06-08 (full week)
-    expect(addBusinessDays('2026-06-01', 5)).toBe('2026-06-08')
-  })
-
   it('computeStartEnd: prereq ends Friday → dependent starts Monday', () => {
     const p: Task = {
       id: 'p', projectId: P, sequence: 1, title: 'p', assigneeId: null, sprintId: 's',
@@ -339,21 +321,6 @@ describe('date computation', () => {
     expect(computeStartEnd(a, byId)).toEqual({
       startDate: '2026-06-08', dueDate: '2026-06-10',
     })
-  })
-
-  it('addBusinessDays skips member-specific off-days', () => {
-    // Mon 06-01 + 4 with Wed 06-03 off → Mon, Tue, [skip Wed], Thu, Fri, Mon
-    // Wait: counting business days FORWARD from Mon. addBusinessDays(start, n)
-    // advances n working days, returning the n-th. With 06-03 off, the days
-    // counted are Tue, Thu, Fri, Mon → end = Mon 06-08.
-    const off = new Set(['2026-06-03'])
-    expect(addBusinessDays('2026-06-01', 4, off)).toBe('2026-06-08')
-  })
-
-  it('nextBusinessDay skips member-specific off-days', () => {
-    const off = new Set(['2026-06-08']) // Monday off
-    // 06-06 Sat → skip Sat, Sun, Mon (off) → Tue 06-09
-    expect(nextBusinessDay('2026-06-06', off)).toBe('2026-06-09')
   })
 
   it('computeStartEnd uses assignee daysOff', () => {
@@ -483,7 +450,7 @@ describe('date computation', () => {
     expect(computeStartEnd(t, byId, memberById)).toEqual({
       startDate: '2026-06-04', dueDate: '2026-06-08',
     })
-    expect(computeWorkingTimes(t, byId, memberById).endTime).toBe('17:00')
+    expect(computeWorkingPlan(t, byId, memberById).endTime).toBe('17:00')
   })
 
   it('computeWorkingPlan ignores a STALE stored dueDate — date + time come from one live plan', () => {
@@ -674,7 +641,7 @@ describe('date computation', () => {
       startDate: '2026-06-04', dueDate: '2026-06-05',
     })
     // Times: B starts PM, ends mid-day Fri.
-    expect(computeWorkingTimes(b, byId)).toEqual({
+    expect(computeWorkingPlan(b, byId)).toMatchObject({
       startTime: '13:00', endTime: '12:00',
     })
   })
@@ -698,7 +665,7 @@ describe('date computation', () => {
     expect(computeStartEnd(b, byId)).toEqual({
       startDate: '2026-06-04', dueDate: '2026-06-04',
     })
-    expect(computeWorkingTimes(b, byId)).toEqual({
+    expect(computeWorkingPlan(b, byId)).toMatchObject({
       startTime: '08:00', endTime: '17:00',
     })
   })

@@ -257,6 +257,42 @@ export function GanttView({
             noDates.push(task)
             continue
           }
+          // Manual dates can legally sit on a weekend (the date picker allows
+          // it: dimmed-but-selectable), but the day axis carries only workdays,
+          // so a raw index lookup would misfile a mid-sprint weekend start into
+          // the "later" chip and silently stretch a weekend due date to the
+          // sprint's last day. Snap for DISPLAY only — never written back: a
+          // weekend start moves forward to the next axis day, a weekend end
+          // backward to the previous one, and a span living entirely inside one
+          // weekend clamps to a one-day bar on the nearest in-sprint axis day
+          // (forward when the sprint has one, else backward).
+          const s0 = sd
+          const d0 = dd
+          if (
+            s0 >= sprintStartDate &&
+            d0 <= sprintEndDate &&
+            !workdays.some((d) => d >= s0 && d <= d0)
+          ) {
+            const day = workdays.find((d) => d > d0) ?? lastDay
+            sd = day
+            dd = day
+            startTime = '08:00'
+            endTime = '17:00'
+          } else {
+            if (s0 >= sprintStartDate && s0 <= lastDay && !workdays.includes(s0)) {
+              sd = workdays.find((d) => d > s0)!
+              startTime = '08:00'
+            }
+            if (d0 >= firstDay && d0 <= sprintEndDate && !workdays.includes(d0)) {
+              let prev = firstDay
+              for (const d of workdays) {
+                if (d < d0) prev = d
+                else break
+              }
+              dd = prev
+              endTime = '17:00'
+            }
+          }
           // wholly after the window → "later" (shows its start); wholly before → "earlier"
           // (shows its end — when it finished)
           if (sd > lastDay) {
@@ -353,7 +389,7 @@ export function GanttView({
         const laterN = offWindow.length - earlierN
         return { member: m, evs, rows, offWindow, earlierN, laterN, noDates, offBands }
       })
-  }, [members, tasks, workdays, planById, childrenByParent, N, firstDay, lastDay, dayW])
+  }, [members, tasks, workdays, planById, childrenByParent, N, firstDay, lastDay, dayW, sprintStartDate, sprintEndDate])
 
   if (!members) return <p className="text-ink-muted py-12 text-center">Loading…</p>
   if (N === 0)
@@ -688,6 +724,7 @@ export function GanttView({
       {openBar && (
         <BarDetailPopover
           task={openBar.task}
+          plan={planById.get(openBar.task.id)!}
           status={openBar.status}
           anchorRect={openBar.rect}
           onClose={() => setOpenBar(null)}
@@ -705,12 +742,15 @@ export function GanttView({
  */
 function BarDetailPopover({
   task,
+  plan,
   status,
   anchorRect,
   onClose,
   onOpenInList,
 }: {
   task: Task
+  /** The bar's computed plan — the popover must agree with what was drawn. */
+  plan: ReturnType<typeof computeWorkingPlan>
   status: keyof typeof STATUS_META
   anchorRect: DOMRect
   onClose: () => void
@@ -754,13 +794,15 @@ function BarDetailPopover({
 
   const meta = STATUS_META[status]
   const v = meta.varName
+  // COMPUTED dates, not the stored task fields — a task scheduled purely via
+  // prereqs/effort has no stored dates, yet its bar clearly spans days.
   const range =
-    task.startDate && task.dueDate
-      ? task.startDate === task.dueDate
-        ? formatShortDate(task.startDate)
-        : `${formatShortDate(task.startDate)} – ${formatShortDate(task.dueDate)}`
-      : task.startDate
-        ? formatShortDate(task.startDate)
+    plan.startDate && plan.dueDate
+      ? plan.startDate === plan.dueDate
+        ? formatShortDate(plan.startDate)
+        : `${formatShortDate(plan.startDate)} – ${formatShortDate(plan.dueDate)}`
+      : plan.startDate
+        ? formatShortDate(plan.startDate)
         : '—'
 
   return createPortal(

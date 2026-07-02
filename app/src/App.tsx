@@ -84,6 +84,8 @@ import {
   latestActiveSprint,
   nextSprintNumber,
   sprintToSelect,
+  firstGrapheme,
+  PRIORITY_TAG,
 } from './lib'
 
 const CURRENT_PROJECT_KEY = 'plan-up:currentProjectId'
@@ -523,15 +525,24 @@ function App() {
   const jumpToTask = (taskId: string) => {
     setPaletteOpen(false)
     setView('list')
-    setTimeout(() => {
+    // The list view may still be mounting (we just flipped it) — poll per
+    // frame until the row exists instead of trusting one fixed delay, which
+    // silently no-ops on slow machines / large sprints. Bounded so a task
+    // that never renders (deleted mid-jump) can't poll forever.
+    let tries = 60 // ~1s at 60fps
+    const attempt = () => {
       const c = scrollRef.current
       const el = c?.querySelector<HTMLElement>(`[data-task-id="${taskId}"]`)
-      if (!c || !el) return
+      if (!c || !el) {
+        if (--tries > 0) requestAnimationFrame(attempt)
+        return
+      }
       const top = c.scrollTop + (el.getBoundingClientRect().top - c.getBoundingClientRect().top) - 80
       c.scrollTo({ top: top < 0 ? 0 : top, behavior: 'smooth' })
       el.setAttribute('data-flash', '1')
       window.setTimeout(() => el.removeAttribute('data-flash'), 1300)
-    }, 70)
+    }
+    requestAnimationFrame(attempt)
   }
 
   // Keyboard shortcuts: / or ⌘K open the search palette, n new sprint, esc closes.
@@ -545,8 +556,11 @@ function App() {
       const sprintActive = selKind === 'sprint' && !!currentSprintId
 
       // ⌘K / Ctrl+K — open palette from anywhere (works even while typing).
+      // Same guards as `/`: the palette's jump-to needs the sprint list view
+      // mounted, so it must not open over settings, Home, or a non-sprint
+      // selection (it would mutate hidden view state and scroll nowhere).
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
-        if (settingsOpen || !sprintActive) return
+        if (settingsOpen || !sprintActive || screen === 'home') return
         e.preventDefault()
         setPaletteOpen(true)
         return
@@ -571,7 +585,9 @@ function App() {
         e.preventDefault()
         setPaletteOpen(true)
       } else if (e.key === 'n' && !e.metaKey && !e.ctrlKey) {
-        if (settingsOpen || screen === 'home') return // no dialog over settings / on Home
+        // No dialog over settings / on Home / while viewing a collection —
+        // consistent with `/`: sprint shortcuts only where sprints are on screen.
+        if (settingsOpen || screen === 'home' || selKind !== 'sprint') return
         e.preventDefault()
         setShowNewSprint(true)
       } else if (e.key === 'd' && (e.metaKey || e.ctrlKey) && e.shiftKey) {
@@ -892,7 +908,7 @@ function App() {
           // Emoji icon wins; otherwise the name's first letter (see
           // project-icon-emoji.md). `||` so a stored empty string also falls back.
           const isEmoji = !!p.icon
-          const label = p.icon || p.name.trim().charAt(0).toUpperCase() || '·'
+          const label = p.icon || firstGrapheme(p.name).toUpperCase() || '·'
           return (
             <button
               key={p.id}
@@ -2223,10 +2239,6 @@ const COLLECTION_VIEWS: { value: CollectionViewMode; label: string; Icon: typeof
  * flips up near the viewport edge; outside-click / Esc to dismiss. See
  * sprint-rollover.md. Move-all — no per-task selection (matches the DB move).
  */
-const ROLL_PRIORITY: Record<string, { label: string; bg: string; fg: string }> = {
-  urgent: { label: 'Urgent', bg: 'rgba(255,59,48,0.12)', fg: 'color-mix(in srgb, var(--color-priority-urgent) 100%, #000 22%)' },
-  high: { label: 'High', bg: 'rgba(255,149,0,0.15)', fg: 'color-mix(in srgb, var(--color-priority-high) 100%, #000 22%)' },
-}
 function RolloverPopover({
   anchorRef,
   tasks,
@@ -2317,7 +2329,7 @@ function RolloverPopover({
         {tasks.map((t) => {
           const m = memberOf(t.assigneeId)
           const overdue = isOverdue(t.dueDate, false)
-          const pri = ROLL_PRIORITY[t.priority]
+          const pri = PRIORITY_TAG[t.priority]
           return (
             <div
               key={t.id}
@@ -2416,6 +2428,23 @@ function SprintNoteBanner({ sprint }: { sprint: Sprint }) {
     setDraft(sprint.note ?? '')
     setEditing(false)
   }
+
+  // Unmount flush: the banner is keyed by sprint.id, so picking another sprint
+  // REPLACES it mid-edit — React-driven unmounts fire no blur, and the draft
+  // would silently vanish. Same guarantee TitleTextarea gives its cells.
+  const flushRef = useRef({ editing, draft, note: sprint.note ?? '' })
+  useEffect(() => {
+    flushRef.current = { editing, draft, note: sprint.note ?? '' }
+  })
+  useEffect(() => {
+    return () => {
+      const s = flushRef.current
+      if (s.editing && s.draft.trim() !== s.note) {
+        void setSprintNote(sprint.id, s.draft)
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   if (editing) {
     return (

@@ -977,61 +977,6 @@ export function isWeekend(dateStr: string): boolean {
   return day === 0 || day === 6
 }
 
-/**
- * Returns dateStr if it's a working day, else the next working day.
- * `extraOff` is an optional set of additional yyyy-mm-dd days that count
- * as non-working (member-specific vacation).
- */
-export function nextBusinessDay(
-  dateStr: string,
-  extraOff?: ReadonlySet<string>
-): string {
-  let d = dateStr
-  while (isWeekend(d) || extraOff?.has(d)) d = addDays(d, 1)
-  return d
-}
-
-/**
- * Add `n` working days to `dateStr`. Assumes dateStr is already a working
- * day. Sat/Sun and any day in `extraOff` do not consume `n`.
- */
-export function addBusinessDays(
-  dateStr: string,
-  n: number,
-  extraOff?: ReadonlySet<string>
-): string {
-  let d = dateStr
-  let remaining = n
-  while (remaining > 0) {
-    d = addDays(d, 1)
-    if (!isWeekend(d) && !extraOff?.has(d)) remaining--
-  }
-  return d
-}
-
-/**
- * Compute (start, end) for a task based on its prereqs and effort.
- * - If task has no prereqs: returns (task.startDate, task.dueDate) — manual.
- * - If prereqs exist: start = max(prereq.dueDate) + 1 day.
- * - end = start + (estimate - 1) days; if no estimate, end = start.
- * Returns null fields if the calculation can't run (e.g. no prereq has an end).
- */
-/**
- * Working fraction contributed by a single day for the given off-map.
- * - Sat/Sun: 0
- * - In off-map with full off (no `half`): 0
- * - In off-map with `half`: 0.5
- * - Otherwise: 1
- */
-export function workingFraction(
-  date: string,
-  contribByDate?: ReadonlyMap<string, 0 | 0.5>
-): number {
-  if (isWeekend(date)) return 0
-  if (contribByDate?.has(date)) return contribByDate.get(date) as number
-  return 1
-}
-
 const EPS = 1e-9
 
 /**
@@ -1295,19 +1240,6 @@ export function computeAllWorkingPlans(
     })
   }
   return out
-}
-
-/**
- * Wall-clock display times. Maps the plan's fractions to {08:00, 12:00,
- * 13:00, 17:00}. Sub-half-day usage is rounded to lunch (12:00) or 17:00.
- */
-export function computeWorkingTimes(
-  task: Task,
-  byId: Map<string, Task>,
-  memberById?: Map<string, Member>
-): { startTime: string; endTime: string } {
-  const { startTime, endTime } = computeWorkingPlan(task, byId, memberById)
-  return { startTime, endTime }
 }
 
 /**

@@ -152,7 +152,7 @@ export function HomeDashboard({
           <section className="grid gap-3.5 [grid-template-columns:repeat(auto-fill,minmax(248px,1fr))]">
             {cards.map(({ p, active, total, pct, remaining, overdue, pMembers }) => {
               const isEmoji = !!p.icon
-              const label = p.icon || p.name.trim().charAt(0).toUpperCase() || '·'
+              const label = p.icon || firstGrapheme(p.name).toUpperCase() || '·'
               return (
                 <button
                   key={p.id}

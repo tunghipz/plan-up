@@ -518,18 +518,41 @@ export function computeBarSegments(
 }
 
 export function useDarkMode() {
+  // safeStorage, not raw localStorage: getItem throws in locked-down
+  // embeddings and this initializer runs on the very first render.
   const [dark, setDark] = useState<boolean>(() => {
-    const stored = localStorage.getItem('plan-up:dark')
+    const stored = safeStorage.get('plan-up:dark')
     if (stored !== null) return stored === '1'
     return window.matchMedia('(prefers-color-scheme: dark)').matches
   })
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', dark)
-    localStorage.setItem('plan-up:dark', dark ? '1' : '0')
+    safeStorage.set('plan-up:dark', dark ? '1' : '0')
   }, [dark])
 
   return [dark, setDark] as const
+}
+
+/**
+ * Priority-tag colors — soft-tint pill, only for urgent/high (Normal/Low are
+ * the silent default: no tag). ONE source for every view that renders the
+ * pill (sprint list title row, rollover preview) so the tints can't drift.
+ */
+export const PRIORITY_TAG: Record<
+  string,
+  { label: string; bg: string; fg: string }
+> = {
+  urgent: {
+    label: 'Urgent',
+    bg: 'rgba(255,59,48,0.12)',
+    fg: 'color-mix(in srgb, var(--color-priority-urgent) 100%, #000 22%)',
+  },
+  high: {
+    label: 'High',
+    bg: 'rgba(255,149,0,0.15)',
+    fg: 'color-mix(in srgb, var(--color-priority-high) 100%, #000 22%)',
+  },
 }
 
 /** Download any JSON-serialisable payload as a file (Blob + transient anchor). */

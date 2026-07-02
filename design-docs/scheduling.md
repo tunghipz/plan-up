@@ -1,8 +1,8 @@
 # Auto-scheduling engine
 
 **Status:** Implemented
-**Last updated:** 2026-06-25
-**Code:** `app/src/db.ts` (`planFor`, `computeStartEnd`, `computeWorkingPlan`,
+**Last updated:** 2026-07-02
+**Code:** `app/src/scheduling.ts` (`planFor`, `computeStartEnd`, `computeWorkingPlan`,
 `computeWorkingTimes`, `recomputeDates`, `recomputeAllDates`)
 
 ## Purpose

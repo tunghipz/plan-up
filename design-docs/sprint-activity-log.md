@@ -6,7 +6,7 @@ row + event in one transaction; earlier: per-sprint retention cap — newest 500
 older pruned on write; motion pass — segmented control slides a measured pill like the
 main `ViewToggle` (§6.5 #4), rows do a one-shot entrance stagger when the drawer opens —
 see [Motion](#motion))
-**Code:** `app/src/db.ts` (`ActivityEvent`, `events` table v10, `logEvent`,
+**Code:** `app/src/activity-log.ts` (`logEvent`, `createSprint`, `sprintEvents`, prune) + `app/src/types.ts`/`schema.ts` (`ActivityEvent`, `events` table v10; all re-exported by the `db.ts` facade),
 `MAX_EVENTS_PER_SPRINT`, `pruneSprintEvents`,
 `sprintEvents`, `logTaskEdits` + wiring in `createSprint`/`addSprintTask`/`updateTask`/
 `logStatusChange`/`setDependencies`/`moveUnfinishedToNextSprint`),
@@ -41,7 +41,7 @@ task row; the two overlapped, so the per-task one was retired and this took over
 
 - **Sprint-wide, not per-task-5.** Shows the whole sprint's recent history, not the last 5
   per task — but **capped at the newest 500 events per sprint** (older rows pruned on write;
-  `MAX_EVENTS_PER_SPRINT` in `db.ts`) so the store can't grow unbounded. See
+  `MAX_EVENTS_PER_SPRINT` in `activity-log.ts`) so the store can't grow unbounded. See
   [Rules & edge cases](#rules--edge-cases).
 - **More event types.** Beyond field-edits, it records **lifecycle events** (created, rolled
   over, sprint started) — see [Data](#data).
@@ -203,7 +203,7 @@ interface ActivityEvent {
 
 ## Implementation
 
-- **`db.ts`** — `logEvent(e)` appends a row; `sprintEvents(sprintId)` reads a sprint's
+- **`activity-log.ts`** — `logEvent(e)` appends a row; `sprintEvents(sprintId)` reads a sprint's
   events newest-first (`ts` desc). `logTaskEdits(task, entries)` records the diffed edit
   entries (`ChangeLogEntry[]`, now an internal shape — see
   [task-change-log.md](./task-change-log.md)) as `'edit'` events (sprint tasks only; **title
@@ -226,7 +226,7 @@ interface ActivityEvent {
   re-clicking the 🕒 button, clicking the backdrop, the header ✕, **or `Escape`** (the
   global key handler closes the drawer right after the palette and before settings — see
   [search-and-keyboard.md](./search-and-keyboard.md)). `sprint_started` is logged inside
-  the data layer's canonical **`createSprint()`** (`db.ts`) — the sprint row and its event
+  the data layer's canonical **`createSprint()`** (`activity-log.ts`) — the sprint row and its event
   commit in **one transaction**, so a crash between them can't leave a sprint with no birth
   entry (the New-Sprint dialog's `submit` just calls it; seeding logs no event by design).
   UI strings are English (matches the rest of the app; the

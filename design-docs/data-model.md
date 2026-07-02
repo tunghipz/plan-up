@@ -2,7 +2,7 @@
 
 **Status:** Implemented
 **Last updated:** 2026-07-02
-**Code:** `app/src/db.ts`
+**Code:** `app/src/types.ts` (entity types) + `app/src/schema.ts` (Dexie schema & migrations); `app/src/db.ts` is the facade re-exporting both
 
 ## Purpose
 Define the four entities the whole app revolves around, and the migration
@@ -13,7 +13,7 @@ discipline that lets the schema evolve without losing local data.
 Seven IndexedDB tables (Dexie database name **`plan-up`**): `projects`, `members`,
 `sprints`, `tasks`, `collections`, `events`, `people`.
 
-### `Project` (`db.ts:19`)
+### `Project` (`types.ts`)
 `id` · `name` · `createdAt` (number) · `description?` (string) · `color?` (hex) · `icon?` (emoji)
 - `description`, `color`, and `icon` are **optional, non-indexed** fields edited from the
   settings page (see [project-member-settings.md](./project-member-settings.md),
@@ -21,7 +21,7 @@ Seven IndexedDB tables (Dexie database name **`plan-up`**): `projects`, `members
   not indexed, adding them needed **no Dexie version bump**; rows without them fall back to
   `colorForName(name)`, an empty description, and the name's first letter respectively.
 
-### `Member` (`db.ts:25`)
+### `Member` (`types.ts`)
 `id` · `projectId` · `name` · `color` (hex) · `daysOff: DayOff[]` · `title?` (string)
 · `avatarImage?` (string) · `avatarEmoji?` (string) · `order` (number) · `personId?` (string)
 - A member is just a **label** — no auth, no login. The user creates them.
@@ -39,7 +39,7 @@ Seven IndexedDB tables (Dexie database name **`plan-up`**): `projects`, `members
   (setting one clears the other). Render falls back image → emoji → colored initial. See
   [member-avatars.md](./member-avatars.md).
 
-### `Sprint` (`db.ts:37`)
+### `Sprint` (`types.ts`)
 `id` · `projectId` · `name` · `startDate` · `endDate` (both `yyyy-mm-dd`) · `note?` (string)
 · `archivedAt?` (number)
 - `name` is **automatic and locked** (`Sprint N`) — no rename UI; see [sprints.md](./sprints.md).
@@ -50,7 +50,7 @@ Seven IndexedDB tables (Dexie database name **`plan-up`**): `projects`, `members
   again **no Dexie version bump**. Set/cleared via `setSprintArchived`; archived sprints
   leave the active flow. See [sprint-archive.md](./sprint-archive.md).
 
-### `Task` (`db.ts:45`)
+### `Task` (`types.ts`)
 `id` · `projectId` · `sequence` (number, per-sprint) · `title` · `assigneeId` (`string|null`) ·
 `sprintId` (`string | null`) · `status` · `priority` · `startDate` (`string|null`) · `dueDate` (`string|null`) ·
 `estimate` (`number|null`, effort in days) · `createdAt` · `dependsOn: string[]` (task IDs) ·
@@ -73,7 +73,7 @@ Seven IndexedDB tables (Dexie database name **`plan-up`**): `projects`, `members
 - `sectionId?` (`string | null`) — non-indexed. The `Section.id` within the collection (arrangement only, never logged).
 - `collectionStatusId?` (`string | null`) — non-indexed. Points to a `CollectionStatus.id` in the collection's `statuses` array (the user-defined status for this item).
 
-### `Collection` (`db.ts:115`)
+### `Collection` (`types.ts`)
 `id` · `projectId` · `name` · `order` (number, fractional sidebar position) ·
 `sections: Section[]` · `statuses: CollectionStatus[]` · `createdAt` (number)
 - `sections` and `statuses` are **embedded arrays** (not separate tables) — ordered, not indexed. A new collection is seeded with 1 section "All" and a default status set the user can edit.
@@ -86,7 +86,7 @@ Seven IndexedDB tables (Dexie database name **`plan-up`**): `projects`, `members
 `id` · `name` · `color` (hex from COLLECTION_PALETTE)
 - User-defined status per collection (not shared across collections). Embedded in `Collection.statuses`.
 
-### `ActivityEvent` (`db.ts`, table `events`)
+### `ActivityEvent` (`types.ts`, table `events`)
 `id` · `projectId` · `sprintId` · `taskId` (`string|null`) · `taskSeq` (`number|null`) ·
 `taskTitle` (`string|null`) · `kind` · `field?` (`LoggableField`) · `from` (`string|null`) ·
 `to` (`string|null`) · `ts` (number)
@@ -101,7 +101,7 @@ Seven IndexedDB tables (Dexie database name **`plan-up`**): `projects`, `members
   write time** so the log stays readable after renumbering or deletion.
 - Indexes: `id, sprintId, ts, projectId`.
 
-### `Person` (`db.ts`, table `people`)
+### `Person` (`types.ts`, table `people`)
 `id` · `name` · `color` (hex) · `createdAt` (number)
 - A **real human shared across projects**. A `Member` is one project's membership for a
   person (`Member.personId` → `Person.id`); the same human in N projects is N members but
@@ -122,10 +122,10 @@ Seven IndexedDB tables (Dexie database name **`plan-up`**): `projects`, `members
   store the **raw** value for stable fields (formatted at render); `assigneeId` freezes the
   resolved member **name** and `dependsOn` freezes a **sequence-range** label at write time
   (the former survives member deletion, the latter survives sequence renumbering).
-- `DayOff` (`db.ts:14`): `{ date: string; half?: 'am' | 'pm' }`. No `half` → whole day off
+- `DayOff` (`types.ts`): `{ date: string; half?: 'am' | 'pm' }`. No `half` → whole day off
   (0 working days); `half` → 0.5 day. AM vs PM is human-readable only; both contribute 0.5.
-- `Status` (`db.ts:3`): `'todo' | 'in_progress' | 'done'`.
-- `Priority` (`db.ts:4`): `'urgent' | 'high' | 'normal' | 'low' | 'none'`.
+- `Status` (`types.ts`): `'todo' | 'in_progress' | 'done'`.
+- `Priority` (`types.ts`): `'urgent' | 'high' | 'normal' | 'low' | 'none'`.
 
 All dates are stored as `yyyy-mm-dd` strings.
 

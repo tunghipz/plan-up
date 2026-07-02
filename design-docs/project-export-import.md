@@ -3,7 +3,7 @@
 **Status:** Implemented
 **Last updated:** 2026-07-02 (full-DB backup is now v5 too — kind marker, not version, routes the import)
 **Code:** `app/src/project-io.ts` (`ProjectBundle`, `isProjectBundle`, `remapBundle`),
-`app/src/db.ts` (`exportProject`, `importProject`), `app/src/App.tsx` (header split-menu,
+`app/src/io.ts` (`exportProject`, `importProject`; re-exported by the `db.ts` facade), `app/src/App.tsx` (header split-menu,
 `handleImportFile`, import toast, `downloadJson`), `app/src/ProjectSettingsView.tsx`
 (inline "Share this project" export).
 
@@ -105,7 +105,7 @@ Rules:
   `max+1`), so the next task created in the imported project self-corrects from the imported
   rows. No seeding, no collision.
 
-### `db.ts` (thin wrappers)
+### `io.ts` (thin wrappers)
 - **`exportProject(projectId): Promise<ProjectBundle>`** — reads the 6 tables filtered by
   `projectId`, returns a `ProjectBundle` (`version: 5`).
 - **`importProject(bundle): Promise<{projectId; projectName; taskCount}>`** —

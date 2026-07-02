@@ -2,7 +2,7 @@
 
 **Status:** Implemented
 **Last updated:** 2026-07-02
-**Code:** `app/src/db.ts` (`exportAll`, `importAll`, `seedIfEmpty`), `app/src/App.tsx`
+**Code:** `app/src/io.ts` (`exportAll`, `importAll`, `seedIfEmpty`), `app/src/App.tsx`
 
 ## Purpose
 Local-first storage with no backend. Data lives in the browser's IndexedDB;
@@ -25,7 +25,7 @@ JSON export/import is the backup & transfer mechanism (not sync).
 - First launch with an empty DB seeds a demo project (see Seeding).
 
 ## Data
-Touches every table. Export payload (`ExportPayload`, `db.ts`), **version 5**:
+Touches every table. Export payload (`ExportPayload`, `io.ts`), **version 5**:
 ```jsonc
 { "version": 5, "exportedAt": "<ISO>", "projects": [], "members": [], "sprints": [],
   "collections": [], "tasks": [], "events": [], "people": [] }
@@ -36,8 +36,8 @@ without it a restore would rebuild people from member names, silently undoing me
 renames and colors).
 
 ## Implementation
-- `exportAll()` (`db.ts`) — snapshot of all tables (incl. `people`), `version: 5`.
-- `importAll(payload)` (`db.ts`) — **replace semantics**: clears all tables, then
+- `exportAll()` (`io.ts`) — snapshot of all tables (incl. `people`), `version: 5`.
+- `importAll(payload)` (`io.ts`) — **replace semantics**: clears all tables, then
   bulk-adds. Accepts v1–v5. Backfills on import:
   synthesize default project for v1, `daysOff` `string[]`→`DayOff[]`, per-project
   `sequence` (by `createdAt`), `startDate ?? null`, `dependsOn ?? []`.
@@ -50,7 +50,7 @@ renames and colors).
   re-unifies) — the same backfill as the v13 schema upgrade.
 - The pre-clear shape guard also rejects a payload whose `people` field is present but
   **not an array** (same reject-before-wipe rule as the other tables).
-- `seedIfEmpty()` (`db.ts:920`) — module-level promise **lock** so React StrictMode's
+- `seedIfEmpty()` (`io.ts`) — module-level promise **lock** so React StrictMode's
   double-mount can't seed twice. `seedFresh` creates 3 demo members, one "Sprint 1"
   (14 days from today), and a welcome task.
 - App load (`App.tsx`) runs `seedIfEmpty()` → `dedupeSprints()` → `recomputeAllDates()`.

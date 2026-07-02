@@ -11,7 +11,6 @@ import {
   renameCollection,
   moveCollectionItem,
   deleteTask,
-  orderBetween,
   renormalizeListOrder,
   addStatus,
   renameStatus,
@@ -25,7 +24,8 @@ import {
 import { CollectionCalendar } from './CollectionCalendar'
 import { DateRangePickCell } from './DatePicker'
 import { AddGroupButton } from './AddGroupButton'
-import { useDragHandle, type RowDrag } from './DragHandle'
+import { useDragHandle, useDragHover, type RowDrag } from './DragHandle'
+import { computeDropSlot, computeAppendSlot, resolveDropOrder, type DropSlot } from './reorder'
 import { usePinnedPopover } from './usePinnedPopover'
 
 /** Effective manual order for a collection item — mirrors the sprint list. */
@@ -188,25 +188,17 @@ export function CollectionView({
   // list's `canReorder`. See design-docs/collections.md.
   const canReorder = sort === null
   const [dragId, setDragId] = useState<string | null>(null)
-  const [over, setOver] = useState<{ id: string; pos: 'before' | 'after' } | null>(
-    null
-  )
   // Section under the cursor — highlights an empty table (which has no row to show
   // a drop-slot line on) as a valid drop target.
   const [overSectionId, setOverSectionId] = useState<string | null>(null)
-  const overRaf = useRef(0)
-  const pendingHit = useRef<{ id: string; el: HTMLElement; clientY: number } | null>(
-    null
-  )
+  // Slot math (own-gap no-op, float collision) is the shared, unit-tested
+  // reorder.ts; this owner keeps the cross-table semantics + persistence.
+  const { over, hover, clear, cancel } = useDragHover()
 
   const endDrag = () => {
     setDragId(null)
-    setOver(null)
     setOverSectionId(null)
-    if (overRaf.current) {
-      cancelAnimationFrame(overRaf.current)
-      overRaf.current = 0
-    }
+    cancel()
   }
 
   // Hover: resolve the item + section under the cursor (elementFromPoint), show a
@@ -219,22 +211,10 @@ export function CollectionView({
     const itemEl = el?.closest('[data-item-id]') as HTMLElement | null
     const targetId = itemEl?.dataset.itemId
     if (!targetId || targetId === dragId) {
-      if (over) setOver(null)
+      clear()
       return
     }
-    pendingHit.current = { id: targetId, el: itemEl!, clientY: y }
-    if (overRaf.current) return
-    overRaf.current = requestAnimationFrame(() => {
-      overRaf.current = 0
-      const h = pendingHit.current
-      if (!h || !dragId) return
-      const r = h.el.getBoundingClientRect()
-      const pos: 'before' | 'after' =
-        h.clientY - r.top > r.height / 2 ? 'after' : 'before'
-      setOver((prev) =>
-        prev && prev.id === h.id && prev.pos === pos ? prev : { id: h.id, pos }
-      )
-    })
+    hover(targetId, itemEl!, y)
   }
 
   // Drop: place the dragged item into the target section at the resolved slot,
@@ -251,52 +231,33 @@ export function CollectionView({
     const targetId = itemEl?.dataset.itemId
     // Released over the dragged row itself (a plain grip click, or a drag that
     // came back home) — a no-op, NOT "append to the section's end": the append
-    // branch below is only for the empty area under a table's rows.
+    // slot below is only for the empty area under a table's rows.
     if (targetId === id) return
     const targetSectionId =
       (targetId ? itemsById.get(targetId)?.sectionId : undefined) ??
       secEl?.dataset.sectionId
     if (!targetSectionId) return
     const arr = itemsBySectionMap.get(targetSectionId) ?? []
-    const rest = arr.filter((x) => x.id !== id)
-    let insertAt: number
-    if (targetId && targetId !== id) {
+    let slot: DropSlot<Task> | null
+    if (targetId) {
       const r = itemEl!.getBoundingClientRect()
       const pos: 'before' | 'after' = y - r.top > r.height / 2 ? 'after' : 'before'
-      insertAt = rest.findIndex((x) => x.id === targetId)
-      if (insertAt < 0) return
-      if (pos === 'after') insertAt += 1
+      slot = computeDropSlot(arr, (t) => t.id, id, targetId, pos)
     } else {
-      // Dropped on the section's empty/below-rows area → append to the end.
-      insertAt = rest.length
+      // Dropped on the section's empty/below-rows area → append to its end.
+      slot = computeAppendSlot(arr, (t) => t.id, id)
     }
-    const before = rest[insertAt - 1] ?? null
-    const after = rest[insertAt] ?? null
-    // No-op if it lands back in its own gap within the same table.
-    if (dragged.sectionId === targetSectionId) {
-      const fromIndex = arr.findIndex((x) => x.id === id)
-      const left = arr[fromIndex - 1] ?? null
-      const right = arr[fromIndex + 1] ?? null
-      if (
-        (before?.id ?? null) === (left?.id ?? null) &&
-        (after?.id ?? null) === (right?.id ?? null)
-      )
-        return
-    }
-    const beforeOrder = before ? effOrder(before) : null
-    const afterOrder = after ? effOrder(after) : null
-    const newOrder = orderBetween(beforeOrder, afterOrder)
-    const collides =
-      (beforeOrder != null && newOrder <= beforeOrder) ||
-      (afterOrder != null && newOrder >= afterOrder)
+    // Own gap only counts within the same table — a cross-table move always writes.
+    if (!slot || (slot.ownGap && dragged.sectionId === targetSectionId)) return
+    const { order, collides } = resolveDropOrder(slot, effOrder)
     if (collides) {
-      const orderedIds = rest.map((x) => x.id)
-      orderedIds.splice(insertAt, 0, id)
+      const orderedIds = arr.filter((t) => t.id !== id).map((t) => t.id)
+      orderedIds.splice(slot.insertAt, 0, id)
       if (dragged.sectionId !== targetSectionId)
         void db.tasks.update(id, { sectionId: targetSectionId })
       void renormalizeListOrder(orderedIds)
     } else {
-      void moveCollectionItem(id, targetSectionId, newOrder)
+      void moveCollectionItem(id, targetSectionId, order)
     }
   }
 

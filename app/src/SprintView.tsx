@@ -21,7 +21,8 @@ import {
   Link2,
   Link2Off,
 } from 'lucide-react'
-import { useDragHandle, type RowDrag } from './DragHandle'
+import { useDragHandle, useDragHover, type RowDrag } from './DragHandle'
+import { computeDropSlot, resolveDropOrder } from './reorder'
 import {
   db,
   addMember,
@@ -29,7 +30,6 @@ import {
   setTaskParent,
   createGroupFromSelection,
   setDependencies,
-  orderBetween,
   setListOrder,
   renormalizeListOrder,
   compareMembersByOrder,
@@ -277,16 +277,7 @@ export function SprintView({
   // Mirrors the row drag in TaskRows: state lives here, scoped to this view.
   // Only the filled lanes (groups) are draggable. See member-lane-order.md.
   const [dragMemberId, setDragMemberId] = useState<string | null>(null)
-  const [laneOver, setLaneOver] = useState<{
-    id: string
-    pos: 'before' | 'after'
-  } | null>(null)
-  const laneRaf = useRef(0)
-  const lanePending = useRef<{
-    id: string
-    el: HTMLElement
-    clientY: number
-  } | null>(null)
+  const laneHover = useDragHover()
 
   const { groups, emptyMembers, unassigned } = useMemo(() => {
     // Lanes follow the manual per-project order (drag-to-reorder); both the
@@ -334,78 +325,44 @@ export function SprintView({
 
   const endLaneDrag = () => {
     setDragMemberId(null)
-    setLaneOver(null)
-    if (laneRaf.current) {
-      cancelAnimationFrame(laneRaf.current)
-      laneRaf.current = 0
-    }
+    laneHover.cancel()
   }
   const hoverLane = (targetEl: Element | null | undefined, clientY: number) => {
     const targetId = targetEl instanceof HTMLElement ? targetEl.dataset.laneId : undefined
     if (!dragMemberId || !targetId || targetId === dragMemberId) {
-      if (laneOver) setLaneOver(null)
+      laneHover.clear()
       return
     }
-    lanePending.current = { id: targetId, el: targetEl as HTMLElement, clientY }
-    if (laneRaf.current) return
-    laneRaf.current = requestAnimationFrame(() => {
-      laneRaf.current = 0
-      const h = lanePending.current
-      if (!h || !dragMemberId) return
-      const r = h.el.getBoundingClientRect()
-      const pos: 'before' | 'after' =
-        h.clientY - r.top > r.height / 2 ? 'after' : 'before'
-      setLaneOver((prev) =>
-        prev && prev.id === h.id && prev.pos === pos ? prev : { id: h.id, pos }
-      )
-    })
+    laneHover.hover(targetId, targetEl as HTMLElement, clientY)
   }
   const dropOnLane = (targetEl: Element | null | undefined, clientY: number) => {
     const id = dragMemberId
     const targetId = targetEl instanceof HTMLElement ? targetEl.dataset.laneId : undefined
-    if (!id || !targetId || targetId === id) return
+    if (!id || !targetId) return
     const arr = laneMembers
     const dragged = arr.find((m) => m.id === id)
-    if (!dragged || !arr.some((m) => m.id === targetId)) return
+    if (!dragged) return
     const r = (targetEl as HTMLElement).getBoundingClientRect()
     const pos: 'before' | 'after' =
       clientY - r.top > r.height / 2 ? 'after' : 'before'
-    const fromIndex = arr.findIndex((m) => m.id === id)
-    const rest = arr.filter((m) => m.id !== id)
-    let insertAt = rest.findIndex((m) => m.id === targetId)
-    if (insertAt < 0) return
-    if (pos === 'after') insertAt += 1
-    const before = rest[insertAt - 1] ?? null
-    const after = rest[insertAt] ?? null
-    // No-op if it lands back in its own gap.
-    const left = arr[fromIndex - 1] ?? null
-    const right = arr[fromIndex + 1] ?? null
-    if (
-      (before?.id ?? null) === (left?.id ?? null) &&
-      (after?.id ?? null) === (right?.id ?? null)
-    )
-      return
-    const beforeOrder = before ? laneOrder(before) : null
-    const afterOrder = after ? laneOrder(after) : null
-    const newOrder = orderBetween(beforeOrder, afterOrder)
-    // Renormalize the lane when float precision is exhausted (same guard as the
-    // row drag), otherwise two lanes would collide on an equal order.
-    const collides =
-      (beforeOrder != null && newOrder <= beforeOrder) ||
-      (afterOrder != null && newOrder >= afterOrder)
+    const slot = computeDropSlot(arr, (m) => m.id, id, targetId, pos)
+    if (!slot || slot.ownGap) return
+    const { order, collides } = resolveDropOrder(slot, laneOrder)
+    // Renormalize the lane list when float precision is exhausted (same guard
+    // as the row drag), otherwise two lanes would collide on an equal order.
     if (collides) {
-      const orderedIds = rest.map((m) => m.id)
-      orderedIds.splice(insertAt, 0, id)
+      const orderedIds = arr.filter((m) => m.id !== id).map((m) => m.id)
+      orderedIds.splice(slot.insertAt, 0, id)
       void renormalizeMemberOrder(orderedIds)
-    } else if (newOrder !== dragged.order) {
-      void setMemberOrder(id, newOrder)
+    } else if (order !== dragged.order) {
+      void setMemberOrder(id, order)
     }
   }
   const laneDragFor = (m: Member): RowDrag => ({
     id: m.id,
     enabled: laneMembers.length > 1,
     dragging: dragMemberId === m.id,
-    over: laneOver?.id === m.id ? laneOver.pos : null,
+    over: laneHover.over?.id === m.id ? laneHover.over.pos : null,
     onStart: () => setDragMemberId(m.id),
     onMove: (x, y) =>
       hoverLane(document.elementFromPoint(x, y)?.closest('[data-lane-id]'), y),
@@ -1576,9 +1533,9 @@ function TaskRows({
   // top-level rows (incl. group heads), or a parentId for a child. Drops only
   // land on rows in the same lane (no drag-reparenting).
   const dragLaneRef = useRef<string>('__top__')
-  const [over, setOver] = useState<{ id: string; pos: 'before' | 'after' } | null>(null)
-  const overRaf = useRef(0)
-  const pendingHit = useRef<{ id: string; el: HTMLElement; clientY: number } | null>(null)
+  // Slot math (own-gap no-op, float collision) lives in the shared, unit-
+  // tested reorder.ts; this owner keeps only lane rules + persistence.
+  const { over, hover, clear, cancel } = useDragHover()
 
   const laneOf = (t: Task) =>
     t.parentId && childrenByParent.has(t.parentId) ? t.parentId : '__top__'
@@ -1588,42 +1545,24 @@ function TaskRows({
 
   const endDrag = () => {
     setDragId(null)
-    setOver(null)
-    if (overRaf.current) {
-      cancelAnimationFrame(overRaf.current)
-      overRaf.current = 0
-    }
+    cancel()
   }
   const beginDrag = (t: Task) => {
     dragLaneRef.current = laneOf(t)
     setDragId(t.id)
   }
-  // Hit-testing is owner-side now: the grip captures the pointer and reports
+  // Hit-testing is owner-side: the grip captures the pointer and reports
   // coordinates; we map them to the row under the cursor via `data-task-id`.
+  // Only a same-lane row that isn't the dragged row shows a slot.
   const hoverRow = (targetEl: Element | null | undefined, clientY: number) => {
     if (!dragId) return
     const targetId = targetEl instanceof HTMLElement ? targetEl.dataset.taskId : undefined
     const target = targetId ? tasksById.get(targetId) : undefined
-    // Only show a slot on a same-lane row that isn't the dragged row itself.
-    // Functional clear: this closure can be a render old (memo'd rows keep
-    // their grip callbacks), so don't trust a captured `over` snapshot.
     if (!targetId || !target || targetId === dragId || laneOf(target) !== dragLaneRef.current) {
-      setOver((prev) => (prev ? null : prev))
+      clear()
       return
     }
-    pendingHit.current = { id: targetId, el: targetEl as HTMLElement, clientY }
-    if (overRaf.current) return
-    overRaf.current = requestAnimationFrame(() => {
-      overRaf.current = 0
-      const h = pendingHit.current
-      if (!h || !dragId) return
-      const r = h.el.getBoundingClientRect()
-      const pos: 'before' | 'after' =
-        h.clientY - r.top > r.height / 2 ? 'after' : 'before'
-      setOver((prev) =>
-        prev && prev.id === h.id && prev.pos === pos ? prev : { id: h.id, pos }
-      )
-    })
+    hover(targetId, targetEl as HTMLElement, clientY)
   }
   const dropOnRow = (targetEl: Element | null | undefined, clientY: number) => {
     const id = dragId
@@ -1631,38 +1570,21 @@ function TaskRows({
     const dragged = id ? tasksById.get(id) : null
     const targetId = targetEl instanceof HTMLElement ? targetEl.dataset.taskId : undefined
     const target = targetId ? tasksById.get(targetId) : null
-    if (!id || !dragged || !target || !targetId || targetId === id || laneOf(target) !== lane) return
+    if (!id || !dragged || !target || !targetId || laneOf(target) !== lane) return
     const r = (targetEl as HTMLElement).getBoundingClientRect()
     const pos: 'before' | 'after' = clientY - r.top > r.height / 2 ? 'after' : 'before'
     const arr = laneArray(lane)
-    const fromIndex = arr.findIndex((x) => x.id === id)
-    const rest = arr.filter((x) => x.id !== id)
-    let insertAt = rest.findIndex((x) => x.id === targetId)
-    if (insertAt < 0) return
-    if (pos === 'after') insertAt += 1
-    const before = rest[insertAt - 1] ?? null
-    const after = rest[insertAt] ?? null
-    // No-op if it lands back in its own gap.
-    const left = arr[fromIndex - 1] ?? null
-    const right = arr[fromIndex + 1] ?? null
-    if ((before?.id ?? null) === (left?.id ?? null) && (after?.id ?? null) === (right?.id ?? null))
-      return
-    const beforeOrder = before ? effOrder(before) : null
-    const afterOrder = after ? effOrder(after) : null
-    const newOrder = orderBetween(beforeOrder, afterOrder)
-    // If the midpoint can't separate from a neighbour (float precision exhausted
-    // after many inserts into the same gap), the cheap one-row write would make
-    // two rows share an order and the drag would silently not take — renormalize
-    // the whole lane to clean integers instead.
-    const collides =
-      (beforeOrder != null && newOrder <= beforeOrder) ||
-      (afterOrder != null && newOrder >= afterOrder)
+    const slot = computeDropSlot(arr, (x) => x.id, id, targetId, pos)
+    if (!slot || slot.ownGap) return
+    const { order, collides } = resolveDropOrder(slot, effOrder)
     if (collides) {
-      const orderedIds = rest.map((x) => x.id)
-      orderedIds.splice(insertAt, 0, id)
+      // Float precision exhausted — a one-row write would make two rows share
+      // an order; renormalize the whole lane to clean integers instead.
+      const orderedIds = arr.filter((x) => x.id !== id).map((x) => x.id)
+      orderedIds.splice(slot.insertAt, 0, id)
       void renormalizeListOrder(orderedIds)
-    } else if (newOrder !== dragged.listOrder) {
-      void setListOrder(id, newOrder)
+    } else if (order !== dragged.listOrder) {
+      void setListOrder(id, order)
     }
   }
   const dragFor = (t: Task): RowDrag | undefined =>

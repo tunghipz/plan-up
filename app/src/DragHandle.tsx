@@ -1,5 +1,46 @@
-import { useRef } from 'react'
+import { useRef, useState } from 'react'
 import { GripVertical } from 'lucide-react'
+
+/**
+ * rAF-coalesced before/after hover state for a pointer drag. pointermove fires
+ * far above the frame rate; hits are buffered and resolved once per frame
+ * (row-midpoint → 'before' | 'after'). Shared by every drag list owner
+ * (sprint rows, member lanes, collection items) — the owners keep their own
+ * hit-testing/lane rules and call `hover`/`clear` from it.
+ */
+export function useDragHover() {
+  const [over, setOver] = useState<{ id: string; pos: 'before' | 'after' } | null>(null)
+  const raf = useRef(0)
+  const pending = useRef<{ id: string; el: HTMLElement; clientY: number } | null>(null)
+
+  const hover = (id: string, el: HTMLElement, clientY: number) => {
+    pending.current = { id, el, clientY }
+    if (raf.current) return
+    raf.current = requestAnimationFrame(() => {
+      raf.current = 0
+      const h = pending.current
+      if (!h) return
+      const r = h.el.getBoundingClientRect()
+      const pos: 'before' | 'after' =
+        h.clientY - r.top > r.height / 2 ? 'after' : 'before'
+      setOver((prev) =>
+        prev && prev.id === h.id && prev.pos === pos ? prev : { id: h.id, pos }
+      )
+    })
+  }
+  // Functional clear — callers can be a render old (memo'd rows keep their
+  // grip callbacks), so never trust a captured `over` snapshot.
+  const clear = () => setOver((prev) => (prev ? null : prev))
+  const cancel = () => {
+    clear()
+    pending.current = null
+    if (raf.current) {
+      cancelAnimationFrame(raf.current)
+      raf.current = 0
+    }
+  }
+  return { over, hover, clear, cancel }
+}
 
 /**
  * Per-row drag state handed down from a list owner. `enabled` gates the whole

@@ -72,7 +72,7 @@ Read `design-system.md` **before** building any new component.
 
 ## Data model
 
-Seven IndexedDB tables in `app/src/db.ts`:
+Seven IndexedDB tables (schema & migrations in `app/src/schema.ts`; `app/src/db.ts` is the facade importers use):
 
 | Table         | Fields                                                                            |
 | ------------- | --------------------------------------------------------------------------------- |

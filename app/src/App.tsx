@@ -58,6 +58,7 @@ import {
 import { isProjectBundle, looksLikeProjectBundle } from './project-io'
 import { CollectionView, CollectionBarIdentity, StatusEditor } from './CollectionView'
 import { useConfirm } from './confirm-context'
+import { ModalSheet } from './ModalSheet'
 import { SprintView } from './SprintView'
 import { BoardView } from './BoardView'
 import { GanttView } from './GanttView'
@@ -1960,15 +1961,7 @@ function NewSprintDialog({
   }
 
   return (
-    <div
-      className="dlg-scrim fixed inset-0 bg-black/25 backdrop-blur-md flex items-center justify-center p-4 z-50"
-      onClick={onClose}
-    >
-      <div
-        className="dlg-sheet bg-surface text-ink rounded-[16px] shadow-[0_20px_60px_rgba(0,0,0,0.28)] w-full max-w-md p-6 space-y-4 border border-border-hair"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h2 className="text-[19px] font-bold tracking-[-0.014em]">New Sprint</h2>
+    <ModalSheet title="New Sprint" onClose={onClose}>
         <div className="block">
           <span className="text-xs text-ink-muted">Name</span>
           {/* Locked: names are automatic (Sprint N), not editable. */}
@@ -2038,8 +2031,7 @@ function NewSprintDialog({
             Create
           </button>
         </div>
-      </div>
-    </div>
+    </ModalSheet>
   )
 }
 
@@ -2058,15 +2050,7 @@ function NewProjectDialog({
     onCreate(p)
   }
   return (
-    <div
-      className="dlg-scrim fixed inset-0 bg-black/25 backdrop-blur-md flex items-center justify-center p-4 z-50"
-      onClick={onClose}
-    >
-      <div
-        className="dlg-sheet bg-surface text-ink rounded-[16px] shadow-[0_20px_60px_rgba(0,0,0,0.28)] w-full max-w-md p-6 space-y-4 border border-border-hair"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h2 className="text-[19px] font-bold tracking-[-0.014em]">New Project</h2>
+    <ModalSheet title="New Project" onClose={onClose}>
         <label className="block">
           <span className="text-xs text-ink-muted">Name</span>
           <input
@@ -2097,8 +2081,7 @@ function NewProjectDialog({
             Create
           </button>
         </div>
-      </div>
-    </div>
+    </ModalSheet>
   )
 }
 
@@ -2120,17 +2103,7 @@ function NewCollectionDialog({
     onCreate(c)
   }
   return (
-    <div
-      className="dlg-scrim fixed inset-0 bg-black/25 backdrop-blur-md flex items-center justify-center p-4 z-50"
-      onClick={onClose}
-    >
-      <div
-        className="dlg-sheet bg-surface text-ink rounded-[16px] shadow-[0_20px_60px_rgba(0,0,0,0.28)] w-full max-w-md p-6 space-y-4 border border-border-hair"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h2 className="text-[19px] font-bold tracking-[-0.014em]">
-          New Collection
-        </h2>
+    <ModalSheet title="New Collection" onClose={onClose}>
         <label className="block">
           <span className="text-xs text-ink-muted">Name</span>
           <input
@@ -2161,8 +2134,7 @@ function NewCollectionDialog({
             Create
           </button>
         </div>
-      </div>
-    </div>
+    </ModalSheet>
   )
 }
 

@@ -27,6 +27,7 @@ import { AddGroupButton } from './AddGroupButton'
 import { useDragHandle, useDragHover, type RowDrag } from './DragHandle'
 import { computeDropSlot, computeAppendSlot, resolveDropOrder, type DropSlot } from './reorder'
 import { usePinnedPopover } from './usePinnedPopover'
+import { ModalSheet } from './ModalSheet'
 
 /** Effective manual order for a collection item — mirrors the sprint list. */
 const effOrder = (t: Task) => t.listOrder ?? t.sequence
@@ -454,8 +455,8 @@ function CollectionTitle({ collection }: { collection: Collection }) {
 }
 
 /**
- * Name-only Cupertino modal — same sheet as App's New Sprint / New Collection
- * dialogs. Used for "Add table". Enter submits; scrim/Cancel closes.
+ * Name-only Cupertino modal (shared ModalSheet shell). Used for "Add
+ * table". Enter submits; scrim/Cancel closes.
  */
 function NameModal({
   title,
@@ -479,15 +480,7 @@ function NameModal({
     void onSubmit(t)
   }
   return (
-    <div
-      className="fixed inset-0 bg-black/25 backdrop-blur-md flex items-center justify-center p-4 z-50"
-      onClick={onClose}
-    >
-      <div
-        className="bg-surface text-ink rounded-[16px] shadow-[0_20px_60px_rgba(0,0,0,0.28)] w-full max-w-md p-6 space-y-4 border border-border-hair"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h2 className="text-[19px] font-bold tracking-[-0.014em]">{title}</h2>
+    <ModalSheet title={title} onClose={onClose}>
         <label className="block">
           <span className="text-xs text-ink-muted">Name</span>
           <input
@@ -520,8 +513,7 @@ function NameModal({
             {submitLabel}
           </button>
         </div>
-      </div>
-    </div>
+    </ModalSheet>
   )
 }
 

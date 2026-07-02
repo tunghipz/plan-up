@@ -57,7 +57,7 @@ import {
 } from './db'
 import { isProjectBundle, looksLikeProjectBundle } from './project-io'
 import { CollectionView, CollectionBarIdentity, StatusEditor } from './CollectionView'
-import { useConfirm } from './ConfirmDialog'
+import { useConfirm } from './confirm-context'
 import { SprintView } from './SprintView'
 import { BoardView } from './BoardView'
 import { GanttView } from './GanttView'
@@ -388,6 +388,7 @@ function App() {
   useEffect(() => {
     if (!projects) return
     if (projects.length === 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- sync-with-liveQuery: validate the restored selection once data arrives
       if (currentProjectId) setCurrentProjectId(null)
       return
     }
@@ -484,6 +485,7 @@ function App() {
   useEffect(() => {
     if (!sprints) return
     if (sprints.length === 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- sync-with-liveQuery: validate the restored selection once data arrives
       setCurrentSprintId(null)
       return
     }
@@ -511,6 +513,7 @@ function App() {
       currentCollectionId &&
       !collections.some((c) => c.id === currentCollectionId)
     ) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- sync-with-liveQuery: dangling collection falls back to the sprint view
       setSelKindState('sprint')
       safeStorage.set(SELKIND_KEY, 'sprint')
       setCurrentCollectionIdState(null)
@@ -1591,10 +1594,10 @@ function SearchPalette({
     return [...list].sort((a, b) => a.sequence - b.sequence).slice(0, 50)
   }, [q, tasks])
 
-  // Keep the selection in range as the result set changes.
-  useEffect(() => {
-    setSel((s) => (s >= results.length ? 0 : s))
-  }, [results.length])
+  // Selection clamped to the result set DERIVED, not synced by an effect —
+  // typing that shrinks the results snaps the highlight to the top row on the
+  // same render, no cascading pass.
+  const selIdx = sel >= results.length ? 0 : sel
 
   const DOT: Record<string, string> = {
     todo: 'bg-status-todo',
@@ -1605,13 +1608,13 @@ function SearchPalette({
   const onKey = (e: React.KeyboardEvent) => {
     if (e.key === 'ArrowDown') {
       e.preventDefault()
-      setSel((s) => Math.min(s + 1, results.length - 1))
+      setSel(Math.min(selIdx + 1, results.length - 1))
     } else if (e.key === 'ArrowUp') {
       e.preventDefault()
-      setSel((s) => Math.max(s - 1, 0))
+      setSel(Math.max(selIdx - 1, 0))
     } else if (e.key === 'Enter') {
       e.preventDefault()
-      const t = results[sel]
+      const t = results[selIdx]
       if (t) onSelect(t.id)
     }
     // Escape is handled by the global key handler (closes the palette).
@@ -1672,7 +1675,7 @@ function SearchPalette({
                   onClick={() => onSelect(t.id)}
                   onMouseEnter={() => setSel(i)}
                   className={`w-full text-left flex items-center gap-3 px-2.5 py-2 rounded-lg transition ${
-                    i === sel ? 'bg-accent-soft' : ''
+                    i === selIdx ? 'bg-accent-soft' : ''
                   }`}
                 >
                   <span
@@ -1835,9 +1838,8 @@ function MondayStrip({
   const move = (next: number) => {
     const i = Math.max(0, Math.min(mondays.length - 1, next))
     onSelect(mondays[i])
-    ref.current
-      ?.querySelectorAll<HTMLButtonElement>('[role="radio"]')
-      [i]?.focus()
+    const radios = ref.current?.querySelectorAll<HTMLButtonElement>('[role="radio"]')
+    radios?.[i]?.focus()
   }
   const onKeyDown = (e: React.KeyboardEvent) => {
     switch (e.key) {
@@ -2408,15 +2410,20 @@ function SprintNoteBanner({ sprint }: { sprint: Sprint }) {
   const [draft, setDraft] = useState(sprint.note ?? '')
   const taRef = useRef<HTMLTextAreaElement>(null)
 
+  // Draft resets in beginEdit (the open trigger), not in an effect — the
+  // effect only owns the post-render focus.
+  const beginEdit = () => {
+    setDraft(sprint.note ?? '')
+    setEditing(true)
+  }
   useEffect(() => {
     if (editing) {
-      setDraft(sprint.note ?? '')
       requestAnimationFrame(() => {
         taRef.current?.focus()
         taRef.current?.select()
       })
     }
-  }, [editing, sprint.note])
+  }, [editing])
 
   const commit = async () => {
     setEditing(false)
@@ -2476,7 +2483,7 @@ function SprintNoteBanner({ sprint }: { sprint: Sprint }) {
     return (
       <div className="shrink-0 bg-surface border-b border-border-hair px-5 py-2">
         <button
-          onClick={() => setEditing(true)}
+          onClick={beginEdit}
           className="w-full flex items-center justify-center gap-1.5 py-1.5 text-[12.5px] font-semibold text-ink-muted border border-dashed border-border rounded-[10px] transition hover:text-accent hover:border-accent/40 hover:bg-accent-soft"
         >
           <StickyNote size={14} strokeWidth={2} />
@@ -2490,7 +2497,7 @@ function SprintNoteBanner({ sprint }: { sprint: Sprint }) {
     <div className="shrink-0 bg-surface border-b border-border-hair px-5 py-2.5">
       <div
         className="group/note flex items-start gap-2.5 cursor-text rounded-[8px] -mx-1.5 px-1.5 py-1 hover:bg-surface-hover transition"
-        onClick={() => setEditing(true)}
+        onClick={beginEdit}
         title="Click to edit note"
       >
         <StickyNote

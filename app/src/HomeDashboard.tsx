@@ -13,7 +13,7 @@ import {
   type Person,
 } from './db'
 import { Avatar, ColorSwatchRow } from './members'
-import { useConfirm } from './ConfirmDialog'
+import { useConfirm } from './confirm-context'
 import {
   latestActiveSprint,
   formatSprintRange,

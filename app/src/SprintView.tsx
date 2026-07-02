@@ -48,8 +48,13 @@ import {
   type WorkingPlan,
 } from './db'
 import { Avatar, MemberDaysOffButton } from './members'
+import {
+  STATUS_META,
+  computeMemberConflicts,
+  derivedGroupStatus,
+} from './sprint-logic'
 import { DatePickCell, SprintRangeContext } from './DatePicker'
-import { useConfirm } from './ConfirmDialog'
+import { useConfirm } from './confirm-context'
 import { AddGroupButton } from './AddGroupButton'
 import {
   formatRelativeDate,
@@ -120,119 +125,12 @@ function compareTasks(a: Task, b: Task, field: SortField, dir: 'asc' | 'desc'): 
   return a.sequence - b.sequence // stable tiebreak by seq
 }
 
-export const STATUS_META: Record<Status, { label: string; varName: string }> = {
-  todo: { label: 'To do', varName: 'var(--color-status-todo)' },
-  in_progress: { label: 'In progress', varName: 'var(--color-status-progress)' },
-  done: { label: 'Done', varName: 'var(--color-status-done)' },
-}
-
-export const STATUS_ORDER: Status[] = ['todo', 'in_progress', 'done']
-
 const COLLAPSE_KEY = (sprintId: string) => `plan-up:collapsed:${sprintId}`
 const GROUP_COLLAPSE_KEY = (parentId: string) =>
   `plan-up:taskgroup-collapsed:${parentId}`
 // One global sort preference (shared across all member cards, not per-sprint), so it
 // survives switching view/sprint/project and a page reload. See list-view.md.
 const SORT_KEY = 'plan-up:sort'
-
-/**
- * Detect schedule conflicts among one member's leaf tasks. A pair conflicts if
- * their computed [start … end] intervals OVERLAP (one person can't run two tasks
- * at once), or they share a prerequisite. Same-start / same-end are kept only as a
- * fallback for zero-duration tasks (where a strict overlap is empty). Returns a
- * per-task tooltip string (absent = no conflict). O(n²) over a member's tasks
- * (small). See design-docs/conflict-warning.md.
- */
-export function computeMemberConflicts(
-  tasks: Task[],
-  tasksById: Map<string, Task>,
-  memberById: Map<string, Member>
-): Map<string, string> {
-  type Hit = { seq: number; kind: 'overlap' | 'start' | 'end' | 'prereq' }
-  // Unsized tasks (no effort) aren't really scheduled — exclude them from
-  // double-booking detection. See design-docs/conflict-warning.md.
-  const sized = tasks.filter((t) => t.estimate !== null)
-  const plans = new Map(
-    sized.map((t) => [t.id, computeWorkingPlan(t, tasksById, memberById)])
-  )
-  const startKey = (t: Task) => {
-    const p = plans.get(t.id)!
-    return p.startDate ? `${p.startDate}T${p.startTime ?? ''}` : null
-  }
-  const endKey = (t: Task) => {
-    const p = plans.get(t.id)!
-    return p.dueDate ? `${p.dueDate}T${p.endTime ?? ''}` : null
-  }
-  const hits = new Map<string, Hit[]>()
-  const push = (id: string, h: Hit) => {
-    const a = hits.get(id) ?? []
-    a.push(h)
-    hits.set(id, a)
-  }
-  for (let i = 0; i < sized.length; i++) {
-    for (let j = i + 1; j < sized.length; j++) {
-      const a = sized[i]
-      const b = sized[j]
-      const sa = startKey(a)
-      const ea = endKey(a)
-      const sb = startKey(b)
-      const eb = endKey(b)
-      // Time-range overlap: both tasks have a full [start..end] range and the
-      // intervals strictly intersect (touching endpoints, e.g. back-to-back, don't
-      // count). Keys are sortable ISO datetimes, so string `<` compares chronology.
-      const overlap = sa && ea && sb && eb && sa < eb && sb < ea
-      if (overlap) {
-        push(a.id, { seq: b.sequence, kind: 'overlap' })
-        push(b.id, { seq: a.sequence, kind: 'overlap' })
-      } else {
-        // Fallback for zero-duration tasks (strict overlap is empty): exact endpoint match.
-        if (sa && sa === sb) {
-          push(a.id, { seq: b.sequence, kind: 'start' })
-          push(b.id, { seq: a.sequence, kind: 'start' })
-        }
-        if (ea && ea === eb) {
-          push(a.id, { seq: b.sequence, kind: 'end' })
-          push(b.id, { seq: a.sequence, kind: 'end' })
-        }
-      }
-      if (a.dependsOn.some((d) => b.dependsOn.includes(d))) {
-        push(a.id, { seq: b.sequence, kind: 'prereq' })
-        push(b.id, { seq: a.sequence, kind: 'prereq' })
-      }
-    }
-  }
-  const label = (k: Hit['kind']) =>
-    k === 'overlap'
-      ? 'chồng thời gian'
-      : k === 'start'
-        ? 'giờ bắt đầu'
-        : k === 'end'
-          ? 'giờ kết thúc'
-          : 'chung prereq'
-  const tips = new Map<string, string>()
-  for (const [id, list] of hits) {
-    const byOther = new Map<number, Set<string>>()
-    for (const h of list) {
-      const s = byOther.get(h.seq) ?? new Set<string>()
-      s.add(label(h.kind))
-      byOther.set(h.seq, s)
-    }
-    const parts = [...byOther.entries()].map(
-      ([seq, kinds]) => `#${seq} (${[...kinds].join(', ')})`
-    )
-    tips.set(id, `Trùng lịch với ${parts.join('; ')}`)
-  }
-  return tips
-}
-
-/** Roll-up status of a parent task derived from its children (display only). */
-export function derivedGroupStatus(children: Task[]): Status {
-  if (children.length === 0) return 'todo'
-  if (children.every((c) => c.status === 'done')) return 'done'
-  if (children.some((c) => c.status === 'in_progress' || c.status === 'done'))
-    return 'in_progress'
-  return 'todo'
-}
 
 function loadCollapsed(sprintId: string): Set<string> {
   try {
@@ -338,6 +236,7 @@ export function SprintView({
   const clearSelection = () => setSelectedIds(new Set())
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- sprint switch swaps the persisted collapse set + clears selection
     setCollapsed(loadCollapsed(sprintId))
     setSelectedIds(new Set())
   }, [sprintId])
@@ -2512,6 +2411,7 @@ function PrereqInput({
   const [pos, setPos] = useState<{ top: number; right: number }>({ top: 0, right: 0 })
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- draft mirrors external writes only while NOT editing (focused guard)
     if (!focused) setDraft(currentLabel)
   }, [currentLabel, focused])
 

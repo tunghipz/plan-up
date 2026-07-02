@@ -928,14 +928,11 @@ export async function updateProject(
  * by tasks in OTHER projects (rare) are stripped from those references.
  */
 export async function deleteProject(projectId: string): Promise<void> {
+  // Table-array form: Dexie's variadic transaction() overloads stop at 5
+  // tables and this wipe spans 6.
   await db.transaction(
     'rw',
-    db.projects,
-    db.members,
-    db.sprints,
-    db.tasks,
-    db.collections,
-    db.events,
+    [db.projects, db.members, db.sprints, db.tasks, db.collections, db.events],
     async () => {
       const taskIds = (
         await db.tasks.where('projectId').equals(projectId).toArray()
@@ -1005,7 +1002,8 @@ function childrenByParent(byId: Map<string, Task>): Map<string, string[]> {
   for (const t of byId.values()) {
     if (t.parentId && byId.has(t.parentId)) {
       const a = m.get(t.parentId)
-      a ? a.push(t.id) : m.set(t.parentId, [t.id])
+      if (a) a.push(t.id)
+      else m.set(t.parentId, [t.id])
     }
   }
   return m
@@ -1587,7 +1585,8 @@ export function planSprintRollover(sprintTasks: Task[]): {
   for (const t of sprintTasks) {
     if (t.parentId && idSet.has(t.parentId)) {
       const a = childrenByParent.get(t.parentId)
-      a ? a.push(t) : childrenByParent.set(t.parentId, [t])
+      if (a) a.push(t)
+      else childrenByParent.set(t.parentId, [t])
     }
   }
   const moveIds = new Set<string>()

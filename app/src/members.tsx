@@ -11,7 +11,14 @@ import {
   type Member,
 } from './db'
 import { DateField } from './DatePicker'
-import { formatShortDate, firstGrapheme } from './lib'
+import {
+  formatShortDate,
+  firstGrapheme,
+  effectiveDaysOff,
+  daysOffInRange,
+  fmtDays,
+  PROJECT_ICON_EMOJIS,
+} from './lib'
 
 /**
  * Shared member controls used by both the Sprint group header and the
@@ -419,30 +426,6 @@ export function AvatarPicker({ member }: { member: Member }) {
   )
 }
 
-/** Days off as effective days — a half-day counts 0.5 (matches scheduler). */
-export function effectiveDaysOff(days: { half?: 'am' | 'pm' }[]): number {
-  return days.reduce((s, d) => s + (d.half ? 0.5 : 1), 0)
-}
-
-/**
- * Off-days falling within an inclusive [start, end] date range (yyyy-mm-dd
- * lexical compare). Used to scope the sprint-view days-off control to the
- * sprint being viewed; settings passes no range and sees the full list.
- * See design-docs/members-and-days-off.md.
- */
-export function daysOffInRange<T extends { date: string }>(
-  days: T[],
-  start: string,
-  end: string
-): T[] {
-  return days.filter((d) => d.date >= start && d.date <= end)
-}
-
-/** Trim a day count for display: 2 → "2", 1.5 → "1.5". */
-export function fmtDays(n: number): string {
-  return Number.isInteger(n) ? String(n) : n.toFixed(1)
-}
-
 /**
  * A row of palette swatches. The currently-selected color gets a ring.
  * Generic so it serves both members and projects.
@@ -478,15 +461,6 @@ export function ColorSwatchRow({
     </div>
   )
 }
-
-/** Curated emoji for a project icon (see project-icon-emoji.md) — the 15 most
- *  project-relevant glyphs, sized to exactly two rows alongside the leading "Aa"
- *  chip (8 cols × 2). Everything else is reached through the search box, which
- *  filters the shared `EMOJI` keyword set (and surfaces any pasted emoji). */
-export const PROJECT_ICON_EMOJIS = [
-  '🚀', '🎯', '✅', '📌', '📋', '💡', '🔥', '⭐',
-  '📈', '🐛', '🔧', '🎨', '🧩', '📦', '🗂️',
-]
 
 /** Inline emoji picker mirroring ColorSwatchRow's `{ value, onPick }` shape.
  *  A search box sits on top: empty → two curated rows of project emoji (with a

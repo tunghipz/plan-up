@@ -21,7 +21,7 @@ import {
   MemberColorDot,
   MemberDaysOffButton,
 } from './members'
-import { useConfirm } from './ConfirmDialog'
+import { useConfirm } from './confirm-context'
 
 /**
  * Settings for the current project: edit the project's own info (name /
@@ -50,6 +50,7 @@ export function ProjectSettingsView({
   // truth — depending on project.name/description here would let one field's
   // commit (which updates the live row) wipe the other field's in-progress draft.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- re-sync drafts only when SWITCHING project (see comment above)
     setName(project.name)
     setDesc(project.description ?? '')
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -237,9 +238,11 @@ export function ProjectSettingsView({
 function MemberRow({ member }: { member: Member }) {
   const confirm = useConfirm()
   const [name, setName] = useState(member.name)
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- draft mirrors the live row between edits
   useEffect(() => setName(member.name), [member.id, member.name])
 
   const [title, setTitle] = useState(member.title ?? '')
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- draft mirrors the live row between edits
   useEffect(() => setTitle(member.title ?? ''), [member.id, member.title])
 
   const commit = async () => {

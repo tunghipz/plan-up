@@ -1,28 +1,15 @@
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { ConfirmCtx, type ConfirmOpts } from './confirm-context'
 
 /**
  * In-DNA replacement for window.confirm() (design-system §6.4 / §8 — no grey OS
- * dialog). A provider wraps <App>; `useConfirm()` returns an async function that
- * resolves true/false, so call sites read almost identically to the old
- * `confirm()`:  `if (!(await confirm({ title, message }))) return`.
+ * dialog). A provider wraps <App>; `useConfirm()` (see confirm-context.ts)
+ * returns an async function that resolves true/false, so call sites read
+ * almost identically to the old `confirm()`:
+ * `if (!(await confirm({ title, message }))) return`.
  */
 
-export type ConfirmOpts = {
-  title: string
-  message?: string
-  confirmLabel?: string
-  cancelLabel?: string
-  /** Red action button + emphasis (delete/replace). Defaults to true. */
-  destructive?: boolean
-}
-
 type Pending = { opts: ConfirmOpts; resolve: (ok: boolean) => void }
-
-const ConfirmCtx = createContext<(opts: ConfirmOpts) => Promise<boolean>>(
-  async () => false
-)
-
-export const useConfirm = () => useContext(ConfirmCtx)
 
 export function ConfirmProvider({ children }: { children: React.ReactNode }) {
   const [pending, setPending] = useState<Pending | null>(null)

@@ -310,7 +310,7 @@ function CalendarPopover({
       window.removeEventListener('scroll', pin, true)
       window.removeEventListener('resize', pin)
     }
-  }, [anchorRef])
+  }, [anchorRef, HEIGHT])
 
   useEffect(() => {
     const onDoc = (e: MouseEvent) => {

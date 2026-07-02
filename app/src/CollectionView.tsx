@@ -59,6 +59,8 @@ type CollSortField = 'title' | 'startDate' | 'dueDate' | 'status'
 type CollSort = { field: CollSortField; dir: 'asc' | 'desc' } | null
 // One global sort preference shared across every section card (like the sprint
 // list's global SORT_KEY), so it survives switching collection/view + reload.
+const EMPTY_TASKS: Task[] = []
+
 const COLL_SORT_KEY = 'plan-up:collSort'
 const COLL_SORT_FIELDS: CollSortField[] = ['title', 'startDate', 'dueDate', 'status']
 
@@ -151,11 +153,13 @@ export function CollectionView({
     () => db.collections.get(collectionId),
     [collectionId]
   )
-  const items =
-    useLiveQuery<Task[]>(
-      () => db.tasks.where('collectionId').equals(collectionId).toArray(),
-      [collectionId]
-    ) ?? []
+  const itemsRaw = useLiveQuery<Task[]>(
+    () => db.tasks.where('collectionId').equals(collectionId).toArray(),
+    [collectionId]
+  )
+  // Stable [] while the query loads — a fresh `?? []` per render would defeat
+  // every downstream useMemo keyed on `items`.
+  const items = itemsRaw ?? EMPTY_TASKS
 
   const [addingTable, setAddingTable] = useState(false)
 
@@ -184,7 +188,8 @@ export function CollectionView({
     for (const t of items) {
       const k = t.sectionId ?? ''
       const arr = m.get(k)
-      arr ? arr.push(t) : m.set(k, [t])
+      if (arr) arr.push(t)
+      else m.set(k, [t])
     }
     for (const arr of m.values()) arr.sort((a, b) => effOrder(a) - effOrder(b))
     return m
@@ -441,15 +446,19 @@ function CollectionTitle({ collection }: { collection: Collection }) {
   const [draft, setDraft] = useState(collection.name)
   const inputRef = useRef<HTMLInputElement>(null)
 
+  // Draft resets in beginEdit (the open trigger); the effect only owns focus.
+  const beginEdit = () => {
+    setDraft(collection.name)
+    setEditing(true)
+  }
   useEffect(() => {
     if (editing) {
-      setDraft(collection.name)
       requestAnimationFrame(() => {
         inputRef.current?.focus()
         inputRef.current?.select()
       })
     }
-  }, [editing, collection.name])
+  }, [editing])
 
   const commit = async () => {
     const n = draft.trim()
@@ -485,7 +494,7 @@ function CollectionTitle({ collection }: { collection: Collection }) {
   return (
     <h2
       className="group/title inline-flex items-center gap-1.5 min-w-0 font-semibold text-ink display-tight cursor-text"
-      onClick={() => setEditing(true)}
+      onClick={beginEdit}
       title="Click to rename"
     >
       <span className="truncate">{collection.name}</span>
@@ -852,15 +861,19 @@ function SectionName({
   const [draft, setDraft] = useState(section.name)
   const inputRef = useRef<HTMLInputElement>(null)
 
+  // Draft resets in beginEdit (the open trigger); the effect only owns focus.
+  const beginEdit = () => {
+    setDraft(section.name)
+    setEditing(true)
+  }
   useEffect(() => {
     if (editing) {
-      setDraft(section.name)
       requestAnimationFrame(() => {
         inputRef.current?.focus()
         inputRef.current?.select()
       })
     }
-  }, [editing, section.name])
+  }, [editing])
 
   const commit = async () => {
     const n = draft.trim()
@@ -899,7 +912,7 @@ function SectionName({
       className="group/sname inline-flex items-center gap-1.5 min-w-0 text-[15.5px] font-semibold text-ink tracking-[-0.01em] cursor-text"
       onClick={(e) => {
         e.stopPropagation()
-        setEditing(true)
+        beginEdit()
       }}
       title="Click to rename"
     >

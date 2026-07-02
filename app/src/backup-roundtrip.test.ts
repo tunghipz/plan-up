@@ -157,8 +157,8 @@ describe('deleteProject wipes everything the project owns', () => {
       endDate: '2026-06-14',
     })
     await db.collections.bulkAdd([
-      { id: uid(), projectId: pidA, name: 'Backlog', statuses: [], sections: [], order: 1 },
-      { id: uid(), projectId: pidB, name: 'Ideas', statuses: [], sections: [], order: 1 },
+      { id: uid(), projectId: pidA, name: 'Backlog', statuses: [], sections: [], order: 1, createdAt: 1 },
+      { id: uid(), projectId: pidB, name: 'Ideas', statuses: [], sections: [], order: 1, createdAt: 1 },
     ])
     await db.events.bulkAdd([
       {

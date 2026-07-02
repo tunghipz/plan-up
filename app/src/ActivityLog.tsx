@@ -326,6 +326,7 @@ export function ActivityLog({
   const [entering, setEntering] = useState(false)
   useEffect(() => {
     if (!open) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- deliberate one-shot animation restart keyed to the open transition
     setEntering(true)
     const id = setTimeout(() => setEntering(false), 650)
     return () => clearTimeout(id)

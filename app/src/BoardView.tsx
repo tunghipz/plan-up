@@ -15,14 +15,8 @@ import {
 import { formatShortDate, dayDiff } from './lib'
 import { Avatar } from './members'
 import { SprintRangeContext } from './DatePicker'
-import {
-  STATUS_META,
-  STATUS_ORDER,
-  StatusIcon,
-  derivedGroupStatus,
-  DatePickCell,
-  EffortCell,
-} from './SprintView'
+import { StatusIcon, DatePickCell, EffortCell } from './SprintView'
+import { STATUS_META, STATUS_ORDER, derivedGroupStatus } from './sprint-logic'
 
 // Per-column sort (see design-docs/board-view.md). Each column carries its own
 // {mode, dir}; `manual` is the default drag order. Sort is a NON-DESTRUCTIVE view
@@ -107,7 +101,8 @@ export function BoardView({
     for (const t of tasks) {
       if (!t.parentId) continue
       const arr = m.get(t.parentId)
-      arr ? arr.push(t) : m.set(t.parentId, [t])
+      if (arr) arr.push(t)
+      else m.set(t.parentId, [t])
     }
     return m
   }, [tasks])
@@ -138,11 +133,17 @@ export function BoardView({
       if (!p) continue
       if (p.startDate) {
         const k = `${p.startDate}T${p.startTime}`
-        if (!sKey || k < sKey) (sKey = k), (sd = p.startDate)
+        if (!sKey || k < sKey) {
+          sKey = k
+          sd = p.startDate
+        }
       }
       if (p.dueDate) {
         const k = `${p.dueDate}T${p.endTime}`
-        if (!eKey || k > eKey) (eKey = k), (dd = p.dueDate)
+        if (!eKey || k > eKey) {
+          eKey = k
+          dd = p.dueDate
+        }
       }
     }
     if (!sd && !dd) return null

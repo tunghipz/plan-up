@@ -678,13 +678,17 @@ export async function addCollectionItem(
   sectionId: string,
   patch: Partial<Task> & { title: string }
 ): Promise<Task> {
-  const today = new Date().toISOString().slice(0, 10)
+  // Local-calendar today, NOT the UTC slice — see todayLocalISO's docstring.
+  const today = todayLocalISO()
   // One transaction so the maxSeq read + add can't interleave with another add:
   // two rapid "add item" clicks would otherwise read the same maxSeq and produce
   // duplicate per-project sequences.
   return db.transaction('rw', db.collections, db.tasks, async () => {
     const c = await db.collections.get(collectionId)
-    const projectId = c?.projectId ?? ''
+    // A deleted/unknown collection must fail loudly — falling back to
+    // projectId '' would insert an invisible orphan row no view ever loads.
+    if (!c) throw new Error(`Collection ${collectionId} not found`)
+    const projectId = c.projectId
     const maxSeq = (
       await db.tasks.where('projectId').equals(projectId).toArray()
     ).reduce((m, t) => Math.max(m, t.sequence ?? 0), 0)
@@ -705,7 +709,7 @@ export async function addCollectionItem(
       estimate: null,
       createdAt: Date.now(),
       dependsOn: [],
-      collectionStatusId: c?.statuses[0]?.id ?? null,
+      collectionStatusId: c.statuses[0]?.id ?? null,
       collectionId,
       sectionId,
       ...patch,

@@ -16,13 +16,19 @@ import { useRegisterSW } from 'virtual:pwa-register/react'
 const CURRENT = __APP_VERSION__
 const UPDATE_POLL_MS = 30 * 60 * 1000 // re-check for a new SW every 30 min
 
+// `onRegisteredSW` fires on every mount and offers no cleanup hook, so a remount
+// would stack extra intervals/listeners. The SW registration is app-global anyway
+// — guard at module level so the polling is wired up exactly once per page load.
+let pollingStarted = false
+
 export function VersionFooter() {
   const {
     needRefresh: [needRefresh],
     updateServiceWorker,
   } = useRegisterSW({
     onRegisteredSW(_swUrl, registration) {
-      if (!registration) return
+      if (!registration || pollingStarted) return
+      pollingStarted = true
       // Proactively look for a new SW on an interval and when the tab refocuses,
       // so a long-lived tab notices a deploy without waiting for a navigation.
       setInterval(() => registration.update(), UPDATE_POLL_MS)

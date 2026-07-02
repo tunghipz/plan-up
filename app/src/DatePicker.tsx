@@ -18,6 +18,9 @@ export type DateRange = { start: string; end: string }
  * clamp + shade to the current sprint without threading the range through every
  * row. DatePickCell reads it; DateField does NOT (sprint dialog stays unclamped).
  */
+// Context lives beside the picker cells that consume it (single import site for
+// callers); the file intentionally exports both, so fast-refresh can't apply here.
+// eslint-disable-next-line react-refresh/only-export-components
 export const SprintRangeContext = createContext<DateRange | null>(null)
 
 const MONTHS = [
@@ -179,7 +182,12 @@ function CalendarGrid({
           <ChevronRight size={16} />
         </button>
       </div>
-      <div className="grid grid-cols-7 gap-[2px]">
+      <div
+        className="grid grid-cols-7 gap-[2px]"
+        // Range mode: the hover preview must die with the cursor — otherwise the
+        // band sticks to the last hovered day after the pointer leaves the grid.
+        onMouseLeave={isRange ? () => setHover(null) : undefined}
+      >
         {WD.map((w) => (
           <div key={w} className="h-5 text-[10px] font-medium text-ink-faint flex items-center justify-center">
             {w}
@@ -527,10 +535,15 @@ function RangeCalendarPopover({
   const HEIGHT = 340
 
   // Refs so the commit-on-close handler (bound once) reads the latest draft.
+  // Synced in an effect (not during render — React forbids ref writes there);
+  // passive effects flush before the next discrete event, so the handler still
+  // sees the draft from the latest committed render.
   const draftStartRef = useRef(draftStart)
-  draftStartRef.current = draftStart
   const draftEndRef = useRef(draftEnd)
-  draftEndRef.current = draftEnd
+  useEffect(() => {
+    draftStartRef.current = draftStart
+    draftEndRef.current = draftEnd
+  })
 
   const pick = (iso: string) => {
     if (!selectingEnd || !draftStart) {

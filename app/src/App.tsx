@@ -550,24 +550,6 @@ function App() {
     return () => window.removeEventListener('keydown', handler)
   }, [paletteOpen, dark, setDark, settingsOpen, showActivity, selKind, currentSprintId, screen])
 
-  if (seedError) {
-    return (
-      <div className="min-h-screen flex items-center justify-center p-6 bg-canvas text-ink">
-        <div className="max-w-md text-center space-y-3">
-          <h1 className="text-xl font-semibold">Storage unavailable</h1>
-          <p className="text-sm text-ink-muted">
-            This app stores data in IndexedDB. Your browser blocked it — usually
-            this happens in private/incognito mode or with strict tracking
-            protection. Try a normal window.
-          </p>
-          <pre className="text-xs text-red-600 bg-red-50 dark:bg-red-950/40 p-2 rounded">
-            {seedError}
-          </pre>
-        </div>
-      </div>
-    )
-  }
-
   // Full-DB backup (every project) — restore-on-a-new-machine file.
   const handleExportAll = async () => {
     setExportMenuOpen(false)
@@ -828,6 +810,29 @@ function App() {
       pctDone: total === 0 ? 0 : Math.round((done / total) * 100),
     }
   }, [tasks])
+
+  // This early return MUST stay below every hook: seedError flips from null to
+  // set on a later render (the seeding effect's catch), and an early return
+  // above the hooks would change the hook count mid-lifecycle — React throws
+  // "Rendered fewer hooks than expected" and the friendly error screen never
+  // shows.
+  if (seedError) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-6 bg-canvas text-ink">
+        <div className="max-w-md text-center space-y-3">
+          <h1 className="text-xl font-semibold">Storage unavailable</h1>
+          <p className="text-sm text-ink-muted">
+            This app stores data in IndexedDB. Your browser blocked it — usually
+            this happens in private/incognito mode or with strict tracking
+            protection. Try a normal window.
+          </p>
+          <pre className="text-xs text-red-600 bg-red-50 dark:bg-red-950/40 p-2 rounded">
+            {seedError}
+          </pre>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="h-screen flex bg-canvas text-ink overflow-hidden">

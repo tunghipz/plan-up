@@ -80,9 +80,16 @@ function ConfirmSheet({
         return
       }
       if (e.key === 'Enter') {
-        // preventDefault stops the autoFocus'd confirm button's own native
-        // Enter-activation from ALSO firing — without it onConfirm runs twice
-        // (idempotent today, but a latent footgun).
+        // If focus sits on one of the dialog's buttons (autoFocus'd Confirm, or
+        // Cancel after a Tab), let the button's own native Enter-activation
+        // fire — a focused Cancel must cancel, never confirm. Only when focus
+        // is elsewhere does a bare Enter mean "confirm".
+        const active = document.activeElement
+        if (
+          active instanceof HTMLButtonElement &&
+          sheetRef.current?.contains(active)
+        )
+          return
         e.preventDefault()
         onConfirm()
         return

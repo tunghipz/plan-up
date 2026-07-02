@@ -259,6 +259,10 @@ export function CollectionView({
     const itemEl = el?.closest('[data-item-id]') as HTMLElement | null
     const secEl = el?.closest('[data-section-id]') as HTMLElement | null
     const targetId = itemEl?.dataset.itemId
+    // Released over the dragged row itself (a plain grip click, or a drag that
+    // came back home) — a no-op, NOT "append to the section's end": the append
+    // branch below is only for the empty area under a table's rows.
+    if (targetId === id) return
     const targetSectionId =
       (targetId ? itemsById.get(targetId)?.sectionId : undefined) ??
       secEl?.dataset.sectionId

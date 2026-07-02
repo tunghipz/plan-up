@@ -1,10 +1,11 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { CalendarPlus } from 'lucide-react'
 import {
   buildMonthGrid,
   assignLanes,
   computeBarSegments,
+  todayLocalISO,
   type CalItem,
 } from './lib'
 import { db, type Collection, type CollectionStatus, type Task } from './db'
@@ -64,11 +65,13 @@ export function CollectionCalendar({
   /** Jump back to the List tab (used by the bar popover's "View in list"). */
   onViewInList?: () => void
 }) {
-  const nowY = new Date().getUTCFullYear()
-  const nowM = new Date().getUTCMonth()
+  // Local time everywhere (matches GanttView / DatePicker / lib.todayLocalISO) —
+  // the UTC slice renders the wrong day near midnight in non-UTC zones.
+  const nowY = new Date().getFullYear()
+  const nowM = new Date().getMonth()
   // Computed per render (NOT frozen at module load) so the "today" highlight
   // stays correct if the tab is left open across midnight.
-  const today = new Date().toISOString().slice(0, 10)
+  const today = todayLocalISO()
   const [view, setView] = useState(() => ({ y: nowY, m: nowM }))
   // Open bar editor — { item id, anchor rect } captured on click.
   const [openItem, setOpenItem] = useState<{ id: string; rect: DOMRect } | null>(
@@ -83,9 +86,10 @@ export function CollectionCalendar({
   }
   const onCurrentMonth = view.y === nowY && view.m === nowM
 
-  const taskById = new Map(items.map((t) => [t.id, t]))
-  const statusColorById = new Map(
-    collection.statuses.map((s) => [s.id, s.color])
+  const taskById = useMemo(() => new Map(items.map((t) => [t.id, t])), [items])
+  const statusColorById = useMemo(
+    () => new Map(collection.statuses.map((s) => [s.id, s.color])),
+    [collection.statuses]
   )
   const colorForTask = (t: Task | undefined): string =>
     (t?.collectionStatusId
@@ -97,24 +101,36 @@ export function CollectionCalendar({
     return collection.statuses.find((s) => s.id === id)?.name ?? 'No status'
   }
 
-  const cal: CalItem[] = items
-    .filter((t) => t.startDate)
-    .map((t) => {
-      const start = t.startDate as string
-      // Clamp end to never precede start: the popover lets start/due be edited
-      // independently, so a user can set due < start. Without this, the segment
-      // span goes negative and lane-packing breaks (zero/negative-width bars).
-      const rawEnd = t.dueDate ?? start
-      return { id: t.id, start, end: rawEnd < start ? start : rawEnd }
-    })
+  const cal: CalItem[] = useMemo(
+    () =>
+      items
+        .filter((t) => t.startDate)
+        .map((t) => {
+          const start = t.startDate as string
+          // Clamp end to never precede start: the popover lets start/due be edited
+          // independently, so a user can set due < start. Without this, the segment
+          // span goes negative and lane-packing breaks (zero/negative-width bars).
+          const rawEnd = t.dueDate ?? start
+          return { id: t.id, start, end: rawEnd < start ? start : rawEnd }
+        }),
+    [items]
+  )
   // Items with no start date never appear on the grid — surface them in an
   // "Unscheduled" tray instead of silently dropping them (a trust bug).
-  const unscheduled = items.filter((t) => !t.startDate)
+  const unscheduled = useMemo(() => items.filter((t) => !t.startDate), [items])
 
-  const grid = buildMonthGrid(view.y, view.m, today)
-  const lanes = assignLanes(cal)
-  const segs = computeBarSegments(cal, grid, lanes)
-  const maxLane = cal.reduce((m, c) => Math.max(m, lanes.get(c.id) ?? 0), 0)
+  const grid = useMemo(
+    () => buildMonthGrid(view.y, view.m, today),
+    [view.y, view.m, today]
+  )
+  const lanes = useMemo(() => assignLanes(cal), [cal])
+  const segs = useMemo(
+    () => computeBarSegments(cal, grid, lanes),
+    [cal, grid, lanes]
+  )
+  // Lane count for the *displayed* month only (from its segments) — sizing off
+  // ALL items would let one crowded week in another month inflate every row here.
+  const maxLane = segs.reduce((m, s) => Math.max(m, s.lane), 0)
 
   const gridTemplateRows = `30px repeat(${maxLane + 1}, 23px) 1fr`
   const minWeekHeight = 30 + (maxLane + 1) * 23 + 14
@@ -373,19 +389,16 @@ function BarPopover({
 }) {
   const popRef = useRef<HTMLDivElement>(null)
   const W = 244
-  const [pos, setPos] = useState<{ top: number; left: number }>({
-    top: -9999,
-    left: -9999,
-  })
-
-  useLayoutEffect(() => {
+  // Position is pure math on the anchor rect + viewport (the popover has a fixed
+  // footprint), so derive it during render — no layout-effect setState pass.
+  const pos = (() => {
     let left = Math.min(anchorRect.left, window.innerWidth - 8 - W)
     left = Math.max(8, left)
     const H = 240
     let top = anchorRect.bottom + 6
     if (top + H > window.innerHeight - 8) top = Math.max(8, anchorRect.top - H - 6)
-    setPos({ top, left })
-  }, [anchorRect])
+    return { top, left }
+  })()
 
   useEffect(() => {
     const onDown = (e: MouseEvent) => {

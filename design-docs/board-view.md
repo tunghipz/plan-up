@@ -1,7 +1,7 @@
 # Board view
 
 **Status:** Implemented
-**Last updated:** 2026-06-19
+**Last updated:** 2026-07-02 (boardOrder midpoint collision → whole-column renormalize)
 **Code:** `app/src/BoardView.tsx`
 
 ## Purpose
@@ -105,6 +105,13 @@ List), and **task creation** via `db.tasks.add` + `nextSequence` (bottom compose
     (`orderForDrop`, skipping the dragged card) and writes `{status?, boardOrder?}` so the
     card persists at the dropped position. Parents set `draggable=false`; dropping a parent
     id is ignored.
+  - **Midpoint collision → renormalize.** Repeated drops into the same gap exhaust float
+    precision of the `(before + after) / 2` midpoint (`(a+b)/2 === a`) — the cheap one-card
+    write would make two cards silently share an order. `orderForDrop` flags the collision
+    and `handleDrop` then **rewrites the whole column's `boardOrder` to clean integers**
+    (`0,1,2,…` over the display order with the card spliced in at the slot, one
+    `db.transaction`) — the same guard as the List row drag / member-lane drag
+    (`renormalizeListOrder` writes `listOrder`, so the Board reindexes inline).
   - `scrollableAncestor(gridRef)` finds the board's scroll container; a rAF loop edge-scrolls
     it while dragging. A document `dragend` listener is a backstop that always clears
     `dragId` (so a hidden source can never get stuck).
@@ -140,8 +147,9 @@ List), and **task creation** via `db.tasks.add` + `nextSequence` (bottom compose
       flips instantly instead of animating, so crossing no longer repaints both columns' full
       card stacks every frame for the transition's duration. `<DragGhost>` is also `memo`-wrapped
       so it doesn't re-render on each `over` change.
-- Reuses `STATUS_META` / `STATUS_ORDER` / `StatusIcon` / `derivedGroupStatus` / `DatePickCell`
-  / `EffortCell` from `SprintView.tsx`, and `recomputeDates` / `computeWorkingPlan` from
+- Reuses `STATUS_META` / `STATUS_ORDER` / `derivedGroupStatus` from `sprint-logic.ts` (pure
+  module shared by List/Board/Timeline), `StatusIcon` / `DatePickCell` / `EffortCell` from
+  `SprintView.tsx`, and `recomputeDates` / `computeWorkingPlan` from
   `db.ts` — so the quick-edit lock rules and recompute behavior stay identical to the List,
   single-sourced.
 - **`AddTaskComposer`** (one per column) toggles between the ghost `+ Add task` button and an

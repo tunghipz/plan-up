@@ -1,11 +1,11 @@
 # Sprints
 
 **Status:** Implemented
-**Last updated:** 2026-06-19 (sprint state glyph: leading dot now encodes upcoming /
-in-progress / past, replacing the flat dot)
+**Last updated:** 2026-07-02 (sprint creation is a canonical `createSprint()` in the data
+layer — row + `sprint_started` event commit in one transaction)
 **Code:** `app/src/App.tsx` (`NewSprintDialog`, `SprintNoteBanner`, sprint panel,
-`SprintStateDot`, `renderSprintRow`), `app/src/db.ts` (`nextSequence`, `setSprintNote`),
-`app/src/lib.ts` (`sprintTemporalState`; tests in `sprint-cadence.test.ts`)
+`SprintStateDot`, `renderSprintRow`), `app/src/db.ts` (`createSprint`, `nextSequence`,
+`setSprintNote`), `app/src/lib.ts` (`sprintTemporalState`; tests in `sprint-cadence.test.ts`)
 
 ## Purpose
 A sprint is the time-boxed folder tasks live in. Biweekly by default, with a clean
@@ -16,7 +16,11 @@ context lives in an **optional note** instead.
 - **Create:** `+` next to "Sprints" or the `n` shortcut → `NewSprintDialog`. The **name is
   shown locked** (`Sprint N`, read-only with a lock glyph — not an input); the editable
   fields are **Start**, **End**, and an optional **note**. Enter or **Create** to save; it
-  becomes the current sprint.
+  becomes the current sprint. Creation goes through the canonical **`createSprint()`**
+  (`db.ts`): the sprint row and its `sprint_started` activity event commit in **one
+  transaction**, so a crash between them can't leave a sprint with no birth entry
+  (seeding logs no event by design). See
+  [sprint-activity-log.md](./sprint-activity-log.md).
 - **Select:** click a row in the sprint panel (active row = accent bg, shows date range +
   task count; a small note glyph appears **trailing at the row's right edge** when the sprint
   has a note — kept off the title so the name stays clean; faint at rest, white/80 on the

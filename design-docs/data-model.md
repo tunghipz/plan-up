@@ -1,7 +1,7 @@
 # Data model
 
 **Status:** Implemented
-**Last updated:** 2026-06-20
+**Last updated:** 2026-07-02
 **Code:** `app/src/db.ts`
 
 ## Purpose
@@ -163,3 +163,6 @@ Current indexes:
   mutate an existing version block.
 - `dependsOn` stores task **IDs** (stable), never sequence numbers — so renumbering a
   sprint's sequences never breaks dependency links.
+- `deleteProject` wipes **every project-owned row** in one transaction: the project's
+  `tasks`, `sprints`, `members`, `collections` **and** `events` (the `projectId` index on
+  events exists for exactly this wipe) — nothing is left orphaned.

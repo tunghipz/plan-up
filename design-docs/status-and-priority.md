@@ -1,9 +1,10 @@
 # Status & priority
 
 **Status:** Implemented
-**Last updated:** 2026-06-03
-**Code:** `app/src/SprintView.tsx` (`StatusDot`, `StatusIcon`, `StatusPicker`,
-`PriorityChip`, `STATUS_META`), `app/src/BoardView.tsx`
+**Last updated:** 2026-07-02 (`STATUS_META`/`STATUS_ORDER` moved to `sprint-logic.ts`)
+**Code:** `app/src/sprint-logic.ts` (`STATUS_META`, `STATUS_ORDER` — pure module shared by
+List/Board/Timeline), `app/src/SprintView.tsx` (`StatusDot`, `StatusIcon`, `StatusPicker`,
+`PriorityChip`), `app/src/BoardView.tsx`
 
 ## Purpose
 Communicate where a task stands and how urgent it is, with calm, glanceable visuals.

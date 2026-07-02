@@ -1,7 +1,7 @@
 # Collections (task ngoài sprint)
 
 **Status:** Implemented
-**Last updated:** 2026-07-01
+**Last updated:** 2026-07-02 (nhả grip không di chuyển / thả lại chỗ cũ = no-op)
 **Code:** `app/src/db.ts` (schema v9 + collection/section/status/item CRUD, export v3),
 `app/src/lib.ts` (buildMonthGrid/assignLanes/computeBarSegments — pure calendar helpers),
 `app/src/CollectionView.tsx` (List card-per-section + status editor + click-assign +
@@ -228,7 +228,9 @@ collection-item (`sprintId = null`) tự động không bị đụng tới. Khô
   có confirm — theo §6.4 design-system).
 - **Kéo-thả item** (pointer-based): reorder trong bảng đặt lại `listOrder`; chuyển sang bảng khác
   đổi `sectionId` + `listOrder` cùng lúc (`moveCollectionItem`). Arrangement — không log như task
-  change-log. Chỉ bật khi sort = off (natural order).
+  change-log. Chỉ bật khi sort = off (natural order). **Nhả grip mà không di chuyển** (hoặc thả
+  ngược lại đúng row đang kéo / đúng khe cũ của nó) = **no-op** — không ghi gì; chỉ một cú thả
+  thật sự mới đổi vị trí (không phải "append vào cuối bảng").
 - **Xoá item:** hover row → chấm-màu đầu dòng hoán thành nút thùng rác → xoá ngay (không confirm;
   item lẻ nhẹ). Khác với xoá bảng/status/collection (có confirm) vì mức độ thấp hơn nhiều.
 - **Calendar:** lane assignment **deterministic** (sort start, dài-trước) để render ổn định.

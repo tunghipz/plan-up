@@ -1,7 +1,7 @@
 # List view
 
 **Status:** Implemented
-**Last updated:** 2026-06-30
+**Last updated:** 2026-07-02 (releasing the grip without moving is a no-op)
 **Code:** `app/src/SprintView.tsx` (`MemberCard`, `UnassignedCard`, `GroupHeader`,
 `TaskColumnHeader`, `SortHeader`, `COL`, `TaskRows` drag state, `TaskRow` grip),
 `app/src/db.ts` (`orderBetween`, `setListOrder`)
@@ -48,6 +48,10 @@ is never touched, so task-numbers and prereq references stay stable.
   between 2 and 3 → 2.5); no global reindex needed.
 - **Within a member card only.** Dropping onto a different card is a no-op (snap back) —
   reassigning still goes through the assignee picker, not drag.
+- **Only a genuine drop repositions.** Releasing the grip **without moving** (or dropping
+  back onto the dragged row / into its own gap — same neighbours before and after) is a
+  **no-op**: nothing is written, so grabbing a grip and letting go never perturbs
+  `listOrder`.
 - **Same level only.** A top-level task reorders among top-level tasks; a child reorders among
   its **siblings under the same parent**; dragging a **group head** moves the whole group (its
   children travel with it). Dragging across levels / into or out of a group is a no-op — use

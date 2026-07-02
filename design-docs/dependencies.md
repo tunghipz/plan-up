@@ -1,7 +1,8 @@
 # Dependencies (prerequisites)
 
 **Status:** Implemented
-**Last updated:** 2026-06-25
+**Last updated:** 2026-07-02 (dependency edits are now transactional — deps write +
+recompute + activity log commit atomically)
 **Code:** `app/src/db.ts` (`addDependency`, `removeDependency`, `setDependencies`,
 `wouldCreateCycle`, `findCyclePath`, `isTaskBlocked`), `app/src/SprintView.tsx`
 (`PrereqInput`, `SelectionBar`), `app/src/lib.ts` (`parsePrereqSeqs`, `formatSeqRanges`,
@@ -51,10 +52,16 @@ chain them, remove the back-edge first (here: clear 6's dependency on 7).
 ## Implementation
 - `wouldCreateCycle(taskId, newDepId)` (`db.ts:711`) — DFS from the new dep; rejects if it
   can reach `taskId`. Self-links rejected.
-- `setDependencies(taskId, ids)` (`db.ts:766`) — replaces the set; filters self-links,
+- `setDependencies(taskId, ids)` (`db.ts`) — replaces the set; filters self-links,
   duplicates, unknown IDs, and cycles with a **cumulative** check (so a batch can't sneak a
   cycle past via ordering). Returns the cleaned set; triggers `recomputeDates`.
 - `addDependency` / `removeDependency` — single-edge helpers, each recomputes.
+- **All three run inside ONE transaction** (`db.transaction('rw', …)`): the cycle check,
+  the `dependsOn` read-modify-write and the recompute can't interleave with another
+  dependency edit (a stale-array overwrite would silently drop an edge) or split on a
+  mid-write crash. `setDependencies`' scope also includes `db.events`, so the deps write,
+  the recompute **and** the activity-log entry commit atomically — there is no
+  deps-changed-without-log window.
 - `isTaskBlocked(task, tasksById)` — `true` if not done AND any prereq isn't done. A prereq
   that is a **parent** is "done" only when all its children are done. Done tasks never report blocked.
 - `PrereqInput` parses input via `parsePrereqSeqs` (list + ranges), resolves sequence→ID

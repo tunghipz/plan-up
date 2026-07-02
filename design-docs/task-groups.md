@@ -1,7 +1,7 @@
 # Task groups (parent task with nested children)
 
 **Status:** Implemented
-**Last updated:** 2026-06-25
+**Last updated:** 2026-07-02 (`setTaskParent` enforces parent + child share the same sprint)
 **Code:** `app/src/db.ts` (`Task.parentId`, `createGroupFromSelection`, `setTaskParent`),
 `app/src/SprintView.tsx` (`MemberCard` task tree render, `TaskGroupRow` parent roll-up,
 `SelectionBar` group/ungroup/delete), collapse persisted in `localStorage`
@@ -112,7 +112,12 @@ child finish), exactly as if it depended on the latest child. Mechanics:
 ## Implementation notes
 1. **`db.ts`** — add `parentId?: string | null` to `Task`. No `.stores()` change.
    - Helper: `setTaskParent(childId, parentId | null)` with the one-level guard
-     (reject if target has a parent, or if child already has children).
+     (reject if target has a parent, or if child already has children) **and a
+     same-sprint guard** (reject if `child.sprintId !== parent.sprintId` — a
+     cross-sprint parent link would break rollover cohesion; `planSprintRollover`
+     assumes a group moves as one unit within its sprint). The guards run inside a
+     transaction so they can't go stale between the reads and the write (two
+     overlapping group edits would otherwise TOCTOU past them).
    - On **delete** of a parent: promote children to top-level (`parentId = null`),
      **do not** cascade-delete. Confirm dialog notes "its grouped tasks become
      ungrouped, not deleted."
@@ -140,7 +145,7 @@ child finish), exactly as if it depended on the latest child. Mechanics:
 - **Empty group**: a parent whose children are all removed/ungrouped silently reverts
   to a normal leaf task (no special "empty group" state).
 - **Cross-member / cross-sprint**: groups never span members or sprints; moving a task
-  out clears `parentId`.
+  out clears `parentId`, and `setTaskParent` refuses a parent in a different sprint.
 - **Board view**: out of scope this round — `parentId` is ignored in BoardView (tasks
   show flat). Flag if grouping is wanted there later.
 - **Dark mode**: all via tokens (derived status dot via `STATUS_META` varName).

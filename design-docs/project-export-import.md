@@ -1,7 +1,7 @@
 # Project export / import (shareable project files)
 
 **Status:** Implemented
-**Last updated:** 2026-06-19 (corrupt project-file branch)
+**Last updated:** 2026-07-02 (full-DB backup is now v5 too — kind marker, not version, routes the import)
 **Code:** `app/src/project-io.ts` (`ProjectBundle`, `isProjectBundle`, `remapBundle`),
 `app/src/db.ts` (`exportProject`, `importProject`), `app/src/App.tsx` (header split-menu,
 `handleImportFile`, import toast, `downloadJson`), `app/src/ProjectSettingsView.tsx`
@@ -40,7 +40,7 @@ full-backup path. Branches:
   *"Imported '<name>' as a new project · N sprints · N tasks · N members"* with an **Undo**
   action (deletes the just-imported project — safe because add-as-new is reversible). The new
   project is selected.
-- **legacy full backup (v1–4) → replace-all.** Unchanged: the Cupertino "Replace all data?"
+- **full backup (v1–5) → replace-all.** Unchanged: the Cupertino "Replace all data?"
   confirm sheet, destructive, then wipes & restores.
 
 ## Data
@@ -62,8 +62,11 @@ A project export is a `ProjectBundle` (`version: 5`, `kind: 'project'`) — **no
 }
 ```
 
-`importAll`'s version allow-list stays `[1, 2, 3, 4]` — a `version: 5` / non-project file is
-**rejected** by the replace-all path, never routed to a wipe.
+`importAll`'s version allow-list is now `[1, 2, 3, 4, 5]` — the full-DB `ExportPayload`
+itself reached **v5** (it carries `people`; see
+[persistence-and-backup.md](./persistence-and-backup.md)). The two file kinds are therefore
+told apart by the **`kind: 'project'` marker, not the version number**: a project bundle is
+committed to the additive path (and rejected there if malformed), never routed to a wipe.
 
 ## Implementation
 

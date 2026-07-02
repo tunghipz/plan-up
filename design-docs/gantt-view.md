@@ -1,16 +1,19 @@
 # Timeline view (calendar swimlanes)
 
 **Status:** Implemented
-**Last updated:** 2026-06-19
+**Last updated:** 2026-07-02 (weekend manual dates snap for display; popover reads the bar's computed plan)
 
 > **Bar click → detail popover (2026-06-08):** event blocks were inert (chỉ `title`
 > tooltip). Nay **bấm bar** mở popover Cupertino (portal + float-shadow) hiển thị
-> title · status · ngày start–end (computed) + **"Open in List →"** (chuyển sprint view
-> về List để sửa). Gantt vẫn là *read-only projection* — popover không sửa ngày tại chỗ
+> title · status · ngày start–end + **"Open in List →"** (chuyển sprint view
+> về List để sửa). Popover đọc **computed plan của chính bar** (`planById` — cùng nguồn
+> bar được vẽ), **không phải** stored dates, nên popover và bar không bao giờ lệch nhau.
+> Gantt vẫn là *read-only projection* — popover không sửa ngày tại chỗ
 > (ngày do scheduler tính), chỉ điều hướng sang List.
 **Code:** `app/src/GanttView.tsx`, `app/src/App.tsx` (view toggle),
 `app/src/lib.ts` (`sprintWorkdays`), reads `computeWorkingPlan` from `app/src/db.ts`,
-reuses `STATUS_META` from `app/src/SprintView.tsx` and `Avatar` from `app/src/members.tsx`
+reuses `STATUS_META` / `derivedGroupStatus` from `app/src/sprint-logic.ts` (pure module
+shared by List/Board/Timeline) and `Avatar` from `app/src/members.tsx`
 
 > **Redesign note (2026-06-04):** the first implementation was a dense half-day **cell
 > grid** (AM/PM columns, hairline borders, zebra). That read as a spreadsheet/ledger and
@@ -114,6 +117,13 @@ thing List and Board can't show. Read-only: a pure projection of the auto-schedu
 - **Read-only by design** — never mutates tasks; a projection of the scheduler, so it can't
   drift from List/Board. Editing (effort/dates/prereqs/status) stays in List.
 - **Weekends excluded** from columns (scheduler contributes 0 there).
+- **Manually-dated tasks on weekends snap for DISPLAY only.** The date picker legally allows
+  weekend dates, but the day axis carries only workdays — a raw index lookup would misfile a
+  mid-sprint weekend start into the `later` chip or silently stretch a weekend due date. So:
+  a weekend **start snaps forward** to the next axis workday, a weekend **due snaps backward**
+  to the previous one, and a span living **entirely inside one weekend clamps to a 1-day bar**
+  on the nearest in-sprint axis day (forward when the sprint has one, else backward).
+  **Nothing is written to the DB** — the stored dates stay untouched.
 - **Nothing is hidden** — every assigned task is either a block, a `later` chip, or a
   `no dates` chip. Off-window/unscheduled counts sit in the member label, expandable.
 - **Parent/group tasks**: a parent is a container with no own dates; it renders as a

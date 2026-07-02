@@ -1,16 +1,17 @@
 # Sprint activity log
 
 **Status:** Implemented
-**Last updated:** 2026-06-19 (per-sprint retention cap — newest 500 events kept, older
-pruned on write; earlier: motion pass — segmented control slides a measured pill like the
+**Last updated:** 2026-07-02 (`sprint_started` now logged inside `createSprint()` — sprint
+row + event in one transaction; earlier: per-sprint retention cap — newest 500 events kept,
+older pruned on write; motion pass — segmented control slides a measured pill like the
 main `ViewToggle` (§6.5 #4), rows do a one-shot entrance stagger when the drawer opens —
 see [Motion](#motion))
 **Code:** `app/src/db.ts` (`ActivityEvent`, `events` table v10, `logEvent`,
 `MAX_EVENTS_PER_SPRINT`, `pruneSprintEvents`,
-`sprintEvents`, `logTaskEdits` + wiring in `addSprintTask`/`updateTask`/
+`sprintEvents`, `logTaskEdits` + wiring in `createSprint`/`addSprintTask`/`updateTask`/
 `logStatusChange`/`setDependencies`/`moveUnfinishedToNextSprint`),
 `app/src/ActivityLog.tsx` (drawer body), `app/src/App.tsx` (🕒 toolbar button +
-`showActivity` **right-side drawer** + `sprint_started` log on sprint create)
+`showActivity` **right-side drawer**)
 **Tests:** `app/src/activity-log.test.ts` (11 cases)
 **Demo:** `demo/sprint-activity-log.html` (Cupertino, light/dark, Timeline + By-member);
 `demo/activity-log-popup-options.html` (3 popup directions explored — drawer chosen)
@@ -224,8 +225,11 @@ interface ActivityEvent {
   animates; `inert={!showActivity}` keeps focus/keyboard out when closed. Dismissed by
   re-clicking the 🕒 button, clicking the backdrop, the header ✕, **or `Escape`** (the
   global key handler closes the drawer right after the palette and before settings — see
-  [search-and-keyboard.md](./search-and-keyboard.md)). `sprint_started` is logged in the
-  New-Sprint dialog's `submit`. UI strings are English (matches the rest of the app; the
+  [search-and-keyboard.md](./search-and-keyboard.md)). `sprint_started` is logged inside
+  the data layer's canonical **`createSprint()`** (`db.ts`) — the sprint row and its event
+  commit in **one transaction**, so a crash between them can't leave a sprint with no birth
+  entry (the New-Sprint dialog's `submit` just calls it; seeding logs no event by design).
+  UI strings are English (matches the rest of the app; the
   Vietnamese demo was flavor only).
 - **`ActivityLog.tsx`** renders the **drawer body** (not a positioned page): a 54px header
   (title + range·count + ✕ `onClose`) over a `flex-1 overflow-auto bg-canvas` scroll area

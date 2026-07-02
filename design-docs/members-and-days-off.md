@@ -1,7 +1,8 @@
 # Members & days off
 
 **Status:** Implemented
-**Last updated:** 2026-06-04
+**Last updated:** 2026-07-02 (deleting a member immediately recomputes the unassigned
+tasks' dates)
 **Code:** `app/src/members.tsx` (`MemberDaysOffButton`, `DateField`, `daysOffInRange`,
 `effectiveDaysOff`), `app/src/SprintView.tsx` (passes per-sprint `range`),
 `app/src/db.ts` (`setMemberDaysOff`, `deleteMember`, `colorForName`)
@@ -49,8 +50,11 @@ half-day = 0.5 (see [scheduling.md](./scheduling.md)).
 - `setMemberDaysOff(memberId, daysOff)` (`db.ts:667`) — dedupes by date (last wins), drops
   malformed dates, sorts, then **recomputes every task assigned to the member** (and their
   dependents).
-- `deleteMember(memberId)` (`db.ts:807`) — transactional; reassigns the member's tasks to
-  `assigneeId = null`.
+- `deleteMember(memberId)` (`db.ts`) — transactional; reassigns the member's tasks to
+  `assigneeId = null`, then **immediately recomputes the dates of the tasks it unassigned**
+  (and their dependents). Tasks scheduled around the member's days-off would otherwise keep
+  those pushed-out dates once unassigned — previously they stayed stale until the next
+  app-load heal pass.
 - `colorForName(name)` (`db.ts:199`) — deterministic 8-color palette by name hash.
 - Avatar = colored circle with the uppercased first letter.
 

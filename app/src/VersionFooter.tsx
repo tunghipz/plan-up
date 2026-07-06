@@ -60,14 +60,14 @@ export function VersionFooter() {
 
   if (!needRefresh) {
     return (
-      <div className="mt-auto shrink-0 px-[18px] py-2.5 border-t border-border-hair text-[11px] text-ink-faint tabular-nums select-none">
+      <div className="flex-1 min-w-0 px-[18px] py-2.5 text-[11px] text-ink-faint tabular-nums select-none truncate">
         plan-up · v{CURRENT}
       </div>
     )
   }
 
   return (
-    <div className="mt-auto shrink-0 px-[18px] py-2 border-t border-border-hair flex">
+    <div className="flex-1 min-w-0 px-[18px] py-2 flex">
       <button
         onClick={() => {
           setUpdating(true)

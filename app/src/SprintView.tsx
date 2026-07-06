@@ -453,6 +453,23 @@ export function SprintView({
     <div className="space-y-4">
       {isEmpty && <EmptyState onAddMember={() => setShowAddMember(true)} />}
 
+      {/* One column header for the whole list — pinned to the top of the scroll
+          area (sticks because nothing between here and the scroller is an overflow
+          box; the per-card overflow-x-auto that trapped the old per-group headers
+          is now BELOW this element). Member layout (no Assignee column); the
+          Unassigned card keeps its own header since it adds that column. Matches
+          the member cards' overflow-x-auto/min-w so columns line up on wide screens.
+          See design-docs/list-view.md v4. */}
+      {groups.length > 0 && (
+        <div className="sticky top-0 z-20 -mx-6 px-6 bg-canvas">
+          <div className="overflow-x-auto">
+            <div className="min-w-[820px]">
+              <TaskColumnHeader sort={sort} setSort={setSort} showAssignee={false} />
+            </div>
+          </div>
+        </div>
+      )}
+
       {groups.map(({ member, tasks: t }) => (
         <MemberCard
           key={member.id}
@@ -469,7 +486,6 @@ export function SprintView({
           collapsed={collapsed.has(member.id)}
           onToggleCollapse={() => toggleCollapse(member.id)}
           sort={sort}
-          setSort={setSort}
           selectedIds={selectedIds}
           onToggleSelect={toggleSelect}
           drag={laneDragFor(member)}
@@ -718,7 +734,6 @@ function MemberCard({
   collapsed,
   onToggleCollapse,
   sort,
-  setSort,
   selectedIds,
   onToggleSelect,
   drag,
@@ -735,10 +750,10 @@ function MemberCard({
   planById: Map<string, WorkingPlan>
   collapsed: boolean
   onToggleCollapse: () => void
+  // sort drives `canReorder` (drag is only allowed in the manual/seq-asc order).
+  // setSort is no longer needed here — the column header is a single sticky bar
+  // hoisted above the list (see SprintView top), not per member card.
   sort: Sort
-  setSort: React.Dispatch<
-    React.SetStateAction<Sort>
-  >
   selectedIds: Set<string>
   onToggleSelect: (id: string) => void
   /** Lane drag-to-reorder wiring (absent → card is not draggable). */
@@ -816,9 +831,8 @@ function MemberCard({
         // person (shown in the group header avatar).
         <div className="overflow-x-auto">
           <div className="min-w-[820px]">
-            {tasks.length > 0 && (
-              <TaskColumnHeader sort={sort} setSort={setSort} showAssignee={false} />
-            )}
+            {/* Column header hoisted to a single sticky header above the whole
+                list (see SprintView top). Member cards no longer carry their own. */}
             <div className="divide-y divide-border">
               <TaskRows
                 tasks={tasks}
@@ -1439,8 +1453,12 @@ function TaskGroupRow({
   const effortSum = childrenTasks.reduce((s, c) => s + (c.estimate ?? 0), 0)
   // Span = earliest child start … latest child end, shown with the same
   // date+time format/size as a normal task row (see design-docs/task-groups.md).
-  let startLabel: string | null = null
-  let endLabel: string | null = null
+  // Date and time kept separate so the time tail can hide until row hover, exactly
+  // like a leaf DatePickCell (see design-docs/list-view.md v4).
+  let startDatePart: string | null = null
+  let startTimePart: string | null = null
+  let endDatePart: string | null = null
+  let endTimePart: string | null = null
   let minKey: string | null = null
   let maxKey: string | null = null
   for (const c of childrenTasks) {
@@ -1449,18 +1467,16 @@ function TaskGroupRow({
       const k = `${plan.startDate}T${plan.startTime ?? ''}`
       if (!minKey || k < minKey) {
         minKey = k
-        startLabel = plan.startTime
-          ? `${formatRelativeDate(plan.startDate)}, ${plan.startTime}`
-          : formatRelativeDate(plan.startDate)
+        startDatePart = formatRelativeDate(plan.startDate)
+        startTimePart = plan.startTime ?? null
       }
     }
     if (plan.dueDate) {
       const k = `${plan.dueDate}T${plan.endTime ?? ''}`
       if (!maxKey || k > maxKey) {
         maxKey = k
-        endLabel = plan.endTime
-          ? `${formatRelativeDate(plan.dueDate)}, ${plan.endTime}`
-          : formatRelativeDate(plan.dueDate)
+        endDatePart = formatRelativeDate(plan.dueDate)
+        endTimePart = plan.endTime ?? null
       }
     }
   }
@@ -1468,7 +1484,7 @@ function TaskGroupRow({
     <div
       {...rowProps}
       data-task-id={task.id}
-      className={`task-row group/row relative flex items-center gap-3 px-4 py-2 text-sm hover:bg-surface-hover transition bg-accent/[0.025] ${
+      className={`task-row group/row relative flex items-center gap-3 px-4 py-1.5 text-sm hover:bg-surface-hover transition bg-accent/[0.025] ${
         dragging ? 'opacity-40' : ''
       }`}
     >
@@ -1510,17 +1526,31 @@ function TaskGroupRow({
       </div>
       <div className={COL.effort}>
         <span className="text-sm text-ink-muted tabular-nums">
-          {hasEffort ? effortSum : '—'}
+          {hasEffort ? effortSum : <span className="text-ink-faint opacity-40">—</span>}
         </span>
       </div>
       <div className={COL.start}>
-        <span className="inline-flex items-center justify-end w-full h-8 px-2 text-sm text-ink-muted whitespace-nowrap">
-          {startLabel ?? '—'}
+        <span className="inline-flex items-center justify-end w-full h-7 px-2 text-sm text-ink-muted whitespace-nowrap">
+          {startDatePart ? (
+            <>
+              {startDatePart}
+              {startTimePart && <span className="hidden group-hover/row:inline">, {startTimePart}</span>}
+            </>
+          ) : (
+            <span className="text-ink-faint opacity-40">—</span>
+          )}
         </span>
       </div>
       <div className={COL.due}>
-        <span className="inline-flex items-center justify-end w-full h-8 px-2 text-sm text-ink-muted whitespace-nowrap">
-          {endLabel ?? '—'}
+        <span className="inline-flex items-center justify-end w-full h-7 px-2 text-sm text-ink-muted whitespace-nowrap">
+          {endDatePart ? (
+            <>
+              {endDatePart}
+              {endTimePart && <span className="hidden group-hover/row:inline">, {endTimePart}</span>}
+            </>
+          ) : (
+            <span className="text-ink-faint opacity-40">—</span>
+          )}
         </span>
       </div>
       <div className={COL.status}>
@@ -1837,7 +1867,7 @@ const TaskRow = memo(function TaskRow({
     <div
       {...rowProps}
       data-task-id={task.id}
-      className={`task-row group/row relative flex items-center gap-3 px-4 py-2 text-sm transition ${
+      className={`task-row group/row relative flex items-center gap-3 px-4 py-1.5 text-sm transition ${
         selected ? 'bg-accent-soft' : 'hover:bg-surface-hover'
       } ${dragging ? 'opacity-40' : ''}`}
       title={blocked ? 'Blocked — waiting on a prerequisite task' : undefined}
@@ -1935,6 +1965,7 @@ const TaskRow = memo(function TaskRow({
           <DatePickCell
             value={liveStart}
             time={startTime}
+            timeOnHover
             locked={task.dependsOn.length > 0}
             emptyHint={task.dependsOn.length > 0 ? undefined : 'Date'}
             emptyHintHover
@@ -1954,6 +1985,7 @@ const TaskRow = memo(function TaskRow({
             <DatePickCell
               value={liveStart}
               time={startTime}
+              timeOnHover
               locked={task.dependsOn.length > 0}
               emptyHint={task.dependsOn.length > 0 ? undefined : 'Start'}
               emptyHintHover
@@ -1971,6 +2003,7 @@ const TaskRow = memo(function TaskRow({
             <DatePickCell
               value={liveDue}
               time={endTime}
+              timeOnHover
               locked={
                 task.dependsOn.length > 0 ||
                 (task.estimate !== null && task.estimate > 0)
@@ -2029,7 +2062,12 @@ function TaskColumnHeader({
     })
   }
   return (
-    <div className="flex items-center gap-3 px-4 py-1.5 border-b border-border-hair bg-canvas-sunk/40">
+    // Lightened: no grey fill (was bg-canvas-sunk/40), tighter py — the labels read
+    // as a quiet caption under the group name, just a hairline separating them from
+    // the rows. (Sticky was attempted but the per-card overflow-x-auto + Card
+    // overflow-hidden trap the sticky context, so it can't pin to the viewport
+    // without a scroll-architecture refactor — deferred. See design-docs/list-view.md v4.)
+    <div className="flex items-center gap-3 px-4 py-1 border-b border-border-hair">
       <div className={COL.lead} />
       <div className={COL.dot} />
       <SortHeader
@@ -2380,7 +2418,7 @@ export function EffortCell({
       placeholder="—"
       title="Effort in days"
       aria-label="Effort in days"
-      className="editable w-full text-sm text-center tabular-nums bg-transparent placeholder:text-ink-faint"
+      className="editable w-full text-sm text-center tabular-nums bg-transparent placeholder:text-ink-faint placeholder:opacity-40"
     />
   )
 }
@@ -2513,7 +2551,10 @@ function PrereqInput({
     <>
       <input
         ref={inputRef}
-        value={draft}
+        // Show a `#`-prefixed ref at rest (matches the `#N` language in the cycle
+        // notices; disambiguates an ID from a count — see list-view.md v4). While
+        // editing, drop the prefix so the raw numbers are what you type/parse.
+        value={focused ? draft : draft ? `#${draft}` : ''}
         onChange={(e) => setDraft(e.target.value)}
         onFocus={() => {
           setFocused(true)
@@ -2533,7 +2574,7 @@ function PrereqInput({
         placeholder="—"
         title="Prereq task numbers — list or ranges, e.g. 2-5, 8"
         aria-label="Prerequisite task numbers"
-        className={`editable w-full text-sm text-right tabular-nums bg-transparent placeholder:text-ink-faint ${
+        className={`editable w-full text-sm text-right tabular-nums bg-transparent placeholder:text-ink-faint placeholder:opacity-40 ${
           notice ? 'text-priority-high' : ''
         }`}
       />

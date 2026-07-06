@@ -50,8 +50,8 @@ Non-obvious behaviors, defaults, persistence keys.
 | [data-model.md](./data-model.md) | IndexedDB tables, fields, Dexie schema versioning |
 | [persistence-and-backup.md](./persistence-and-backup.md) | Local-first storage, export/import JSON, seeding |
 | [project-export-import.md](./project-export-import.md) | Per-project export to a portable file + non-destructive "add as new project" import (auto-detected alongside full backup) |
-| [app-shell-and-navigation.md](./app-shell-and-navigation.md) | Layout, icon rail, resizable sprint panel, capacity stats |
-| [home-dashboard.md](./home-dashboard.md) | Read-first Home screen: all-projects grid (active-sprint progress/overdue) + cross-project People roster (Dexie v13 `people` table) |
+| [app-shell-and-navigation.md](./app-shell-and-navigation.md) | Layout, project switcher dropdown, resizable sprint panel, capacity stats |
+| [home-dashboard.md](./home-dashboard.md) | Read-first Home screen *(temporarily hidden — `HOME_ENABLED=false`)*: all-projects grid + cross-project People roster (Dexie v13 `people` table) |
 | [projects.md](./projects.md) | Multi-project create/switch/delete |
 | [project-member-settings.md](./project-member-settings.md) | Gear → settings page: edit project info (name/description/color) + members + delete |
 | [project-icon-emoji.md](./project-icon-emoji.md) | Optional emoji override for a project's icon-rail tile (curated grid + native picker; falls back to first letter) |

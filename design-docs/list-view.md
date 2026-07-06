@@ -1,10 +1,39 @@
 # List view
 
 **Status:** Implemented
-**Last updated:** 2026-07-06 (Start/End sort by the displayed computed/rollup date, not the raw field)
+**Last updated:** 2026-07-06 (calm refinements: time-on-hover dates, quiet empty cells, sticky-light group headers, compact rows, `#`-prefixed prereq)
 **Code:** `app/src/SprintView.tsx` (`MemberCard`, `UnassignedCard`, `GroupHeader`,
 `TaskColumnHeader`, `SortHeader`, `COL`, `TaskRows` drag state, `TaskRow` grip),
-`app/src/db.ts` (`orderBetween`, `setListOrder`)
+`app/src/DatePicker.tsx` (`DatePickCell` time-on-hover), `app/src/db.ts` (`orderBetween`, `setListOrder`)
+
+> **v4 · calm refinements (2026-07-06)** — a signal-to-noise pass on the row grid
+> (demo `demo/list-view-refinements.html`, options approved by user):
+> 1. **Date time-of-day shows on row hover only.** The working-hours suffix (`, 08:00` /
+>    `, 17:00`) was repeating on every row for near-zero info. The date shows at rest; the
+>    `, HH:mm` tail fades in on `group-hover/row`. `DatePickCell` gained a `timeOnHover` prop
+>    (List passes it; Collections/other callers keep time inline).
+> 2. **Quiet empty cells.** A resting empty Effort / Prereq / date renders its `—` at ~25%
+>    opacity (was full `ink-faint`); editable-empty cells reveal their `＋` add-affordance on
+>    row hover. The grid of dashes no longer competes with real data.
+> 3. **One sticky column header** for the whole list (was: a repeated header inside every
+>    group card). It's rendered once at the top of `space-y-4` and **pins to the top of the
+>    scroll area** as you scroll — it sticks because nothing between it and the scroll
+>    container (`scrollRef` in App) is an overflow box, unlike the old per-card headers which
+>    were trapped inside each card's `overflow-x-auto`. It uses the **member column layout**
+>    (no Assignee column) and mirrors the member cards' `overflow-x-auto` / `min-w-[820px]` so
+>    columns line up. The header itself is also lightened (no grey fill; sits on the canvas).
+>    **Exception:** the **Unassigned** card keeps its *own* inline header, because it adds an
+>    Assignee column the member layout doesn't have — one header can't align with both column
+>    sets. The global header only renders when there's ≥1 member group (`groups.length > 0`).
+>    *Caveat:* on a viewport narrow enough to trigger each card's horizontal scroll (<~820px
+>    of column width, rare on this desktop-first tool) the pinned header won't track a card's
+>    independent horizontal scroll.
+> 4. **Compact rows** (~40px, was ~48px) — more tasks per screen (speed DNA).
+> 5. **Prereq shows `#7`** (was bare `7`) — matches the `#N` language used in the cycle/notice
+>    popovers and disambiguates an ID reference from a count. Prefix is display-only (the input
+>    edits raw numbers).
+> 6. The **sprint-note** empty state is a slim left-aligned ghost (see
+>    [app-shell-and-navigation.md] / `SprintNoteBanner`), not a full-width dashed bar.
 
 ## Purpose
 The primary editing surface: every task in the sprint, grouped by assignee in
@@ -12,8 +41,10 @@ inset-grouped cards, fully editable inline.
 
 ## User-facing behavior
 - One **card per member** (plus an **Unassigned** card, and a collapsed "members with no
-  tasks" section). Each card = a `GroupHeader` + its own labelled column header + task rows
-  + an "Add task" row.
+  tasks" section). Each card = a `GroupHeader` + task rows + an "Add task" row. The
+  **column header is a single sticky bar** at the top of the list (not repeated per card) —
+  see v4 note above. (The Unassigned card is the one exception that keeps an inline header,
+  since it carries an extra Assignee column.)
 - **Collapse** a member card by clicking its header (persisted per sprint).
 - **Sort** by any column via its header (`ID, Task, Effort, Start, End, Status, Prereq`);
   clicking a column **cycles three states: asc → desc → off**. "Off" is a NEUTRAL state
@@ -92,10 +123,11 @@ Status 112 · Prereq 56 · actions 16`. Header & rows share the same `COL` const
 they stay aligned.
 
 ## Horizontal scroll
-Each group wraps its header + rows in `overflow-x-auto` with a `min-w` floor (**member
-820px**, **unassigned 896px**) ≥ true content width. On narrow screens the table scrolls
-instead of crushing the Task column, and the grey column-header background still spans the
-full content width (no fall-short on scroll).
+Each group wraps its rows in `overflow-x-auto` with a `min-w` floor (**member 820px**,
+**unassigned 896px**) ≥ true content width; the **single sticky header** mirrors the member
+`overflow-x-auto` / `min-w-[820px]` so it aligns. On narrow screens the table scrolls instead
+of crushing the Task column. *(Caveat: the pinned header doesn't track a card's independent
+horizontal scroll on very narrow viewports — see v4 note.)*
 
 ## Rules & edge cases
 - Changing a `COL` width means re-checking the `min-w` floors (must stay ≥ summed content).

@@ -1,7 +1,7 @@
 # Sprint rollover
 
 **Status:** Implemented
-**Last updated:** 2026-06-30
+**Last updated:** 2026-07-06
 **Code:** `app/src/App.tsx` (`RolloverPopover`, Roll over button), `app/src/db.ts`
 (`planSprintRollover`, `moveUnfinishedToNextSprint`, `dedupeSprints`)
 
@@ -20,6 +20,16 @@ without manual re-entry.
 - **Move** → all not-done tasks move to the next sprint (chronologically the smallest
   `startDate` greater than source's); the popover closes and selection follows to the
   target sprint. It's move-all (no per-task selection) — matches `moveUnfinishedToNextSprint`.
+- **A moved task keeps ALL its information — including its start/due dates — unchanged.**
+  Only `sprintId` and `sequence` change on the move itself. Effort / prereq / off-day
+  recomputation still runs afterwards exactly as before (so an effort-driven end still
+  follows its start, a prereq-locked start still tracks its prerequisite), but the stored
+  `startDate` you set is **never rewritten to the target sprint's start**. *(Decision
+  2026-07-06: a rolled-over task must preserve its dates — the user's start time is theirs.
+  A consequence is that a task whose start predates the new sprint keeps that earlier start
+  and so begins before the new sprint's window; that is accepted in exchange for never
+  silently discarding a start the user chose. The earlier "pull stale starts forward to the
+  target start" rule is removed; it lives in git history.)*
 - Popover follows the date-picker portal pattern (§5.5): `createPortal` + fixed position
   pinned to the button rect (re-pins on scroll/resize, flips up if it would overflow the
   viewport), outside-click / **Esc** to dismiss. Lives in a portal because the main column
@@ -29,7 +39,9 @@ without manual re-entry.
   instead of confirm-by-text. The old sheet lives in git history.
 
 ## Data
-Mutates moved `Task` rows: `sprintId`, `sequence`, sometimes `startDate`.
+Mutates moved `Task` rows: `sprintId` and `sequence` only. `startDate`/`dueDate` are left
+as-is on the move (recompute may still re-derive them for effort/prereq tasks, same as any
+other edit — but the move never overwrites a manually-set date).
 
 ## Task groups (parent + children)
 A group must never be **split across sprints** — every view nests children under their
@@ -65,10 +77,12 @@ disagree.
    Must match App.tsx `nextSprint`, which is already per-project.)*
 2. `planSprintRollover` the source sprint's tasks. Clear `parentId` on every `ungroupIds`
    task (done children that stay).
-3. For each `moveIds` task: set `sprintId = target`, assign **`sequence = nextSequence(target)`**
-   (awaited in-loop so each sees the prior insert), and bump `startDate` up to the target
-   sprint's start if it was earlier.
-4. `recomputeDates()` each moved task so prereq chains + off-days resettle in the new home.
+3. For each `moveIds` task: set `sprintId = target` and assign **`sequence = nextSequence(target)`**
+   (awaited in-loop so each sees the prior insert). **`startDate`/`dueDate` are left untouched** —
+   the task keeps the dates the user set.
+4. `recomputeDates()` each moved task so prereq chains + off-days resettle in the new home
+   (this re-derives dates for effort/prereq tasks the same way any edit does; it does not
+   clobber a manual start).
 - `dependsOn` links survive (they reference task IDs, not sequence). `movedCount` returned =
   leaf tasks moved (excludes container parents).
 

@@ -64,6 +64,7 @@ import { BoardView } from './BoardView'
 import { GanttView } from './GanttView'
 import { ActivityLog } from './ActivityLog'
 import { VersionFooter } from './VersionFooter'
+import { usePinnedPopover } from './usePinnedPopover'
 import { ProjectSettingsView } from './ProjectSettingsView'
 import { HomeDashboard } from './HomeDashboard'
 import { Avatar } from './members'
@@ -197,15 +198,23 @@ function App() {
   // Top-level screen: the Home overview vs a single project. Persisted so a
   // reload lands back where you were (Home is never force-shown over a project).
   // See design-docs/home-dashboard.md.
+  //
+  // HOME_ENABLED gates the whole Home / All-projects overview off (temporarily
+  // hidden 2026-07-06, user request). While false: the "Home / All projects"
+  // switcher item is dropped, the persisted screen is ignored (always lands on
+  // 'project'), and HomeDashboard is never rendered. Flip back to true to restore
+  // the overview — nothing else was removed. See design-docs/home-dashboard.md.
+  const HOME_ENABLED = false
   const SCREEN_KEY = 'plan-up:screen'
   const [screen, setScreenState] = useState<'home' | 'project'>(
-    () => (safeStorage.get(SCREEN_KEY) === 'home' ? 'home' : 'project')
+    () => (HOME_ENABLED && safeStorage.get(SCREEN_KEY) === 'home' ? 'home' : 'project')
   )
   const setScreen = (s: 'home' | 'project') => {
     setScreenState(s)
     safeStorage.set(SCREEN_KEY, s)
   }
   const goHome = () => {
+    if (!HOME_ENABLED) return
     setSettingsOpen(false)
     setShowActivity(false)
     setScreen('home')
@@ -230,6 +239,18 @@ function App() {
   }
   const [showNewSprint, setShowNewSprint] = useState(false)
   const [showNewProject, setShowNewProject] = useState(false)
+  // Project switcher (header dropdown) — replaces the old icon rail. The popover
+  // is `absolute` inside the switcher's `relative` header; usePinnedPopover only
+  // wires outside-press / Escape (no `place` — it scrolls with the pane).
+  const [switcherOpen, setSwitcherOpen] = useState(false)
+  const switcherRef = useRef<HTMLButtonElement>(null)
+  const switcherPopRef = useRef<HTMLDivElement>(null)
+  usePinnedPopover({
+    open: switcherOpen,
+    onClose: () => setSwitcherOpen(false),
+    anchorRef: switcherRef,
+    popRef: switcherPopRef,
+  })
   const [showNewCollection, setShowNewCollection] = useState(false)
   const confirm = useConfirm()
   // Collapsible sidebar sections — persisted per section (design-system §6.2).
@@ -304,11 +325,10 @@ function App() {
   // the picked task (we never use scrollIntoView; it breaks this container).
   const scrollRef = useRef<HTMLDivElement>(null)
 
-  // Resizable sprint panel. Width persisted across sessions; the icon rail
-  // (58px) sits to its left, so a drag maps to clientX - 58, clamped.
+  // Resizable sprint panel. Width persisted across sessions. The sidebar is the
+  // leftmost pane (the old icon rail is gone), so a drag maps to clientX, clamped.
   const SIDEBAR_MIN = 200
   const SIDEBAR_MAX = 460
-  const RAIL_W = 58
   const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
     const s = Number(safeStorage.get('plan-up:sidebarWidth'))
     return s >= SIDEBAR_MIN && s <= SIDEBAR_MAX ? s : 248
@@ -324,7 +344,7 @@ function App() {
     let raf = 0
     let nextW = 0
     const onMove = (ev: MouseEvent) => {
-      nextW = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, ev.clientX - RAIL_W))
+      nextW = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, ev.clientX))
       if (raf) return
       raf = requestAnimationFrame(() => {
         raf = 0
@@ -774,17 +794,18 @@ function App() {
       <div key={s.id} className="relative group/row">
         <button
           onClick={() => selectSprint(s.id)}
-          className={`w-full text-left flex items-center gap-2.5 px-2.5 py-2 mb-0.5 text-[14px] rounded-lg transition ${
+          className={`w-full text-left flex flex-col gap-0.5 px-2.5 py-1.5 mb-0.5 rounded-lg transition ${
             isActive ? 'bg-accent text-white' : 'text-ink hover:bg-surface-hover'
           }`}
         >
-          <SprintStateDot state={state} done={allDone} onAccent={isActive} />
-          <span className="flex-1 min-w-0">
-            {/* Note glyph hugs the title text (not the row edge) so it never
-               collides with the hover archive action. See sprint-archive.md. */}
-            <span className="flex items-center gap-1.5 min-w-0">
+          {/* Top tier: state dot + name + task count (count fades on hover so it
+             never collides with the absolute archive action that fades in). */}
+          <span className="flex items-center gap-2 min-w-0">
+            <SprintStateDot state={state} done={allDone} onAccent={isActive} />
+            {/* Note glyph hugs the title text (not the row edge). See sprint-archive.md. */}
+            <span className="flex items-center gap-1.5 min-w-0 flex-1">
               <span
-                className={`min-w-0 truncate font-medium ${
+                className={`min-w-0 truncate text-[14px] font-medium ${
                   archived && !isActive ? 'text-ink-muted' : ''
                 }`}
               >
@@ -799,18 +820,25 @@ function App() {
                 />
               )}
             </span>
-            <span
-              className={`block truncate text-[11.5px] leading-tight mt-0.5 tab-data ${
-                isActive ? 'text-white/80' : 'text-ink-faint'
-              }`}
-            >
-              {formatSprintRange(s.startDate, s.endDate)}
-              {!archived && c && c.total > 0 &&
-                ` · ${c.total} task${c.total === 1 ? '' : 's'}`}
-              {aDate && ` · archived ${MON[aDate.getMonth()]} ${aDate.getDate()}`}
-            </span>
+            {!archived && c && c.total > 0 && (
+              <span
+                className={`shrink-0 text-[11.5px] tab-data transition-opacity group-hover/row:opacity-0 ${
+                  isActive ? 'text-white/80' : 'text-ink-faint'
+                }`}
+              >
+                {c.total}
+              </span>
+            )}
           </span>
-          <span className="w-5 shrink-0" aria-hidden />
+          {/* Second tier: date range, indented under the name (dot width + gap). */}
+          <span
+            className={`block truncate text-[11.5px] leading-tight pl-[18px] tab-data ${
+              isActive ? 'text-white/80' : 'text-ink-faint'
+            }`}
+          >
+            {formatSprintRange(s.startDate, s.endDate)}
+            {aDate && ` · archived ${MON[aDate.getMonth()]} ${aDate.getDate()}`}
+          </span>
         </button>
         <button
           type="button"
@@ -889,72 +917,14 @@ function App() {
 
   return (
     <div className="h-screen flex bg-canvas text-ink overflow-hidden">
-      {/* Icon rail: macOS vibrancy. Squircle app-icon tiles, accent ring on active. */}
-      <aside className="vibrancy w-[58px] shrink-0 border-r border-border-hair flex flex-col items-center py-3.5 gap-2.5">
-        {/* Home — portfolio overview. A surface tile (not a colored project),
-            ringed in accent when active. See design-docs/home-dashboard.md. */}
-        <button
-          onClick={goHome}
-          title="Home"
-          aria-label="Home"
-          aria-current={screen === 'home' ? 'true' : undefined}
-          className={`tile-press w-[36px] h-[36px] rounded-[10px] bg-surface flex items-center justify-center transition ${
-            screen === 'home'
-              ? 'text-accent shadow-[0_0_0_2.5px_var(--color-accent),0_2px_5px_rgba(0,0,0,0.14)]'
-              : 'text-ink-muted shadow-[0_1px_3px_rgba(0,0,0,0.12),0_0_0_0.5px_rgba(0,0,0,0.04)] hover:text-ink'
-          }`}
-        >
-          <LayoutGrid size={18} strokeWidth={2} />
-        </button>
-        <div className="w-[26px] h-px bg-[var(--color-border)] shrink-0" />
-        {projects?.map((p) => {
-          const isActive = screen === 'project' && p.id === currentProjectId
-          // Emoji icon wins; otherwise the name's first letter (see
-          // project-icon-emoji.md). `||` so a stored empty string also falls back.
-          const isEmoji = !!p.icon
-          const label = p.icon || firstGrapheme(p.name).toUpperCase() || '·'
-          return (
-            <button
-              key={p.id}
-              onClick={() => openProject(p.id)}
-              title={p.name}
-              aria-label={p.name}
-              aria-current={isActive ? 'true' : undefined}
-              className={`tile-press w-[36px] h-[36px] rounded-[10px] flex items-center justify-center text-white font-semibold transition ${
-                isEmoji ? 'text-[19px]' : 'text-[15px]'
-              } ${
-                isActive
-                  ? 'shadow-[0_0_0_2.5px_var(--color-accent),0_2px_5px_rgba(0,0,0,0.14)]'
-                  : 'opacity-80 hover:opacity-100'
-              }`}
-              style={{
-                background: p.color ?? colorForName(p.name),
-                letterSpacing: isEmoji ? '0' : '-0.01em',
-              }}
-            >
-              {label}
-            </button>
-          )
-        })}
-        <button
-          onClick={() => setShowNewProject(true)}
-          title="New project"
-          className="tile-press w-[36px] h-[36px] rounded-[10px] text-ink-faint hover:text-accent hover:bg-surface-hover flex items-center justify-center transition"
-        >
-          <Plus size={18} strokeWidth={2} />
-        </button>
-        <div className="flex-1" />
-        <button
-          onClick={() => setDark(!dark)}
-          title={dark ? 'Switch to light' : 'Switch to dark'}
-          className="tile-press w-[36px] h-[36px] rounded-[10px] text-ink-faint hover:text-ink hover:bg-surface-hover flex items-center justify-center transition"
-        >
-          {dark ? <Sun size={16} /> : <Moon size={16} />}
-        </button>
-      </aside>
-
-      {screen === 'home' ? (
-        <HomeDashboard projects={projects ?? []} onOpenProject={openProject} />
+      {HOME_ENABLED && screen === 'home' ? (
+        <HomeDashboard
+          projects={projects ?? []}
+          onOpenProject={openProject}
+          onNewProject={() => setShowNewProject(true)}
+          dark={dark}
+          onToggleDark={() => setDark(!dark)}
+        />
       ) : (
       <>
       {/* Secondary panel: macOS vibrancy sidebar, accent-filled active row */}
@@ -964,11 +934,60 @@ function App() {
       >
         {currentProject ? (
           <>
-            <div className="px-[18px] pt-[18px] pb-3">
-              <div className="flex items-center gap-2">
-                <div className="text-[21px] font-bold text-ink truncate tracking-[-0.022em] flex-1 min-w-0">
-                  {currentProject.name}
-                </div>
+            <div className="px-2.5 pt-2.5 pb-2 relative">
+              <div className="flex items-center gap-1.5">
+                {/* Project switcher — the current project only; the popover
+                    switches to any other. Replaces the old always-on icon rail.
+                    See app-shell-and-navigation.md. */}
+                <button
+                  ref={switcherRef}
+                  onClick={() => setSwitcherOpen((v) => !v)}
+                  aria-haspopup="menu"
+                  aria-expanded={switcherOpen}
+                  title="Switch project"
+                  className="flex-1 min-w-0 flex items-center gap-2.5 px-2 py-1.5 rounded-[10px] text-left hover:bg-surface-hover transition"
+                >
+                  {(() => {
+                    const isEmoji = !!currentProject.icon
+                    const label =
+                      currentProject.icon ||
+                      firstGrapheme(currentProject.name).toUpperCase() ||
+                      '·'
+                    return (
+                      <span
+                        className={`shrink-0 w-[30px] h-[30px] rounded-[8px] flex items-center justify-center text-white font-semibold ${
+                          isEmoji ? 'text-[16px]' : 'text-[14px]'
+                        }`}
+                        style={{
+                          background:
+                            currentProject.color ?? colorForName(currentProject.name),
+                          letterSpacing: isEmoji ? '0' : '-0.01em',
+                        }}
+                        aria-hidden
+                      >
+                        {label}
+                      </span>
+                    )
+                  })()}
+                  <span className="flex-1 min-w-0">
+                    <span className="block truncate text-[15px] font-semibold tracking-[-0.014em] text-ink">
+                      {currentProject.name}
+                    </span>
+                    <span className="block text-[11.5px] text-ink-faint">
+                      <span className="tab-data">{sprints?.length ?? 0}</span> sprint
+                      {(sprints?.length ?? 0) === 1 ? '' : 's'} ·{' '}
+                      <span className="tab-data">{totalProjectTasks}</span>{' '}
+                      task{totalProjectTasks === 1 ? '' : 's'}
+                    </span>
+                  </span>
+                  <ChevronDown
+                    size={16}
+                    className={`shrink-0 text-ink-faint transition-transform ${
+                      switcherOpen ? 'rotate-180' : ''
+                    }`}
+                    aria-hidden
+                  />
+                </button>
                 <button
                   onClick={() => setSettingsOpen((v) => !v)}
                   title="Project settings"
@@ -983,12 +1002,95 @@ function App() {
                   <Settings size={16} />
                 </button>
               </div>
-              <div className="text-[12.5px] text-ink-faint mt-1">
-                <span className="tab-data">{sprints?.length ?? 0}</span> sprint
-                {(sprints?.length ?? 0) === 1 ? '' : 's'} ·{' '}
-                <span className="tab-data">{totalProjectTasks}</span>{' '}
-                task{totalProjectTasks === 1 ? '' : 's'}
-              </div>
+              {switcherOpen && (
+                <div
+                  ref={switcherPopRef}
+                  role="menu"
+                  className="absolute left-2.5 right-2.5 top-[calc(100%-2px)] z-40 bg-surface rounded-[13px] p-1.5 shadow-[0_1px_3px_rgba(0,0,0,0.12),0_12px_34px_rgba(0,0,0,0.18),0_0_0_0.5px_rgba(0,0,0,0.05)]"
+                >
+                  <div className="px-2.5 pt-1 pb-1 text-[11px] font-semibold text-ink-faint tracking-[0.01em]">
+                    Projects
+                  </div>
+                  <div className="max-h-[min(52vh,380px)] overflow-y-auto">
+                    {projects?.map((p) => {
+                      const isActive = p.id === currentProjectId
+                      const isEmoji = !!p.icon
+                      const label =
+                        p.icon || firstGrapheme(p.name).toUpperCase() || '·'
+                      return (
+                        <button
+                          key={p.id}
+                          role="menuitemradio"
+                          aria-checked={isActive}
+                          aria-current={isActive ? 'true' : undefined}
+                          onClick={() => {
+                            openProject(p.id)
+                            setSwitcherOpen(false)
+                          }}
+                          className={`w-full flex items-center gap-2.5 px-2 py-1.5 rounded-[9px] text-left text-[13.5px] transition ${
+                            isActive ? 'bg-accent-soft' : 'hover:bg-surface-hover'
+                          }`}
+                        >
+                          <span
+                            className={`shrink-0 w-[22px] h-[22px] rounded-[6.5px] flex items-center justify-center text-white font-semibold ${
+                              isEmoji ? 'text-[12px]' : 'text-[11px]'
+                            }`}
+                            style={{
+                              background: p.color ?? colorForName(p.name),
+                              letterSpacing: isEmoji ? '0' : '-0.01em',
+                            }}
+                            aria-hidden
+                          >
+                            {label}
+                          </span>
+                          <span className="flex-1 min-w-0 truncate font-medium text-ink">
+                            {p.name}
+                          </span>
+                          {isActive && (
+                            <Check
+                              size={15}
+                              strokeWidth={2.4}
+                              className="shrink-0 text-accent"
+                              aria-hidden
+                            />
+                          )}
+                        </button>
+                      )
+                    })}
+                  </div>
+                  <div className="h-px bg-border-hair mx-1.5 my-1" />
+                  <button
+                    role="menuitem"
+                    onClick={() => {
+                      setShowNewProject(true)
+                      setSwitcherOpen(false)
+                    }}
+                    className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-[9px] text-left text-[13px] font-medium text-accent hover:bg-surface-hover transition"
+                  >
+                    <span className="w-[22px] flex justify-center shrink-0">
+                      <Plus size={16} strokeWidth={2} />
+                    </span>
+                    New project
+                  </button>
+                  {/* Home / All projects — hidden while HOME_ENABLED is false
+                      (overview temporarily hidden, 2026-07-06). */}
+                  {HOME_ENABLED && (
+                    <button
+                      role="menuitem"
+                      onClick={() => {
+                        goHome()
+                        setSwitcherOpen(false)
+                      }}
+                      className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-[9px] text-left text-[13px] font-medium text-ink-muted hover:bg-surface-hover transition"
+                    >
+                      <span className="w-[22px] flex justify-center shrink-0">
+                        <LayoutGrid size={16} strokeWidth={1.9} />
+                      </span>
+                      Home / All projects
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
             <div className="flex-1 overflow-auto">
             <div
@@ -1150,14 +1252,31 @@ function App() {
             </div>
           </>
         ) : (
-          <div className="p-4 text-[13px] text-ink-faint">
-            Select a project →
+          <div className="flex-1 flex flex-col items-center justify-center gap-3 p-6 text-center">
+            <div className="text-[14px] text-ink-muted">No project yet</div>
+            <button
+              onClick={() => setShowNewProject(true)}
+              className="inline-flex items-center gap-2 rounded-full bg-accent hover:bg-accent-hover text-white text-[13px] font-semibold px-4 py-2 transition-colors"
+            >
+              <Plus size={16} strokeWidth={2} />
+              New project
+            </button>
           </div>
         )}
-        {/* Version footer — calm `plan-up · v{version}` at rest; morphs into a
-            glowing "Update" pill when a newer build is live. See
-            design-docs/version-and-updates.md. */}
-        <VersionFooter />
+        {/* Footer — calm `plan-up · v{version}` (morphs into an "Update" pill when
+            a newer build is live; see version-and-updates.md), with the dark-mode
+            toggle pinned at its right (it used to live on the removed icon rail). */}
+        <div className="mt-auto shrink-0 border-t border-border-hair flex items-center">
+          <VersionFooter />
+          <button
+            onClick={() => setDark(!dark)}
+            title={dark ? 'Switch to light' : 'Switch to dark'}
+            aria-label={dark ? 'Switch to light mode' : 'Switch to dark mode'}
+            className="shrink-0 mr-1.5 w-7 h-7 grid place-items-center rounded-md text-ink-faint hover:text-ink hover:bg-surface-hover transition"
+          >
+            {dark ? <Sun size={16} /> : <Moon size={16} />}
+          </button>
+        </div>
         {/* Drag handle — resize the panel; persists across sessions */}
         <div
           onMouseDown={startSidebarResize}
@@ -2452,13 +2571,15 @@ function SprintNoteBanner({ sprint }: { sprint: Sprint }) {
   }
 
   if (!sprint.note) {
+    // Slim, left-aligned ghost affordance — a sprint note is a secondary action,
+    // so the empty state no longer takes a full-width dashed bar. See list-view.md v4.
     return (
-      <div className="shrink-0 bg-surface border-b border-border-hair px-5 py-2">
+      <div className="shrink-0 bg-surface border-b border-border-hair px-5 py-1.5">
         <button
           onClick={beginEdit}
-          className="w-full flex items-center justify-center gap-1.5 py-1.5 text-[12.5px] font-semibold text-ink-muted border border-dashed border-border rounded-[10px] transition hover:text-accent hover:border-accent/40 hover:bg-accent-soft"
+          className="inline-flex items-center gap-1.5 px-2 py-1 text-[12.5px] font-medium text-ink-faint rounded-[8px] transition hover:text-accent hover:bg-accent-soft"
         >
-          <StickyNote size={14} strokeWidth={2} />
+          <StickyNote size={13} strokeWidth={2} />
           Add sprint note
         </button>
       </div>

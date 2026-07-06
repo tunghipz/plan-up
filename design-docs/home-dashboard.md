@@ -1,7 +1,16 @@
 # Home dashboard & cross-project People
 
-**Status:** Implemented
-**Last updated:** 2026-06-20 (shipped: People panel on right rail)
+**Status:** Implemented — **temporarily hidden** (feature-flagged off, 2026-07-06)
+**Last updated:** 2026-07-06 (hidden behind `HOME_ENABLED = false`)
+
+> **Temporarily hidden (2026-07-06):** the Overview screen is gated off behind a single
+> `HOME_ENABLED = false` const in `App.tsx`. All the code below still exists (component,
+> `screen` state, cross-project People, v13 schema) — only the **entry points** are
+> suppressed: the "Home / All projects" item is dropped from the project-switcher dropdown,
+> the app never lands on `screen === 'home'`, and `HomeDashboard` is never rendered. To
+> restore, flip `HOME_ENABLED` back to `true`. Nothing was deleted; the People data model
+> and migrations are untouched. Decision: hide the overview for now (user request); revisit
+> if/when the multi-project overview earns its place back.
 **Code:** `app/src/HomeDashboard.tsx` (projects grid + People roster + merge popover),
 `app/src/App.tsx` (rail Home tile + top-level `screen` state, persisted), `app/src/people.ts`
 (pure helpers: `buildPersonBackfill`, `personLoad`, `personProjectCount`, `nextDayOff`,

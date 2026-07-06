@@ -928,7 +928,9 @@ describe('moveUnfinishedToNextSprint', () => {
     expect((await db.tasks.get('c'))?.sprintId).toBe(s1.id) // done stays
   })
 
-  it('bumps stale start dates up to the target sprint start', async () => {
+  it('preserves the task start date on rollover (no pull-forward to target start)', async () => {
+    // A rollover must keep ALL task info — including a start that predates the
+    // target sprint. See design-docs/sprint-rollover.md (decision 2026-07-06).
     const s1 = { id: 's1', projectId: P, name: 'A', startDate: '2026-06-01', endDate: '2026-06-14' }
     const s2 = { id: 's2', projectId: P, name: 'B', startDate: '2026-06-15', endDate: '2026-06-28' }
     await db.sprints.bulkAdd([s1, s2])
@@ -940,7 +942,27 @@ describe('moveUnfinishedToNextSprint', () => {
     })
     await moveUnfinishedToNextSprint(s1.id)
     const t = await db.tasks.get('t')
-    expect(t?.startDate).toBe('2026-06-15') // bumped to s2.startDate
+    expect(t?.sprintId).toBe('s2') // moved
+    expect(t?.startDate).toBe('2026-06-02') // KEPT — not bumped to s2.startDate
+  })
+
+  it('preserves a user-set start + effort-driven due across a rollover', async () => {
+    // Mirrors the real UI flow: task created with an auto start, user edits it,
+    // then rolls it over — the edited start survives and the effort end follows it.
+    const s1 = { id: 's1', projectId: P, name: 'A', startDate: '2026-06-01', endDate: '2026-06-14' }
+    const s2 = { id: 's2', projectId: P, name: 'B', startDate: '2026-06-22', endDate: '2026-07-05' }
+    await db.sprints.bulkAdd([s1, s2])
+    await db.tasks.add({
+      id: 't', projectId: P, sequence: 1, title: 't', assigneeId: null, sprintId: s1.id,
+      status: 'todo', priority: 'normal',
+      startDate: '2026-06-03', dueDate: '2026-06-05', estimate: 3, createdAt: 0, // Wed..Fri
+      dependsOn: [],
+    })
+    await moveUnfinishedToNextSprint(s1.id)
+    const t = await db.tasks.get('t')
+    expect(t?.sprintId).toBe('s2')
+    expect(t?.startDate).toBe('2026-06-03') // user's start preserved
+    expect(t?.dueDate).toBe('2026-06-05') // 3-day effort from Wed → Fri, unchanged
   })
 
   it('returns null target when there is no next sprint', async () => {

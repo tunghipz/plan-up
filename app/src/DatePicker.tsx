@@ -394,6 +394,7 @@ export function DatePickCell({
   daysOff,
   emptyHint,
   emptyHintHover = false,
+  timeOnHover = false,
 }: {
   value: string | null
   highlight?: 'overdue' | null
@@ -421,6 +422,13 @@ export function DatePickCell({
    * Keeps dense rows (sprint List) calm; collections show the pill always.
    */
   emptyHintHover?: boolean
+  /**
+   * When set, the `, HH:mm` time tail is hidden at rest and only revealed on
+   * `group-hover/row` (the working-hours default repeats on every dense List row
+   * and carries near-zero info). The date itself always shows. Needs a
+   * `group/row` ancestor. Callers without one (Collections) omit it → time inline.
+   */
+  timeOnHover?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLButtonElement>(null)
@@ -452,12 +460,21 @@ export function DatePickCell({
         }}
         aria-label={ariaLabel}
         title={locked ? 'Computed from prerequisites. Clear Pre to edit manually.' : undefined}
-        className={`group relative inline-flex items-center justify-end w-full h-8 px-2 rounded-md border border-transparent transition ${valueCls} ${
+        className={`group relative inline-flex items-center justify-end w-full h-7 px-2 rounded-md border border-transparent transition ${valueCls} ${
           locked ? 'cursor-default' : 'cursor-pointer hover:border-border-strong hover:bg-canvas'
         }`}
       >
         {value ? (
-          <span className="text-sm whitespace-nowrap">{label}</span>
+          timeOnHover && time ? (
+            // Date always visible; time tail fades in on row hover (keeps dense
+            // List rows calm — the working-hours default is near-zero info).
+            <span className="text-sm whitespace-nowrap">
+              {date}
+              <span className="hidden group-hover/row:inline">, {time}</span>
+            </span>
+          ) : (
+            <span className="text-sm whitespace-nowrap">{label}</span>
+          )
         ) : emptyHint ? (
           <span
             className={`inline-flex items-center rounded-full border border-dashed border-border px-2.5 py-0.5 text-[11.5px] font-medium text-ink-faint group-hover:border-accent group-hover:text-accent transition ${
@@ -467,7 +484,7 @@ export function DatePickCell({
             ＋ {emptyHint}
           </span>
         ) : (
-          <span className="text-sm text-ink-faint">—</span>
+          <span className="text-sm text-ink-faint opacity-40">—</span>
         )}
       </button>
       {open && (
@@ -651,7 +668,7 @@ export function DateRangePickCell({
             ＋ {emptyHint}
           </span>
         ) : (
-          <span className="text-sm text-ink-faint">—</span>
+          <span className="text-sm text-ink-faint opacity-40">—</span>
         )}
       </button>
       {open && (

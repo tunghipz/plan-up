@@ -1,7 +1,7 @@
 import { useState, useRef, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { Users, MoreHorizontal, AlertTriangle, CalendarOff } from 'lucide-react'
+import { Users, MoreHorizontal, AlertTriangle, CalendarOff, Plus, Moon, Sun } from 'lucide-react'
 import {
   db,
   colorForName,
@@ -45,9 +45,18 @@ interface RosterEntry {
 export function HomeDashboard({
   projects,
   onOpenProject,
+  onNewProject,
+  dark,
+  onToggleDark,
 }: {
   projects: Project[]
   onOpenProject: (id: string) => void
+  // The old icon rail (New project / dark toggle) is gone; on Home there's no
+  // sidebar/switcher, so these controls live in this header. See
+  // design-docs/app-shell-and-navigation.md.
+  onNewProject: () => void
+  dark: boolean
+  onToggleDark: () => void
 }) {
   // Stable `?? EMPTY` fallbacks (not fresh `[]`) so the memos below don't see a
   // new array identity on every render while the live queries are still loading.
@@ -140,11 +149,30 @@ export function HomeDashboard({
   return (
     <div className="flex-1 min-w-0 overflow-auto bg-canvas">
       <div className="px-7 pt-6 pb-12 max-w-[1400px]">
-        <header className="mb-5">
-          <h1 className="text-[26px] font-bold text-ink tracking-[-0.022em]">Overview</h1>
-          <div className="text-[13px] text-ink-muted mt-0.5 tabular-nums">
-            {projects.length} {projects.length === 1 ? 'project' : 'projects'} ·{' '}
-            {roster.length} {roster.length === 1 ? 'person' : 'people'}
+        <header className="mb-5 flex items-start gap-3">
+          <div className="flex-1 min-w-0">
+            <h1 className="text-[26px] font-bold text-ink tracking-[-0.022em]">Overview</h1>
+            <div className="text-[13px] text-ink-muted mt-0.5 tabular-nums">
+              {projects.length} {projects.length === 1 ? 'project' : 'projects'} ·{' '}
+              {roster.length} {roster.length === 1 ? 'person' : 'people'}
+            </div>
+          </div>
+          <div className="shrink-0 flex items-center gap-2">
+            <button
+              onClick={onNewProject}
+              className="inline-flex items-center gap-1.5 rounded-full bg-accent hover:bg-accent-hover text-white text-[13px] font-semibold px-3.5 py-2 transition-colors"
+            >
+              <Plus size={16} strokeWidth={2} />
+              New project
+            </button>
+            <button
+              onClick={onToggleDark}
+              title={dark ? 'Switch to light' : 'Switch to dark'}
+              aria-label={dark ? 'Switch to light mode' : 'Switch to dark mode'}
+              className="w-9 h-9 grid place-items-center rounded-full bg-surface text-ink-faint hover:text-ink shadow-[0_1px_3px_rgba(0,0,0,0.12),0_0_0_0.5px_rgba(0,0,0,0.04)] transition"
+            >
+              {dark ? <Sun size={16} /> : <Moon size={16} />}
+            </button>
           </div>
         </header>
 

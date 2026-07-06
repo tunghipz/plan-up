@@ -573,9 +573,12 @@ export async function logStatusChange(
  *
  * Behavior:
  * - Done tasks stay put.
- * - Moved tasks get the new sprintId. If their startDate is now before
- *   the target sprint's start, it's bumped to the target start. Dates
- *   are then recomputed (effort + off-days + prereq chain still apply).
+ * - Moved tasks get the new sprintId (+ a fresh per-sprint sequence). Their
+ *   startDate/dueDate are KEPT AS-IS — a rollover preserves all task info, so
+ *   a start the user set is never rewritten to the target sprint's start
+ *   (design-docs/sprint-rollover.md, decision 2026-07-06). Dates are still
+ *   recomputed afterwards (effort + off-days + prereq chain apply as always),
+ *   which re-derives computed dates but never clobbers a manual start.
  * - dependsOn links survive across sprints — prereq IDs stay valid.
  */
 /**
@@ -671,13 +674,13 @@ export async function moveUnfinishedToNextSprint(
       // Sequence is per-sprint, so a moved task must be renumbered into the
       // target — otherwise it keeps its source number and collides with an
       // existing task there. Awaited in-loop so each call sees the prior insert.
+      // Keep ALL task info on the move — only sprintId + sequence change.
+      // startDate/dueDate are deliberately preserved (no pull-forward to the
+      // target start): the user's dates are theirs. A task whose start predates
+      // the new sprint keeps that earlier start. See sprint-rollover.md.
       const patch: Partial<Task> = {
         sprintId: target.id,
         sequence: await nextSequence(target.id),
-      }
-      // Pull stale starts forward so the task lands inside the new sprint.
-      if (!t.startDate || t.startDate < target.startDate) {
-        patch.startDate = target.startDate
       }
       await db.tasks.update(t.id, patch)
       // Record the carry-over on the TARGET sprint's activity log — leaf work

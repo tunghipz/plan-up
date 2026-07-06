@@ -1,7 +1,7 @@
 # List view
 
 **Status:** Implemented
-**Last updated:** 2026-07-02 (releasing the grip without moving is a no-op)
+**Last updated:** 2026-07-06 (Start/End sort by the displayed computed/rollup date, not the raw field)
 **Code:** `app/src/SprintView.tsx` (`MemberCard`, `UnassignedCard`, `GroupHeader`,
 `TaskColumnHeader`, `SortHeader`, `COL`, `TaskRows` drag state, `TaskRow` grip),
 `app/src/db.ts` (`orderBetween`, `setListOrder`)
@@ -25,6 +25,13 @@ inset-grouped cards, fully editable inline.
   ID header shows an arrow.) Sort is **shared across all member cards** (one preference, not
   per-member) and **persisted** so it survives switching view/sprint/project and a page reload
   (defaults to neutral first run).
+- Sorting by **Start** / **End** uses the *displayed* date, not the raw stored field.
+  Leaf rows show the **scheduled** plan date (`computeWorkingPlan`) and a group-head row shows
+  a **rollup** (earliest child start … latest child end); its own stored `dueDate` never tracks
+  that rollup. `compareTasks` therefore sorts these two columns by a per-lane `dateKeys` map of
+  the same composite `date+time` keys the cells render, so a parent lands where its End cell says
+  it should. (Before this, a parent sorted by its often-empty raw `dueDate` → jumped to the bottom
+  even when its rolled-up End was early.) Empty dates sort last ascending.
 - Member cards omit the **Assignee** column (everyone in the group is the same person);
   the Unassigned card keeps it.
 - A task with **Effort = 0** renders as a **milestone**: a `◆ Milestone` pill after the
@@ -67,6 +74,15 @@ is never touched, so task-numbers and prereq references stay stable.
   accent **insertion line** marks the drop slot, computed from the pointer vs each row's
   mid-height. `orderBetween(prev, next)` (db.ts) returns the fractional value;
   `setListOrder(id, order)` persists it raw.
+- **The insertion line only shows where a drop would actually move the row.** The hover
+  handler runs the *same* `computeDropSlot` the drop does and suppresses the line for a
+  `null`/`ownGap` slot — so the ~2-row band around the dragged row's current slot (its own
+  gap: bottom-half of the row above + top-half of the row below) shows **no line**, matching
+  the no-op. Fix (2026-07-06): previously the line appeared for any hovered neighbour
+  regardless of `ownGap`, so dragging a row a half-step onto an adjacent neighbour lit the
+  line but releasing did nothing — the row looked stuck. To move a row down one slot, drag
+  past the next row's mid-height (its bottom half). Same gating in the member-lane and
+  Collections drags (all share `reorder.ts`).
 
 ## Column widths (`COL`)
 Fixed widths sized to measured content + a small buffer; **Task** is `flex-1` and absorbs

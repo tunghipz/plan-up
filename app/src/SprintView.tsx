@@ -94,32 +94,93 @@ const STATUS_RANK: Record<Status, number> = {
   in_progress: 1,
   done: 2,
 }
-function compareTasks(a: Task, b: Task, field: SortField, dir: 'asc' | 'desc'): number {
+/** Composite `date+time` sort keys per task id, mirroring what Start/End cells render. */
+type DateSortKeys = Map<string, { startDate: string; dueDate: string }>
+const EMPTY_DATE_KEY = '￿' // no date → sorts last ascending (matches the raw-field sentinel)
+
+/**
+ * Build the Start/End sort keys that MATCH the displayed cells. A leaf row shows its
+ * *scheduled* plan date, and a group-head row shows a rollup (earliest child start …
+ * latest child end) that its own stored `startDate`/`dueDate` never tracks — so sorting
+ * by the raw field puts parents out of order (usually last, since a parent's raw dueDate
+ * is empty). Computed per lane (the array being sorted) so the rollup considers exactly
+ * the children nested under the parent in that card. See design-docs/list-view.md.
+ */
+export function buildDateSortKeys(
+  lane: Task[],
+  planById: Map<string, WorkingPlan>
+): DateSortKeys {
+  const idSet = new Set(lane.map((t) => t.id))
+  const kidsByParent = new Map<string, Task[]>()
+  for (const t of lane) {
+    if (t.parentId && idSet.has(t.parentId)) {
+      const arr = kidsByParent.get(t.parentId) ?? []
+      arr.push(t)
+      kidsByParent.set(t.parentId, arr)
+    }
+  }
+  const keys: DateSortKeys = new Map()
+  for (const t of lane) {
+    const kids = kidsByParent.get(t.id)
+    if (kids?.length) {
+      // Group head: min child start … max child end (same as the TaskGroupRow cell).
+      let minStart: string | null = null
+      let maxDue: string | null = null
+      for (const c of kids) {
+        const plan = planById.get(c.id)
+        if (plan?.startDate) {
+          const k = `${plan.startDate}T${plan.startTime ?? ''}`
+          if (!minStart || k < minStart) minStart = k
+        }
+        if (plan?.dueDate) {
+          const k = `${plan.dueDate}T${plan.endTime ?? ''}`
+          if (!maxDue || k > maxDue) maxDue = k
+        }
+      }
+      keys.set(t.id, {
+        startDate: minStart ?? EMPTY_DATE_KEY,
+        dueDate: maxDue ?? EMPTY_DATE_KEY,
+      })
+    } else {
+      const plan = planById.get(t.id)
+      keys.set(t.id, {
+        startDate: plan?.startDate
+          ? `${plan.startDate}T${plan.startTime ?? ''}`
+          : EMPTY_DATE_KEY,
+        dueDate: plan?.dueDate
+          ? `${plan.dueDate}T${plan.endTime ?? ''}`
+          : EMPTY_DATE_KEY,
+      })
+    }
+  }
+  return keys
+}
+
+export function compareTasks(
+  a: Task,
+  b: Task,
+  field: SortField,
+  dir: 'asc' | 'desc',
+  dateKeys?: DateSortKeys
+): number {
   const mul = dir === 'asc' ? 1 : -1
-  const va: string | number =
+  const valueOf = (t: Task): string | number =>
     field === 'seq'
-      ? (a.listOrder ?? a.sequence)
+      ? (t.listOrder ?? t.sequence)
       : field === 'title'
-        ? (a.title || '').toLowerCase()
+        ? (t.title || '').toLowerCase()
         : field === 'effort'
-          ? (a.estimate ?? Number.POSITIVE_INFINITY)
+          ? (t.estimate ?? Number.POSITIVE_INFINITY)
           : field === 'status'
-            ? STATUS_RANK[a.status]
+            ? STATUS_RANK[t.status]
             : field === 'dependsOn'
-              ? (a.dependsOn?.length ?? 0)
-              : (a[field] ?? '￿')
-  const vb: string | number =
-    field === 'seq'
-      ? (b.listOrder ?? b.sequence)
-      : field === 'title'
-        ? (b.title || '').toLowerCase()
-        : field === 'effort'
-          ? (b.estimate ?? Number.POSITIVE_INFINITY)
-          : field === 'status'
-            ? STATUS_RANK[b.status]
-            : field === 'dependsOn'
-              ? (b.dependsOn?.length ?? 0)
-              : (b[field] ?? '￿')
+              ? (t.dependsOn?.length ?? 0)
+              : field === 'startDate' || field === 'dueDate'
+                ? // Sort by the displayed computed/rollup date, not the raw field.
+                  (dateKeys?.get(t.id)?.[field] ?? t[field] ?? '￿')
+                : (t[field] ?? '￿')
+  const va = valueOf(a)
+  const vb = valueOf(b)
   if (va < vb) return -1 * mul
   if (va > vb) return 1 * mul
   return a.sequence - b.sequence // stable tiebreak by seq
@@ -292,11 +353,19 @@ export function SprintView({
       else orphan.push(t)
     }
     // Sort each member's tasks by the user-selected field. Neutral (field null)
-    // falls back to the manual order — same as `seq asc`.
-    const cmp = (a: Task, b: Task) =>
-      compareTasks(a, b, sort.field ?? 'seq', sort.field ? sort.dir : 'asc')
-    for (const arr of byMember.values()) arr.sort(cmp)
-    orphan.sort(cmp)
+    // falls back to the manual order — same as `seq asc`. Start/End sort by the
+    // displayed computed/rollup date via per-lane dateKeys (see buildDateSortKeys).
+    const sortLane = (arr: Task[]) => {
+      const dateKeys =
+        sort.field === 'startDate' || sort.field === 'dueDate'
+          ? buildDateSortKeys(arr, planById)
+          : undefined
+      arr.sort((a, b) =>
+        compareTasks(a, b, sort.field ?? 'seq', sort.field ? sort.dir : 'asc', dateKeys)
+      )
+    }
+    for (const arr of byMember.values()) sortLane(arr)
+    sortLane(orphan)
     const filled = ms.filter((m) => (byMember.get(m.id) ?? []).length > 0)
     const empty = ms.filter((m) => (byMember.get(m.id) ?? []).length === 0)
     return {
@@ -304,7 +373,7 @@ export function SprintView({
       emptyMembers: empty,
       unassigned: orphan,
     }
-  }, [members, tasks, sort])
+  }, [members, tasks, sort, planById])
 
   // Flat top-to-bottom order exactly as rendered (lanes in order, group children
   // nested, Unassigned last). The selection bar's "Chain prereqs" links tasks in
@@ -330,6 +399,14 @@ export function SprintView({
   const hoverLane = (targetEl: Element | null | undefined, clientY: number) => {
     const targetId = targetEl instanceof HTMLElement ? targetEl.dataset.laneId : undefined
     if (!dragMemberId || !targetId || targetId === dragMemberId) {
+      laneHover.clear()
+      return
+    }
+    // Suppress the insertion line on an own-gap no-op (same guard as dropOnLane).
+    const r = (targetEl as HTMLElement).getBoundingClientRect()
+    const pos: 'before' | 'after' = clientY - r.top > r.height / 2 ? 'after' : 'before'
+    const slot = computeDropSlot(laneMembers, (m) => m.id, dragMemberId, targetId, pos)
+    if (!slot || slot.ownGap) {
       laneHover.clear()
       return
     }
@@ -1559,6 +1636,16 @@ function TaskRows({
     const targetId = targetEl instanceof HTMLElement ? targetEl.dataset.taskId : undefined
     const target = targetId ? tasksById.get(targetId) : undefined
     if (!targetId || !target || targetId === dragId || laneOf(target) !== dragLaneRef.current) {
+      clear()
+      return
+    }
+    // Only light the insertion line where a drop would actually move the row —
+    // run the SAME slot math the drop does and suppress the line on an own-gap
+    // no-op (dragging a half-step onto an adjacent neighbour). See list-view.md.
+    const r = (targetEl as HTMLElement).getBoundingClientRect()
+    const pos: 'before' | 'after' = clientY - r.top > r.height / 2 ? 'after' : 'before'
+    const slot = computeDropSlot(laneArray(dragLaneRef.current), (x) => x.id, dragId, targetId, pos)
+    if (!slot || slot.ownGap) {
       clear()
       return
     }

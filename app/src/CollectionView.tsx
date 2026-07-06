@@ -215,6 +215,18 @@ export function CollectionView({
       clear()
       return
     }
+    // Only light the insertion line where a drop would actually move the item —
+    // mirror dropOnItem's guard (own-gap is a no-op only within the same section).
+    const targetSectionId = itemsById.get(targetId)?.sectionId
+    const arr = targetSectionId ? itemsBySectionMap.get(targetSectionId) ?? [] : []
+    const r = itemEl!.getBoundingClientRect()
+    const pos: 'before' | 'after' = y - r.top > r.height / 2 ? 'after' : 'before'
+    const slot = computeDropSlot(arr, (t) => t.id, dragId, targetId, pos)
+    const draggedSectionId = itemsById.get(dragId)?.sectionId
+    if (!slot || (slot.ownGap && draggedSectionId === targetSectionId)) {
+      clear()
+      return
+    }
     hover(targetId, itemEl!, y)
   }
 

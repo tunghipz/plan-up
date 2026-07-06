@@ -48,6 +48,27 @@ describe('computeDropSlot', () => {
     expect(s.before?.id).toBe('y')
     expect(s.after).toBeNull()
   })
+
+  // Regression (2026-07-06): the hover handler must light the insertion line
+  // ONLY where a drop would actually move the row — i.e. `slot && !slot.ownGap`,
+  // the exact predicate the drop uses. It used to draw the line for any hovered
+  // neighbour, so the ~2-row band around the dragged row's own gap showed a line
+  // that did nothing on release — the row looked stuck (see the drag bug video).
+  it('indicator-visible predicate matches the drop outcome around the own gap', () => {
+    // Video scenario: displayed order [Task1, Task3, Task2, Task4], drag Task3.
+    const list = rows('T1', 'T3', 'T2', 'T4')
+    const shows = (target: string, pos: 'before' | 'after') => {
+      const s = computeDropSlot(list, idOf, 'T3', target, pos)
+      return !!s && !s.ownGap // what hoverRow now uses to decide the line
+    }
+    // Own-gap band around Task3 → NO line (matches the no-op drop):
+    expect(shows('T1', 'after')).toBe(false) // bottom half of the row above
+    expect(shows('T2', 'before')).toBe(false) // top half of the row below
+    // Real moves → line shows (matches a repositioning drop):
+    expect(shows('T2', 'after')).toBe(true) // past Task2 → drops below it
+    expect(shows('T1', 'before')).toBe(true) // to the very top
+    expect(shows('T4', 'after')).toBe(true) // to the very bottom
+  })
 })
 
 describe('computeAppendSlot', () => {

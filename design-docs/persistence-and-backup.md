@@ -24,7 +24,8 @@ JSON export/import is the backup & transfer mechanism (not sync).
   non-destructively (see project-export-import.md), while a **full backup (v1–5)**
   takes the destructive path below.
 - Full-backup import → confirm *"Replace all data?"* → all current data is wiped and
-  replaced. Success alert: *"Import successful."*
+  replaced. Success/failure feedback is an **in-DNA toast** (same slide-up toast as the
+  project import), never a native `alert()` (2026-07-07 — §8 no-OS-dialog rule).
 - First launch with an empty DB seeds a demo project (see Seeding).
 
 ## Data

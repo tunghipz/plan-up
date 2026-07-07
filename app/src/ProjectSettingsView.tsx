@@ -129,6 +129,9 @@ export function ProjectSettingsView({
                     e.preventDefault()
                     ;(e.target as HTMLInputElement).blur()
                   } else if (e.key === 'Escape') {
+                    // Esc here reverts the edit only — don't let the global
+                    // handler also slam the drawer shut on the same keypress.
+                    e.stopPropagation()
                     setName(project.name)
                     ;(e.target as HTMLInputElement).blur()
                   }
@@ -211,8 +214,8 @@ export function ProjectSettingsView({
           </section>
 
           {/* Danger zone */}
-          <section className="rounded-[14px] p-5 border border-red-500/25 bg-red-500/[0.03]">
-            <h2 className="text-[12px] font-semibold uppercase tracking-wide text-red-500/90">
+          <section className="rounded-[14px] p-5 border border-overdue/25 bg-overdue/[0.03]">
+            <h2 className="text-[12px] font-semibold uppercase tracking-wide text-overdue/90">
               Danger zone
             </h2>
             <div className="flex items-center justify-between gap-4 mt-2">
@@ -222,7 +225,7 @@ export function ProjectSettingsView({
               </p>
               <button
                 onClick={removeProject}
-                className="shrink-0 inline-flex items-center gap-1.5 text-sm font-medium text-red-600 dark:text-red-400 border border-red-500/40 hover:bg-red-500/10 rounded-[8px] px-3 py-1.5 transition"
+                className="shrink-0 inline-flex items-center gap-1.5 text-sm font-medium text-overdue border border-overdue/40 hover:bg-overdue/10 rounded-[8px] px-3 py-1.5 transition"
               >
                 <Trash2 size={14} /> Delete project
               </button>
@@ -291,6 +294,7 @@ function MemberRow({ member }: { member: Member }) {
               e.preventDefault()
               ;(e.target as HTMLInputElement).blur()
             } else if (e.key === 'Escape') {
+              e.stopPropagation()
               setName(member.name)
               ;(e.target as HTMLInputElement).blur()
             }
@@ -307,6 +311,7 @@ function MemberRow({ member }: { member: Member }) {
               e.preventDefault()
               ;(e.target as HTMLInputElement).blur()
             } else if (e.key === 'Escape') {
+              e.stopPropagation()
               setTitle(member.title ?? '')
               ;(e.target as HTMLInputElement).blur()
             }
@@ -322,7 +327,7 @@ function MemberRow({ member }: { member: Member }) {
       <MemberColorDot member={member} />
       <button
         onClick={remove}
-        className="text-ink-faint hover:text-red-500 opacity-0 group-hover/card:opacity-100 transition shrink-0"
+        className="text-ink-faint hover:text-overdue opacity-0 group-hover/card:opacity-100 transition shrink-0"
         aria-label="Remove member"
         title="Remove member"
       >
@@ -371,7 +376,7 @@ function AddMember({ projectId }: { projectId: string }) {
           aria-label="Add member"
         />
       </div>
-      {err && <p className="mt-1 px-3 text-[12px] text-red-500">{err}</p>}
+      {err && <p className="mt-1 px-3 text-[12px] text-overdue">{err}</p>}
     </div>
   )
 }

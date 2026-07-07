@@ -47,7 +47,7 @@ export function Avatar({
   className?: string
 } & React.HTMLAttributes<HTMLSpanElement>) {
   const ringCls = ring
-    ? 'ring-2 ring-canvas shadow-[0_0_0_1px_rgba(9,30,66,0.13)]'
+    ? 'ring-2 ring-canvas shadow-[0_0_0_1px_color-mix(in_srgb,var(--color-ink)_13%,transparent)]'
     : ''
   const base = `rounded-full inline-flex items-center justify-center text-white font-semibold shrink-0 overflow-hidden select-none ${ringCls} ${className}`
   if (member.avatarImage) {
@@ -250,7 +250,7 @@ export function AvatarPicker({ member }: { member: Member }) {
         }}
         aria-label="Change avatar"
         title="Change avatar"
-        className="relative block rounded-full transition hover:scale-105 group/avatar"
+        className="relative block rounded-full transition hover:scale-105 motion-reduce:transform-none group/avatar"
       >
         <Avatar member={member} />
         <span
@@ -369,7 +369,7 @@ export function AvatarPicker({ member }: { member: Member }) {
                 </div>
               )}
               {error && (
-                <div className="mt-2 text-[11.5px] text-center text-red-500 bg-red-500/10 rounded-[7px] py-1.5">
+                <div className="mt-2 text-[11.5px] text-center text-overdue bg-overdue/10 rounded-[7px] py-1.5">
                   {error}
                 </div>
               )}
@@ -388,7 +388,7 @@ export function AvatarPicker({ member }: { member: Member }) {
                 setSavings(null)
                 setOpen(false)
               }}
-              className="mt-2 w-full inline-flex items-center justify-center gap-1.5 text-[12.5px] text-red-500 rounded-[9px] py-1.5 transition hover:bg-red-500/10"
+              className="mt-2 w-full inline-flex items-center justify-center gap-1.5 text-[12.5px] text-overdue rounded-[9px] py-1.5 transition hover:bg-overdue/10"
             >
               <Trash2 size={13} /> Remove avatar
             </button>
@@ -426,7 +426,7 @@ export function ColorSwatchRow({
             className={`w-5 h-5 rounded-full transition ${
               active
                 ? 'ring-2 ring-offset-2 ring-offset-surface ring-ink/45'
-                : 'opacity-80 hover:opacity-100 hover:scale-110'
+                : 'opacity-80 hover:opacity-100 hover:scale-110 motion-reduce:transform-none'
             }`}
             style={{ background: c }}
           />
@@ -464,7 +464,7 @@ export function EmojiPickerRow({
         className={`w-8 h-8 rounded-[8px] grid place-items-center text-[18px] leading-none transition ${
           active
             ? 'bg-surface ring-2 ring-accent'
-            : 'bg-canvas hover:bg-surface-hover hover:scale-110'
+            : 'bg-canvas hover:bg-surface-hover hover:scale-110 motion-reduce:transform-none'
         }`}
       >
         {e}
@@ -532,7 +532,7 @@ export function MemberColorDot({ member }: { member: Member }) {
         onClick={() => setOpen((v) => !v)}
         aria-label="Member color"
         title="Change color"
-        className="block w-[18px] h-[18px] rounded-full transition hover:scale-110"
+        className="block w-[18px] h-[18px] rounded-full transition hover:scale-110 motion-reduce:transform-none"
         style={{ background: member.color, boxShadow: '0 0 0 1px rgba(0,0,0,0.10)' }}
       />
       {open && (
@@ -721,7 +721,7 @@ export function MemberDaysOffButton({
               </select>
               <button
                 onClick={() => removeDay(d.date)}
-                className="text-ink-faint hover:text-red-500 opacity-0 group-hover/day:opacity-100 transition"
+                className="text-ink-faint hover:text-overdue opacity-0 group-hover/day:opacity-100 transition"
                 aria-label={`Remove ${d.date}`}
               >
                 <X size={14} />

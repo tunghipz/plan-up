@@ -149,6 +149,28 @@ export function CollectionView({
 
   const [addingTable, setAddingTable] = useState(false)
 
+  // Delete-item undo toast (collections.md 2026-07-07): the trash button sits in
+  // the status dot's hover slot, so a stray click is easy — deletion stays
+  // 1-click/no-confirm, but the item is restorable for ~6s.
+  const [deletedToast, setDeletedToast] = useState<Task | null>(null)
+  const deletedTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => () => {
+    if (deletedTimer.current) clearTimeout(deletedTimer.current)
+  }, [])
+  const handleDeleteItem = async (task: Task) => {
+    await deleteTask(task.id)
+    if (deletedTimer.current) clearTimeout(deletedTimer.current)
+    setDeletedToast(task)
+    deletedTimer.current = setTimeout(() => setDeletedToast(null), 6000)
+  }
+  const undoDelete = async () => {
+    if (!deletedToast) return
+    setDeletedToast(null)
+    // Collection items carry no children/deps — re-adding the row verbatim
+    // (same id/section/status/dates/order) is a full restore.
+    await db.tasks.add(deletedToast)
+  }
+
   // Global sort preference, shared across all section cards (mirrors sprint list).
   const [sort, setSort] = useState<CollSort>(loadCollSort)
   useEffect(() => {
@@ -314,6 +336,7 @@ export function CollectionView({
               statusRank={statusRank}
               dragFor={dragFor}
               dropHint={dragId !== null && overSectionId === sec.id}
+              onDeleteItem={handleDeleteItem}
             />
           ))}
           <AddGroupButton
@@ -343,6 +366,32 @@ export function CollectionView({
           }}
         />
       )}
+
+      {/* Delete-item undo toast — same slide-up idiom as App's import toast. */}
+      {deletedToast &&
+        createPortal(
+          <div
+            className="fixed inset-x-0 bottom-6 z-[60] flex justify-center px-4 pointer-events-none"
+            role="status"
+            aria-live="polite"
+          >
+            <div className="pointer-events-auto flex items-center gap-3 min-w-[300px] max-w-[460px] px-4 py-3 rounded-[14px] bg-surface border border-border-hair animate-toast-in shadow-[0_12px_32px_rgba(0,0,0,0.16),0_0_0_0.5px_rgba(0,0,0,0.06)] dark:shadow-[0_12px_32px_rgba(0,0,0,0.55),0_0_0_0.5px_rgba(255,255,255,0.08)]">
+              <span className="shrink-0 w-[34px] h-[34px] rounded-full flex items-center justify-center bg-overdue/15 text-overdue">
+                <Trash2 size={16} strokeWidth={2} />
+              </span>
+              <div className="min-w-0 flex-1 text-[13.5px] font-semibold text-ink truncate">
+                Deleted “{deletedToast.title.trim() || 'Untitled item'}”
+              </div>
+              <button
+                onClick={undoDelete}
+                className="shrink-0 self-center text-[13px] font-medium text-accent hover:bg-accent-soft rounded-md px-2.5 py-1.5 transition"
+              >
+                Undo
+              </button>
+            </div>
+          </div>,
+          document.body
+        )}
     </div>
   )
 }
@@ -565,6 +614,7 @@ function SectionCard({
   statusRank,
   dragFor,
   dropHint,
+  onDeleteItem,
 }: {
   collectionId: string
   section: { id: string; name: string; color?: string }
@@ -579,6 +629,8 @@ function SectionCard({
   dragFor: (t: Task) => RowDrag | undefined
   /** True while a drag hovers this card — highlights it as a drop target. */
   dropHint: boolean
+  /** Delete + arm the undo toast (owned by CollectionView). */
+  onDeleteItem: (t: Task) => void
 }) {
   // Apply the active sort; `null` keeps natural (insertion) order. JS sort is
   // stable, so a copy preserves order for equal rows. See list-view.md.
@@ -661,7 +713,7 @@ function SectionCard({
       </div>
 
       {confirmingDelete && (
-        <div className="flex items-center gap-3 px-[18px] py-2.5 bg-red-500/[0.06] border-b border-border text-[13px]">
+        <div className="flex items-center gap-3 px-[18px] py-2.5 bg-overdue/[0.06] border-b border-border text-[13px]">
           <span className="flex-1 text-ink font-medium">
             Delete this table? Its items move to the first table.
           </span>
@@ -669,7 +721,7 @@ function SectionCard({
             onClick={async () => {
               await deleteSection(collectionId, section.id)
             }}
-            className="text-red-500 font-semibold hover:underline"
+            className="text-overdue font-semibold hover:underline"
           >
             Delete
           </button>
@@ -738,6 +790,7 @@ function SectionCard({
                 statusById={statusById}
                 statuses={statuses}
                 drag={dragFor(t)}
+                onDelete={onDeleteItem}
               />
             ))}
             <AddItemRow collectionId={collectionId} sectionId={section.id} />
@@ -778,7 +831,7 @@ function SortHeader({
     <button
       type="button"
       onClick={() => onSort(field)}
-      className={`${className} group flex items-center gap-1 text-[11px] tracking-normal font-medium select-none py-0.5 hover:bg-black/[0.04] rounded transition ${
+      className={`${className} group flex items-center gap-1 text-[11px] tracking-normal font-semibold select-none py-0.5 hover:bg-surface-hover rounded transition ${
         align === 'end'
           ? 'justify-end'
           : align === 'center'
@@ -881,17 +934,19 @@ function ItemRow({
   statusById,
   statuses,
   drag,
+  onDelete,
 }: {
   task: Task
   statusById: Map<string, CollectionStatus>
   statuses: CollectionStatus[]
   /** Pointer-drag wiring (undefined → not draggable, e.g. a column sort is on). */
   drag?: RowDrag
+  onDelete: (t: Task) => void
 }) {
   const status = task.collectionStatusId
     ? statusById.get(task.collectionStatusId)
     : undefined
-  const dotColor = status?.color ?? '#C7C7CC'
+  const dotColor = status?.color ?? 'var(--color-status-none)'
 
   // Pointer-based drag (shared with the sprint list). The grip is rendered
   // absolutely at the row's left edge and only *it* starts a drag, so the title
@@ -925,9 +980,9 @@ function ItemRow({
           title="Delete item"
           onClick={(e) => {
             e.stopPropagation()
-            void deleteTask(task.id)
+            onDelete(task)
           }}
-          className="absolute inset-0 grid place-items-center rounded text-ink-faint/70 opacity-0 group-hover/row:opacity-100 hover:text-red-500 transition"
+          className="absolute inset-0 grid place-items-center rounded text-ink-faint/70 opacity-0 group-hover/row:opacity-100 hover:text-overdue transition"
         >
           <Trash2 size={13} />
         </button>
@@ -1107,7 +1162,7 @@ function StatusPill({
             className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11.5px] font-semibold leading-none w-fit"
             style={{
               background: `color-mix(in srgb, ${status.color} 16%, transparent)`,
-              color: status.color,
+              color: `color-mix(in srgb, ${status.color} 78%, var(--color-ink))`,
             }}
           >
             <span
@@ -1211,8 +1266,8 @@ export function StatusEditor({ collection }: { collection: Collection }) {
         <div
           className={`absolute right-0 top-full mt-1.5 z-40 bg-surface rounded-[12px] w-[260px] py-2 ${FLOAT_SHADOW}`}
         >
-          <div className="px-4 pb-1.5 pt-0.5 text-[11px] font-semibold text-ink-faint tracking-wider">
-            STATUSES
+          <div className="px-4 pb-1.5 pt-0.5 text-[11px] font-semibold text-ink-faint">
+            Statuses
           </div>
 
           {collection.statuses.map((s) =>
@@ -1220,7 +1275,7 @@ export function StatusEditor({ collection }: { collection: Collection }) {
               <div
                 key={s.id}
                 data-status-row
-                className="flex items-center gap-2 px-3 py-1.5 bg-red-500/[0.06] text-[13px]"
+                className="flex items-center gap-2 px-3 py-1.5 bg-overdue/[0.06] text-[13px]"
               >
                 <span className="flex-1 min-w-0 truncate text-ink">
                   Delete “{s.name}”?
@@ -1230,7 +1285,7 @@ export function StatusEditor({ collection }: { collection: Collection }) {
                     await deleteStatus(collection.id, s.id)
                     setConfirmId(null)
                   }}
-                  className="text-red-500 font-semibold shrink-0"
+                  className="text-overdue font-semibold shrink-0"
                 >
                   Delete
                 </button>
@@ -1300,7 +1355,7 @@ export function StatusEditor({ collection }: { collection: Collection }) {
                   setPaletteFor(null)
                   setConfirmId(s.id)
                 }}
-                className="opacity-0 group-hover:opacity-60 hover:!opacity-100 text-ink-faint hover:text-red-500 transition p-0.5 rounded"
+                className="opacity-0 group-hover:opacity-60 hover:!opacity-100 text-ink-faint hover:text-overdue transition p-0.5 rounded"
                 aria-label={`Delete ${s.name}`}
               >
                 <X size={13} />

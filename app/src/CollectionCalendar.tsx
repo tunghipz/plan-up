@@ -43,7 +43,7 @@ const MONTHS_SHORT = [
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
 /** Neutral fallback when an item has no (or a deleted) status. */
-const NEUTRAL = '#C7C7CC'
+const NEUTRAL = 'var(--color-status-none)'
 
 /** Human-readable "Mon D" from a yyyy-mm-dd string (UTC, no TZ drift). */
 function shortDate(dateStr: string): string {
@@ -170,7 +170,7 @@ export function CollectionCalendar({
           )}
           <button
             onClick={() => step(-1)}
-            className="w-[26px] h-[26px] rounded-[7px] bg-black/[0.05] hover:bg-black/[0.09] text-ink-muted transition grid place-items-center"
+            className="w-[26px] h-[26px] rounded-[7px] bg-ink/[0.05] hover:bg-ink/[0.09] text-ink-muted transition grid place-items-center"
             aria-label="Previous month"
           >
             ‹
@@ -180,7 +180,7 @@ export function CollectionCalendar({
           </span>
           <button
             onClick={() => step(1)}
-            className="w-[26px] h-[26px] rounded-[7px] bg-black/[0.05] hover:bg-black/[0.09] text-ink-muted transition grid place-items-center"
+            className="w-[26px] h-[26px] rounded-[7px] bg-ink/[0.05] hover:bg-ink/[0.09] text-ink-muted transition grid place-items-center"
             aria-label="Next month"
           >
             ›
@@ -213,7 +213,7 @@ export function CollectionCalendar({
                 key={`bg-${cell.date}`}
                 className={`row-[1/-1] z-0 ${
                   c === 6 ? '' : 'border-r border-border-hair'
-                } ${cell.inMonth ? '' : 'bg-black/[0.018]'}`}
+                } ${cell.inMonth ? '' : 'bg-ink/[0.02]'}`}
                 style={{ gridColumn: c + 1 }}
                 aria-hidden
               />
@@ -272,7 +272,7 @@ export function CollectionCalendar({
                       marginRight: seg.roundR ? '4px' : '0',
                       paddingLeft: seg.roundL ? '13px' : '9px',
                       background: `color-mix(in srgb, ${color} 16%, transparent)`,
-                      color,
+                      color: `color-mix(in srgb, ${color} 78%, var(--color-ink))`,
                     }}
                   >
                     {seg.roundL && (
@@ -311,8 +311,8 @@ export function CollectionCalendar({
       {unscheduled.length > 0 && (
         <div className="mt-3 bg-surface rounded-[14px] shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_22px_rgba(0,0,0,0.05)] px-4 py-3">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-[11px] font-semibold text-ink-faint tracking-wider mr-0.5">
-              UNSCHEDULED · {unscheduled.length}
+            <span className="text-[11px] font-semibold text-ink-faint mr-0.5">
+              Unscheduled · {unscheduled.length}
             </span>
             {unscheduled.map((t) => (
               <UnscheduledChip
@@ -467,7 +467,9 @@ function BarPopover({
                 background: active
                   ? `color-mix(in srgb, ${s.color} 16%, transparent)`
                   : 'transparent',
-                color: active ? s.color : 'var(--color-ink-muted)',
+                color: active
+                  ? `color-mix(in srgb, ${s.color} 78%, var(--color-ink))`
+                  : 'var(--color-ink-muted)',
                 boxShadow: active ? 'none' : 'inset 0 0 0 1px var(--color-border)',
               }}
             >

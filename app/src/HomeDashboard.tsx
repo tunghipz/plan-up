@@ -186,7 +186,7 @@ export function HomeDashboard({
                 <button
                   key={p.id}
                   onClick={() => onOpenProject(p.id)}
-                  className="group text-left bg-surface rounded-[14px] p-4 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_22px_rgba(0,0,0,0.05)] transition hover:-translate-y-0.5 hover:shadow-[0_2px_4px_rgba(0,0,0,0.06),0_14px_32px_rgba(0,0,0,0.09)] focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                  className="group text-left bg-surface rounded-[14px] p-4 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_22px_rgba(0,0,0,0.05)] transition hover:-translate-y-0.5 motion-reduce:transform-none hover:shadow-[0_2px_4px_rgba(0,0,0,0.06),0_14px_32px_rgba(0,0,0,0.09)] focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
                 >
                   <div className="flex items-center gap-2.5 mb-3">
                     <span

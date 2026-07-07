@@ -243,7 +243,7 @@ function CalendarGrid({
                   className="absolute bottom-[3px] left-1/2 -translate-x-1/2 w-[5px] h-[5px] rounded-full"
                   style={
                     off === 'all'
-                      ? { background: sel || endpoint ? '#fff' : 'var(--color-priority-high)' }
+                      ? { background: sel || endpoint ? 'var(--color-surface)' : 'var(--color-priority-high)' }
                       : {
                           background: 'linear-gradient(90deg, var(--color-priority-high) 50%, transparent 50%)',
                           boxShadow: 'inset 0 0 0 1px var(--color-priority-high)',
@@ -441,7 +441,7 @@ export function DatePickCell({
   const label = value && time ? `${date}, ${time}` : date
   const valueCls = value
     ? highlight === 'overdue'
-      ? 'text-red-500 font-medium'
+      ? 'text-overdue font-semibold'
       : accent
         ? 'text-accent font-semibold'
         : 'text-ink-muted'

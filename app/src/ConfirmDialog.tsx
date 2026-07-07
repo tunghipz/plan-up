@@ -63,6 +63,10 @@ function ConfirmSheet({
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
+        // Topmost layer (z-60) owns Escape — don't let a drawer/modal/App
+        // handler underneath also close on the same keypress.
+        e.stopImmediatePropagation()
+        e.stopPropagation()
         onCancel()
         return
       }
@@ -123,17 +127,20 @@ function ConfirmSheet({
         )}
         <div className="flex justify-end gap-2 pt-2">
           <button
+            // Destructive alerts focus the SAFE action (Apple idiom) so a
+            // reflexive Enter/Space can never delete.
+            autoFocus={destructive}
             onClick={onCancel}
             className="px-3.5 py-1.5 text-sm font-medium text-ink-muted hover:bg-surface-hover rounded-[8px] transition"
           >
             {cancelLabel}
           </button>
           <button
-            autoFocus
+            autoFocus={!destructive}
             onClick={onConfirm}
             className={`px-4 py-1.5 text-sm font-medium text-white rounded-[8px] transition ${
               destructive
-                ? 'bg-red-500 hover:bg-red-600'
+                ? 'bg-overdue hover:bg-overdue/90'
                 : 'bg-accent hover:bg-accent-hover'
             }`}
           >

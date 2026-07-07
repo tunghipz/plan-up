@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { FolderOpen } from 'lucide-react'
 import { ModalSheet } from './ModalSheet'
 import {
@@ -19,10 +19,10 @@ import { pickBackupDir, runBackupNow } from './backup-tauri'
  */
 
 function timeAgo(ts: number): string {
-  const mins = Math.round((Date.now() - ts) / 60000)
+  const mins = Math.floor((Date.now() - ts) / 60000)
   if (mins < 1) return 'just now'
   if (mins < 60) return `${mins} min ago`
-  const hours = Math.round(mins / 60)
+  const hours = Math.floor(mins / 60)
   if (hours < 24) return `${hours} h ago`
   return new Date(ts).toLocaleDateString()
 }
@@ -32,6 +32,13 @@ export function BackupSettingsModal({ onClose }: { onClose: () => void }) {
   const [dir, setDir] = useState(getBackupDir)
   const [last, setLast] = useState<BackupStatus | null>(getLastBackupStatus)
   const [running, setRunning] = useState(false)
+
+  // The 30s auto-backup can fire while the modal sits open — keep the status
+  // line live by re-reading the persisted status.
+  useEffect(() => {
+    const t = setInterval(() => setLast(getLastBackupStatus()), 2000)
+    return () => clearInterval(t)
+  }, [])
 
   const toggle = () => {
     const next = !enabled
@@ -68,17 +75,23 @@ export function BackupSettingsModal({ onClose }: { onClose: () => void }) {
       </p>
 
       <div className="flex items-center justify-between">
-        <span className="text-[13.5px] font-medium text-ink">Back up automatically</span>
+        <button
+          onClick={toggle}
+          className="text-[13.5px] font-medium text-ink text-left cursor-pointer"
+        >
+          Back up automatically
+        </button>
         <button
           role="switch"
           aria-checked={enabled}
+          aria-label="Back up automatically"
           onClick={toggle}
           className={`relative w-[42px] h-[26px] rounded-full transition-colors ${
             enabled ? 'bg-accent' : 'bg-border-hair'
           }`}
         >
           <span
-            className={`absolute top-[3px] w-[20px] h-[20px] rounded-full bg-white shadow-[0_1px_3px_rgba(0,0,0,0.25)] transition-[left] ${
+            className={`absolute top-[3px] w-[20px] h-[20px] rounded-full bg-white shadow-[0_1px_3px_rgba(0,0,0,0.25)] transition-[left] motion-reduce:transition-none ${
               enabled ? 'left-[19px]' : 'left-[3px]'
             }`}
           />
@@ -94,21 +107,27 @@ export function BackupSettingsModal({ onClose }: { onClose: () => void }) {
         </span>
         <button
           onClick={chooseFolder}
-          className="shrink-0 text-xs flex items-center gap-1.5 px-2.5 py-1.5 text-accent hover:bg-accent-soft rounded-md transition"
+          className="shrink-0 text-xs flex items-center gap-1.5 px-2.5 py-1.5 text-accent hover:bg-accent-soft rounded-[8px] transition"
         >
           <FolderOpen size={13} /> Choose folder…
         </button>
       </div>
 
+      {enabled && !dir && (
+        <p className="text-[12px] text-warn-ink leading-snug">
+          Choose a folder to start backing up — nothing is written until one is set.
+        </p>
+      )}
+
       <div className="flex items-center justify-between pt-1 border-t border-border-hair">
-        <span className="text-[12px] leading-snug min-w-0 pr-3">
+        <span className="text-[12px] leading-snug min-w-0 pr-3" role="status" aria-live="polite">
           {last ? (
             last.ok ? (
-              <span className="text-green-600 dark:text-green-400">
+              <span className="text-status-done">
                 Last backup {timeAgo(last.at)} → {last.file}
               </span>
             ) : (
-              <span className="text-red-600 dark:text-red-400 break-words">
+              <span className="text-overdue break-words">
                 Backup failed: {last.error} — try re-picking the folder.
               </span>
             )
@@ -119,12 +138,21 @@ export function BackupSettingsModal({ onClose }: { onClose: () => void }) {
         <button
           onClick={backupNow}
           disabled={running || !dir}
-          className="shrink-0 text-xs font-semibold px-3 py-1.5 rounded-md bg-accent text-white hover:bg-accent-hover transition disabled:opacity-40 inline-flex items-center gap-2"
+          className="shrink-0 text-xs font-semibold px-3 py-1.5 rounded-[8px] bg-accent text-white hover:bg-accent-hover transition disabled:opacity-40 inline-flex items-center gap-2"
         >
           {running && (
             <span className="w-3 h-3 rounded-full border-2 border-white/40 border-t-white animate-spin" />
           )}
           Back up now
+        </button>
+      </div>
+
+      <div className="flex justify-end pt-1">
+        <button
+          onClick={onClose}
+          className="px-3.5 py-1.5 text-sm font-medium text-ink-muted hover:bg-surface-hover rounded-[8px] transition"
+        >
+          Done
         </button>
       </div>
     </ModalSheet>

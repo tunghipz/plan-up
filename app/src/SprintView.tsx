@@ -633,7 +633,7 @@ function SelectionBar({
 
   return (
     <div
-      className={`fixed left-1/2 bottom-6 z-40 -translate-x-1/2 flex items-center gap-3 rounded-[14px] bg-ink dark:bg-[#2c2c2e] dark:ring-1 dark:ring-white/10 text-white pl-4 pr-2 py-2 shadow-[0_8px_30px_rgba(0,0,0,0.22),0_0_0_0.5px_rgba(0,0,0,0.06)] transition-[opacity,transform] duration-200 ${
+      className={`fixed left-1/2 bottom-6 z-40 -translate-x-1/2 flex items-center gap-3 rounded-[14px] bg-ink dark:bg-surface dark:ring-1 dark:ring-white/10 text-white pl-4 pr-2 py-2 shadow-[0_8px_30px_rgba(0,0,0,0.22),0_0_0_0.5px_rgba(0,0,0,0.06)] transition-[opacity,transform] duration-200 ${
         n > 0
           ? 'opacity-100 translate-y-0'
           : 'opacity-0 translate-y-3 pointer-events-none'
@@ -676,6 +676,8 @@ function SelectionBar({
             ? undefined
             : 'Select ≥2 tasks with the same assignee (not a group) to group'
         }
+        // Button is always-white on the dark floating bar (both themes), so the
+        // label stays hardcoded near-black — text-ink would flip to white in dark.
         className="inline-flex items-center gap-1.5 text-[13px] font-semibold rounded-[9px] px-3 py-1.5 transition disabled:opacity-40 disabled:cursor-not-allowed bg-white text-[#1d1d1f] hover:bg-white/90"
       >
         <FolderPlus size={14} /> Group
@@ -699,7 +701,7 @@ function SelectionBar({
 
 function EmptyState({ onAddMember }: { onAddMember: () => void }) {
   return (
-    <div className="bg-surface border border-dashed border-border-strong rounded-lg p-10 text-center">
+    <div className="bg-surface border border-dashed border-border-strong rounded-[14px] p-10 text-center">
       <div className="text-base font-medium text-ink mb-1">No members yet</div>
       <p className="text-sm text-ink-muted max-w-sm mx-auto mb-4">
         Add a teammate to start assigning tasks. Members are labels — they don't
@@ -1382,7 +1384,7 @@ function TitleTextarea({
 function StatusPill({ status }: { status: Status }) {
   const meta = STATUS_META[status]
   const bg = `color-mix(in srgb, ${meta.varName} 15%, transparent)`
-  const fg = `color-mix(in srgb, ${meta.varName} 100%, #000 22%)`
+  const fg = `color-mix(in srgb, ${meta.varName} 78%, var(--color-ink))`
   // The interactive StatusPicker's native <select> reserves space for the
   // widest option ("In progress"), so its pill is always that wide. Reserve
   // the same width here via an invisible sizer so the group's read-only pill
@@ -2160,7 +2162,7 @@ function SortHeader({
     <button
       type="button"
       onClick={() => onSort(field)}
-      className={`${className} group flex items-center gap-1 text-[11px] tracking-normal font-medium select-none py-0.5 hover:bg-black/[0.04] rounded transition ${
+      className={`${className} group flex items-center gap-1 text-[11px] tracking-normal font-semibold select-none py-0.5 hover:bg-surface-hover rounded transition ${
         align === 'end'
           ? 'justify-end'
           : align === 'center'
@@ -2205,7 +2207,7 @@ function StatusDot({
   return (
     <button
       onClick={onCycle}
-      className={`w-4 h-4 shrink-0 transition hover:scale-110 flex items-center justify-center ${
+      className={`w-4 h-4 shrink-0 transition hover:scale-110 motion-reduce:transform-none flex items-center justify-center ${
         popping ? 'status-pop' : ''
       }`}
       style={{ color: meta.varName }}
@@ -2286,7 +2288,7 @@ function StatusPicker({
   const meta = STATUS_META[status]
   // Cupertino status pill: soft tinted bg, colored dot + label, fully rounded.
   const bg = `color-mix(in srgb, ${meta.varName} 15%, transparent)`
-  const fg = `color-mix(in srgb, ${meta.varName} 100%, #000 22%)`
+  const fg = `color-mix(in srgb, ${meta.varName} 78%, var(--color-ink))`
   return (
     <div
       className="relative inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 cursor-pointer transition hover:opacity-90 leading-none"
@@ -2660,7 +2662,7 @@ function AddMemberRow({
   }
 
   return (
-    <div className="flex items-center gap-2 bg-surface border border-border rounded-lg p-2">
+    <div className="flex items-center gap-2 bg-surface border border-border rounded-[14px] p-2">
       <UserPlus size={14} className="text-ink-faint ml-2" />
       <input
         ref={inputRef}

@@ -47,7 +47,7 @@ function gapBefore(prev: string, cur: string): boolean {
   return (new Date(cur + 'T00:00:00Z').getTime() - new Date(prev + 'T00:00:00Z').getTime()) / 86_400_000 > 1
 }
 const softBg = (v: string) => `color-mix(in srgb, ${v} 15%, transparent)`
-const softFg = (v: string) => `color-mix(in srgb, ${v} 100%, #000 22%)`
+const softFg = (v: string) => `color-mix(in srgb, ${v} 78%, var(--color-ink))`
 // Faint diagonal hatch — the universal "non-working time" texture for day-offs.
 const HATCH_OFF =
   'repeating-linear-gradient(45deg, color-mix(in srgb, var(--color-ink) 13%, transparent) 0 3px, transparent 3px 7px)'
@@ -434,7 +434,8 @@ export function GanttView({
         </span>
         <span className="inline-flex items-center gap-1.5">
           <span
-            className="inline-block w-[11px] h-[11px] rotate-45 rounded-[2px] bg-accent"
+            className="inline-block w-[11px] h-[11px] rotate-45 rounded-[2px]"
+            style={{ background: 'var(--color-status-todo)' }}
             aria-hidden
           />
           Milestone

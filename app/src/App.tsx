@@ -150,10 +150,45 @@ function SprintStateDot({
 
 /** Transient feedback after a non-destructive import (slides up from the bottom,
  *  optional Undo action). Plain timeout dismiss; no toast queue (one at a time). */
+/**
+ * Arrow-key navigation for a `role="menu"` container (overlay contract §6.5):
+ * ↓/↑ move focus through the enabled menuitems (wrapping), Home/End jump.
+ * Attach as onKeyDown on the menu div; pair with focusFirstMenuItem on open.
+ */
+function menuKeyNav(e: React.KeyboardEvent<HTMLElement>) {
+  if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) return
+  const items = Array.from(
+    e.currentTarget.querySelectorAll<HTMLButtonElement>(
+      '[role^="menuitem"]:not([disabled])'
+    )
+  )
+  if (items.length === 0) return
+  e.preventDefault()
+  const i = items.indexOf(document.activeElement as HTMLButtonElement)
+  const next =
+    e.key === 'ArrowDown'
+      ? items[(i + 1) % items.length]
+      : e.key === 'ArrowUp'
+        ? items[(i - 1 + items.length) % items.length]
+        : e.key === 'Home'
+          ? items[0]
+          : items[items.length - 1]
+  next.focus()
+}
+
+/** Focus a menu's first enabled item on open so arrow keys work immediately. */
+function focusFirstMenuItem(container: HTMLElement | null) {
+  container
+    ?.querySelector<HTMLButtonElement>('[role^="menuitem"]:not([disabled])')
+    ?.focus()
+}
+
 type ToastState = {
   title: string
   detail: string
   onUndo?: () => void
+  /** 'error' renders the red ⚠ variant; default is the green check. */
+  kind?: 'success' | 'error'
 } | null
 
 function App() {
@@ -581,6 +616,11 @@ function App() {
   // Keyboard shortcuts: / or ⌘K open the search palette, n new sprint, esc closes.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      // A modal sheet / confirm owns the keyboard while open (overlay contract,
+      // design-system §6.5): no palette/new-sprint over a dialog, and Escape is
+      // the dialog's (its own listener stops propagation before we run anyway).
+      if (document.querySelector('[role="dialog"], [role="alertdialog"]')) return
+
       const t = e.target as HTMLElement | null
       const inField =
         t &&
@@ -656,7 +696,7 @@ function App() {
     try {
       data = JSON.parse(await file.text())
     } catch {
-      alert('Import failed: not a valid JSON file.')
+      showToast({ kind: 'error', title: 'Import failed', detail: 'Not a valid JSON file.' })
       return
     }
 
@@ -666,7 +706,11 @@ function App() {
     // (a damaged share file must not raise a full-DB-wipe prompt).
     if (looksLikeProjectBundle(data)) {
       if (!isProjectBundle(data)) {
-        alert('Import failed: this project file is invalid or corrupt.')
+        showToast({
+          kind: 'error',
+          title: 'Import failed',
+          detail: 'This project file is invalid or corrupt.',
+        })
         return
       }
       // A single-project bundle is ADDITIVE — it adds a new project and destroys
@@ -695,7 +739,11 @@ function App() {
           },
         })
       } catch (err) {
-        alert(`Import failed: ${err instanceof Error ? err.message : String(err)}`)
+        showToast({
+          kind: 'error',
+          title: 'Import failed',
+          detail: err instanceof Error ? err.message : String(err),
+        })
       }
       return
     }
@@ -721,9 +769,13 @@ function App() {
       safeStorage.remove(SELCOLL_KEY)
       setCurrentSprintId(null)
       setCurrentProjectId(null)
-      alert('Import successful.')
+      showToast({ title: 'Import successful', detail: 'All data replaced from the backup file.' })
     } catch (err) {
-      alert(`Import failed: ${err instanceof Error ? err.message : String(err)}`)
+      showToast({
+        kind: 'error',
+        title: 'Import failed',
+        detail: err instanceof Error ? err.message : String(err),
+      })
     }
   }
 
@@ -916,7 +968,7 @@ function App() {
             this happens in private/incognito mode or with strict tracking
             protection. Try a normal window.
           </p>
-          <pre className="text-xs text-red-600 bg-red-50 dark:bg-red-950/40 p-2 rounded">
+          <pre className="text-xs text-overdue bg-overdue/[0.07] p-2 rounded">
             {seedError}
           </pre>
         </div>
@@ -1013,8 +1065,12 @@ function App() {
               </div>
               {switcherOpen && (
                 <div
-                  ref={switcherPopRef}
+                  ref={(el) => {
+                    switcherPopRef.current = el
+                    focusFirstMenuItem(el)
+                  }}
                   role="menu"
+                  onKeyDown={menuKeyNav}
                   className="absolute left-2.5 right-2.5 top-[calc(100%-2px)] z-40 bg-surface rounded-[13px] p-1.5 shadow-[0_1px_3px_rgba(0,0,0,0.12),0_12px_34px_rgba(0,0,0,0.18),0_0_0_0.5px_rgba(0,0,0,0.05)]"
                 >
                   <div className="px-2.5 pt-1 pb-1 text-[11px] font-semibold text-ink-faint tracking-[0.01em]">
@@ -1105,6 +1161,13 @@ function App() {
             <div
               onClick={toggleSprintsCollapsed}
               role="button"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault()
+                  toggleSprintsCollapsed()
+                }
+              }}
               aria-expanded={!sprintsCollapsed}
               className="flex items-center justify-between px-[18px] pt-3 pb-1.5 cursor-pointer select-none"
             >
@@ -1179,6 +1242,13 @@ function App() {
             <div
               onClick={toggleCollectionsCollapsed}
               role="button"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault()
+                  toggleCollectionsCollapsed()
+                }
+              }}
               aria-expanded={!collectionsCollapsed}
               className="flex items-center justify-between px-[18px] pt-3 pb-1.5 cursor-pointer select-none"
             >
@@ -1245,7 +1315,7 @@ function App() {
                       title="Delete collection"
                       aria-label={`Delete collection ${c.name}`}
                       className={`absolute right-1.5 top-1/2 -translate-y-1/2 w-5 h-5 flex items-center justify-center rounded transition opacity-0 group-hover:opacity-100 ${
-                        isActive ? 'text-white/70 hover:text-white hover:bg-white/20' : 'text-ink-faint hover:text-red-500 hover:bg-red-500/10'
+                        isActive ? 'text-white/70 hover:text-white hover:bg-white/20' : 'text-ink-faint hover:text-overdue hover:bg-overdue/10'
                       }`}
                     >
                       <X size={13} strokeWidth={2} />
@@ -1411,7 +1481,9 @@ function App() {
               </button>
               {exportMenuOpen && (
                 <div
+                  ref={focusFirstMenuItem}
                   role="menu"
+                  onKeyDown={menuKeyNav}
                   className="absolute right-0 top-[calc(100%+6px)] z-30 min-w-[262px] p-1.5 rounded-[12px] bg-surface shadow-[0_12px_32px_rgba(0,0,0,0.16),0_0_0_0.5px_rgba(0,0,0,0.06)] dark:shadow-[0_12px_32px_rgba(0,0,0,0.55),0_0_0_0.5px_rgba(255,255,255,0.08)]"
                 >
                   <button
@@ -1581,16 +1653,17 @@ function App() {
           <div
             className={`fixed inset-0 z-40 bg-black/25 backdrop-blur-md transition-opacity duration-200 ${
               settingsOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'
-            }`}
+            } motion-reduce:transition-none`}
             onClick={() => setSettingsOpen(false)}
             aria-hidden
           />
+          {/* Non-modal inspector (background stays interactive) — so
+              role=complementary, NOT dialog/aria-modal (§ overlay contract). */}
           <div
-            role="dialog"
-            aria-modal="true"
+            role="complementary"
             aria-label="Project settings"
             inert={!settingsOpen}
-            className={`fixed top-0 right-0 z-50 h-full w-[440px] max-w-[90vw] bg-surface border-l border-border-hair shadow-[-12px_0_50px_rgba(0,0,0,0.18)] transition-transform duration-300 ease-[cubic-bezier(.32,.72,0,1)] ${
+            className={`fixed top-0 right-0 z-50 h-full w-[440px] max-w-[90vw] bg-surface border-l border-border-hair shadow-[-12px_0_50px_rgba(0,0,0,0.18)] transition-transform duration-300 ease-[cubic-bezier(.32,.72,0,1)] motion-reduce:transition-none ${
               settingsOpen ? 'translate-x-0' : 'translate-x-full'
             }`}
           >
@@ -1610,16 +1683,15 @@ function App() {
           <div
             className={`fixed inset-0 z-40 bg-black/25 backdrop-blur-md transition-opacity duration-200 ${
               showActivity ? 'opacity-100' : 'opacity-0 pointer-events-none'
-            }`}
+            } motion-reduce:transition-none`}
             onClick={() => setShowActivity(false)}
             aria-hidden
           />
           <div
-            role="dialog"
-            aria-modal="true"
+            role="complementary"
             aria-label="Sprint activity log"
             inert={!showActivity}
-            className={`fixed top-0 right-0 z-50 h-full w-[440px] max-w-[90vw] bg-surface border-l border-border-hair shadow-[-12px_0_50px_rgba(0,0,0,0.18)] transition-transform duration-300 ease-[cubic-bezier(.32,.72,0,1)] ${
+            className={`fixed top-0 right-0 z-50 h-full w-[440px] max-w-[90vw] bg-surface border-l border-border-hair shadow-[-12px_0_50px_rgba(0,0,0,0.18)] transition-transform duration-300 ease-[cubic-bezier(.32,.72,0,1)] motion-reduce:transition-none ${
               showActivity ? 'translate-x-0' : 'translate-x-full'
             }`}
           >
@@ -1682,10 +1754,24 @@ function App() {
 
       {toast &&
         createPortal(
-          <div className="fixed inset-x-0 bottom-6 z-[60] flex justify-center px-4 pointer-events-none">
+          <div
+            className="fixed inset-x-0 bottom-6 z-[60] flex justify-center px-4 pointer-events-none"
+            role="status"
+            aria-live="polite"
+          >
             <div className="pointer-events-auto flex items-center gap-3 min-w-[340px] max-w-[460px] px-4 py-3 rounded-[14px] bg-surface border border-border-hair animate-toast-in shadow-[0_12px_32px_rgba(0,0,0,0.16),0_0_0_0.5px_rgba(0,0,0,0.06)] dark:shadow-[0_12px_32px_rgba(0,0,0,0.55),0_0_0_0.5px_rgba(255,255,255,0.08)]">
-              <span className="shrink-0 w-[34px] h-[34px] rounded-full flex items-center justify-center bg-status-done/15 text-status-done">
-                <Check size={18} strokeWidth={2.2} />
+              <span
+                className={`shrink-0 w-[34px] h-[34px] rounded-full flex items-center justify-center ${
+                  toast.kind === 'error'
+                    ? 'bg-overdue/15 text-overdue'
+                    : 'bg-status-done/15 text-status-done'
+                }`}
+              >
+                {toast.kind === 'error' ? (
+                  <X size={18} strokeWidth={2.2} />
+                ) : (
+                  <Check size={18} strokeWidth={2.2} />
+                )}
               </span>
               <div className="min-w-0 flex-1">
                 <div className="text-[13.5px] font-semibold text-ink truncate">{toast.title}</div>
@@ -2320,7 +2406,7 @@ function ViewToggle<T extends string>({
       {ind && (
         <span
           aria-hidden
-          className="absolute top-0.5 bottom-0.5 rounded-[7px] bg-surface shadow-[0_1px_3px_rgba(0,0,0,0.12),0_0_0_0.5px_rgba(0,0,0,0.04)] transition-[left,width] duration-[280ms] ease-[cubic-bezier(.32,.72,0,1)]"
+          className="absolute top-0.5 bottom-0.5 rounded-[7px] bg-surface shadow-[0_1px_3px_rgba(0,0,0,0.12),0_0_0_0.5px_rgba(0,0,0,0.04)] transition-[left,width] duration-[280ms] ease-[cubic-bezier(.32,.72,0,1)] motion-reduce:transition-none"
           style={{ left: ind.left, width: ind.width }}
         />
       )}
@@ -2493,7 +2579,7 @@ function RolloverPopover({
               )}
               <span
                 className={`text-[11.5px] tab-data shrink-0 min-w-[42px] text-right ${
-                  overdue ? 'text-red-500 font-medium' : 'text-ink-muted'
+                  overdue ? 'text-overdue font-semibold' : 'text-ink-muted'
                 }`}
               >
                 {t.dueDate ? formatShortDate(t.dueDate) : '—'}

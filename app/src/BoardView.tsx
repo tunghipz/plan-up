@@ -893,7 +893,7 @@ function DatePopover({
   const assigneeDaysOff = task.assigneeId ? membersById.get(task.assigneeId)?.daysOff : undefined
   return (
     <div className="absolute top-[42px] right-2 z-30 w-[232px] rounded-[13px] border border-border-hair bg-surface p-2 shadow-[0_8px_30px_rgba(0,0,0,0.18)]">
-      <div className="text-[11px] font-bold uppercase tracking-[0.04em] text-ink-faint px-1.5 pt-0.5 pb-1.5">
+      <div className="text-[11px] font-semibold text-ink-faint px-1.5 pt-0.5 pb-1.5">
         Schedule
       </div>
       <div className="flex items-center gap-2 px-1 mb-1">
@@ -950,8 +950,8 @@ function DatePopover({
 }
 
 const PRIO_TAG: Record<string, { label: string; bg: string; fg: string }> = {
-  urgent: { label: 'Urgent', bg: 'rgba(255,59,48,0.12)', fg: 'color-mix(in srgb, var(--color-priority-urgent) 100%, #000 22%)' },
-  high: { label: 'High', bg: 'rgba(255,149,0,0.15)', fg: 'color-mix(in srgb, var(--color-priority-high) 100%, #000 22%)' },
+  urgent: { label: 'Urgent', bg: 'color-mix(in srgb, var(--color-priority-urgent) 12%, transparent)', fg: 'color-mix(in srgb, var(--color-priority-urgent) 78%, var(--color-ink))' },
+  high: { label: 'High', bg: 'color-mix(in srgb, var(--color-priority-high) 15%, transparent)', fg: 'color-mix(in srgb, var(--color-priority-high) 78%, var(--color-ink))' },
 }
 
 // Wrapped in memo so the per-dragover re-renders of BoardView don't re-render every
@@ -1014,7 +1014,7 @@ const BoardCard = memo(function BoardCard({
           })()
     return {
       bg: `color-mix(in srgb, ${c} 13%, transparent)`,
-      fg: `color-mix(in srgb, ${c} 100%, #000 25%)`,
+      fg: `color-mix(in srgb, ${c} 75%, var(--color-ink))`,
       label: plan.endTime ? `${formatShortDate(dd)}, ${plan.endTime}` : formatShortDate(dd),
       title: `Due ${dd}${plan.endTime ? ' ' + plan.endTime : ''}`,
     }
@@ -1030,7 +1030,7 @@ const BoardCard = memo(function BoardCard({
     const c = od ? 'var(--color-priority-urgent)' : 'var(--color-accent)'
     return {
       bg: `color-mix(in srgb, ${c} 13%, transparent)`,
-      fg: `color-mix(in srgb, ${c} 100%, #000 25%)`,
+      fg: `color-mix(in srgb, ${c} 75%, var(--color-ink))`,
       label: plan.startTime ? `${formatShortDate(sd)}, ${plan.startTime}` : formatShortDate(sd),
       title: `Milestone ${sd}${plan.startTime ? ' ' + plan.startTime : ''}`,
     }
@@ -1099,7 +1099,7 @@ const BoardCard = memo(function BoardCard({
         ) : (
           <button
             onClick={() => onCycleStatus(task.id)}
-            className="w-[18px] h-[18px] shrink-0 mt-0.5 transition hover:scale-110 flex items-center justify-center"
+            className="w-[18px] h-[18px] shrink-0 mt-0.5 transition hover:scale-110 motion-reduce:transform-none flex items-center justify-center"
             style={{ color: meta.varName }}
             title={`${meta.label} — click to cycle`}
             aria-label={`Status: ${meta.label}`}

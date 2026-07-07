@@ -1,7 +1,7 @@
 # Collections (task ngoài sprint)
 
 **Status:** Implemented
-**Last updated:** 2026-07-02 (nhả grip không di chuyển / thả lại chỗ cũ = no-op)
+**Last updated:** 2026-07-07 (xoá item có undo toast ~6s)
 **Code:** `app/src/db.ts` (schema v9 + collection/section/status/item CRUD, export v3),
 `app/src/lib.ts` (buildMonthGrid/assignLanes/computeBarSegments — pure calendar helpers),
 `app/src/CollectionView.tsx` (List card-per-section + status editor + click-assign +
@@ -50,6 +50,9 @@ theo section do user tạo). Mỗi bảng:
   (cùng slot → không thêm cột đuôi, không xô lệch lưới; tách khỏi grip kéo ở lead-gutter); click →
   xoá ngay (1 click, không confirm). Item lẻ nhẹ, dễ gõ lại — đúng DNA "speed > breadth, ≤1 click".
   Dùng lại `deleteTask` (an toàn cho collection-item: không children/deps).
+  **Undo toast (2026-07-07):** vì nút trash chiếm đúng chỗ status dot khi hover (dễ click nhầm),
+  xoá xong hiện **toast slide-up "Deleted <tên>" + nút Undo** (~6s, cùng idiom toast import của
+  App) — Undo re-add item nguyên vẹn (giữ id/section/status/dates). Vẫn 0 confirm trước hành động.
 - **Kéo-thả item = pointer-based** (dùng chung `useDragHandle`/`RowDrag` với sprint list — xem
   [list-view.md](./list-view.md)), thay HTML5 DnD cũ (browser-fragile). Grip hiện khi hover trong
   lead-gutter. Kéo để **sắp-xếp-lại thứ tự trong cùng bảng** *và* **chuyển sang bảng khác** — cùng

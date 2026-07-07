@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Package } from 'lucide-react'
 import { useRegisterSW } from 'virtual:pwa-register/react'
+import { IS_TAURI } from './backup'
 
 /**
  * Sidebar footer (design-docs/version-and-updates.md). Calm `plan-up · v{version}`
@@ -22,6 +23,20 @@ const UPDATE_POLL_MS = 30 * 60 * 1000 // re-check for a new SW every 30 min
 let pollingStarted = false
 
 export function VersionFooter() {
+  // Desktop (Tauri) build ships no service worker — updates arrive as new DMGs,
+  // so the footer stays a static version line (desktop-app-tauri.md). Hooks
+  // can't be conditional, so the SW machinery lives in the web-only component.
+  if (IS_TAURI) {
+    return (
+      <div className="flex-1 min-w-0 px-[18px] py-2.5 text-[11px] text-ink-faint tabular-nums select-none truncate">
+        plan-up · v{CURRENT}
+      </div>
+    )
+  }
+  return <SwVersionFooter />
+}
+
+function SwVersionFooter() {
   const {
     needRefresh: [needRefresh],
     updateServiceWorker,

@@ -1,6 +1,6 @@
 # plan-up
 
-ClickUp without the seat tax — a single-user, local-first task & sprint planner. Multi-project, no auth, no backend, no team plan. Members are just labels you create. Data lives in your browser (IndexedDB); export/import JSON for backup.
+ClickUp without the seat tax — a single-user, local-first task & sprint planner. Multi-project, no auth, no backend, no team plan. Members are just labels you create. Data lives in your browser (IndexedDB); export/import JSON for backup. Also ships as a **macOS desktop app** (Tauri 2) with **auto backup** to a folder you pick.
 
 ## Stack
 
@@ -21,6 +21,21 @@ npm run build      # tsc -b && vite build
 npm run test       # vitest run
 npm run lint       # eslint .
 ```
+
+### macOS desktop app (Tauri 2)
+
+```bash
+# prereq: rustup + both darwin targets
+cd app
+npm run tauri dev                                      # dev window
+npm run tauri build -- --target universal-apple-darwin # universal .dmg
+```
+
+Releases: push a `v*` tag → GitHub Actions builds an unsigned universal DMG (first
+launch: right-click → Open). Desktop-only **Auto backup**: Export menu → *Auto backup…*
+→ pick a folder; the app writes `plan-up-YYYY-MM-DD.json` there 30 s after any data
+change, keeping the newest 30 files. See [`design-docs/desktop-app-tauri.md`](./design-docs/desktop-app-tauri.md)
+and [`design-docs/auto-backup.md`](./design-docs/auto-backup.md).
 
 ## What's inside
 

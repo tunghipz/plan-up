@@ -1,7 +1,7 @@
 # Persistence & backup
 
 **Status:** Implemented
-**Last updated:** 2026-07-02
+**Last updated:** 2026-07-07
 **Code:** `app/src/io.ts` (`exportAll`, `importAll`, `seedIfEmpty`), `app/src/App.tsx`
 
 ## Purpose
@@ -12,6 +12,9 @@ JSON export/import is the backup & transfer mechanism (not sync).
 > additively without wiping anything) is a sibling feature — see
 > [project-export-import.md](./project-export-import.md). This doc covers the
 > **full-DB backup** only.
+>
+> **Auto backup** (desktop app only) reuses the same `exportAll()` payload but writes
+> it to a user-picked folder automatically — see [auto-backup.md](./auto-backup.md).
 
 ## User-facing behavior
 - **Export → "Export all (full backup)"** (header toolbar menu): downloads

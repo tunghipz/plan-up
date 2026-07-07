@@ -1,0 +1,132 @@
+import { useState } from 'react'
+import { FolderOpen } from 'lucide-react'
+import { ModalSheet } from './ModalSheet'
+import {
+  BACKUP_KEEP,
+  getBackupDir,
+  getLastBackupStatus,
+  isBackupEnabled,
+  setBackupDir,
+  setBackupEnabled,
+  type BackupStatus,
+} from './backup'
+import { pickBackupDir, runBackupNow } from './backup-tauri'
+
+/**
+ * Auto-backup settings (desktop only) — design-docs/auto-backup.md. State
+ * lives in localStorage (plan-up:backup*); this modal is just a thin editor
+ * over it plus a manual "Back up now" trigger.
+ */
+
+function timeAgo(ts: number): string {
+  const mins = Math.round((Date.now() - ts) / 60000)
+  if (mins < 1) return 'just now'
+  if (mins < 60) return `${mins} min ago`
+  const hours = Math.round(mins / 60)
+  if (hours < 24) return `${hours} h ago`
+  return new Date(ts).toLocaleDateString()
+}
+
+export function BackupSettingsModal({ onClose }: { onClose: () => void }) {
+  const [enabled, setEnabled] = useState(isBackupEnabled)
+  const [dir, setDir] = useState(getBackupDir)
+  const [last, setLast] = useState<BackupStatus | null>(getLastBackupStatus)
+  const [running, setRunning] = useState(false)
+
+  const toggle = () => {
+    const next = !enabled
+    setEnabled(next)
+    setBackupEnabled(next)
+  }
+
+  const chooseFolder = async () => {
+    const picked = await pickBackupDir()
+    if (!picked) return
+    setBackupDir(picked)
+    setDir(picked)
+    // Picking a folder when none was set is an obvious "turn it on".
+    if (!enabled) {
+      setEnabled(true)
+      setBackupEnabled(true)
+    }
+  }
+
+  const backupNow = async () => {
+    setRunning(true)
+    try {
+      setLast(await runBackupNow())
+    } finally {
+      setRunning(false)
+    }
+  }
+
+  return (
+    <ModalSheet title="Auto backup" onClose={onClose}>
+      <p className="text-[13px] text-ink-muted leading-snug">
+        Writes a full backup (<span className="tabular-nums">plan-up-YYYY-MM-DD.json</span>) to a
+        folder 30 s after any change. Keeps the newest {BACKUP_KEEP} daily files.
+      </p>
+
+      <div className="flex items-center justify-between">
+        <span className="text-[13.5px] font-medium text-ink">Back up automatically</span>
+        <button
+          role="switch"
+          aria-checked={enabled}
+          onClick={toggle}
+          className={`relative w-[42px] h-[26px] rounded-full transition-colors ${
+            enabled ? 'bg-accent' : 'bg-border-hair'
+          }`}
+        >
+          <span
+            className={`absolute top-[3px] w-[20px] h-[20px] rounded-full bg-white shadow-[0_1px_3px_rgba(0,0,0,0.25)] transition-[left] ${
+              enabled ? 'left-[19px]' : 'left-[3px]'
+            }`}
+          />
+        </button>
+      </div>
+
+      <div className="flex items-center gap-2.5 min-w-0">
+        <span
+          className={`flex-1 min-w-0 truncate text-[13px] tabular-nums ${dir ? 'text-ink' : 'text-ink-faint'}`}
+          title={dir ?? undefined}
+        >
+          {dir ?? 'No folder chosen'}
+        </span>
+        <button
+          onClick={chooseFolder}
+          className="shrink-0 text-xs flex items-center gap-1.5 px-2.5 py-1.5 text-accent hover:bg-accent-soft rounded-md transition"
+        >
+          <FolderOpen size={13} /> Choose folder…
+        </button>
+      </div>
+
+      <div className="flex items-center justify-between pt-1 border-t border-border-hair">
+        <span className="text-[12px] leading-snug min-w-0 pr-3">
+          {last ? (
+            last.ok ? (
+              <span className="text-green-600 dark:text-green-400">
+                Last backup {timeAgo(last.at)} → {last.file}
+              </span>
+            ) : (
+              <span className="text-red-600 dark:text-red-400 break-words">
+                Backup failed: {last.error} — try re-picking the folder.
+              </span>
+            )
+          ) : (
+            <span className="text-ink-faint">No backup yet.</span>
+          )}
+        </span>
+        <button
+          onClick={backupNow}
+          disabled={running || !dir}
+          className="shrink-0 text-xs font-semibold px-3 py-1.5 rounded-md bg-accent text-white hover:bg-accent-hover transition disabled:opacity-40 inline-flex items-center gap-2"
+        >
+          {running && (
+            <span className="w-3 h-3 rounded-full border-2 border-white/40 border-t-white animate-spin" />
+          )}
+          Back up now
+        </button>
+      </div>
+    </ModalSheet>
+  )
+}

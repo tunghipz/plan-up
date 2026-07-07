@@ -29,6 +29,10 @@ export default defineConfig({
     // `prompt` mode = the new SW WAITS; we surface the update pill and only
     // skipWaiting + reload when the user clicks it (see VersionFooter.tsx).
     VitePWA({
+      // Service workers can't run under Tauri's protocol — ship the desktop
+      // build without SW/manifest entirely (desktop-app-tauri.md). Tauri sets
+      // TAURI_ENV_PLATFORM for both `tauri dev` and `tauri build`.
+      disable: !!process.env.TAURI_ENV_PLATFORM,
       registerType: 'prompt',
       injectRegister: null, // registration is driven by useRegisterSW in React
       workbox: {
@@ -51,4 +55,7 @@ export default defineConfig({
   // Single source of truth for the app version: package.json, inlined at build
   // time and surfaced in the sidebar footer (app-shell-and-navigation.md).
   define: { __APP_VERSION__: JSON.stringify(pkg.version) },
+  // Tauri: keep its CLI output visible and expose TAURI_ENV_* to the client.
+  clearScreen: false,
+  envPrefix: ['VITE_', 'TAURI_ENV_'],
 })

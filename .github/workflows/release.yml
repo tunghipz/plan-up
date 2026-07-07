@@ -1,0 +1,46 @@
+# Desktop release: push a v* tag → build the unsigned universal macOS DMG and
+# attach it to a draft GitHub Release. See design-docs/desktop-app-tauri.md.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          # Universal build needs both; forgetting x86_64 is the classic failure.
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: app/src-tauri
+
+      - run: npm ci
+        working-directory: app
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: app
+          args: --target universal-apple-darwin
+          tagName: ${{ github.ref_name }}
+          releaseName: 'plan-up ${{ github.ref_name }}'
+          releaseBody: >
+            Unsigned build — first launch: right-click the app → Open
+            (or `xattr -dr com.apple.quarantine /Applications/plan-up.app`).
+          releaseDraft: true

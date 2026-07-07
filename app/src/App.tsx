@@ -26,6 +26,7 @@ import {
   Layers,
   Package,
   Database,
+  FolderDown,
   Check,
 } from 'lucide-react'
 import {
@@ -64,6 +65,9 @@ import { BoardView } from './BoardView'
 import { GanttView } from './GanttView'
 import { ActivityLog } from './ActivityLog'
 import { VersionFooter } from './VersionFooter'
+import { IS_TAURI } from './backup'
+import { startAutoBackup } from './backup-tauri'
+import { BackupSettingsModal } from './BackupSettingsModal'
 import { usePinnedPopover } from './usePinnedPopover'
 import { ProjectSettingsView } from './ProjectSettingsView'
 import { HomeDashboard } from './HomeDashboard'
@@ -238,6 +242,7 @@ function App() {
     safeStorage.set(COLLVIEW_KEY, v)
   }
   const [showNewSprint, setShowNewSprint] = useState(false)
+  const [backupSettingsOpen, setBackupSettingsOpen] = useState(false)
   const [showNewProject, setShowNewProject] = useState(false)
   // Project switcher (header dropdown) — replaces the old icon rail. The popover
   // is `absolute` inside the switcher's `relative` header; usePinnedPopover only
@@ -367,6 +372,10 @@ function App() {
     document.addEventListener('mousemove', onMove)
     document.addEventListener('mouseup', onUp)
   }
+
+  // Desktop only: change-driven auto backup (design-docs/auto-backup.md).
+  // No-ops on web; the disposer keeps StrictMode's double-mount clean.
+  useEffect(() => startAutoBackup(), [])
 
   useEffect(() => {
     seedIfEmpty()
@@ -1438,6 +1447,27 @@ function App() {
                       <span className="block text-[12px] text-ink-muted">Every project — restore on a new machine</span>
                     </span>
                   </button>
+                  {IS_TAURI && (
+                    <>
+                      <div className="h-px bg-border-hair mx-2 my-1" />
+                      <button
+                        role="menuitem"
+                        onClick={() => {
+                          setExportMenuOpen(false)
+                          setBackupSettingsOpen(true)
+                        }}
+                        className="w-full flex items-start gap-3 p-2.5 rounded-[8px] text-left hover:bg-surface-hover transition"
+                      >
+                        <span className="shrink-0 w-[30px] h-[30px] rounded-[8px] flex items-center justify-center bg-accent-soft text-accent">
+                          <FolderDown size={15} strokeWidth={1.9} />
+                        </span>
+                        <span className="min-w-0">
+                          <span className="block text-[13.5px] font-medium text-ink">Auto backup…</span>
+                          <span className="block text-[12px] text-ink-muted">Daily JSON backups to a folder</span>
+                        </span>
+                      </button>
+                    </>
+                  )}
                 </div>
               )}
             </div>
@@ -1614,6 +1644,8 @@ function App() {
           }}
         />
       )}
+
+      {backupSettingsOpen && <BackupSettingsModal onClose={() => setBackupSettingsOpen(false)} />}
 
       {showNewSprint && currentProjectId && (
         <NewSprintDialog

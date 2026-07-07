@@ -49,6 +49,8 @@ Non-obvious behaviors, defaults, persistence keys.
 | --- | --- |
 | [data-model.md](./data-model.md) | IndexedDB tables, fields, Dexie schema versioning |
 | [persistence-and-backup.md](./persistence-and-backup.md) | Local-first storage, export/import JSON, seeding |
+| [auto-backup.md](./auto-backup.md) | Desktop-only: auto-write daily full-backup JSON to a user-picked folder (30 s debounce on change, keep newest 30) |
+| [desktop-app-tauri.md](./desktop-app-tauri.md) | macOS desktop app — Tauri 2 shell in `app/src-tauri/`, universal DMG via GitHub Actions on `v*` tag |
 | [project-export-import.md](./project-export-import.md) | Per-project export to a portable file + non-destructive "add as new project" import (auto-detected alongside full backup) |
 | [app-shell-and-navigation.md](./app-shell-and-navigation.md) | Layout, project switcher dropdown, resizable sprint panel, capacity stats |
 | [home-dashboard.md](./home-dashboard.md) | Read-first Home screen *(temporarily hidden — `HOME_ENABLED=false`)*: all-projects grid + cross-project People roster (Dexie v13 `people` table) |

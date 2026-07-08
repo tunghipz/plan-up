@@ -52,6 +52,7 @@ html.dark input, html.dark select, html.dark textarea, html.dark button {
   --glass-edge: rgba(255, 255, 255, 0.62);
   --glass-ring: rgba(255, 255, 255, 0.35);
   --ambient-tint: color-mix(in srgb, var(--color-accent) 6%, transparent);
+  --ambient-tint-2: color-mix(in srgb, var(--color-accent) 3.5%, transparent);
 
   /* Subtle control fill (search field, segmented track, date pill). Flips with
      theme so it stays visible on dark surfaces. */
@@ -100,10 +101,11 @@ html.dark input, html.dark select, html.dark textarea, html.dark button {
   --color-vibrancy: rgba(30, 30, 32, 0.62);
   --color-fill: rgba(255, 255, 255, 0.09);
 
-  --color-glass: rgba(44, 44, 50, 0.58);
+  --color-glass: rgba(44, 44, 50, 0.52);
   --glass-edge: rgba(255, 255, 255, 0.14);
   --glass-ring: rgba(255, 255, 255, 0.08);
-  --ambient-tint: color-mix(in srgb, var(--color-accent) 13%, transparent);
+  --ambient-tint: color-mix(in srgb, var(--color-accent) 16%, transparent);
+  --ambient-tint-2: color-mix(in srgb, var(--color-accent) 8%, transparent);
 
   --color-status-todo: #8e8e93;
   --color-status-progress: #0a84ff;
@@ -284,6 +286,7 @@ h1, h2, h3, .display-tight {
 .ambient-canvas {
   background:
     radial-gradient(56% 44% at 86% -4%, var(--ambient-tint), transparent 62%),
+    radial-gradient(60% 50% at 6% 104%, var(--ambient-tint-2), transparent 60%),
     var(--color-canvas);
   background-attachment: fixed;
 }

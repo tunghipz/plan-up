@@ -83,11 +83,17 @@ describe('colorForName', () => {
 })
 
 describe('seedIfEmpty', () => {
-  it('seeds 3 members + 1 sprint + 1 task on empty db', async () => {
-    await seedIfEmpty()
+  it('seeds 3 members + 1 sprint + 1 task on empty db and resolves true', async () => {
+    expect(await seedIfEmpty()).toBe(true)
     expect(await db.members.count()).toBe(3)
     expect(await db.sprints.count()).toBe(1)
     expect(await db.tasks.count()).toBe(1)
+  })
+
+  it('resolves false when data already exists (no fresh-start notice)', async () => {
+    await seedIfEmpty()
+    __resetSeedLockForTests()
+    expect(await seedIfEmpty()).toBe(false)
   })
 
   it('is idempotent — does not re-seed when members exist', async () => {

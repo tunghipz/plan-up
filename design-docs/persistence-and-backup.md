@@ -1,8 +1,8 @@
 # Persistence & backup
 
 **Status:** Implemented
-**Last updated:** 2026-07-07
-**Code:** `app/src/io.ts` (`exportAll`, `importAll`, `seedIfEmpty`), `app/src/App.tsx`
+**Last updated:** 2026-07-08
+**Code:** `app/src/io.ts` (`exportAll`, `importAll`, `seedIfEmpty`), `app/src/App.tsx`, `app/vite.config.ts` (`__VERCEL_ENV__`)
 
 ## Purpose
 Local-first storage with no backend. Data lives in the browser's IndexedDB;
@@ -58,6 +58,34 @@ renames and colors).
   double-mount can't seed twice. `seedFresh` creates 3 demo members, one "Sprint 1"
   (14 days from today), and a welcome task.
 - App load (`App.tsx`) runs `seedIfEmpty()` → `dedupeSprints()` → `recomputeAllDates()`.
+
+## Storage persistence & origin safety (2026-07-08)
+
+Incident: after a Vercel deploy the user "lost all data" intermittently. Audit showed no
+code path can wipe IndexedDB on deploy — the real causes are **origin-scoped storage**
+(preview URLs / www-vs-apex are different origins with their own empty DB, which
+`seedIfEmpty` then silently fills with demo data, masquerading as data loss) and
+**best-effort storage eviction** (Safari ITP deletes site data after 7 days of no
+interaction). Three mitigations:
+
+1. **`navigator.storage.persist()`** on boot (`App.tsx`) — asks the browser to exempt
+   the origin from storage eviction. Fire-and-forget; browsers that deny (or lack the
+   API) degrade to today's behavior.
+2. **Preview-deployment banner** — Vercel sets `VERCEL_ENV=preview` at build time for
+   non-production deployments; `vite.config.ts` injects it as `__VERCEL_ENV__`. On a
+   preview build the app shows a persistent dismissible notice: data saved on a preview
+   URL lives in a separate origin from the production site. (Production deployments and
+   local dev inject `''` — no banner.)
+3. **Fresh-seed notice** — `seedIfEmpty()` now resolves `true` when it actually seeded
+   the demo data into an empty DB. On that boot the app shows a dismissible notice
+   ("started with sample data — if you had data before you may be on a different URL;
+   open your usual address or import a backup") instead of seeding silently. Dismissal
+   is remembered (`plan-up:seedNoticeAck` via `safeStorage`).
+
+**Canonical domain (manual, Vercel dashboard):** keep exactly one primary domain; when
+both `www.x` and `x` are assigned, Vercel redirects the secondary to the primary
+automatically — verify the redirect is on so the two origins can't split user data.
+Preview URLs can't be redirected (they exist on purpose); the banner covers them.
 
 ## Rules & edge cases
 - Import is **replace, never merge** — by design (it's a restore, not a sync).

@@ -32,6 +32,7 @@ import {
   Check,
   Send,
   Image as ImageIcon,
+  TriangleAlert,
 } from 'lucide-react'
 import {
   db,
@@ -172,6 +173,40 @@ function SprintStateDot({
  * ↓/↑ move focus through the enabled menuitems (wrapping), Home/End jump.
  * Attach as onKeyDown on the menu div; pair with focusFirstMenuItem on open.
  */
+/** Persistent dismissible data-safety notice (persistence-and-backup.md §origin
+ *  safety) — same card DNA as the toast, but amber and it stays until dismissed. */
+function DataNotice({
+  title,
+  detail,
+  onDismiss,
+}: {
+  title: string
+  detail: string
+  onDismiss: () => void
+}) {
+  return (
+    <div
+      role="status"
+      className="pointer-events-auto flex items-start gap-3 min-w-[340px] max-w-[500px] px-4 py-3 rounded-[14px] bg-surface border border-border-hair animate-toast-in shadow-[0_12px_32px_rgba(0,0,0,0.16),0_0_0_0.5px_rgba(0,0,0,0.06)] dark:shadow-[0_12px_32px_rgba(0,0,0,0.55),0_0_0_0.5px_rgba(255,255,255,0.08)]"
+    >
+      <span className="shrink-0 w-[34px] h-[34px] rounded-full flex items-center justify-center bg-priority-high/15 text-warn-ink">
+        <TriangleAlert size={18} strokeWidth={2.2} />
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="text-[13.5px] font-semibold text-ink">{title}</div>
+        <div className="text-[12px] text-ink-muted mt-0.5">{detail}</div>
+      </div>
+      <button
+        onClick={onDismiss}
+        aria-label="Dismiss"
+        className="shrink-0 w-7 h-7 grid place-items-center rounded-md text-ink-faint hover:text-ink hover:bg-surface-hover transition"
+      >
+        <X size={16} />
+      </button>
+    </div>
+  )
+}
+
 function menuKeyNav(e: React.KeyboardEvent<HTMLElement>) {
   if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) return
   const items = Array.from(
@@ -382,6 +417,15 @@ function App() {
   )
   const [dark, setDark] = useDarkMode()
   const [brand, setBrand] = useBrandTheme()
+  // Data-safety notices (persistence-and-backup.md §origin safety): an empty DB
+  // on a known-good browser usually means a DIFFERENT ORIGIN (Vercel preview
+  // URL, www vs apex) — surface it instead of silently seeding demo data.
+  const [seedNotice, setSeedNotice] = useState(false)
+  const [previewNotice, setPreviewNotice] = useState(
+    () =>
+      __VERCEL_ENV__ === 'preview' &&
+      safeStorage.get('plan-up:previewNoticeAck') !== '1'
+  )
   const fileInputRef = useRef<HTMLInputElement>(null)
   // Scroll container for the sprint views — search-palette jump-to scrolls it to
   // the picked task (we never use scrollIntoView; it breaks this container).
@@ -451,9 +495,20 @@ function App() {
   // No-ops on web; the disposer keeps StrictMode's double-mount clean.
   useEffect(() => startAutoBackup(), [])
 
+  // Ask the browser to exempt this origin from storage eviction (Safari ITP
+  // wipes unpersisted site data after 7 days without interaction). Best-effort:
+  // denial or a missing API just keeps today's behavior.
+  useEffect(() => {
+    navigator.storage?.persist?.().catch(() => {})
+  }, [])
+
   useEffect(() => {
     seedIfEmpty()
-      .then(() => dedupeSprints())
+      .then((seeded) => {
+        if (seeded && safeStorage.get('plan-up:seedNoticeAck') !== '1')
+          setSeedNotice(true)
+        return dedupeSprints()
+      })
       .then((removed) => {
         if (removed > 0) {
           console.info(
@@ -2021,6 +2076,33 @@ function App() {
           onClose={() => setPaletteOpen(false)}
         />
       )}
+
+      {(seedNotice || previewNotice) &&
+        createPortal(
+          <div className="fixed inset-x-0 bottom-6 z-[55] flex flex-col items-center gap-2 px-4 pointer-events-none">
+            {previewNotice && (
+              <DataNotice
+                title="Preview deployment"
+                detail="Data saved on this preview URL is separate from the main site. Open your usual address to see your real data."
+                onDismiss={() => {
+                  safeStorage.set('plan-up:previewNoticeAck', '1')
+                  setPreviewNotice(false)
+                }}
+              />
+            )}
+            {seedNotice && (
+              <DataNotice
+                title="Fresh start with sample data"
+                detail="This browser had no saved data at this URL. Had data before? Open the exact URL you used last time, or import a backup (Import in the toolbar)."
+                onDismiss={() => {
+                  safeStorage.set('plan-up:seedNoticeAck', '1')
+                  setSeedNotice(false)
+                }}
+              />
+            )}
+          </div>,
+          document.body
+        )}
 
       {toast &&
         createPortal(

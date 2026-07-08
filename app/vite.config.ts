@@ -54,7 +54,14 @@ export default defineConfig({
   ],
   // Single source of truth for the app version: package.json, inlined at build
   // time and surfaced in the sidebar footer (app-shell-and-navigation.md).
-  define: { __APP_VERSION__: JSON.stringify(pkg.version) },
+  define: {
+    __APP_VERSION__: JSON.stringify(pkg.version),
+    // Vercel sets VERCEL_ENV at build time ('production' | 'preview' | ...).
+    // Preview deployments are a different origin with their own empty IndexedDB
+    // — the app warns the user there (persistence-and-backup.md). Local dev /
+    // non-Vercel builds inline '' (no banner).
+    __VERCEL_ENV__: JSON.stringify(process.env.VERCEL_ENV ?? ''),
+  },
   // Tauri: keep its CLI output visible and expose TAURI_ENV_* to the client.
   clearScreen: false,
   envPrefix: ['VITE_', 'TAURI_ENV_'],

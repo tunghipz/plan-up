@@ -311,8 +311,12 @@ export async function importProject(
 }
 
 // Module-level promise lock prevents StrictMode double-mount from seeding twice.
-let seedPromise: Promise<void> | null = null
-export function seedIfEmpty(): Promise<void> {
+// Resolves `true` when this boot actually seeded demo data into an empty DB —
+// the app surfaces that as a "fresh start" notice instead of seeding silently
+// (an empty DB on a known-good browser usually means a different origin, e.g.
+// a Vercel preview URL — see design-docs/persistence-and-backup.md).
+let seedPromise: Promise<boolean> | null = null
+export function seedIfEmpty(): Promise<boolean> {
   if (!seedPromise) {
     // On failure, release the lock so a later call (e.g. after a transient
     // IndexedDB hiccup clears) can retry — otherwise a single rejected seed is
@@ -384,8 +388,8 @@ export async function dedupeSprints(): Promise<number> {
   })
 }
 
-async function doSeed() {
-  await db.transaction(
+async function doSeed(): Promise<boolean> {
+  return db.transaction(
     'rw',
     [db.projects, db.members, db.sprints, db.tasks, db.people],
     async () => {
@@ -401,8 +405,9 @@ async function doSeed() {
         await db.projects.add(project)
       }
       const memberCount = await db.members.count()
-      if (memberCount > 0) return
+      if (memberCount > 0) return false
       await seedFresh(project.id)
+      return true
     }
   )
 }

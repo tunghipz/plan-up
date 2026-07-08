@@ -24,6 +24,7 @@ import {
   ArchiveRestore,
   FolderSync,
   Layers,
+  PanelLeft,
   Package,
   Database,
   FolderDown,
@@ -387,8 +388,19 @@ function App() {
   useEffect(() => {
     safeStorage.set('plan-up:sidebarWidth', String(sidebarWidth))
   }, [sidebarWidth])
+  // Collapse the whole sidebar (macOS sidebar.left idiom — app-shell v4.2). Fully
+  // hidden (width 0), not a mini rail. `sidebarResizing` suppresses the width
+  // transition while dragging the resize edge so the drag tracks the cursor 1:1.
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(
+    () => safeStorage.get('plan-up:sidebarCollapsed') === '1'
+  )
+  useEffect(() => {
+    safeStorage.set('plan-up:sidebarCollapsed', sidebarCollapsed ? '1' : '0')
+  }, [sidebarCollapsed])
+  const [sidebarResizing, setSidebarResizing] = useState(false)
   const startSidebarResize = (e: React.MouseEvent) => {
     e.preventDefault()
+    setSidebarResizing(true)
     // rAF-coalesced: mousemove can fire far above the frame rate, and each
     // setSidebarWidth re-renders the whole App tree — one write per frame is
     // all the screen can show anyway.
@@ -412,6 +424,7 @@ function App() {
       document.removeEventListener('mouseup', onUp)
       document.body.style.userSelect = ''
       document.body.style.cursor = ''
+      setSidebarResizing(false)
     }
     document.body.style.userSelect = 'none'
     document.body.style.cursor = 'col-resize'
@@ -647,6 +660,14 @@ function App() {
         if (settingsOpen || !sprintActive || screen === 'home') return
         e.preventDefault()
         setPaletteOpen(true)
+        return
+      }
+
+      // ⌘\ / Ctrl+\ — toggle the sidebar (macOS sidebar idiom, app-shell v4.2).
+      // Global: works even while typing, like ⌘K.
+      if ((e.metaKey || e.ctrlKey) && e.key === '\\') {
+        e.preventDefault()
+        setSidebarCollapsed((c) => !c)
         return
       }
 
@@ -999,10 +1020,20 @@ function App() {
         />
       ) : (
       <>
-      {/* Secondary panel: macOS vibrancy sidebar, accent-filled active row */}
+      {/* Secondary panel: macOS vibrancy sidebar, accent-filled active row.
+          Collapses to width 0 (app-shell v4.2); `inert` when collapsed so its
+          controls leave the tab order. Width transition off during drag-resize. */}
       <aside
-        className="vibrancy shrink-0 border-r border-border-hair flex flex-col overflow-hidden relative"
-        style={{ width: sidebarWidth }}
+        className={`vibrancy shrink-0 border-border-hair flex flex-col overflow-hidden relative ${
+          sidebarCollapsed ? '' : 'border-r'
+        } ${
+          sidebarResizing
+            ? ''
+            : 'transition-[width] duration-300 ease-[cubic-bezier(.32,.72,0,1)] motion-reduce:transition-none'
+        }`}
+        style={{ width: sidebarCollapsed ? 0 : sidebarWidth }}
+        aria-hidden={sidebarCollapsed}
+        inert={sidebarCollapsed}
       >
         {currentProject ? (
           <>
@@ -1383,6 +1414,17 @@ function App() {
           settings opens as a right-side drawer overlay (below), not a takeover. */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         <header className="h-[54px] shrink-0 border-b border-border-hair bg-surface flex items-center px-5 gap-3">
+          {/* Sidebar toggle — macOS sidebar.left idiom (one button, both ways),
+              far left so the breadcrumb keeps context when the panel is hidden. */}
+          <button
+            onClick={() => setSidebarCollapsed((c) => !c)}
+            title={`${sidebarCollapsed ? 'Show' : 'Hide'} sidebar (⌘\\)`}
+            aria-label={`${sidebarCollapsed ? 'Show' : 'Hide'} sidebar`}
+            aria-pressed={!sidebarCollapsed}
+            className="shrink-0 inline-flex items-center justify-center w-8 h-8 -ml-1.5 rounded-md text-ink-faint hover:text-ink hover:bg-surface-hover transition"
+          >
+            <PanelLeft size={16} strokeWidth={1.9} />
+          </button>
           <div className="flex items-center gap-2.5 text-sm min-w-0">
             {selKind === 'collection' && currentCollection ? (
               <CollectionBarIdentity collection={currentCollection} />

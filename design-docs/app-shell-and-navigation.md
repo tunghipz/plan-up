@@ -46,6 +46,17 @@
 > project stays a sidebar-only affordance (no duplicate trigger, §8.3), so the
 > breadcrumb is `aria-hidden` (the title `h1` + Dates property carry it for a11y).
 > Approved via demo `demo/sprint-toolbar-fill.html` (Hướng 1).
+>
+> **v4.2 · Collapsible sidebar (2026-07-08)** — a **`PanelLeft` toggle** at the far
+> left of the main toolbar hides/shows the sidebar (macOS `sidebar.left` idiom — one
+> button, both directions, always visible). Collapsed = the vibrancy panel slides to
+> **width 0** (shared *move* curve, reduced-motion safe) — fully hidden, **not** a mini
+> icon-rail (that was removed in v3). The breadcrumb (v4.1) keeps you oriented while the
+> sidebar is away. Shortcut **⌘\ / Ctrl+\** (global, fires even while typing); state
+> persists at `localStorage['plan-up:sidebarCollapsed']`. The collapsed `<aside>` is
+> `inert` so its controls drop out of the tab order, and the width transition is
+> suppressed mid drag-resize (`sidebarResizing`) so dragging still tracks the cursor
+> 1:1. Approved via demo `demo/sidebar-collapse.html` (variant A).
 
 ## Purpose
 The two-pane macOS-style frame (sidebar + main) that hosts everything, plus the

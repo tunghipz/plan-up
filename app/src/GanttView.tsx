@@ -461,10 +461,13 @@ export function GanttView({
           )}
 
           {/* Sticky date header */}
+          {/* rounded-t matches the card's 18px — sticky layers escape the
+              scroll container's rounded clip in Chromium, so the flush glass
+              would otherwise paint square over the card corners. */}
           <div
-            className="sticky top-0 z-20 flex glass-flush border-b border-border-hair"
+            className="sticky top-0 z-20 flex glass-flush border-b border-border-hair rounded-t-[18px]"
           >
-            <div className="sticky left-0 z-10 glass-flush" style={{ width: MGUT }} />
+            <div className="sticky left-0 z-10 glass-flush rounded-tl-[18px]" style={{ width: MGUT }} />
             {workdays.map((date, i) => (
               <div
                 key={date}
@@ -495,7 +498,7 @@ export function GanttView({
           </div>
 
           {/* Swimlanes */}
-          {groups.map(({ member, evs, rows, offWindow, earlierN, laterN, noDates, offBands }) => {
+          {groups.map(({ member, evs, rows, offWindow, earlierN, laterN, noDates, offBands }, gi) => {
             const laneH = rows * ROWH + PAD_TOP * 2
             const hasExtra = offWindow.length > 0 || noDates.length > 0
             const isOpen = expanded.has(member.id)
@@ -508,7 +511,9 @@ export function GanttView({
                 <div className="flex border-b border-border-hair/70" style={{ minHeight: laneH }}>
                   {/* sticky label */}
                   <div
-                    className="sticky left-0 z-10 glass-flush flex items-start gap-2.5 px-3.5 py-2.5"
+                    className={`sticky left-0 z-10 glass-flush flex items-start gap-2.5 px-3.5 py-2.5 ${
+                      gi === groups.length - 1 && !(isOpen && hasExtra) ? 'rounded-bl-[18px]' : ''
+                    }`}
                     style={{ width: MGUT }}
                   >
                     <Avatar member={member} />

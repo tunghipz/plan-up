@@ -101,7 +101,10 @@ Left → right:
      carries `aria-haspopup="menu"` + `aria-expanded`; the active project row carries
      `aria-current`. The popover closes on outside-press / Escape (shared `usePinnedPopover`
      wiring) and caps its list height (scrolls) so many projects don't overflow the pane.
-     A **settings gear** sits beside the switcher inside the strip (unchanged behavior).
+     The **settings gear** is **hover-revealed** (2026-07-08, demo
+     `settings-gear-placement.html` option B): hidden at rest so the strip reads as
+     tile + name + chevron only; it fades in on strip hover, on keyboard focus
+     (focus-visible), and stays visible while the settings drawer is open.
    - **Sprints + Collections** — the sprint list (active row = accent bg), `+`/`n` to add a
      sprint, then Collections. Both are collapsible sections (unchanged).
    - **Footer** — `plan-up · v{version}` (see below) with the **dark-mode toggle** (`Moon`/`Sun`)

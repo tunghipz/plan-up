@@ -48,11 +48,14 @@ html.dark input, html.dark select, html.dark textarea, html.dark button {
   /* Liquid Glass (Tempered) — design-docs/liquid-glass-material.md.
      Glass bg stays fairly opaque (0.62) so muted text keeps AA over the
      ambient tint; edge/ring are the specular highlights of the material. */
-  --color-glass: rgba(255, 255, 255, 0.62);
-  --glass-edge: rgba(255, 255, 255, 0.62);
-  --glass-ring: rgba(255, 255, 255, 0.35);
-  --ambient-tint: color-mix(in srgb, var(--color-accent) 6%, transparent);
-  --ambient-tint-2: color-mix(in srgb, var(--color-accent) 3.5%, transparent);
+  /* Light "liquid" (option D, demo/liquid-light-fix.html): lower opacity +
+     stronger ambient so the wash reads through, dark 0.5px ring as the
+     optical edge (a white rim vanishes on a white canvas), bright specular. */
+  --color-glass: rgba(255, 255, 255, 0.5);
+  --glass-edge: rgba(255, 255, 255, 0.9);
+  --glass-ring: rgba(0, 0, 0, 0.06);
+  --ambient-tint: color-mix(in srgb, var(--color-accent) 10%, transparent);
+  --ambient-tint-2: color-mix(in srgb, var(--color-accent) 5.5%, transparent);
 
   /* Subtle control fill (search field, segmented track, date pill). Flips with
      theme so it stays visible on dark surfaces. */

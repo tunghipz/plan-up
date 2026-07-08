@@ -29,10 +29,17 @@ Reminders, capacity bar, semantic colors, hành vi (1-click, keyboard).
 
 | Token | Light | Dark |
 |---|---|---|
-| `--color-glass` | `rgba(255,255,255,0.62)` | `rgba(44,44,50,0.58)` |
-| `--glass-edge` (specular trên) | `rgba(255,255,255,0.62)` | `rgba(255,255,255,0.14)` |
-| `--glass-ring` (viền 0.5px) | `rgba(255,255,255,0.35)` | `rgba(255,255,255,0.08)` |
-| `--ambient-tint` | `color-mix(accent 6%, transparent)` | `color-mix(accent 9%, transparent)` |
+| `--color-glass` | `rgba(255,255,255,0.5)` | `rgba(44,44,50,0.52)` |
+| `--glass-edge` (specular trên) | `rgba(255,255,255,0.9)` | `rgba(255,255,255,0.14)` |
+| `--glass-ring` (viền 0.5px) | `rgba(0,0,0,0.06)` **(đen — rim trắng chìm trên nền sáng)** | `rgba(255,255,255,0.08)` |
+| `--ambient-tint` (góc trên-phải) | `color-mix(accent 10%, transparent)` | `color-mix(accent 16%, transparent)` |
+| `--ambient-tint-2` (góc dưới-trái) | `color-mix(accent 5.5%, transparent)` | `color-mix(accent 8%, transparent)` |
+
+Light theme đi theo **option D** của `demo/liquid-light-fix.html` (2026-07-08):
+dark rim + trong hơn + ambient đậm — vì rim specular trắng vô hình trên canvas
+sáng, cạnh light theme cần hairline tối làm optical edge. Dark theme lộ rim
+trắng tự nhiên nên giữ nguyên. `.glass-flush` = cùng bg + blur, không shadow,
+cho sticky cell bên trong card kính (gantt date header, member gutter).
 
 Utility classes:
 
@@ -73,7 +80,8 @@ Utility classes:
 
 - `backdrop-filter` nhiều card = GPU cost — chấp nhận vì nội dung sau card là
   canvas tĩnh (blur rẻ), không phải scroll content; theo dõi trên máy yếu.
-- Glass bg light giữ 0.62 opacity (đậm hơn demo 0.55) để text muted không rớt
-  AA trên ambient tint.
+- Glass light 0.5 opacity: `ink-faint` trên vùng tint đo ~4.1:1, body kính
+  ~4.4:1 — ngang precedent đã chấp nhận ở design-system §2.2 (ink-faint trên
+  canvas 4.15 "sát AA"); tint chỉ chiếm 2 góc, không phủ vùng đọc chính.
 - `background-attachment: fixed` trên WKWebView (Tauri) OK; nếu browser nào
   không support thì tint chỉ lệch nhẹ, không vỡ.

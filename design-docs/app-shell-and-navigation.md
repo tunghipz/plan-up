@@ -58,6 +58,13 @@
 > suppressed mid drag-resize (`sidebarResizing`) so dragging still tracks the cursor
 > 1:1. Approved via demo `demo/sidebar-collapse.html` (variant A).
 
+> **v4.3 · Copy-for-Telegram button (2026-07-08)** — the `SprintPageHeader` title
+> row gains a right-aligned **Copy** button (paper-plane icon, calm `--fill`
+> background) that opens the `CopyTelegramModal` popover to copy the sprint as
+> plain-text Tree for pasting into chat. Hidden when the sprint has no tasks. The
+> title + note now share a flex row with the button; Dates + capacity unchanged.
+> Full spec in [`copy-to-telegram.md`](./copy-to-telegram.md).
+
 ## Purpose
 The two-pane macOS-style frame (sidebar + main) that hosts everything, plus the
 **sprint page header** (title · note · dates · capacity inset) at the top of the

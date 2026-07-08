@@ -29,6 +29,7 @@ import {
   Database,
   FolderDown,
   Check,
+  Send,
   Image as ImageIcon,
 } from 'lucide-react'
 import {
@@ -71,6 +72,7 @@ import { IS_TAURI } from './backup'
 import { startAutoBackup } from './backup-tauri'
 import { BackupSettingsModal } from './BackupSettingsModal'
 import { ExportImageModal } from './ExportImageModal'
+import { CopyTelegramModal } from './CopyTelegramModal'
 import { groupTasksByMember } from './png-export'
 import { computeAllWorkingPlans } from './scheduling'
 import { loadSort } from './task-sort'
@@ -285,6 +287,7 @@ function App() {
   const [showNewSprint, setShowNewSprint] = useState(false)
   const [backupSettingsOpen, setBackupSettingsOpen] = useState(false)
   const [exportImageOpen, setExportImageOpen] = useState(false)
+  const [copyTgOpen, setCopyTgOpen] = useState(false)
   const [showNewProject, setShowNewProject] = useState(false)
   // Project switcher (header dropdown) — replaces the old icon rail. The popover
   // is `absolute` inside the switcher's `relative` header; usePinnedPopover only
@@ -1682,6 +1685,7 @@ function App() {
               key={currentSprint.id}
               sprint={currentSprint}
               capacity={capacity}
+              onCopy={() => setCopyTgOpen(true)}
             />
           )}
 
@@ -1823,6 +1827,14 @@ function App() {
       )}
 
       {backupSettingsOpen && <BackupSettingsModal onClose={() => setBackupSettingsOpen(false)} />}
+      {copyTgOpen && currentSprint && (
+        <CopyTelegramModal
+          sprint={currentSprint}
+          members={paletteMembers ?? []}
+          tasks={tasks ?? []}
+          onClose={() => setCopyTgOpen(false)}
+        />
+      )}
       {exportImageOpen &&
         currentProject &&
         currentSprint &&
@@ -2097,6 +2109,7 @@ function SearchPalette({
 function SprintPageHeader({
   sprint,
   capacity,
+  onCopy,
 }: {
   sprint: Sprint
   capacity: {
@@ -2108,17 +2121,34 @@ function SprintPageHeader({
     open: number
     notEstimated: number
   }
+  /** Open the "Copy for Telegram" popover. Button hidden when the sprint is empty. */
+  onCopy: () => void
 }) {
   const { total, pctAssigned, done, pctDone, inFlight, open, notEstimated } = capacity
   const pct = (n: number) => `${(n / total) * 100}%`
   return (
     <div className="bg-surface px-6 pt-5 pb-5">
-      <h1 className="text-[21px] font-bold tracking-[-0.022em] text-ink leading-tight">
-        {sprint.name}
-      </h1>
-
-      {/* Note as an inline description right under the title. */}
-      <SprintNoteBanner sprint={sprint} />
+      {/* Title + Copy button on one row; note flows under the title. */}
+      <div className="flex items-start gap-3">
+        <div className="min-w-0 flex-1">
+          <h1 className="text-[21px] font-bold tracking-[-0.022em] text-ink leading-tight">
+            {sprint.name}
+          </h1>
+          {/* Note as an inline description right under the title. */}
+          <SprintNoteBanner sprint={sprint} />
+        </div>
+        {total > 0 && (
+          <button
+            onClick={onCopy}
+            title="Copy for Telegram"
+            aria-label="Copy sprint for Telegram"
+            className="shrink-0 inline-flex items-center gap-1.5 rounded-[9px] bg-fill px-3 py-1.5 text-[13px] font-medium text-ink-muted transition hover:bg-[rgba(0,0,0,0.09)] hover:text-ink active:scale-[0.97] dark:hover:bg-white/10"
+          >
+            <Send size={14} strokeWidth={1.9} aria-hidden />
+            Copy
+          </button>
+        )}
+      </div>
 
       {/* Dates property — Notion-style muted label + value pill. */}
       <div className="mt-3 flex items-center gap-2.5 text-[13px]">

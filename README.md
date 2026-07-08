@@ -32,7 +32,11 @@ npm run tauri build -- --target universal-apple-darwin # universal .dmg
 ```
 
 Releases: push a `v*` tag → GitHub Actions builds an unsigned universal DMG (first
-launch: right-click → Open). Desktop-only **Auto backup**: Export menu → *Auto backup…*
+launch: right-click → Open). **Auto update**: the desktop app checks GitHub Releases
+on launch (+ every 6 h) and shows the same `Update · vX.Y.Z` footer pill as the web —
+click to download the signed update and relaunch (see
+[`design-docs/desktop-auto-update.md`](./design-docs/desktop-auto-update.md)).
+Desktop-only **Auto backup**: Export menu → *Auto backup…*
 → pick a folder; the app writes `plan-up-YYYY-MM-DD.json` there 30 s after any data
 change, keeping the newest 30 files. See [`design-docs/desktop-app-tauri.md`](./design-docs/desktop-app-tauri.md)
 and [`design-docs/auto-backup.md`](./design-docs/auto-backup.md).
@@ -71,7 +75,9 @@ and [`design-docs/auto-backup.md`](./design-docs/auto-backup.md).
   - **Collection** — in the toolbar **Export ▾** menu (which also gains **Export as image** for collections — one PNG, sections → `Name · Start · End · Status` table): grouped by table `section → item → subtask`, status = the item's custom status name, dates as a `start → end` range, no ID; scope = whole collection or one section.
   - See [`design-docs/copy-to-telegram.md`](./design-docs/copy-to-telegram.md)
 - **Export / Import JSON** — local-first backup, no sync. The header **Export** button is a split-menu: *Export this project* (a portable single-project file) or *Export all* (full-DB backup). The single **Import** button **auto-detects** the file: a per-project bundle is added **non-destructively as a new project** (every id regenerated, dangling refs dropped, your existing projects untouched) with a slide-up toast + **Undo**; a full backup takes the destructive **replace-all** path (Cupertino confirm sheet). The full backup (**payload v5**) carries the cross-project **People** table too, so merges / renames / colors survive an export → import round-trip instead of being rebuilt from member names. Import **validates the file's shape before touching your data** — a truncated/foreign/hand-edited file (or one with duplicate ids) is rejected with a plain message and your existing data is left intact, never half-wiped. See [`design-docs/project-export-import.md`](./design-docs/project-export-import.md)
+- **Origin safety** — IndexedDB is per-URL, so the app defends against "my data vanished" surprises: it requests `navigator.storage.persist()` on boot (blocks Safari's 7-day eviction), shows a **preview-deployment banner** on Vercel preview URLs (their data is a separate origin from the main site), and a fresh, empty DB seeds demo data **with a dismissible "Fresh start" notice** pointing you back to your usual URL or an import — never silently. See [`design-docs/persistence-and-backup.md`](./design-docs/persistence-and-backup.md)
 - **Dark mode** — Apple dark (canvas `#1C1C1E`, accent `#0A84FF`)
+- **Brand theme** — two switchable accent themes via a **Flame toggle** in the sidebar footer: **ZingPlay Fire** (default — official studio palette `#F04E23→#FDB913`, gradient only at the two signature spots: active sidebar row + primary CTA; AA-safe text accent `#C93A0F`) and the original **Cupertino Blue** (`#0071E3`). Pure CSS token swap (`data-brand` on `<html>`), persists across reloads; semantic overdue/urgent red stays Apple red in both. See [`design-docs/brand-theme.md`](./design-docs/brand-theme.md)
 - **Brand mark** — a progress-ring-on-squircle favicon in System Blue, dark-aware (swaps to `#0A84FF` via `prefers-color-scheme`) — the same ring as the member progress indicator
 - **Version & one-click update** — a calm `plan-up · v{version}` line at the sidebar foot (version inlined from `package.json`, single source of truth). The app ships as an offline-capable PWA: when a newer build is deployed, a **service worker** precaches it and the footer **morphs in place** into a glowing `Update · v{latest}` pill — click it for an instant skipWaiting + reload onto the new version. Prompt-mode (never auto-reloads under you); the glow honours `prefers-reduced-motion`. See [`design-docs/version-and-updates.md`](./design-docs/version-and-updates.md)
 

@@ -326,7 +326,7 @@ function CalendarPopover({
       data-calendar-popover=""
       onClick={(e) => e.stopPropagation()}
       style={{ position: 'fixed', top: pos.top, left: pos.left, width: WIDTH }}
-      className="z-50 bg-surface border border-border-hair rounded-[14px] shadow-[0_12px_40px_rgba(0,0,0,0.18),0_0_0_0.5px_rgba(0,0,0,0.04)] p-3"
+      className="z-50 glass-popover rounded-[14px] p-3"
     >
       <CalendarGrid
         value={value}
@@ -598,7 +598,7 @@ function RangeCalendarPopover({
       data-calendar-popover=""
       onClick={(e) => e.stopPropagation()}
       style={{ position: 'fixed', top: pos.top, left: pos.left, width: WIDTH }}
-      className="z-50 bg-surface border border-border-hair rounded-[14px] shadow-[0_12px_40px_rgba(0,0,0,0.18),0_0_0_0.5px_rgba(0,0,0,0.04)] p-3"
+      className="z-50 glass-popover rounded-[14px] p-3"
     >
       <CalendarGrid
         value={draftStart ?? draftEnd ?? null}

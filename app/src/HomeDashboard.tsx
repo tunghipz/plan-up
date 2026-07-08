@@ -364,7 +364,7 @@ function PersonRow({ entry, allPeople }: { entry: RosterEntry; allPeople: Person
           <div
             ref={popRef}
             style={{ position: 'fixed', top: pos.top, left: pos.left, width: MENU_W }}
-            className="z-50 bg-surface rounded-[12px] border border-border-hair shadow-[0_12px_40px_rgba(0,0,0,0.18)] p-3"
+            className="z-50 glass-popover rounded-[12px] p-3"
           >
             <label className="block text-[11px] font-semibold text-ink-faint mb-1">Name</label>
             <input

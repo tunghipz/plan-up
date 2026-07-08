@@ -91,8 +91,14 @@ từ dải `ambient-canvas` đục full-bleed sang **capsule kính nổi**
 bỏ border-b vì rim capsule là edge) — option C của
 `demo/liquid-column-header.html`.
 
-**Phase 2 (còn lại):** popover/menu/toast sang glass; sidebar vibrancy
-đồng bộ recipe.
+**Phase 2 — popover (2026-07-08):** utility **`.glass-popover`**
+(`--color-glass-thick`, blur 24, popover-tier shadow + rim trong
+box-shadow — mép popover không bị children che). Swap 11 shell:
+DatePicker ×2 (calendar), members ×3 (member editor, color menu,
+days-off), BoardView (Schedule), GanttView + CollectionCalendar
+(task popover), HomeDashboard (project menu), App ×2 (sidebar
+dropdown, Export menu). **Còn lại:** toast (đang solid + ring,
+chấp nhận); sidebar vibrancy.
 
 ## Trade-offs đã cân nhắc
 

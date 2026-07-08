@@ -892,7 +892,7 @@ function DatePopover({
   const endLocked = task.dependsOn.length > 0 || (task.estimate !== null && task.estimate > 0)
   const assigneeDaysOff = task.assigneeId ? membersById.get(task.assigneeId)?.daysOff : undefined
   return (
-    <div className="absolute top-[42px] right-2 z-30 w-[232px] rounded-[13px] border border-border-hair bg-surface p-2 shadow-[0_8px_30px_rgba(0,0,0,0.18)]">
+    <div className="absolute top-[42px] right-2 z-30 w-[232px] rounded-[13px] glass-popover p-2">
       <div className="text-[11px] font-semibold text-ink-faint px-1.5 pt-0.5 pb-1.5">
         Schedule
       </div>

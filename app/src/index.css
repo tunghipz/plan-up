@@ -286,6 +286,25 @@ h1, h2, h3, .display-tight {
     inset 0 0 0 0.5px var(--glass-ring);
 }
 
+/* glass-popover: floating panels — dropdown menus, pickers, date popovers.
+ * Same thick material as modals (read comfort over busy content), popover-tier
+ * shadow. Children never cover a popover's edges, so the rim lives here. */
+.glass-popover {
+  background: var(--color-glass-thick);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  box-shadow:
+    0 12px 40px rgba(0, 0, 0, 0.18),
+    inset 0 1px 0 var(--glass-edge),
+    inset 0 0 0 0.5px var(--glass-ring);
+}
+.dark .glass-popover {
+  box-shadow:
+    0 12px 40px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 var(--glass-edge),
+    inset 0 0 0 0.5px var(--glass-ring);
+}
+
 /* glass-modal: dialog sheets (ModalSheet). Thicker material than cards —
  * dialogs float over dimmed content, so they need more opacity for reading
  * comfort. Children never cover a dialog's edges, so the rim can live in the

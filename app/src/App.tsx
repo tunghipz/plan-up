@@ -1185,7 +1185,7 @@ function App() {
                   }}
                   role="menu"
                   onKeyDown={menuKeyNav}
-                  className="absolute left-2.5 right-2.5 top-[calc(100%-2px)] z-40 bg-surface rounded-[13px] p-1.5 shadow-[0_1px_3px_rgba(0,0,0,0.12),0_12px_34px_rgba(0,0,0,0.18),0_0_0_0.5px_rgba(0,0,0,0.05)]"
+                  className="absolute left-2.5 right-2.5 top-[calc(100%-2px)] z-40 glass-popover rounded-[13px] p-1.5"
                 >
                   <div className="px-2.5 pt-1 pb-1 text-[11px] font-semibold text-ink-faint tracking-[0.01em]">
                     Projects
@@ -1647,7 +1647,7 @@ function App() {
                   ref={focusFirstMenuItem}
                   role="menu"
                   onKeyDown={menuKeyNav}
-                  className="absolute right-0 top-[calc(100%+6px)] z-30 min-w-[262px] p-1.5 rounded-[12px] bg-surface shadow-[0_12px_32px_rgba(0,0,0,0.16),0_0_0_0.5px_rgba(0,0,0,0.06)] dark:shadow-[0_12px_32px_rgba(0,0,0,0.55),0_0_0_0.5px_rgba(255,255,255,0.08)]"
+                  className="absolute right-0 top-[calc(100%+6px)] z-30 min-w-[262px] p-1.5 rounded-[12px] glass-popover"
                 >
                   {/* Share the current view. Sprint → one image (grouped by
                       member). Collection → Copy for Telegram (text tree by

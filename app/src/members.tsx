@@ -316,7 +316,7 @@ export function AvatarPicker({ member }: { member: Member }) {
           ref={popRef}
           onClick={(e) => e.stopPropagation()}
           style={{ position: 'fixed', top: pos?.top ?? -9999, left: pos?.left ?? -9999 }}
-          className={`z-[60] w-[264px] bg-surface border border-border-hair rounded-[14px] shadow-[0_10px_36px_rgba(0,0,0,0.18)] p-3.5 transition-opacity ${
+          className={`z-[60] w-[264px] glass-popover rounded-[14px] p-3.5 transition-opacity ${
             pos ? 'opacity-100' : 'opacity-0 pointer-events-none'
           }`}
         >
@@ -586,7 +586,7 @@ export function MemberColorDot({ member }: { member: Member }) {
         style={{ background: member.color, boxShadow: '0 0 0 1px rgba(0,0,0,0.10)' }}
       />
       {open && (
-        <div className="absolute right-0 top-7 z-20 bg-surface border border-border-hair rounded-[12px] shadow-[0_10px_36px_rgba(0,0,0,0.18)] p-2">
+        <div className="absolute right-0 top-7 z-20 glass-popover rounded-[12px] p-2">
           <ColorSwatchRow
             value={member.color}
             onPick={(c) => {
@@ -740,7 +740,7 @@ export function MemberDaysOffButton({
           ref={popRef}
           onClick={(e) => e.stopPropagation()}
           style={{ position: 'fixed', top: pos.top, right: pos.right }}
-          className="z-50 w-72 bg-surface border border-border-hair rounded-[14px] shadow-[0_10px_36px_rgba(0,0,0,0.18)] p-2"
+          className="z-50 w-72 glass-popover rounded-[14px] p-2"
         >
           <div className="text-[11px] tracking-normal text-ink-faint px-1 pb-1.5">
             Days off — {member.name}

@@ -44,9 +44,13 @@ cho sticky cell bên trong card kính (gantt date header, member gutter).
 Utility classes:
 
 - **`.glass-card`** — `background: var(--color-glass)` +
-  `backdrop-filter: blur(22px) saturate(180%)` + drop shadow cũ của card +
-  `inset 0 1px 0 var(--glass-edge)` + `inset 0 0 0 0.5px var(--glass-ring)`.
+  `backdrop-filter: blur(22px) saturate(180%)` + drop shadow cũ của card.
   Thay cho `bg-surface + shadow-[0_1px_2px…0_8px_22px…]`.
+  **Viền specular nằm trên overlay `::after`** (`inset 0`, `border-radius:
+  inherit`, `z-index: 30`, `pointer-events: none`) chứ KHÔNG nằm trong
+  box-shadow của card — để children che mép (sticky flush header/gutter
+  trong gantt) không nuốt mất rim. Card nào cũng tự có viền, không cần
+  từng view tự lo. Hệ quả: `.glass-card` là `position: relative`.
 - **`.glass-toolbar`** — như trên, blur 24px, shadow nhẹ hơn (floating tier).
 - **`.ambient-canvas`** — `radial-gradient(ambient-tint góc trên-phải)` chồng
   lên `var(--color-canvas)`, `background-attachment: fixed` để sticky bar

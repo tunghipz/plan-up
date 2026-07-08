@@ -100,9 +100,11 @@ export function Avatar({
 export function ProjectTile({
   project,
   size = 30,
+  className = '',
 }: {
   project: { name: string; icon?: string; color?: string }
   size?: number
+  className?: string
 }) {
   const icon = project.icon
   const isImage = !!icon?.startsWith('data:')
@@ -115,14 +117,14 @@ export function ProjectTile({
         alt=""
         aria-hidden
         draggable={false}
-        className="shrink-0 object-cover select-none"
+        className={`shrink-0 object-cover select-none ${className}`}
         style={{ width: size, height: size, borderRadius: radius }}
       />
     )
   }
   return (
     <span
-      className="shrink-0 flex items-center justify-center text-white font-semibold select-none"
+      className={`shrink-0 flex items-center justify-center text-white font-semibold select-none ${className}`}
       style={{
         width: size,
         height: size,

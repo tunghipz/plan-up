@@ -86,9 +86,14 @@ is left intact so restoring the overview is a one-line flip.
 ## User-facing behavior
 Left → right:
 1. **Sidebar** (vibrancy, **resizable**) — top to bottom:
-   - **Project switcher** (header dropdown) — a full-width button showing the **current
-     project only** (squircle icon = emoji/initial + brand color, project name, and the
-     `{n} sprints · {m} tasks` counts as a sub-line) with a `ChevronDown`. Clicking it opens a
+   - **Project switcher** (header dropdown) — a **cover-strip** block (2026-07-08,
+     demo `sidebar-project-header.html` option C): the project's own image/color makes a
+     heavily-blurred backdrop behind the header row (photo → `blur(18px)` cover, scaled
+     to hide edges, ~50%/40% opacity light/dark under a to-canvas gradient veil; no
+     photo → a quiet tint of the project color), with a **48px** sharp `ProjectTile`
+     (photo/emoji/initial squircle), the project name (15.5px, one line, ellipsis) and
+     the `{n} sprints · {m} tasks` counts as a **single non-wrapping sub-line** riding
+     on top, plus a `ChevronDown`. Clicking it opens a
      **popover** listing **all** projects (each = squircle + name, a `Check` on the active one;
      clicking one switches project), then a divider and the footer action **New project**
      (`Plus`). *(The **Home / All projects** item is hidden while `HOME_ENABLED = false`; it
@@ -96,7 +101,7 @@ Left → right:
      carries `aria-haspopup="menu"` + `aria-expanded`; the active project row carries
      `aria-current`. The popover closes on outside-press / Escape (shared `usePinnedPopover`
      wiring) and caps its list height (scrolls) so many projects don't overflow the pane.
-     A **settings gear** sits beside the switcher (unchanged).
+     A **settings gear** sits beside the switcher inside the strip (unchanged behavior).
    - **Sprints + Collections** — the sprint list (active row = accent bg), `+`/`n` to add a
      sprint, then Collections. Both are collapsible sections (unchanged).
    - **Footer** — `plan-up · v{version}` (see below) with the **dark-mode toggle** (`Moon`/`Sun`)

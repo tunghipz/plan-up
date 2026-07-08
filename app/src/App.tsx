@@ -37,6 +37,7 @@ import {
 import {
   db,
   uid,
+  colorForName,
   exportAll,
   importAll,
   exportProject,
@@ -1116,51 +1117,78 @@ function App() {
         {currentProject ? (
           <>
             <div className="px-2.5 pt-2.5 pb-2 relative">
-              <div className="flex items-center gap-1.5">
-                {/* Project switcher — the current project only; the popover
-                    switches to any other. Replaces the old always-on icon rail.
-                    See app-shell-and-navigation.md. */}
-                <button
-                  ref={switcherRef}
-                  onClick={() => setSwitcherOpen((v) => !v)}
-                  aria-haspopup="menu"
-                  aria-expanded={switcherOpen}
-                  title="Switch project"
-                  className="flex-1 min-w-0 flex items-center gap-2.5 px-2 py-1.5 rounded-[10px] text-left hover:bg-surface-hover transition"
-                >
-                  <ProjectTile project={currentProject} size={30} />
-                  <span className="flex-1 min-w-0">
-                    <span className="block truncate text-[15px] font-semibold tracking-[-0.014em] text-ink">
-                      {currentProject.name}
-                    </span>
-                    <span className="block text-[11.5px] text-ink-faint">
-                      <span className="tab-data">{sprints?.length ?? 0}</span> sprint
-                      {(sprints?.length ?? 0) === 1 ? '' : 's'} ·{' '}
-                      <span className="tab-data">{totalProjectTasks}</span>{' '}
-                      task{totalProjectTasks === 1 ? '' : 's'}
-                    </span>
-                  </span>
-                  <ChevronDown
-                    size={16}
-                    className={`shrink-0 text-ink-faint transition-transform ${
-                      switcherOpen ? 'rotate-180' : ''
-                    }`}
+              {/* Project switcher — cover-strip header (app-shell v5): the
+                  project's own photo (or color) makes a blurred backdrop, a
+                  48px sharp tile + name + counts ride on top. Click = switch
+                  project popover; gear = settings. */}
+              <div className="relative rounded-[12px] overflow-hidden">
+                {currentProject.icon?.startsWith('data:') ? (
+                  <div
+                    className="absolute inset-0 bg-cover bg-center blur-[18px] saturate-[1.3] scale-[1.6] opacity-50 dark:opacity-40"
+                    style={{ backgroundImage: `url(${currentProject.icon})` }}
                     aria-hidden
                   />
-                </button>
-                <button
-                  onClick={() => setSettingsOpen((v) => !v)}
-                  title="Project settings"
-                  aria-label="Project settings"
-                  aria-pressed={settingsOpen}
-                  className={`shrink-0 inline-flex items-center justify-center w-7 h-7 rounded-md transition ${
-                    settingsOpen
-                      ? 'text-accent bg-accent-soft'
-                      : 'text-ink-faint hover:text-ink hover:bg-surface-hover'
-                  }`}
-                >
-                  <Settings size={16} />
-                </button>
+                ) : (
+                  <div
+                    className="absolute inset-0 opacity-[0.14] dark:opacity-[0.2]"
+                    style={{
+                      background:
+                        currentProject.color ?? colorForName(currentProject.name),
+                    }}
+                    aria-hidden
+                  />
+                )}
+                <div
+                  className="absolute inset-0 bg-gradient-to-b from-transparent to-canvas/55"
+                  aria-hidden
+                />
+                <div className="relative flex items-center gap-1.5 pr-1.5">
+                  <button
+                    ref={switcherRef}
+                    onClick={() => setSwitcherOpen((v) => !v)}
+                    aria-haspopup="menu"
+                    aria-expanded={switcherOpen}
+                    title="Switch project"
+                    className="flex-1 min-w-0 flex items-center gap-3 px-2.5 py-2.5 rounded-[12px] text-left hover:bg-surface-hover/60 transition"
+                  >
+                    <ProjectTile
+                      project={currentProject}
+                      size={48}
+                      className="shadow-[0_2px_5px_rgba(0,0,0,0.22),0_0_0_0.5px_rgba(255,255,255,0.18)]"
+                    />
+                    <span className="flex-1 min-w-0">
+                      <span className="block truncate text-[15.5px] font-semibold tracking-[-0.014em] text-ink">
+                        {currentProject.name}
+                      </span>
+                      <span className="block truncate text-[11.5px] text-ink-muted">
+                        <span className="tab-data">{sprints?.length ?? 0}</span> sprint
+                        {(sprints?.length ?? 0) === 1 ? '' : 's'} ·{' '}
+                        <span className="tab-data">{totalProjectTasks}</span>{' '}
+                        task{totalProjectTasks === 1 ? '' : 's'}
+                      </span>
+                    </span>
+                    <ChevronDown
+                      size={16}
+                      className={`shrink-0 text-ink-faint transition-transform ${
+                        switcherOpen ? 'rotate-180' : ''
+                      }`}
+                      aria-hidden
+                    />
+                  </button>
+                  <button
+                    onClick={() => setSettingsOpen((v) => !v)}
+                    title="Project settings"
+                    aria-label="Project settings"
+                    aria-pressed={settingsOpen}
+                    className={`shrink-0 inline-flex items-center justify-center w-7 h-7 rounded-md transition ${
+                      settingsOpen
+                        ? 'text-accent bg-accent-soft'
+                        : 'text-ink-faint hover:text-ink hover:bg-surface-hover'
+                    }`}
+                  >
+                    <Settings size={16} />
+                  </button>
+                </div>
               </div>
               {switcherOpen && (
                 <div

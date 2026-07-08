@@ -23,6 +23,8 @@ export function ExportImageModal({
   viewName,
   groups,
   planById,
+  sprintStart,
+  sprintEnd,
   today,
   onClose,
 }: {
@@ -30,6 +32,8 @@ export function ExportImageModal({
   viewName: string
   groups: MemberGroup[]
   planById: Map<string, WorkingPlan>
+  sprintStart: string
+  sprintEnd: string
   today: string
   onClose: () => void
 }) {
@@ -76,6 +80,8 @@ export function ExportImageModal({
       viewName={viewName}
       groups={groups}
       planById={planById}
+      sprintStart={sprintStart}
+      sprintEnd={sprintEnd}
       today={today}
     />
   )

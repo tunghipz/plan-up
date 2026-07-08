@@ -1774,6 +1774,8 @@ function App() {
               viewName={currentSprint.name}
               groups={groups}
               planById={planById}
+              sprintStart={currentSprint.startDate}
+              sprintEnd={currentSprint.endDate}
               today={today}
               onClose={() => setExportImageOpen(false)}
             />

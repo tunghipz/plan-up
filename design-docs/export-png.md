@@ -29,31 +29,39 @@ export (bàn giao dữ liệu). PNG là *người đọc*, JSON là *máy đọc
 
 ### Nội dung ảnh
 
-- **Header ảnh:** tên project · tên view (Sprint N / tên collection) · ngày xuất.
+- **Header ảnh:** tên project · tên view (Sprint N) · ngày xuất · tổng số task.
 - **Thứ tự khớp List view 1:1**: lanes sắp theo `compareMembersByOrder`; task
   trong lane sắp bằng `compareTasks` theo **đúng sort đang chọn** (`loadSort()`,
   mặc định neutral → `listOrder ?? sequence`); subtask nest dưới parent qua
   `flattenDisplayOrder`. Cùng dùng module `task-sort.ts` với List (tách ra từ
   SprintView) nên không lệch. Task có assignee đã xoá → rơi vào Unassigned
   (giống orphan lane của List).
+- **Column header** (một hàng, in hoa nhạt): ID · TASK · EFFORT (DAY) · START ·
+  END · STATUS — **đúng cột & thứ tự List view** (nhóm theo member nên bỏ cột
+  Assignee; **không có cột Prereq** — bỏ theo yêu cầu).
 - **Mỗi member = 1 section**, sắp theo `Member.order` (thứ tự lane trong List):
-  - Hàng tiêu đề: avatar (ảnh/emoji/initial màu) + tên + `title` (role, nếu có)
-    + đếm `x/y done` (mini).
-  - Một hàng **column header** (nhỏ, in hoa nhạt): TASK · STATUS · START · END ·
-    EFFORT — để member đọc hiểu các cột.
+  - **Member header giàu thông tin** (khớp `member-header-summary.md`):
+    **progress ring** xanh quanh avatar (% done) · `done/total` · **overdue chip**
+    đỏ (chỉ khi >0) · **next deadline** `due MMM d` (chỉ khi có) · **days off**
+    `N days off` (calendar glyph; đếm `effectiveDaysOff` trong `daysOffInRange`
+    theo sprint range). Stats tính trên **leaf tasks** (bỏ parent) từ computed plan.
   - Danh sách task của member đó, mỗi row (grid cột cố định để thẳng hàng):
-    `#sequence · title · [status dot + label] · start · end · effort`.
-    (Không có cột Priority — bỏ theo yêu cầu; ưu tiên vẫn có trong app.)
+    `#sequence · title[+ pill/tag] · effort · start · end · status`.
+    - **Title** kèm **Priority pill** (chỉ `urgent`/`high`, im lặng với các mức
+      khác — đúng `PRIORITY_TAG`), **◆ Milestone tag** (khi `estimate === 0`),
+      và **subtask thụt lề** (`↳`, khi parent nằm cùng lane).
+    - **Effort** = `fmtDays(estimate)` số trần (đơn vị "day" ở header); milestone
+      (0) & chưa ước lượng (null) → `—`.
     - **Start / End** = ngày **computed từ scheduling** (`computeAllWorkingPlans`
-      → `WorkingPlan.startDate/dueDate`), khớp đúng cột Start/End trong List
-      (giờ/nửa ngày chỉ hiện khi hover trong app → ảnh chỉ in ngày).
-    - **Effort** = `fmtDays(estimate)` + "d" (vd `2d`, `0.5d`); `estimate === 0`
-      → **◆** (milestone, dùng chính start làm mốc); `estimate == null` → `—`.
-    - Quá hạn (End < hôm nay và chưa done; milestone dùng Start) → ngày đỏ
-      (`--color-overdue`).
-- **Bucket "Unassigned"** (task `assigneeId === null`) xuống cuối, chỉ hiện khi có.
+      → `WorkingPlan.startDate/dueDate`), khớp cột Start/End List (giờ/nửa ngày
+      chỉ hiện khi hover trong app → ảnh chỉ in ngày). Milestone: Start = mốc,
+      End = `—`.
+    - **Status** = dot + label (To do / In progress / Done), pill soft-tint.
+    - Quá hạn (End < hôm nay và chưa done; milestone dùng Start) → ngày đỏ.
+- **Bucket "Unassigned"** (task `assigneeId === null` hoặc member đã xoá) xuống
+  cuối, chỉ hiện khi có; header chỉ có `done/total` (không ring/days-off).
 - Section không có task → **ẩn** (không in member rảnh việc cho đỡ nhiễu).
-- Footer ảnh: "plan-up" watermark nhạt + tổng số task.
+- Footer ảnh: "Made with plan-up" watermark nhạt.
 
 ## Data
 

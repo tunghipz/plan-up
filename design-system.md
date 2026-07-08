@@ -25,6 +25,15 @@ Feature không support 1 trong 4 cái trên → defer hoặc cut.
 
 ## 2. Brand spec
 
+> **Brand theme (2026-07-08):** app có 2 brand theme đổi qua lại được —
+> **ZingPlay Fire (default)** và **Cupertino Blue** — qua nút Flame ở footer
+> sidebar (`useBrandTheme`, `data-brand` trên `<html>`, key `plan-up:brand`).
+> Fire = token swap accent sang hệ vermilion official (`#F04E23`/`#C93A0F`) +
+> gradient lửa **chỉ ở 2 chỗ signature** (active sidebar row `.brand-fill`,
+> primary CTA `.brand-btn`). Mọi quy tắc dưới đây (accent là tín hiệu, không
+> phải chrome; cấm gradient toàn khối) áp cho **cả hai** theme. Chi tiết:
+> [`design-docs/brand-theme.md`](design-docs/brand-theme.md).
+
 ### 2.1 Accent · System Blue `#0071E3`
 
 Một accent **duy nhất** (Apple marketing/system blue). Không thêm accent thứ hai. Dùng cho:

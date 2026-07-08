@@ -569,7 +569,7 @@ function NameModal({
           <button
             onClick={submit}
             disabled={!name.trim()}
-            className="px-4 py-1.5 text-sm font-medium bg-accent hover:bg-accent-hover text-white rounded-[8px] disabled:opacity-50 transition"
+            className="px-4 py-1.5 text-sm font-medium brand-btn text-white rounded-[8px] disabled:opacity-50 transition"
           >
             {submitLabel}
           </button>

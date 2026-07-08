@@ -91,7 +91,7 @@ function SwVersionFooter() {
         }}
         disabled={updating}
         title={latest ? `Update to v${latest} (reloads the app)` : 'Update available (reloads the app)'}
-        className="update-pill inline-flex items-center gap-2 rounded-full bg-accent hover:bg-accent-hover text-white text-[12px] font-semibold tracking-[-0.01em] px-3 py-1.5 transition-colors disabled:opacity-80"
+        className="update-pill inline-flex items-center gap-2 rounded-full brand-btn text-white text-[12px] font-semibold tracking-[-0.01em] px-3 py-1.5 transition-colors disabled:opacity-80"
       >
         {updating ? (
           <span className="w-3.5 h-3.5 rounded-full border-2 border-white/40 border-t-white animate-spin" />

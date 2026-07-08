@@ -566,7 +566,7 @@ function EmptyState({ onAddMember }: { onAddMember: () => void }) {
       </p>
       <button
         onClick={onAddMember}
-        className="text-sm px-3 py-1.5 bg-accent hover:bg-accent-hover text-white rounded inline-flex items-center gap-1.5"
+        className="text-sm px-3 py-1.5 brand-btn text-white rounded inline-flex items-center gap-1.5"
       >
         <UserPlus size={14} /> Add first member
       </button>

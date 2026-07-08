@@ -160,7 +160,7 @@ export function HomeDashboard({
           <div className="shrink-0 flex items-center gap-2">
             <button
               onClick={onNewProject}
-              className="inline-flex items-center gap-1.5 rounded-full bg-accent hover:bg-accent-hover text-white text-[13px] font-semibold px-3.5 py-2 transition-colors"
+              className="inline-flex items-center gap-1.5 rounded-full brand-btn text-white text-[13px] font-semibold px-3.5 py-2 transition-colors"
             >
               <Plus size={16} strokeWidth={2} />
               New project

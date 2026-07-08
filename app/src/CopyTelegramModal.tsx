@@ -83,7 +83,7 @@ export function CopyTelegramModal({
     }`
 
   return (
-    <ModalSheet title="Copy cho Telegram" onClose={onClose}>
+    <ModalSheet title="Copy for Telegram" onClose={onClose}>
       <div className="-mt-1 flex items-center gap-2 text-[13px] text-ink-muted">
         <Send size={14} strokeWidth={1.9} className="text-accent" aria-hidden />
         {subtitle}
@@ -92,7 +92,7 @@ export function CopyTelegramModal({
       {/* Scope: whole sprint/collection or one lane/section. */}
       {scopes.length > 1 && (
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
-          <span className="text-[12px] text-ink-faint">Phạm vi</span>
+          <span className="text-[12px] text-ink-faint">Scope</span>
           <div className="flex flex-wrap gap-1 bg-[var(--color-canvas-sunk)] rounded-[9px] p-1">
             {scopes.map((s) => (
               <button key={s.id} className={chip(activeScope === s.id)} onClick={() => setScope(s.id)}>
@@ -106,7 +106,7 @@ export function CopyTelegramModal({
       {/* Telegram preview — proportional font, exactly how it pastes. Follows
           the app theme (light/dark). */}
       <div>
-        <div className="mb-1.5 text-[12px] text-ink-faint">Xem trước</div>
+        <div className="mb-1.5 text-[12px] text-ink-faint">Preview</div>
         <div
           className="rounded-[12px] p-3 max-h-[240px] overflow-auto"
           style={{
@@ -137,7 +137,7 @@ export function CopyTelegramModal({
         <button
           onClick={doCopy}
           className={`flex-1 inline-flex items-center justify-center gap-2 rounded-[11px] px-4 py-2.5 text-[14px] font-semibold text-white transition active:scale-[0.98] ${
-            copied ? 'bg-status-done' : 'bg-accent hover:bg-accent-hover'
+            copied ? 'bg-status-done' : 'brand-btn'
           }`}
         >
           {copied ? <Check size={16} strokeWidth={2.4} /> : <Send size={15} strokeWidth={2} />}

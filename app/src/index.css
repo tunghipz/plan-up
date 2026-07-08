@@ -109,6 +109,57 @@ html.dark input, html.dark select, html.dark textarea, html.dark button {
   --color-status-none: #636366;
 }
 
+/* ── Brand theme — ZingPlay Fire (design-docs/brand-theme.md) ───────────────
+ * Official palette (Zing Play Brand Guideline EN tr.11): #F04E23 / #FDB913
+ * primary, #A71C20 crimson secondary. Text-accent = darkened #C93A0F because
+ * #F04E23 on white is ~3.5:1 (fails AA for small text); fills/gradients keep
+ * the official hexes. Cascade order matters: this block sits AFTER `.dark` so
+ * `[data-brand="fire"]` (same specificity, later) wins over `.dark` accents,
+ * and `.dark[data-brand="fire"]` (higher) wins over both.
+ * Everything non-accent (canvas, greys, done/todo, overdue red) stays
+ * Cupertino — Fire is a signature, not a repaint. */
+[data-brand='fire'] {
+  --color-accent: #c93a0f;
+  --color-accent-hover: #b03209;
+  --color-accent-soft: #fdeae3;
+  --color-accent-strong: #a5300e;
+  --color-accent-tint: rgba(240, 78, 35, 0.12);
+  --color-status-progress: #f04e23;
+  --color-priority-normal: #f04e23;
+}
+.dark[data-brand='fire'] {
+  --color-accent: #ff7a4d;
+  --color-accent-hover: #ff8f66;
+  --color-accent-soft: #3d1d10;
+  --color-accent-strong: #ff9b73;
+  --color-accent-tint: rgba(255, 122, 77, 0.24);
+  --color-status-progress: #ff7a4d;
+  --color-priority-normal: #ff7a4d;
+}
+
+/* Signature fills — the ONLY two places the official fire gradient appears
+ * (active sidebar row + primary CTA). Blue theme resolves both to the plain
+ * accent so components can use these classes unconditionally. */
+.brand-fill {
+  background: var(--color-accent);
+}
+[data-brand='fire'] .brand-fill {
+  background: linear-gradient(135deg, #f04e23, #f5941a);
+}
+.brand-btn {
+  background: var(--color-accent);
+}
+.brand-btn:hover {
+  background: var(--color-accent-hover);
+}
+[data-brand='fire'] .brand-btn {
+  background: linear-gradient(135deg, #f04e23, #fdb913);
+}
+[data-brand='fire'] .brand-btn:hover {
+  background: linear-gradient(135deg, #f04e23, #fdb913);
+  filter: brightness(0.94);
+}
+
 body {
   margin: 0;
   font-family: var(--font-sans);

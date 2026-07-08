@@ -141,7 +141,7 @@ function ConfirmSheet({
             className={`px-4 py-1.5 text-sm font-medium text-white rounded-[8px] transition ${
               destructive
                 ? 'bg-overdue hover:bg-overdue/90'
-                : 'bg-accent hover:bg-accent-hover'
+                : 'brand-btn'
             }`}
           >
             {confirmLabel}

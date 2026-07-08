@@ -4,6 +4,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import {
   Download,
   Upload,
+  Flame,
   Moon,
   Sun,
   Search,
@@ -91,6 +92,7 @@ import {
   formatSprintRange,
   formatShortDate,
   isOverdue,
+  useBrandTheme,
   useDarkMode,
   downloadJson,
   slugify,
@@ -379,6 +381,7 @@ function App() {
     []
   )
   const [dark, setDark] = useDarkMode()
+  const [brand, setBrand] = useBrandTheme()
   const fileInputRef = useRef<HTMLInputElement>(null)
   // Scroll container for the sprint views — search-palette jump-to scrolls it to
   // the picked task (we never use scrollIntoView; it breaks this container).
@@ -910,7 +913,7 @@ function App() {
         <button
           onClick={() => selectSprint(s.id)}
           className={`w-full text-left flex flex-col gap-0.5 px-2.5 py-1.5 mb-0.5 rounded-lg transition ${
-            isActive ? 'bg-accent text-white' : 'text-ink hover:bg-surface-hover'
+            isActive ? 'brand-fill text-white' : 'text-ink hover:bg-surface-hover'
           }`}
         >
           {/* Top tier: state dot + name + task count (count fades on hover so it
@@ -1350,7 +1353,7 @@ function App() {
                     <button
                       onClick={() => selectCollection(c.id)}
                       className={`w-full text-left flex items-center gap-2.5 px-2.5 py-2 text-[14px] rounded-lg transition ${
-                        isActive ? 'bg-accent text-white' : 'text-ink hover:bg-surface-hover'
+                        isActive ? 'brand-fill text-white' : 'text-ink hover:bg-surface-hover'
                       }`}
                     >
                       <span className={`w-2 h-2 rounded-full shrink-0 ${isActive ? 'bg-white/90' : 'bg-ink-faint'}`} aria-hidden />
@@ -1399,7 +1402,7 @@ function App() {
             <div className="text-[14px] text-ink-muted">No project yet</div>
             <button
               onClick={() => setShowNewProject(true)}
-              className="inline-flex items-center gap-2 rounded-full bg-accent hover:bg-accent-hover text-white text-[13px] font-semibold px-4 py-2 transition-colors"
+              className="inline-flex items-center gap-2 rounded-full brand-btn text-white text-[13px] font-semibold px-4 py-2 transition-colors"
             >
               <Plus size={16} strokeWidth={2} />
               New project
@@ -1411,6 +1414,20 @@ function App() {
             toggle pinned at its right (it used to live on the removed icon rail). */}
         <div className="mt-auto shrink-0 border-t border-border-hair flex items-center">
           <VersionFooter />
+          {/* Brand theme — ZingPlay Fire ↔ Cupertino Blue (design-docs/brand-theme.md).
+              Same ghost-icon idiom as the dark toggle; flame tints accent when Fire is on. */}
+          <button
+            onClick={() => setBrand(brand === 'fire' ? 'blue' : 'fire')}
+            title={brand === 'fire' ? 'Switch to Cupertino Blue' : 'Switch to ZingPlay Fire'}
+            aria-label={brand === 'fire' ? 'Switch to Cupertino Blue theme' : 'Switch to ZingPlay Fire theme'}
+            className={`shrink-0 w-7 h-7 grid place-items-center rounded-md transition ${
+              brand === 'fire'
+                ? 'text-accent hover:bg-accent-soft'
+                : 'text-ink-faint hover:text-ink hover:bg-surface-hover'
+            }`}
+          >
+            <Flame size={16} />
+          </button>
           <button
             onClick={() => setDark(!dark)}
             title={dark ? 'Switch to light' : 'Switch to dark'}
@@ -1767,7 +1784,7 @@ function App() {
                 <p className="text-ink-muted">No projects yet.</p>
                 <button
                   onClick={() => setShowNewProject(true)}
-                  className="text-sm font-medium bg-accent hover:bg-accent-hover text-white rounded-[8px] px-4 py-2 transition"
+                  className="text-sm font-medium brand-btn text-white rounded-[8px] px-4 py-2 transition"
                 >
                   Create your first project
                 </button>
@@ -1785,7 +1802,7 @@ function App() {
                 </p>
                 <button
                   onClick={() => setShowNewSprint(true)}
-                  className="text-sm font-medium bg-accent hover:bg-accent-hover text-white rounded-[8px] px-4 py-2 transition"
+                  className="text-sm font-medium brand-btn text-white rounded-[8px] px-4 py-2 transition"
                 >
                   Create the first sprint
                 </button>
@@ -1899,9 +1916,9 @@ function App() {
       {backupSettingsOpen && <BackupSettingsModal onClose={() => setBackupSettingsOpen(false)} />}
       {copyTgOpen && currentSprint && (
         <CopyTelegramModal
-          subtitle="Cây sprint · dán thẳng vào chat, không cần markdown"
+          subtitle="Sprint tree · paste straight into chat, no markdown needed"
           scopes={[
-            { id: 'all', label: 'Cả sprint' },
+            { id: 'all', label: 'Whole sprint' },
             ...membersWithTasks(paletteMembers ?? [], tasks ?? []).map((m) => ({
               id: m.id,
               label: m.name,
@@ -1917,9 +1934,9 @@ function App() {
       )}
       {collCopyOpen && currentCollection && (
         <CopyTelegramModal
-          subtitle="Cây collection theo table · dán thẳng vào chat"
+          subtitle="Collection tree by table · paste straight into chat"
           scopes={[
-            { id: 'all', label: 'Cả collection' },
+            { id: 'all', label: 'Whole collection' },
             ...sectionsWithItems(currentCollection, collectionItems ?? []).map((s) => ({
               id: s.id,
               label: s.name,
@@ -2548,7 +2565,7 @@ function NewSprintDialog({
           <button
             onClick={submit}
             disabled={!name.trim()}
-            className="px-4 py-1.5 text-sm font-medium bg-accent hover:bg-accent-hover text-white rounded-[8px] disabled:opacity-50 transition"
+            className="px-4 py-1.5 text-sm font-medium brand-btn text-white rounded-[8px] disabled:opacity-50 transition"
           >
             Create
           </button>
@@ -2598,7 +2615,7 @@ function NewProjectDialog({
           <button
             onClick={submit}
             disabled={!name.trim()}
-            className="px-4 py-1.5 text-sm font-medium bg-accent hover:bg-accent-hover text-white rounded-[8px] disabled:opacity-50 transition"
+            className="px-4 py-1.5 text-sm font-medium brand-btn text-white rounded-[8px] disabled:opacity-50 transition"
           >
             Create
           </button>
@@ -2651,7 +2668,7 @@ function NewCollectionDialog({
           <button
             onClick={submit}
             disabled={!name.trim()}
-            className="px-4 py-1.5 text-sm font-medium bg-accent hover:bg-accent-hover text-white rounded-[8px] disabled:opacity-50 transition"
+            className="px-4 py-1.5 text-sm font-medium brand-btn text-white rounded-[8px] disabled:opacity-50 transition"
           >
             Create
           </button>
@@ -2882,7 +2899,7 @@ function RolloverPopover({
         </button>
         <button
           onClick={onMove}
-          className="px-3.5 py-1.5 text-[13.5px] font-medium bg-accent hover:bg-accent-hover text-white rounded-[8px] transition"
+          className="px-3.5 py-1.5 text-[13.5px] font-medium brand-btn text-white rounded-[8px] transition"
         >
           Move {tasks.length}
         </button>

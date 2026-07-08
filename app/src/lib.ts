@@ -535,6 +535,26 @@ export function useDarkMode() {
 }
 
 /**
+ * Brand theme — ZingPlay Fire (default) vs Cupertino Blue. Pure token swap:
+ * the effect stamps `data-brand` on <html> and index.css does the rest
+ * (design-docs/brand-theme.md). Mirrors useDarkMode (safeStorage + effect).
+ */
+export type BrandTheme = 'fire' | 'blue'
+
+export function useBrandTheme() {
+  const [brand, setBrand] = useState<BrandTheme>(() =>
+    safeStorage.get('plan-up:brand') === 'blue' ? 'blue' : 'fire',
+  )
+
+  useEffect(() => {
+    document.documentElement.dataset.brand = brand
+    safeStorage.set('plan-up:brand', brand)
+  }, [brand])
+
+  return [brand, setBrand] as const
+}
+
+/**
  * Priority-tag colors — soft-tint pill, only for urgent/high (Normal/Low are
  * the silent default: no tag). ONE source for every view that renders the
  * pill (sprint list title row, rollover preview) so the tints can't drift.

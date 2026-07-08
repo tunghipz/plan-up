@@ -49,10 +49,10 @@ describe('formatSprintTree', () => {
       task('t1', 'a', 12, { title: 'Payment', status: 'in_progress', dueDate: '2026-07-15' }),
       task('t2', 'a', 14, { title: 'Refund', status: 'todo' }),
     ])
-    expect(out).toContain('#12 Payment — Đang làm · Jul 15')
-    expect(out).toContain('#14 Refund — Chưa làm')
+    expect(out).toContain('#12 Payment — In progress · Jul 15')
+    expect(out).toContain('#14 Refund — To do')
     // no due → no trailing " · <date>"
-    expect(out).not.toMatch(/#14 Refund — Chưa làm ·/)
+    expect(out).not.toMatch(/#14 Refund — To do ·/)
   })
 
   it('never emits priority', () => {
@@ -80,19 +80,19 @@ describe('formatSprintTree', () => {
     const child = lines.findIndex((l) => l.includes('Webhooks'))
     expect(parent).toBeGreaterThan(-1)
     expect(child).toBe(parent + 1)
-    expect(lines[child]).toContain('Webhooks — Xong')
+    expect(lines[child]).toContain('Webhooks — Done')
     expect(lines[child]).not.toContain('#13') // children drop the seq
   })
 
-  it('labels the unassigned bucket "Chưa gán" and sorts it last', () => {
+  it('labels the unassigned bucket "Unassigned" and sorts it last', () => {
     const out = formatSprintTree(sprint, [member('a', 'An', 0)], [
       task('t1', 'a', 1),
       task('t2', null, 2),
     ])
     const lines = out.split('\n')
     expect(lines).toContain('├─ 👤 An')
-    expect(lines).toContain('└─ 👤 Chưa gán')
-    expect(lines.indexOf('└─ 👤 Chưa gán')).toBeGreaterThan(lines.indexOf('├─ 👤 An'))
+    expect(lines).toContain('└─ 👤 Unassigned')
+    expect(lines.indexOf('└─ 👤 Unassigned')).toBeGreaterThan(lines.indexOf('├─ 👤 An'))
   })
 
   it('scopes to a single member when memberId is given', () => {

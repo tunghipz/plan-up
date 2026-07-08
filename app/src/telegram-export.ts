@@ -1,6 +1,6 @@
-import type { Collection, Member, Section, Sprint, Status, Task } from './types'
+import type { Collection, Member, Section, Sprint, Task } from './types'
 import { groupTasksByMember } from './png-export'
-import { formatShortDate, formatSprintRange } from './lib'
+import { formatShortDate, formatSprintRange, STATUS_LABEL } from './lib'
 
 /**
  * Copy a sprint as plain "Tree" text for pasting straight into Telegram (or any
@@ -13,13 +13,8 @@ import { formatShortDate, formatSprintRange } from './lib'
  * breaks — never space-padded columns.
  */
 
-/** Status shown as WORDS, not glyphs — the whole point of this export. Vietnamese
- * to match the team; swap to STATUS_LABEL (lib.ts) for English. */
-export const STATUS_TEXT_VI: Record<Status, string> = {
-  todo: 'Chưa làm',
-  in_progress: 'Đang làm',
-  done: 'Xong',
-}
+// Status shown as WORDS, not glyphs — the whole point of this export. Reuses the
+// app's STATUS_LABEL ('To do' / 'In progress' / 'Done') so the export matches the UI.
 
 const BRANCH_MID = '├─'
 const BRANCH_LAST = '└─'
@@ -28,14 +23,14 @@ const PIPE_LAST = '   '
 
 /** Task line meta: ` — Status[ · Due]` (due dropped when absent). */
 function taskMeta(t: Task): string {
-  const parts = [STATUS_TEXT_VI[t.status]]
+  const parts = [STATUS_LABEL[t.status]]
   if (t.dueDate) parts.push(formatShortDate(t.dueDate))
   return ' — ' + parts.join(' · ')
 }
 
 /** Subtask line meta: ` — Status` (children never show #seq or due). */
 function subMeta(t: Task): string {
-  return ' — ' + STATUS_TEXT_VI[t.status]
+  return ' — ' + STATUS_LABEL[t.status]
 }
 
 export interface TreeOptions {
@@ -72,7 +67,7 @@ export function formatSprintTree(
     const lastG = gi === groups.length - 1
     const gPipe = lastG ? PIPE_LAST : PIPE_MID
     L.push('│')
-    L.push(`${lastG ? BRANCH_LAST : BRANCH_MID} 👤 ${g.member ? g.member.name : 'Chưa gán'}`)
+    L.push(`${lastG ? BRANCH_LAST : BRANCH_MID} 👤 ${g.member ? g.member.name : 'Unassigned'}`)
 
     // Nest children under their parent within THIS lane — mirrors
     // flattenDisplayOrder (a child whose parent isn't in the lane renders as a

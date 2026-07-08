@@ -67,9 +67,9 @@ export function CollectionImageModal({
   )
 
   return (
-    <ModalSheet title="Export ảnh" onClose={onClose}>
+    <ModalSheet title="Export as image" onClose={onClose}>
       <p className="text-[13px] text-ink-muted -mt-1">
-        Một ảnh PNG của collection theo từng table — copy dán thẳng vào chat, hoặc tải về.
+        One PNG of the collection by table — copy straight into chat, or download.
       </p>
 
       {/* Scaled preview (zoom reflows the box so the modal doesn't overflow). */}
@@ -99,7 +99,7 @@ export function CollectionImageModal({
         <button
           onClick={handleDownload}
           disabled={busy !== null}
-          className="flex items-center gap-1.5 px-3.5 py-2 rounded-[9px] text-[13px] font-semibold text-white bg-accent hover:bg-accent-hover transition disabled:opacity-50"
+          className="flex items-center gap-1.5 px-3.5 py-2 rounded-[9px] text-[13px] font-semibold text-white brand-btn transition disabled:opacity-50"
         >
           {busy === 'download' ? (
             <Loader2 size={14} className="animate-spin motion-reduce:animate-none" />

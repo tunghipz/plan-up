@@ -2220,7 +2220,7 @@ function SearchPalette({
       <div
         role="dialog"
         aria-label="Search tasks"
-        className="dlg-sheet bg-surface text-ink rounded-[16px] shadow-[0_20px_60px_rgba(0,0,0,0.28)] w-full max-w-xl border border-border-hair overflow-hidden"
+        className="dlg-sheet glass-modal text-ink rounded-[16px] w-full max-w-xl overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center gap-3 px-4 py-3.5 border-b border-border">
@@ -2892,7 +2892,7 @@ function RolloverPopover({
       ref={popRef}
       onClick={(e) => e.stopPropagation()}
       style={{ position: 'fixed', top: pos.top, left: pos.left, width: WIDTH }}
-      className="dlg-sheet z-50 bg-surface text-ink rounded-[14px] shadow-[0_12px_40px_rgba(0,0,0,0.18),0_0_0_0.5px_rgba(0,0,0,0.06)] overflow-hidden"
+      className="dlg-sheet z-50 glass-modal text-ink rounded-[14px] overflow-hidden"
       role="dialog"
       aria-label="Roll over unfinished tasks"
     >

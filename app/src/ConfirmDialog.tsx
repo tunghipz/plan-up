@@ -116,7 +116,7 @@ function ConfirmSheet({
     >
       <div
         ref={sheetRef}
-        className="dlg-sheet bg-surface text-ink rounded-[16px] shadow-[0_20px_60px_rgba(0,0,0,0.28)] w-full max-w-md p-6 space-y-3 border border-border-hair"
+        className="dlg-sheet glass-modal text-ink rounded-[16px] w-full max-w-md p-6 space-y-3"
         onClick={(e) => e.stopPropagation()}
         role="alertdialog"
         aria-modal="true"

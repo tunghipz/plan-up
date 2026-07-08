@@ -81,10 +81,12 @@ Utility classes:
 mép dialog không bao giờ bị children che nên không cần `::after`); board task
 card + drag ghost nhận rim (`inset var(--glass-edge)/var(--glass-ring)`) nhưng
 nền vẫn solid; `PngExportCard` group box có **rim tĩnh inline hex** (PNG
-pipeline không render được backdrop-filter, card cố tình token-free).
+pipeline không render được backdrop-filter, card cố tình token-free);
+**3 dlg-sheet tự dựng ngoài ModalSheet** — search palette ⌘K (App.tsx),
+rollover popover (App.tsx), `ConfirmDialog` — cũng sang `.glass-modal`.
 
-**Phase 2 (còn lại):** popover/menu/toast/dlg-sheet ngoài ModalSheet sang
-glass; sidebar vibrancy đồng bộ recipe.
+**Phase 2 (còn lại):** popover/menu/toast sang glass; sidebar vibrancy
+đồng bộ recipe.
 
 ## Trade-offs đã cân nhắc
 

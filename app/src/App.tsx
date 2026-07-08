@@ -1503,7 +1503,10 @@ function App() {
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         {/* Liquid Glass capsule toolbar (design-docs/liquid-glass-material.md) —
             floats with a margin instead of a full-bleed bar + border-b. */}
-        <header className="h-[46px] shrink-0 mx-3 mt-3 rounded-full glass-toolbar flex items-center px-4 gap-3">
+        {/* relative z-30: glass surfaces below create stacking contexts
+            (backdrop-filter), so toolbar dropdowns need the whole header
+            lifted above the scroll content. Below drawers/dialogs (z-50). */}
+        <header className="relative z-30 h-[46px] shrink-0 mx-3 mt-3 rounded-full glass-toolbar flex items-center px-4 gap-3">
           {/* Sidebar toggle — macOS sidebar.left idiom (one button, both ways),
               far left so the breadcrumb keeps context when the panel is hidden. */}
           <button

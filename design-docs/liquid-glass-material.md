@@ -100,6 +100,14 @@ days-off), BoardView (Schedule), GanttView + CollectionCalendar
 dropdown, Export menu). **Còn lại:** toast (đang solid + ring,
 chấp nhận); sidebar vibrancy.
 
+## Gotcha build (2026-07-08)
+
+Trong mỗi block glass, **`-webkit-backdrop-filter` phải đứng TRƯỚC
+`backdrop-filter`**. LightningCSS (minifier của Tailwind v4) coi dòng
+prefix đứng sau là "đè" dòng chuẩn và xoá `backdrop-filter` khỏi bundle
+prod — Chromium không apply bản `-webkit-` nên mặt kính mất blur trên
+bản deploy (dev serve CSS thô nên không lộ). Prefix-first giữ cả hai.
+
 ## Trade-offs đã cân nhắc
 
 - `backdrop-filter` nhiều card = GPU cost — chấp nhận vì nội dung sau card là

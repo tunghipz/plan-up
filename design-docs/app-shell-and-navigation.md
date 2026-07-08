@@ -35,6 +35,15 @@
 > Approved via demo `demo/sprint-header-merge-notion.html` (variant **A+B**). See
 > [list-view.md](./list-view.md) / [sprints.md](./sprints.md).
 >
+> **v4.2 · Liquid Glass shell (2026-07-08)** — material pass per
+> [liquid-glass-material.md](./liquid-glass-material.md): the pinned toolbar
+> becomes a **floating glass capsule** (`.glass-toolbar`, `rounded-full`,
+> `mx-3 mt-3`, `relative z-30` so its dropdowns clear the glass stacking
+> contexts below), and `SprintPageHeader` sits on a **glass plate**
+> (`.glass-card`, 18px, `mx-6`) instead of a full-bleed white band — the
+> ambient canvas wash shows around it. "Separation by material" in v4 now
+> means glass plate → ambient canvas, not white → grey.
+>
 > **v4.1 · Toolbar breadcrumb (2026-07-08)** — moving the title down left the
 > pinned toolbar's left half empty. It now carries a calm, **non-interactive
 > breadcrumb** — the project squircle · project name (muted) · `ChevronRight` ·

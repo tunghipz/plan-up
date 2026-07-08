@@ -103,7 +103,7 @@ html.dark input, html.dark select, html.dark textarea, html.dark button {
   --color-glass: rgba(44, 44, 50, 0.58);
   --glass-edge: rgba(255, 255, 255, 0.14);
   --glass-ring: rgba(255, 255, 255, 0.08);
-  --ambient-tint: color-mix(in srgb, var(--color-accent) 9%, transparent);
+  --ambient-tint: color-mix(in srgb, var(--color-accent) 13%, transparent);
 
   --color-status-todo: #8e8e93;
   --color-status-progress: #0a84ff;

@@ -2288,8 +2288,8 @@ function SearchPalette({
  *   • the note as an inline description (`SprintNoteBanner`)
  *   • a Dates property
  *   • capacity folded into a soft recessed inset panel (`--color-fill`, no card)
- * Sits on a white surface region; the grey canvas list below separates by material,
- * not a hairline. Capacity = one slim stacked bar partitioning leaf tasks into three
+ * Sits on a glass plate (liquid-glass-material.md) so the ambient canvas shows
+ * around it; the list below separates by material, not a hairline. Capacity = one slim stacked bar partitioning leaf tasks into three
  * disjoint segments (done / in-flight / open) that sum to `total`; `notEstimated`
  * rides the legend as a warning, never the bar (design-system §4.7).
  */
@@ -2314,7 +2314,7 @@ function SprintPageHeader({
   const { total, pctAssigned, done, pctDone, inFlight, open, notEstimated } = capacity
   const pct = (n: number) => `${(n / total) * 100}%`
   return (
-    <div className="bg-surface px-6 pt-5 pb-5">
+    <div className="mx-6 mt-4 mb-3 glass-card rounded-[18px] px-5 pt-4 pb-4">
       {/* Title + Copy button on one row; note flows under the title. */}
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1">

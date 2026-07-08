@@ -91,6 +91,54 @@ export function Avatar({
 }
 
 /**
+ * The project tile — single render point for a project's squircle avatar across
+ * every surface (switcher button, switcher dropdown, toolbar breadcrumb, Home
+ * cards). Resolves in three tiers like the member Avatar: uploaded photo
+ * (`icon` starting with `data:`) → emoji → colored first letter.
+ * See design-docs/project-icon-emoji.md.
+ */
+export function ProjectTile({
+  project,
+  size = 30,
+}: {
+  project: { name: string; icon?: string; color?: string }
+  size?: number
+}) {
+  const icon = project.icon
+  const isImage = !!icon?.startsWith('data:')
+  const isEmoji = !!icon && !isImage
+  const radius = Math.round(size * 0.27 * 10) / 10
+  if (isImage) {
+    return (
+      <img
+        src={icon}
+        alt=""
+        aria-hidden
+        draggable={false}
+        className="shrink-0 object-cover select-none"
+        style={{ width: size, height: size, borderRadius: radius }}
+      />
+    )
+  }
+  return (
+    <span
+      className="shrink-0 flex items-center justify-center text-white font-semibold select-none"
+      style={{
+        width: size,
+        height: size,
+        borderRadius: radius,
+        background: project.color ?? colorForName(project.name),
+        fontSize: isEmoji ? Math.round(size * 0.54) : Math.round(size * 0.48),
+        letterSpacing: isEmoji ? '0' : '-0.01em',
+      }}
+      aria-hidden
+    >
+      {icon || firstGrapheme(project.name).toUpperCase() || '·'}
+    </span>
+  )
+}
+
+/**
  * Searchable emoji set for the avatar picker — curated + keyword-tagged so the
  * user can type a name ("fox", "rocket") to filter. Deliberately a small curated
  * list, not a full emoji-name database (calm, dependency-free). [char, keywords].

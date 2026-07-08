@@ -1,7 +1,7 @@
-# Project icon (emoji override)
+# Project icon (emoji or photo override)
 
 **Status:** Implemented
-**Last updated:** 2026-06-20
+**Last updated:** 2026-07-08 (photo upload option; shared ProjectTile renderer)
 **Code:** `app/src/db.ts` (`Project.icon`, `updateProject` Pick), `app/src/App.tsx`
 (icon-rail tile render), `app/src/members.tsx` (`PROJECT_ICON_EMOJIS`, `EmojiPickerRow`),
 `app/src/ProjectSettingsView.tsx` (the "Icon" row). Tested in
@@ -17,6 +17,21 @@ default.
 
 This is the **in-app project avatar**, not the browser favicon / PWA app icon (that's
 [app-icon-and-favicon.md](./app-icon-and-favicon.md)) — out of scope here.
+
+## Photo upload (2026-07-08)
+
+The icon can also be a **photo**: Project settings → Icon row gains an **"Upload
+photo…"** button (and a "Remove photo" once set). The image goes through the same
+client-side pipeline as member avatars (`resizeImageToDataURL`, 128px, EXIF-honored,
+tiny data-URL) and is stored in the SAME `Project.icon` field — an icon starting
+with `data:` is a photo, anything else is an emoji. No schema change (non-indexed
+string either way); export/import carries it verbatim like the emoji did.
+
+All four tile surfaces render through one shared **`ProjectTile`** component
+(`members.tsx`): switcher button (30px), switcher dropdown rows (22px), toolbar
+breadcrumb (20px), Home project cards (30px). Photo renders as a cover-fit `<img>`
+in the same squircle; emoji/letter keep the color-tile look. Picking an emoji
+replaces a photo and vice versa — one field, last pick wins.
 
 ## User-facing behavior
 - **Icon rail tile:** if the project has an emoji, the tile shows the emoji centered on

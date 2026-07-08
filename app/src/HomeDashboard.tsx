@@ -12,7 +12,7 @@ import {
   type Task,
   type Person,
 } from './db'
-import { Avatar, ColorSwatchRow } from './members'
+import { Avatar, ColorSwatchRow, ProjectTile } from './members'
 import { useConfirm } from './confirm-context'
 import { usePinnedPopover } from './usePinnedPopover'
 import {
@@ -180,8 +180,6 @@ export function HomeDashboard({
           {/* Projects grid — the hero */}
           <section className="grid gap-3.5 [grid-template-columns:repeat(auto-fill,minmax(248px,1fr))]">
             {cards.map(({ p, active, total, pct, remaining, overdue, pMembers }) => {
-              const isEmoji = !!p.icon
-              const label = p.icon || firstGrapheme(p.name).toUpperCase() || '·'
               return (
                 <button
                   key={p.id}
@@ -189,14 +187,7 @@ export function HomeDashboard({
                   className="group text-left bg-surface rounded-[14px] p-4 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_22px_rgba(0,0,0,0.05)] transition hover:-translate-y-0.5 motion-reduce:transform-none hover:shadow-[0_2px_4px_rgba(0,0,0,0.06),0_14px_32px_rgba(0,0,0,0.09)] focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
                 >
                   <div className="flex items-center gap-2.5 mb-3">
-                    <span
-                      className={`shrink-0 w-[30px] h-[30px] rounded-[8px] flex items-center justify-center text-white font-semibold ${
-                        isEmoji ? 'text-[16px]' : 'text-[14px]'
-                      }`}
-                      style={{ background: p.color ?? colorForName(p.name) }}
-                    >
-                      {label}
-                    </span>
+                    <ProjectTile project={p} size={30} />
                     <span className="flex-1 min-w-0 text-[15.5px] font-semibold tracking-[-0.01em] text-ink truncate">
                       {p.name}
                     </span>

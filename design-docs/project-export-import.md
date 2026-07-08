@@ -1,11 +1,11 @@
 # Project export / import (shareable project files)
 
 **Status:** Implemented
-**Last updated:** 2026-07-02 (full-DB backup is now v5 too — kind marker, not version, routes the import)
+**Last updated:** 2026-07-08 (drawer's inline "Share this project" row removed — header Export menu is the single entry point)
 **Code:** `app/src/project-io.ts` (`ProjectBundle`, `isProjectBundle`, `remapBundle`),
 `app/src/io.ts` (`exportProject`, `importProject`; re-exported by the `db.ts` facade), `app/src/App.tsx` (header split-menu,
 `handleImportFile`, import toast, `downloadJson`), `app/src/ProjectSettingsView.tsx`
-(inline "Share this project" export).
+(header Export menu).
 
 ## Purpose
 Turn a single project into a portable file that can be emailed / dropped in chat / committed
@@ -24,7 +24,7 @@ Two entry points, complementary by role (see the demo `demo/export-per-project.h
 - **Header split-menu** — the `Export` toolbar button opens a small menu:
   - *Export this project* — current project only → downloads `plan-up-<slug>-YYYY-MM-DD.json`.
   - *Export all (full backup)* — the existing whole-DB backup (`plan-up-YYYY-MM-DD.json`).
-- **Project settings → inline** — a "Share this project" row at the foot of the Project card
+- ~~Project settings → inline "Share this project" row~~ — **removed 2026-07-08** (duplicate affordance; the header Export ▾ → *Export this project* is the single entry point)
   (after a hairline) with an `Export` action, scoped to the project being edited.
 
 ### Import (one button, auto-detect)
@@ -117,7 +117,7 @@ Rules:
 - `App.tsx`: `downloadJson(name, data)` helper (extracted from the old inline Blob+anchor).
   Header `Export` becomes a split-menu; `handleImportFile` parses, then `isProjectBundle(data)`
   → `importProject` + toast (no confirm) + select new project; else → `importAll` (confirm).
-- `ProjectSettingsView.tsx`: inline "Share this project" export row in the Project card.
+- `ProjectSettingsView.tsx`: no longer hosts an export row (removed 2026-07-08).
 - A lightweight transient **toast** (slide-up from bottom, optional action button) for the
   non-destructive import. Auto-dismisses; Undo deletes the imported project (`deleteProject`).
 

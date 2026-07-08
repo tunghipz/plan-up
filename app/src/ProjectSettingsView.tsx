@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { X, Trash2, UserPlus, Share2 } from 'lucide-react'
+import { X, Trash2, UserPlus, Upload } from 'lucide-react'
 import {
   db,
   colorForName,
@@ -8,18 +8,18 @@ import {
   deleteProject,
   updateProject,
   deleteMember,
-  exportProject,
   memberNameExists,
+  resizeImageToDataURL,
   type Project,
   type Member,
 } from './db'
-import { downloadJson, slugify } from './lib'
 import {
   AvatarPicker,
   ColorSwatchRow,
   EmojiPickerRow,
   MemberColorDot,
   MemberDaysOffButton,
+  ProjectTile,
 } from './members'
 import { useConfirm } from './confirm-context'
 
@@ -30,6 +30,63 @@ import { useConfirm } from './confirm-context'
  * + slide); this component is just the header + scrollable body, sized for a
  * narrow single column. See design-docs/project-member-settings.md.
  */
+/**
+ * Photo option for the project icon (project-icon-emoji.md §photo upload):
+ * current tile preview + "Upload photo…" (same 128px client-side pipeline as
+ * member avatars) + "Remove photo" once an image is set. The photo lives in
+ * the SAME `Project.icon` field — a `data:` prefix marks it as an image; the
+ * emoji grid below stays usable and simply replaces it (last pick wins).
+ */
+function ProjectPhotoRow({ project }: { project: Project }) {
+  const fileRef = useRef<HTMLInputElement>(null)
+  const [error, setError] = useState<string | null>(null)
+  const isImage = !!project.icon?.startsWith('data:')
+
+  const onFile = async (f: File | undefined) => {
+    if (!f) return
+    setError(null)
+    try {
+      const data = await resizeImageToDataURL(f, 128)
+      await updateProject(project.id, { icon: data })
+    } catch {
+      setError('Could not read that image — try a JPG or PNG.')
+    }
+  }
+
+  return (
+    <div className="mt-1.5 flex items-center gap-2.5">
+      <ProjectTile project={project} size={30} />
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(e) => {
+          void onFile(e.target.files?.[0])
+          e.target.value = ''
+        }}
+      />
+      <button
+        type="button"
+        onClick={() => fileRef.current?.click()}
+        className="inline-flex items-center gap-1.5 text-[13px] font-medium text-accent hover:bg-accent-soft rounded-[8px] px-2.5 py-1.5 transition"
+      >
+        <Upload size={13} /> Upload photo…
+      </button>
+      {isImage && (
+        <button
+          type="button"
+          onClick={() => void updateProject(project.id, { icon: undefined })}
+          className="text-[13px] text-ink-muted hover:text-ink hover:bg-surface-hover rounded-[8px] px-2.5 py-1.5 transition"
+        >
+          Remove photo
+        </button>
+      )}
+      {error && <span className="text-[12px] text-overdue">{error}</span>}
+    </div>
+  )
+}
+
 export function ProjectSettingsView({
   project,
   onClose,
@@ -70,16 +127,6 @@ export function ProjectSettingsView({
     const d = desc.trim()
     if (d === (project.description ?? '')) return
     void updateProject(project.id, { description: d })
-  }
-
-  // Export this project to a portable file (additive on import — see the header
-  // Import button). Mirrors the header menu's "Export this project".
-  const exportThisProject = async () => {
-    const bundle = await exportProject(project.id)
-    downloadJson(
-      `plan-up-${slugify(project.name)}-${bundle.exportedAt.slice(0, 10)}.json`,
-      bundle
-    )
   }
 
   const removeProject = async () => {
@@ -154,7 +201,8 @@ export function ProjectSettingsView({
             </label>
             <div>
               <span className="text-xs text-ink-muted">Icon</span>
-              <div className="mt-1.5">
+              <ProjectPhotoRow project={project} />
+              <div className="mt-2">
                 <EmojiPickerRow
                   value={project.icon}
                   onPick={(icon) => void updateProject(project.id, { icon })}
@@ -169,26 +217,6 @@ export function ProjectSettingsView({
                   onPick={(c) => void updateProject(project.id, { color: c })}
                 />
               </div>
-            </div>
-            {/* Share = export this one project to a portable file (additive on
-                import). Footer action of the Project card. */}
-            <div className="-mx-5 border-t border-border-hair" />
-            <div className="flex items-center gap-4">
-              <div className="min-w-0 flex-1">
-                <div className="text-sm font-medium text-ink">
-                  Share this project
-                </div>
-                <div className="text-[12.5px] text-ink-muted mt-0.5">
-                  Export a file a teammate can import — adds a new project, never
-                  overwrites their data.
-                </div>
-              </div>
-              <button
-                onClick={exportThisProject}
-                className="shrink-0 inline-flex items-center gap-1.5 text-sm font-medium text-accent hover:bg-accent-soft rounded-[8px] px-3 py-1.5 transition"
-              >
-                <Share2 size={14} /> Export
-              </button>
             </div>
           </section>
 

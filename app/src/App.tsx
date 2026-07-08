@@ -37,7 +37,6 @@ import {
 import {
   db,
   uid,
-  colorForName,
   exportAll,
   importAll,
   exportProject,
@@ -88,7 +87,7 @@ import { loadSort } from './task-sort'
 import { usePinnedPopover } from './usePinnedPopover'
 import { ProjectSettingsView } from './ProjectSettingsView'
 import { HomeDashboard } from './HomeDashboard'
-import { Avatar } from './members'
+import { Avatar, ProjectTile } from './members'
 import {
   formatSprintRange,
   formatShortDate,
@@ -108,7 +107,6 @@ import {
   latestActiveSprint,
   nextSprintNumber,
   sprintToSelect,
-  firstGrapheme,
   PRIORITY_TAG,
 } from './lib'
 
@@ -1130,28 +1128,7 @@ function App() {
                   title="Switch project"
                   className="flex-1 min-w-0 flex items-center gap-2.5 px-2 py-1.5 rounded-[10px] text-left hover:bg-surface-hover transition"
                 >
-                  {(() => {
-                    const isEmoji = !!currentProject.icon
-                    const label =
-                      currentProject.icon ||
-                      firstGrapheme(currentProject.name).toUpperCase() ||
-                      '·'
-                    return (
-                      <span
-                        className={`shrink-0 w-[30px] h-[30px] rounded-[8px] flex items-center justify-center text-white font-semibold ${
-                          isEmoji ? 'text-[16px]' : 'text-[14px]'
-                        }`}
-                        style={{
-                          background:
-                            currentProject.color ?? colorForName(currentProject.name),
-                          letterSpacing: isEmoji ? '0' : '-0.01em',
-                        }}
-                        aria-hidden
-                      >
-                        {label}
-                      </span>
-                    )
-                  })()}
+                  <ProjectTile project={currentProject} size={30} />
                   <span className="flex-1 min-w-0">
                     <span className="block truncate text-[15px] font-semibold tracking-[-0.014em] text-ink">
                       {currentProject.name}
@@ -1201,9 +1178,6 @@ function App() {
                   <div className="max-h-[min(52vh,380px)] overflow-y-auto">
                     {projects?.map((p) => {
                       const isActive = p.id === currentProjectId
-                      const isEmoji = !!p.icon
-                      const label =
-                        p.icon || firstGrapheme(p.name).toUpperCase() || '·'
                       return (
                         <button
                           key={p.id}
@@ -1218,18 +1192,7 @@ function App() {
                             isActive ? 'bg-accent-soft' : 'hover:bg-surface-hover'
                           }`}
                         >
-                          <span
-                            className={`shrink-0 w-[22px] h-[22px] rounded-[6.5px] flex items-center justify-center text-white font-semibold ${
-                              isEmoji ? 'text-[12px]' : 'text-[11px]'
-                            }`}
-                            style={{
-                              background: p.color ?? colorForName(p.name),
-                              letterSpacing: isEmoji ? '0' : '-0.01em',
-                            }}
-                            aria-hidden
-                          >
-                            {label}
-                          </span>
+                          <ProjectTile project={p} size={22} />
                           <span className="flex-1 min-w-0 truncate font-medium text-ink">
                             {p.name}
                           </span>
@@ -1531,20 +1494,7 @@ function App() {
               <div className="flex items-center gap-2 min-w-0" aria-hidden>
                 {currentProject && (
                   <>
-                    <span
-                      className={`shrink-0 w-[20px] h-[20px] rounded-[6px] flex items-center justify-center text-white font-semibold ${
-                        currentProject.icon ? 'text-[12px]' : 'text-[11px]'
-                      }`}
-                      style={{
-                        background:
-                          currentProject.color ?? colorForName(currentProject.name),
-                        letterSpacing: currentProject.icon ? '0' : '-0.01em',
-                      }}
-                    >
-                      {currentProject.icon ||
-                        firstGrapheme(currentProject.name).toUpperCase() ||
-                        '·'}
-                    </span>
+                    <ProjectTile project={currentProject} size={20} />
                     <span className="text-[13px] text-ink-muted truncate max-w-[168px]">
                       {currentProject.name}
                     </span>

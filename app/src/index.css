@@ -231,8 +231,8 @@ h1, h2, h3, .display-tight {
  * sprint panel. Falls back to an opaque tint where backdrop-filter is absent. */
 .vibrancy {
   background: var(--color-vibrancy);
-  backdrop-filter: blur(24px) saturate(180%);
   -webkit-backdrop-filter: blur(24px) saturate(180%);
+  backdrop-filter: blur(24px) saturate(180%);
 }
 
 /* Liquid Glass (Tempered) — design-docs/liquid-glass-material.md.
@@ -242,8 +242,8 @@ h1, h2, h3, .display-tight {
 .glass-card {
   position: relative;
   background: var(--color-glass);
-  backdrop-filter: blur(22px) saturate(180%);
   -webkit-backdrop-filter: blur(22px) saturate(180%);
+  backdrop-filter: blur(22px) saturate(180%);
   box-shadow:
     0 1px 2px rgba(0, 0, 0, 0.04),
     0 8px 22px rgba(0, 0, 0, 0.06);
@@ -271,8 +271,8 @@ h1, h2, h3, .display-tight {
 /* glass-toolbar: the floating capsule header — one blur tier up. */
 .glass-toolbar {
   background: var(--color-glass);
-  backdrop-filter: blur(24px) saturate(180%);
   -webkit-backdrop-filter: blur(24px) saturate(180%);
+  backdrop-filter: blur(24px) saturate(180%);
   box-shadow:
     0 4px 16px rgba(20, 24, 38, 0.10),
     0 1px 3px rgba(20, 24, 38, 0.05),
@@ -291,8 +291,8 @@ h1, h2, h3, .display-tight {
  * shadow. Children never cover a popover's edges, so the rim lives here. */
 .glass-popover {
   background: var(--color-glass-thick);
-  backdrop-filter: blur(24px) saturate(180%);
   -webkit-backdrop-filter: blur(24px) saturate(180%);
+  backdrop-filter: blur(24px) saturate(180%);
   box-shadow:
     0 12px 40px rgba(0, 0, 0, 0.18),
     inset 0 1px 0 var(--glass-edge),
@@ -311,8 +311,8 @@ h1, h2, h3, .display-tight {
  * element's own box-shadow (no ::after needed). */
 .glass-modal {
   background: var(--color-glass-thick);
-  backdrop-filter: blur(28px) saturate(180%);
   -webkit-backdrop-filter: blur(28px) saturate(180%);
+  backdrop-filter: blur(28px) saturate(180%);
   box-shadow:
     0 20px 60px rgba(0, 0, 0, 0.28),
     inset 0 1px 0 var(--glass-edge),
@@ -330,8 +330,8 @@ h1, h2, h3, .display-tight {
  * masking content that scrolls beneath them. */
 .glass-flush {
   background: var(--color-glass);
-  backdrop-filter: blur(20px) saturate(180%);
   -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
 }
 
 /* ambient-canvas: canvas + a faint accent wash top-right so the glass has

@@ -28,6 +28,7 @@ import {
   Database,
   FolderDown,
   Check,
+  Image as ImageIcon,
 } from 'lucide-react'
 import {
   db,
@@ -68,6 +69,8 @@ import { VersionFooter } from './VersionFooter'
 import { IS_TAURI } from './backup'
 import { startAutoBackup } from './backup-tauri'
 import { BackupSettingsModal } from './BackupSettingsModal'
+import { ExportImageModal } from './ExportImageModal'
+import { groupTasksByMember } from './png-export'
 import { usePinnedPopover } from './usePinnedPopover'
 import { ProjectSettingsView } from './ProjectSettingsView'
 import { HomeDashboard } from './HomeDashboard'
@@ -278,6 +281,7 @@ function App() {
   }
   const [showNewSprint, setShowNewSprint] = useState(false)
   const [backupSettingsOpen, setBackupSettingsOpen] = useState(false)
+  const [exportImageOpen, setExportImageOpen] = useState(false)
   const [showNewProject, setShowNewProject] = useState(false)
   // Project switcher (header dropdown) — replaces the old icon rail. The popover
   // is `absolute` inside the switcher's `relative` header; usePinnedPopover only
@@ -1488,6 +1492,32 @@ function App() {
                 >
                   <button
                     role="menuitem"
+                    disabled={
+                      selKind !== 'sprint' || !currentSprint || (tasks?.length ?? 0) === 0
+                    }
+                    onClick={() => {
+                      setExportMenuOpen(false)
+                      setExportImageOpen(true)
+                    }}
+                    className="w-full flex items-start gap-3 p-2.5 rounded-[8px] text-left hover:bg-surface-hover transition disabled:opacity-40 disabled:hover:bg-transparent"
+                  >
+                    <span className="shrink-0 w-[30px] h-[30px] rounded-[8px] flex items-center justify-center bg-accent-soft text-accent">
+                      <ImageIcon size={15} strokeWidth={1.9} />
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block text-[13.5px] font-medium text-ink">Export as image…</span>
+                      <span className="block text-[12px] text-ink-muted truncate">
+                        {selKind !== 'sprint'
+                          ? 'Switch to a sprint to share tasks'
+                          : !currentSprint || (tasks?.length ?? 0) === 0
+                            ? 'No tasks in this sprint yet'
+                            : 'One PNG, grouped by member'}
+                      </span>
+                    </span>
+                  </button>
+                  <div className="h-px bg-border-hair mx-2 my-1" />
+                  <button
+                    role="menuitem"
                     disabled={!currentProject}
                     onClick={() =>
                       currentProject &&
@@ -1718,6 +1748,15 @@ function App() {
       )}
 
       {backupSettingsOpen && <BackupSettingsModal onClose={() => setBackupSettingsOpen(false)} />}
+      {exportImageOpen && currentProject && currentSprint && (
+        <ExportImageModal
+          projectName={currentProject.name}
+          viewName={currentSprint.name}
+          groups={groupTasksByMember(tasks ?? [], paletteMembers ?? [])}
+          today={today}
+          onClose={() => setExportImageOpen(false)}
+        />
+      )}
 
       {showNewSprint && currentProjectId && (
         <NewSprintDialog

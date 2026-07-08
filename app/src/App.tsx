@@ -370,6 +370,11 @@ function App() {
   // Scroll container for the sprint views — search-palette jump-to scrolls it to
   // the picked task (we never use scrollIntoView; it breaks this container).
   const scrollRef = useRef<HTMLDivElement>(null)
+  // Toolbar breadcrumb reveals the sprint date range once the page header's big
+  // title scrolls out of view (app-shell v4.1). Cheap scrollTop threshold; React
+  // bails on the setState when the boolean is unchanged, so scroll ticks don't
+  // re-render.
+  const [scrolled, setScrolled] = useState(false)
 
   // Resizable sprint panel. Width persisted across sessions. The sidebar is the
   // leftmost pane (the old icon rail is gone), so a drag maps to clientX, clamped.
@@ -1382,11 +1387,49 @@ function App() {
             {selKind === 'collection' && currentCollection ? (
               <CollectionBarIdentity collection={currentCollection} />
             ) : currentSprint ? (
-              // Sprint identity (name · date range · note · capacity) now lives in
-              // the SprintPageHeader at the top of the scroll area, Notion-style —
-              // the toolbar stays a slim chrome strip. The sidebar's accent row is
-              // the persistent "which sprint" context. See app-shell v4.
-              null
+              // Breadcrumb (project › sprint) — fills the toolbar's left with
+              // orientation, not filler (app-shell v4.1). The date range fades in
+              // once the page header's big title scrolls away. Non-interactive:
+              // switching project is a sidebar-only affordance (no duplicate, §8.3),
+              // so this is aria-hidden — the title h1 + Dates carry it for a11y.
+              <div className="flex items-center gap-2 min-w-0" aria-hidden>
+                {currentProject && (
+                  <>
+                    <span
+                      className={`shrink-0 w-[20px] h-[20px] rounded-[6px] flex items-center justify-center text-white font-semibold ${
+                        currentProject.icon ? 'text-[12px]' : 'text-[11px]'
+                      }`}
+                      style={{
+                        background:
+                          currentProject.color ?? colorForName(currentProject.name),
+                        letterSpacing: currentProject.icon ? '0' : '-0.01em',
+                      }}
+                    >
+                      {currentProject.icon ||
+                        firstGrapheme(currentProject.name).toUpperCase() ||
+                        '·'}
+                    </span>
+                    <span className="text-[13px] text-ink-muted truncate max-w-[168px]">
+                      {currentProject.name}
+                    </span>
+                    <ChevronRight
+                      size={14}
+                      strokeWidth={1.8}
+                      className="shrink-0 text-ink-faint"
+                    />
+                  </>
+                )}
+                <span className="text-[13px] font-semibold text-ink shrink-0">
+                  {currentSprint.name}
+                </span>
+                <span
+                  className={`text-[12.5px] text-ink-muted tab-data shrink-0 overflow-hidden whitespace-nowrap transition-[max-width,opacity] duration-[280ms] ease-[cubic-bezier(.32,.72,0,1)] motion-reduce:transition-none ${
+                    scrolled ? 'max-w-[180px] opacity-100 ml-0.5' : 'max-w-0 opacity-0'
+                  }`}
+                >
+                  · {formatSprintRange(currentSprint.startDate, currentSprint.endDate)}
+                </span>
+              </div>
             ) : (
               <span className="text-ink-faint">No sprint selected</span>
             )}
@@ -1584,7 +1627,11 @@ function App() {
           </div>
         </header>
 
-        <div ref={scrollRef} className="flex-1 overflow-auto">
+        <div
+          ref={scrollRef}
+          className="flex-1 overflow-auto"
+          onScroll={(e) => setScrolled(e.currentTarget.scrollTop > 48)}
+        >
           {/* Merged Notion-style sprint page header: title · note (description) ·
               Dates · capacity inset. Scrolls with content; keyed by sprint so the
               note draft + capacity reset on sprint change. See app-shell v4. */}

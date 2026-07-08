@@ -34,6 +34,18 @@
 > canvas list), not lines. Collections keep their existing bar identity unchanged.
 > Approved via demo `demo/sprint-header-merge-notion.html` (variant **A+B**). See
 > [list-view.md](./list-view.md) / [sprints.md](./sprints.md).
+>
+> **v4.1 · Toolbar breadcrumb (2026-07-08)** — moving the title down left the
+> pinned toolbar's left half empty. It now carries a calm, **non-interactive
+> breadcrumb** — the project squircle · project name (muted) · `ChevronRight` ·
+> **sprint name** — that fills the space with *orientation, not filler*. The sprint
+> **date range fades in** beside it **once the big page-header title scrolls out of
+> view** (a cheap `scrollTop > 48` threshold on `scrollRef` → `scrolled` state; the
+> reveal animates with the shared *move* curve, honouring reduced-motion), so context
+> persists on scroll without duplicating the title while it's visible. Switching
+> project stays a sidebar-only affordance (no duplicate trigger, §8.3), so the
+> breadcrumb is `aria-hidden` (the title `h1` + Dates property carry it for a11y).
+> Approved via demo `demo/sprint-toolbar-fill.html` (Hướng 1).
 
 ## Purpose
 The two-pane macOS-style frame (sidebar + main) that hosts everything, plus the
@@ -71,7 +83,8 @@ Left → right:
      sprint, then Collections. Both are collapsible sections (unchanged).
    - **Footer** — `plan-up · v{version}` (see below) with the **dark-mode toggle** (`Moon`/`Sun`)
      pinned at its right. **Drag the right edge** of the sidebar to resize.
-2. **Main column** — a slim pinned **toolbar** (Roll over, view toggle, search,
+2. **Main column** — a slim pinned **toolbar** (left: a **breadcrumb** *project ›
+   sprint*, date revealing on scroll — v4.1; right: Roll over, view toggle, search,
    activity, Export/Import), then the scrolling view whose top is the **sprint page
    header** (`SprintPageHeader`: large title · inline note/description · **Dates**
    property · capacity **inset** panel), then the List/Board view. The header scrolls

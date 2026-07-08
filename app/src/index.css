@@ -52,6 +52,7 @@ html.dark input, html.dark select, html.dark textarea, html.dark button {
      stronger ambient so the wash reads through, dark 0.5px ring as the
      optical edge (a white rim vanishes on a white canvas), bright specular. */
   --color-glass: rgba(255, 255, 255, 0.5);
+  --color-glass-thick: rgba(255, 255, 255, 0.78);
   --glass-edge: rgba(255, 255, 255, 0.9);
   --glass-ring: rgba(0, 0, 0, 0.06);
   --ambient-tint: color-mix(in srgb, var(--color-accent) 10%, transparent);
@@ -105,6 +106,7 @@ html.dark input, html.dark select, html.dark textarea, html.dark button {
   --color-fill: rgba(255, 255, 255, 0.09);
 
   --color-glass: rgba(44, 44, 50, 0.52);
+  --color-glass-thick: rgba(44, 44, 50, 0.78);
   --glass-edge: rgba(255, 255, 255, 0.14);
   --glass-ring: rgba(255, 255, 255, 0.08);
   --ambient-tint: color-mix(in srgb, var(--color-accent) 16%, transparent);
@@ -280,6 +282,26 @@ h1, h2, h3, .display-tight {
 .dark .glass-toolbar {
   box-shadow:
     0 4px 18px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 var(--glass-edge),
+    inset 0 0 0 0.5px var(--glass-ring);
+}
+
+/* glass-modal: dialog sheets (ModalSheet). Thicker material than cards —
+ * dialogs float over dimmed content, so they need more opacity for reading
+ * comfort. Children never cover a dialog's edges, so the rim can live in the
+ * element's own box-shadow (no ::after needed). */
+.glass-modal {
+  background: var(--color-glass-thick);
+  backdrop-filter: blur(28px) saturate(180%);
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  box-shadow:
+    0 20px 60px rgba(0, 0, 0, 0.28),
+    inset 0 1px 0 var(--glass-edge),
+    inset 0 0 0 0.5px var(--glass-ring);
+}
+.dark .glass-modal {
+  box-shadow:
+    0 20px 60px rgba(0, 0, 0, 0.5),
     inset 0 1px 0 var(--glass-edge),
     inset 0 0 0 0.5px var(--glass-ring);
 }

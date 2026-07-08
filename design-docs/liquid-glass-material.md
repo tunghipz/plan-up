@@ -76,9 +76,15 @@ Utility classes:
   `ActivityLog.tsx`, `HomeDashboard.tsx`, `ProjectSettingsView.tsx` — swap
   shadow string → `glass-card`.
 
-**Phase 2 (chưa làm):** popover/menu/dialog/toast sang glass; sidebar vibrancy
-đồng bộ recipe; đo lại contrast AA của `ink-faint` trên glass khi wallpaper
-đậm hơn.
+**Đã làm thêm (2026-07-08):** `ModalSheet` sang **`.glass-modal`**
+(`--color-glass-thick` 0.78 cả 2 theme, blur 28, rim trong box-shadow riêng —
+mép dialog không bao giờ bị children che nên không cần `::after`); board task
+card + drag ghost nhận rim (`inset var(--glass-edge)/var(--glass-ring)`) nhưng
+nền vẫn solid; `PngExportCard` group box có **rim tĩnh inline hex** (PNG
+pipeline không render được backdrop-filter, card cố tình token-free).
+
+**Phase 2 (còn lại):** popover/menu/toast/dlg-sheet ngoài ModalSheet sang
+glass; sidebar vibrancy đồng bộ recipe.
 
 ## Trade-offs đã cân nhắc
 

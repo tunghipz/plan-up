@@ -51,7 +51,7 @@ export function ModalSheet({
         aria-modal="true"
         aria-label={title}
         tabIndex={-1}
-        className="dlg-sheet bg-surface text-ink rounded-[16px] shadow-[0_20px_60px_rgba(0,0,0,0.28)] w-full max-w-md p-6 space-y-4 border border-border-hair outline-none"
+        className="dlg-sheet glass-modal text-ink rounded-[16px] w-full max-w-md p-6 space-y-4 outline-none"
         onClick={(e) => e.stopPropagation()}
       >
         <h2 className="text-[19px] font-bold tracking-[-0.014em]">{title}</h2>

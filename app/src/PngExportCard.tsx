@@ -475,7 +475,18 @@ export const PngExportCard = forwardRef<HTMLDivElement, PngExportCardProps>(
                   </div>
 
                   {/* Task rows */}
-                  <div style={{ background: C.panel, borderRadius: 12, overflow: 'hidden' }}>
+                  {/* Static "liquid" rim (PNG can't render backdrop-filter):
+                      white specular top edge + 0.5px dark ring, fixed hex for
+                      the deterministic light palette. */}
+                  <div
+                    style={{
+                      background: C.panel,
+                      borderRadius: 12,
+                      overflow: 'hidden',
+                      boxShadow:
+                        'inset 0 1px 0 rgba(255,255,255,0.9), inset 0 0 0 0.5px rgba(0,0,0,0.07)',
+                    }}
+                  >
                     {g.tasks.map((t, ti) => {
                       const plan = planById.get(t.id)
                       const start = plan?.startDate ?? t.startDate

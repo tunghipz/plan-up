@@ -1121,7 +1121,7 @@ function App() {
                   project's own photo (or color) makes a blurred backdrop, a
                   48px sharp tile + name + counts ride on top. Click = switch
                   project popover; gear = settings. */}
-              <div className="group relative rounded-[12px] overflow-hidden">
+              <div className="relative rounded-[12px] overflow-hidden">
                 {currentProject.icon?.startsWith('data:') ? (
                   <div
                     className="absolute inset-0 bg-cover bg-center blur-[18px] saturate-[1.3] scale-[1.6] opacity-50 dark:opacity-40"
@@ -1174,22 +1174,6 @@ function App() {
                       }`}
                       aria-hidden
                     />
-                  </button>
-                  {/* Hover-revealed (gear-placement option B): hidden at rest so
-                      the strip reads tile + name + chevron; fades in on strip
-                      hover / keyboard focus, stays while the drawer is open. */}
-                  <button
-                    onClick={() => setSettingsOpen((v) => !v)}
-                    title="Project settings"
-                    aria-label="Project settings"
-                    aria-pressed={settingsOpen}
-                    className={`shrink-0 inline-flex items-center justify-center w-7 h-7 rounded-md transition ${
-                      settingsOpen
-                        ? 'text-accent bg-accent-soft'
-                        : 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100 text-ink-faint hover:text-ink hover:bg-surface-hover'
-                    }`}
-                  >
-                    <Settings size={16} />
                   </button>
                 </div>
               </div>
@@ -1252,6 +1236,22 @@ function App() {
                       <Plus size={16} strokeWidth={2} />
                     </span>
                     New project
+                  </button>
+                  {/* Settings moved off the strip (gear-placement option A):
+                      a rare action lives behind the switcher, not as an
+                      always-on icon. */}
+                  <button
+                    role="menuitem"
+                    onClick={() => {
+                      setSettingsOpen(true)
+                      setSwitcherOpen(false)
+                    }}
+                    className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-[9px] text-left text-[13px] font-medium text-ink-muted hover:text-ink hover:bg-surface-hover transition"
+                  >
+                    <span className="w-[22px] flex justify-center shrink-0">
+                      <Settings size={15} strokeWidth={1.9} />
+                    </span>
+                    Project settings
                   </button>
                   {/* Home / All projects — hidden while HOME_ENABLED is false
                       (overview temporarily hidden, 2026-07-06). */}

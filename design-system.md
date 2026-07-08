@@ -120,9 +120,18 @@ Avatar = **vòng tròn đặc** màu trên, chữ trắng first-letter.
 
 ## 4. Layout principles
 
+> **Material v2.1 · Liquid Glass Tempered (2026-07-08)** — content cards +
+> toolbar nâng vật liệu theo iOS 26: card = `.glass-card` (translucent
+> `--color-glass` + `backdrop-filter: blur(22px) saturate(180%)` + specular
+> edge, **bo 18px**), toolbar = capsule `rounded-full` `.glass-toolbar`,
+> canvas = `.ambient-canvas` (vệt accent nhạt góc trên-phải, brand-aware).
+> Popover/dialog/toast/board task card vẫn solid 14px (phase 2). Layout,
+> semantic colors, typography, hành vi **không đổi**. Chi tiết + recipe:
+> [`design-docs/liquid-glass-material.md`](design-docs/liquid-glass-material.md).
+
 ### 4.1 Inset-grouped cards trên canvas xám
 
-**Đúng**: canvas xám `--color-canvas`; mỗi member là 1 **thẻ trắng bo 14px nổi nhẹ** (soft shadow), gap `space-y-4` (16px). Đây là "inset grouped" của macOS — depth tách group, không phải border.
+**Đúng**: canvas xám `--color-canvas` (+ ambient tint); mỗi member là 1 **thẻ glass bo 18px nổi nhẹ** (`.glass-card`), gap `space-y-4` (16px). Đây là "inset grouped" của macOS — depth tách group, không phải border.
 
 **Sai**: bọc tất cả trong 1 thẻ lớn rồi `divide-y`; hoặc thẻ có viền đậm + không shadow (đó là ledger/flat, không phải Cupertino).
 

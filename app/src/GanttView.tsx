@@ -444,7 +444,7 @@ export function GanttView({
 
       <div
         ref={measureRef}
-        className="overflow-x-auto rounded-[14px] bg-surface shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_22px_rgba(0,0,0,0.05)]"
+        className="overflow-x-auto rounded-[18px] glass-card"
       >
         <div className="relative" style={{ width: innerW }}>
           {/* Today — a soft accent column wash (Apple-Calendar style), behind

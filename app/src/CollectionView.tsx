@@ -672,7 +672,7 @@ function SectionCard({
       // this table so an item can be dropped into it — including onto its empty
       // area, which has no row to land on.
       data-section-id={section.id}
-      className={`bg-surface rounded-[14px] shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_22px_rgba(0,0,0,0.05)] overflow-hidden transition-shadow ${
+      className={`glass-card rounded-[18px] overflow-hidden transition-shadow ${
         dropHint ? 'ring-2 ring-accent/40' : ''
       }`}
     >

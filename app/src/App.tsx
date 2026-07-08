@@ -1088,7 +1088,7 @@ function App() {
   }
 
   return (
-    <div className="h-screen flex bg-canvas text-ink overflow-hidden">
+    <div className="h-screen flex ambient-canvas text-ink overflow-hidden">
       {HOME_ENABLED && screen === 'home' ? (
         <HomeDashboard
           projects={projects ?? []}
@@ -1501,7 +1501,9 @@ function App() {
       {/* Main column: thin header + capacity + sprint view. Always rendered;
           settings opens as a right-side drawer overlay (below), not a takeover. */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        <header className="h-[54px] shrink-0 border-b border-border-hair bg-surface flex items-center px-5 gap-3">
+        {/* Liquid Glass capsule toolbar (design-docs/liquid-glass-material.md) —
+            floats with a margin instead of a full-bleed bar + border-b. */}
+        <header className="h-[46px] shrink-0 mx-3 mt-3 rounded-full glass-toolbar flex items-center px-4 gap-3">
           {/* Sidebar toggle — macOS sidebar.left idiom (one button, both ways),
               far left so the breadcrumb keeps context when the panel is hidden. */}
           <button

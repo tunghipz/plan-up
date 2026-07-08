@@ -45,6 +45,14 @@ html.dark input, html.dark select, html.dark textarea, html.dark button {
   /* Vibrancy base for sidebars (paired with backdrop-blur at component level) */
   --color-vibrancy: rgba(248, 248, 250, 0.72);
 
+  /* Liquid Glass (Tempered) — design-docs/liquid-glass-material.md.
+     Glass bg stays fairly opaque (0.62) so muted text keeps AA over the
+     ambient tint; edge/ring are the specular highlights of the material. */
+  --color-glass: rgba(255, 255, 255, 0.62);
+  --glass-edge: rgba(255, 255, 255, 0.62);
+  --glass-ring: rgba(255, 255, 255, 0.35);
+  --ambient-tint: color-mix(in srgb, var(--color-accent) 6%, transparent);
+
   /* Subtle control fill (search field, segmented track, date pill). Flips with
      theme so it stays visible on dark surfaces. */
   --color-fill: rgba(0, 0, 0, 0.05);
@@ -91,6 +99,11 @@ html.dark input, html.dark select, html.dark textarea, html.dark button {
 
   --color-vibrancy: rgba(30, 30, 32, 0.62);
   --color-fill: rgba(255, 255, 255, 0.09);
+
+  --color-glass: rgba(44, 44, 50, 0.58);
+  --glass-edge: rgba(255, 255, 255, 0.14);
+  --glass-ring: rgba(255, 255, 255, 0.08);
+  --ambient-tint: color-mix(in srgb, var(--color-accent) 9%, transparent);
 
   --color-status-todo: #8e8e93;
   --color-status-progress: #0a84ff;
@@ -213,6 +226,57 @@ h1, h2, h3, .display-tight {
   background: var(--color-vibrancy);
   backdrop-filter: blur(24px) saturate(180%);
   -webkit-backdrop-filter: blur(24px) saturate(180%);
+}
+
+/* Liquid Glass (Tempered) — design-docs/liquid-glass-material.md.
+ * glass-card: content surfaces (group cards, page sections). Same drop shadow
+ * tier as the old solid card, plus the material: translucency, blur, and a
+ * specular top edge + 0.5px ring. */
+.glass-card {
+  background: var(--color-glass);
+  backdrop-filter: blur(22px) saturate(180%);
+  -webkit-backdrop-filter: blur(22px) saturate(180%);
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.04),
+    0 8px 22px rgba(0, 0, 0, 0.06),
+    inset 0 1px 0 var(--glass-edge),
+    inset 0 0 0 0.5px var(--glass-ring);
+}
+.dark .glass-card {
+  box-shadow:
+    0 2px 6px rgba(0, 0, 0, 0.28),
+    0 10px 28px rgba(0, 0, 0, 0.32),
+    inset 0 1px 0 var(--glass-edge),
+    inset 0 0 0 0.5px var(--glass-ring);
+}
+
+/* glass-toolbar: the floating capsule header — one blur tier up. */
+.glass-toolbar {
+  background: var(--color-glass);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  box-shadow:
+    0 4px 16px rgba(20, 24, 38, 0.10),
+    0 1px 3px rgba(20, 24, 38, 0.05),
+    inset 0 1px 0 var(--glass-edge),
+    inset 0 0 0 0.5px var(--glass-ring);
+}
+.dark .glass-toolbar {
+  box-shadow:
+    0 4px 18px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 var(--glass-edge),
+    inset 0 0 0 0.5px var(--glass-ring);
+}
+
+/* ambient-canvas: canvas + a faint accent wash top-right so the glass has
+ * something to refract. background-attachment: fixed makes the gradient
+ * viewport-anchored, so a sticky bar using the same class lines up exactly
+ * with the root behind it. Tint follows --color-accent (brand-aware). */
+.ambient-canvas {
+  background:
+    radial-gradient(56% 44% at 86% -4%, var(--ambient-tint), transparent 62%),
+    var(--color-canvas);
+  background-attachment: fixed;
 }
 
 /* Cupertino: no zebra striping — rows separate via hairline + plenty of

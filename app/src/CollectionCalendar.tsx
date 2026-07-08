@@ -188,7 +188,7 @@ export function CollectionCalendar({
         </div>
       </div>
 
-      <div className="bg-surface rounded-[14px] shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_22px_rgba(0,0,0,0.05)] overflow-hidden">
+      <div className="glass-card rounded-[18px] overflow-hidden">
         <div className="grid grid-cols-7 border-b border-border-hair">
           {WEEKDAYS.map((w) => (
             <div
@@ -309,7 +309,7 @@ export function CollectionCalendar({
       )}
 
       {unscheduled.length > 0 && (
-        <div className="mt-3 bg-surface rounded-[14px] shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_22px_rgba(0,0,0,0.05)] px-4 py-3">
+        <div className="mt-3 glass-card rounded-[18px] px-4 py-3">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-[11px] font-semibold text-ink-faint mr-0.5">
               Unscheduled · {unscheduled.length}

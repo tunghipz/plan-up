@@ -161,7 +161,7 @@ export function ProjectSettingsView({
       <div className="flex-1 overflow-auto bg-canvas px-5 py-5">
         <div className="space-y-4">
           {/* Project card */}
-          <section className="bg-surface rounded-[14px] p-5 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_6px_16px_rgba(0,0,0,0.04)] space-y-4">
+          <section className="glass-card rounded-[18px] p-5 space-y-4">
             <h2 className="text-[12px] font-semibold text-ink-faint uppercase tracking-wide">
               Project
             </h2>
@@ -221,7 +221,7 @@ export function ProjectSettingsView({
           </section>
 
           {/* Members card */}
-          <section className="bg-surface rounded-[14px] p-5 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_6px_16px_rgba(0,0,0,0.04)]">
+          <section className="glass-card rounded-[18px] p-5">
             <h2 className="text-[12px] font-semibold text-ink-faint uppercase tracking-wide mb-2">
               Members{' '}
               <span className="text-ink-faint/70 normal-case font-normal">

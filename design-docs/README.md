@@ -56,6 +56,7 @@ Non-obvious behaviors, defaults, persistence keys.
 | [desktop-auto-update.md](./desktop-auto-update.md) | Desktop-only: in-app auto update via Tauri updater — signed artifacts on GitHub Releases, update pill in the footer |
 | [project-export-import.md](./project-export-import.md) | Per-project export to a portable file + non-destructive "add as new project" import (auto-detected alongside full backup) |
 | [app-shell-and-navigation.md](./app-shell-and-navigation.md) | Layout, project switcher dropdown, resizable sprint panel, capacity stats |
+| [liquid-glass-material.md](./liquid-glass-material.md) | Material v2.1 (iOS 26 Tempered): glass cards 18px + capsule toolbar + ambient accent tint, tokens `--color-glass`/`.glass-card` |
 | [home-dashboard.md](./home-dashboard.md) | Read-first Home screen *(temporarily hidden — `HOME_ENABLED=false`)*: all-projects grid + cross-project People roster (Dexie v13 `people` table) |
 | [projects.md](./projects.md) | Multi-project create/switch/delete |
 | [project-member-settings.md](./project-member-settings.md) | Gear → settings page: edit project info (name/description/color) + members + delete |

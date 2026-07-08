@@ -184,7 +184,7 @@ export function HomeDashboard({
                 <button
                   key={p.id}
                   onClick={() => onOpenProject(p.id)}
-                  className="group text-left bg-surface rounded-[14px] p-4 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_22px_rgba(0,0,0,0.05)] transition hover:-translate-y-0.5 motion-reduce:transform-none hover:shadow-[0_2px_4px_rgba(0,0,0,0.06),0_14px_32px_rgba(0,0,0,0.09)] focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                  className="group text-left glass-card rounded-[18px] p-4 transition hover:-translate-y-0.5 motion-reduce:transform-none focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
                 >
                   <div className="flex items-center gap-2.5 mb-3">
                     <ProjectTile project={p} size={30} />
@@ -250,7 +250,7 @@ export function HomeDashboard({
           </section>
 
           {/* People roster — the support panel (right rail; stacks below < lg) */}
-          <aside className="bg-surface rounded-[14px] shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_22px_rgba(0,0,0,0.05)] overflow-hidden">
+          <aside className="glass-card rounded-[18px] overflow-hidden">
             <div className="flex items-center justify-between px-4 py-3 border-b border-border">
               <h2 className="flex items-center gap-2 text-[15.5px] font-semibold tracking-[-0.01em] text-ink">
                 <Users size={16} className="text-ink-faint" />

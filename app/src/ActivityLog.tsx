@@ -186,7 +186,7 @@ function dayLabel(key: string): string {
 }
 
 const CARD =
-  'bg-surface rounded-[14px] overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_22px_rgba(0,0,0,0.05)]'
+  'glass-card rounded-[18px] overflow-hidden'
 
 function EventRow({ e }: { e: ActivityEvent }) {
   return (

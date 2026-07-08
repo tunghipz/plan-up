@@ -318,7 +318,7 @@ export function SprintView({
           the member cards' overflow-x-auto/min-w so columns line up on wide screens.
           See design-docs/list-view.md v4. */}
       {groups.length > 0 && (
-        <div className="sticky top-0 z-20 -mx-6 px-6 bg-canvas">
+        <div className="sticky top-0 z-20 -mx-6 px-6 ambient-canvas">
           <div className="overflow-x-auto">
             <div className="min-w-[820px]">
               <TaskColumnHeader sort={sort} setSort={setSort} showAssignee={false} />
@@ -842,7 +842,7 @@ function Card({
   // `group/card` enables hover-reveal of the grip + delete button in GroupHeader.
   return (
     <div
-      className={`group/card bg-surface rounded-[14px] overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_22px_rgba(0,0,0,0.05)] ${className}`}
+      className={`group/card glass-card rounded-[18px] overflow-hidden ${className}`}
       {...rest}
     >
       {children}

@@ -71,6 +71,7 @@ import { startAutoBackup } from './backup-tauri'
 import { BackupSettingsModal } from './BackupSettingsModal'
 import { ExportImageModal } from './ExportImageModal'
 import { groupTasksByMember } from './png-export'
+import { computeAllWorkingPlans } from './scheduling'
 import { usePinnedPopover } from './usePinnedPopover'
 import { ProjectSettingsView } from './ProjectSettingsView'
 import { HomeDashboard } from './HomeDashboard'
@@ -1753,6 +1754,11 @@ function App() {
           projectName={currentProject.name}
           viewName={currentSprint.name}
           groups={groupTasksByMember(tasks ?? [], paletteMembers ?? [])}
+          planById={computeAllWorkingPlans(
+            tasks ?? [],
+            new Map((tasks ?? []).map((t) => [t.id, t])),
+            new Map((paletteMembers ?? []).map((m) => [m.id, m]))
+          )}
           today={today}
           onClose={() => setExportImageOpen(false)}
         />

@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import { Check, Copy, Download, Loader2 } from 'lucide-react'
 import { ModalSheet } from './ModalSheet'
 import { PngExportCard } from './PngExportCard'
+import type { WorkingPlan } from './scheduling'
 import type { MemberGroup } from './png-export'
 import {
   canCopyImage,
@@ -21,12 +22,14 @@ export function ExportImageModal({
   projectName,
   viewName,
   groups,
+  planById,
   today,
   onClose,
 }: {
   projectName: string
   viewName: string
   groups: MemberGroup[]
+  planById: Map<string, WorkingPlan>
   today: string
   onClose: () => void
 }) {
@@ -72,6 +75,7 @@ export function ExportImageModal({
       projectName={projectName}
       viewName={viewName}
       groups={groups}
+      planById={planById}
       today={today}
     />
   )
@@ -84,7 +88,7 @@ export function ExportImageModal({
 
       {/* Scaled preview (zoom reflows the box so the modal doesn't overflow). */}
       <div className="rounded-[12px] border border-border-hair bg-canvas overflow-auto max-h-[52vh]">
-        <div style={{ zoom: 0.56 }}>{card()}</div>
+        <div style={{ zoom: 0.46 }}>{card()}</div>
       </div>
 
       {error && <p className="text-[12.5px] text-overdue">{error}</p>}

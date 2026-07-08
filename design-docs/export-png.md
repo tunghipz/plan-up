@@ -1,6 +1,6 @@
 # Export as image (PNG)
 
-**Status:** Planned
+**Status:** Implemented
 **Last updated:** 2026-07-08
 **Code:** `app/src/png-export.ts`, `app/src/PngExportCard.tsx`, `app/src/ExportImageModal.tsx`, wired from `app/src/App.tsx`
 
@@ -33,9 +33,17 @@ export (bàn giao dữ liệu). PNG là *người đọc*, JSON là *máy đọc
 - **Mỗi member = 1 section**, sắp theo `Member.order` (thứ tự lane trong List):
   - Hàng tiêu đề: avatar (ảnh/emoji/initial màu) + tên + `title` (role, nếu có)
     + đếm `x/y done` (mini).
-  - Danh sách task của member đó, mỗi row:
-    `#sequence · title · [status dot + label] · [priority chip] · due date`.
-    Quá hạn (dueDate < hôm nay và chưa done) → ngày màu đỏ (`--color-overdue`).
+  - Một hàng **column header** (nhỏ, in hoa nhạt): TASK · PRIORITY · STATUS ·
+    START · END · EFFORT — để member đọc hiểu các cột.
+  - Danh sách task của member đó, mỗi row (grid cột cố định để thẳng hàng):
+    `#sequence · title · [priority chip] · [status dot + label] · start · end · effort`.
+    - **Start / End** = ngày **computed từ scheduling** (`computeAllWorkingPlans`
+      → `WorkingPlan.startDate/dueDate`), khớp đúng cột Start/End trong List
+      (giờ/nửa ngày chỉ hiện khi hover trong app → ảnh chỉ in ngày).
+    - **Effort** = `fmtDays(estimate)` + "d" (vd `2d`, `0.5d`); `estimate === 0`
+      → **◆** (milestone, dùng chính start làm mốc); `estimate == null` → `—`.
+    - Quá hạn (End < hôm nay và chưa done; milestone dùng Start) → ngày đỏ
+      (`--color-overdue`).
 - **Bucket "Unassigned"** (task `assigneeId === null`) xuống cuối, chỉ hiện khi có.
 - Section không có task → **ẩn** (không in member rảnh việc cho đỡ nhiễu).
 - Footer ảnh: "plan-up" watermark nhạt + tổng số task.
@@ -52,6 +60,9 @@ Chỉ **đọc**, không ghi DB. Nguồn:
   và `Member.order` để sắp section.
 - `currentProject`, `currentSprint`/collection cho header ảnh.
 - Status/priority nhãn: `STATUS_LABEL` / `PRIORITY_LABEL` (`lib.ts`).
+- **Start/End dates:** `computeAllWorkingPlans(tasks, tasksById, memberById)`
+  (`scheduling.ts`) → `Map<taskId, WorkingPlan>`, tính khi mở modal và truyền
+  vào card. Effort đọc thẳng `Task.estimate` (`fmtDays`).
 
 Xem [data-model.md](./data-model.md) cho `Task` / `Member`.
 

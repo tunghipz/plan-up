@@ -35,6 +35,10 @@ jobs:
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Signs the updater artifacts (.app.tar.gz + .sig) so installed apps
+          # can verify them against the pubkey in tauri.conf.json — see
+          # design-docs/desktop-auto-update.md. Key has no passphrase.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         with:
           projectPath: app
           args: --target universal-apple-darwin
@@ -43,4 +47,5 @@ jobs:
           releaseBody: >
             Unsigned build — first launch: right-click the app → Open
             (or `xattr -dr com.apple.quarantine /Applications/plan-up.app`).
+            In-app auto update takes over from here (desktop-auto-update.md).
           releaseDraft: true

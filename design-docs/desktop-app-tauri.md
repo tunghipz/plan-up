@@ -1,7 +1,7 @@
 # Desktop app (Tauri 2, macOS)
 
 **Status:** Implemented
-**Last updated:** 2026-07-07
+**Last updated:** 2026-07-08
 **Code:** `app/src-tauri/` (shell), `app/vite.config.ts`, `app/src/VersionFooter.tsx`, `.github/workflows/release.yml`
 
 ## Purpose
@@ -16,8 +16,8 @@ macOS only for now; Windows would be a CI-only addition later.
   built on every `v*` tag.
 - **Unsigned** — first launch needs right-click → Open (or
   `xattr -dr com.apple.quarantine /Applications/plan-up.app`) to pass Gatekeeper.
-- No update pill in the desktop build (that's the web PWA mechanism); updates arrive
-  as new DMG downloads. Footer shows a static `plan-up · vX.Y.Z`.
+- **Auto update (2026-07-08):** the desktop build now has its own update pill via
+  the Tauri updater — see [desktop-auto-update.md](./desktop-auto-update.md).
 - Desktop-only extra: **Auto backup** to a folder — see [auto-backup.md](./auto-backup.md).
 
 ## Data
@@ -64,4 +64,4 @@ reset — the auto-backup feature is the durability mitigation.
   are strictly additive/conditional.
 
 ## Future / open questions
-- Windows build (CI matrix addition), code signing/notarization, Tauri updater.
+- Windows build (CI matrix addition), Apple code signing/notarization.

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Package } from 'lucide-react'
 import { useRegisterSW } from 'virtual:pwa-register/react'
+import type { Update as TauriUpdate } from '@tauri-apps/plugin-updater'
 import { IS_TAURI } from './backup'
 
 /**
@@ -23,17 +24,85 @@ const UPDATE_POLL_MS = 30 * 60 * 1000 // re-check for a new SW every 30 min
 let pollingStarted = false
 
 export function VersionFooter() {
-  // Desktop (Tauri) build ships no service worker — updates arrive as new DMGs,
-  // so the footer stays a static version line (desktop-app-tauri.md). Hooks
-  // can't be conditional, so the SW machinery lives in the web-only component.
-  if (IS_TAURI) {
+  // Desktop (Tauri) build ships no service worker — its updates come from the
+  // Tauri updater instead (desktop-auto-update.md). Hooks can't be conditional,
+  // so each update mechanism lives in its own component.
+  if (IS_TAURI) return <TauriVersionFooter />
+  return <SwVersionFooter />
+}
+
+// Desktop: ask GitHub Releases (latest.json) for a newer signed build. Same
+// pill DNA as the SW footer; errors (offline, draft-only release) stay silent
+// — the update pill is a convenience, never an alert (desktop-auto-update.md).
+const TAURI_POLL_MS = 6 * 60 * 60 * 1000 // long-running desktop app: re-check every 6 h
+
+function TauriVersionFooter() {
+  const [update, setUpdate] = useState<TauriUpdate | null>(null)
+  const [updating, setUpdating] = useState(false)
+
+  useEffect(() => {
+    let disposed = false
+    const checkOnce = async () => {
+      try {
+        // Dynamic import keeps the updater chunk out of the web bundle.
+        const { check } = await import('@tauri-apps/plugin-updater')
+        const u = await check()
+        if (!disposed && u) setUpdate(u)
+      } catch {
+        // offline / no published release / rate limit — stay calm, retry later
+      }
+    }
+    checkOnce()
+    const id = setInterval(checkOnce, TAURI_POLL_MS)
+    return () => {
+      disposed = true
+      clearInterval(id)
+    }
+  }, [])
+
+  if (!update) {
     return (
       <div className="flex-1 min-w-0 px-[18px] py-2.5 text-[11px] text-ink-faint tabular-nums select-none truncate">
         plan-up · v{CURRENT}
       </div>
     )
   }
-  return <SwVersionFooter />
+
+  return (
+    <div className="flex-1 min-w-0 px-[18px] py-2 flex">
+      <button
+        onClick={async () => {
+          setUpdating(true)
+          try {
+            await update.downloadAndInstall()
+            const { relaunch } = await import('@tauri-apps/plugin-process')
+            await relaunch()
+          } catch {
+            // download/install failed (network, signature) — re-arm the pill
+            setUpdating(false)
+          }
+        }}
+        disabled={updating}
+        title={`Update to v${update.version} (restarts the app)`}
+        className="update-pill inline-flex items-center gap-2 rounded-full brand-btn text-white text-[12px] font-semibold tracking-[-0.01em] px-3 py-1.5 transition-colors disabled:opacity-80"
+      >
+        {updating ? (
+          <span className="w-3.5 h-3.5 rounded-full border-2 border-white/40 border-t-white animate-spin" />
+        ) : (
+          <Package size={14} strokeWidth={2} />
+        )}
+        <span>
+          {updating ? (
+            'Updating…'
+          ) : (
+            <>
+              Update · <span className="tabular-nums opacity-90">v{update.version}</span>
+            </>
+          )}
+        </span>
+      </button>
+    </div>
+  )
 }
 
 function SwVersionFooter() {

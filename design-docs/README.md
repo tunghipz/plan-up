@@ -53,6 +53,7 @@ Non-obvious behaviors, defaults, persistence keys.
 | [copy-to-telegram.md](./copy-to-telegram.md) | Copy the sprint as plain-text "Tree" (member → task → subtask, status as words) from a header button — paste straight into Telegram/chat |
 | [auto-backup.md](./auto-backup.md) | Desktop-only: auto-write daily full-backup JSON to a user-picked folder (30 s debounce on change, keep newest 30) |
 | [desktop-app-tauri.md](./desktop-app-tauri.md) | macOS desktop app — Tauri 2 shell in `app/src-tauri/`, universal DMG via GitHub Actions on `v*` tag |
+| [desktop-auto-update.md](./desktop-auto-update.md) | Desktop-only: in-app auto update via Tauri updater — signed artifacts on GitHub Releases, update pill in the footer |
 | [project-export-import.md](./project-export-import.md) | Per-project export to a portable file + non-destructive "add as new project" import (auto-detected alongside full backup) |
 | [app-shell-and-navigation.md](./app-shell-and-navigation.md) | Layout, project switcher dropdown, resizable sprint panel, capacity stats |
 | [home-dashboard.md](./home-dashboard.md) | Read-first Home screen *(temporarily hidden — `HOME_ENABLED=false`)*: all-projects grid + cross-project People roster (Dexie v13 `people` table) |

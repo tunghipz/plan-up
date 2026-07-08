@@ -25,10 +25,24 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["app", "dmg"],
-    "icon": ["icons/icon.icns"],
+    "targets": [
+      "app",
+      "dmg"
+    ],
+    "icon": [
+      "icons/icon.icns"
+    ],
     "macOS": {
       "minimumSystemVersion": "10.15"
+    },
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDNEMkQ4M0RCMDg0RDUyMDUKUldRRlVrMEkyNE10UFgwa3gxbXdwNlh0aW4vMTUvcHNEM05DT0U3L1VQQzZKSWJJNjF4RmNCWGEK",
+      "endpoints": [
+        "https://github.com/tunghipz/plan-up/releases/latest/download/latest.json"
+      ]
     }
   }
 }

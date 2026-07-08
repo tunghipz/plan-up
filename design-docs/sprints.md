@@ -1,8 +1,9 @@
 # Sprints
 
 **Status:** Implemented
-**Last updated:** 2026-07-02 (sprint creation is a canonical `createSprint()` in the data
-layer — row + `sprint_started` event commit in one transaction)
+**Last updated:** 2026-07-08 (note is now an inline **description** in the merged
+Notion-style sprint page header — see app-shell-and-navigation.md v4; prior 2026-07-02:
+sprint creation is a canonical `createSprint()` — row + `sprint_started` event in one transaction)
 **Code:** `app/src/App.tsx` (`NewSprintDialog`, `SprintNoteBanner`, sprint panel,
 `SprintStateDot`, `renderSprintRow`), `app/src/db.ts` (`createSprint`, `nextSequence`,
 `setSprintNote`), `app/src/lib.ts` (`sprintTemporalState`; tests in `sprint-cadence.test.ts`)
@@ -39,10 +40,12 @@ context lives in an **optional note** instead.
     conveyed by the date range text too). The "live" halo has a calm 2s pulse.
 - **Name is not editable.** There is no rename affordance anywhere — the header title is
   plain locked text. (Removed the old `SprintNameEditor` inline rename.)
-- **Note (optional):** a sprint-goal line shown in a thin **goal banner** beneath the
-  header (Solution B). Click the banner text to edit inline (multi-line; `⌘`+Enter or blur
-  commits, Escape cancels). When empty, the banner collapses to a calm dashed
-  **`+ Add sprint note`** slot (`AddGroupButton` idiom, §5.11) so it stays quiet until used.
+- **Note (optional):** a sprint-goal line shown as an inline **description** directly
+  beneath the sprint title in the **page header** (`SprintPageHeader`, see
+  [app-shell-and-navigation.md](./app-shell-and-navigation.md) v4). Click the text to edit
+  inline (multi-line; `⌘`+Enter or blur commits, Escape cancels). When empty it collapses
+  to a quiet **"Add sprint focus…"** placeholder so it stays calm until used. (Was a thin
+  full-width goal banner beneath the header; merged into the page header 2026-07-08.)
 
 ## Why lock the name
 Custom sprint names drift (`Sprint 12`, `Payments`, `wk of Jun 2`…) and break the clean

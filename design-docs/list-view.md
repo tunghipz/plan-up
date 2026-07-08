@@ -1,7 +1,7 @@
 # List view
 
 **Status:** Implemented
-**Last updated:** 2026-07-06 (calm refinements: time-on-hover dates, quiet empty cells, sticky-light group headers, compact rows, `#`-prefixed prereq)
+**Last updated:** 2026-07-08 (sprint note → inline description in the merged Notion-style page header, see app-shell v4; prior: calm refinements — time-on-hover dates, quiet empty cells, sticky-light group headers, compact rows, `#`-prefixed prereq)
 **Code:** `app/src/SprintView.tsx` (`MemberCard`, `UnassignedCard`, `GroupHeader`,
 `TaskColumnHeader`, `SortHeader`, `COL`, `TaskRows` drag state, `TaskRow` grip),
 `app/src/DatePicker.tsx` (`DatePickCell` time-on-hover), `app/src/db.ts` (`orderBetween`, `setListOrder`)
@@ -32,8 +32,9 @@
 > 5. **Prereq shows `#7`** (was bare `7`) — matches the `#N` language used in the cycle/notice
 >    popovers and disambiguates an ID reference from a count. Prefix is display-only (the input
 >    edits raw numbers).
-> 6. The **sprint-note** empty state is a slim left-aligned ghost (see
->    [app-shell-and-navigation.md] / `SprintNoteBanner`), not a full-width dashed bar.
+> 6. The **sprint note** now lives as an inline **description** line inside the merged
+>    sprint **page header** (see [app-shell-and-navigation.md] v4 / `SprintNoteBanner`);
+>    its empty state is a quiet **"Add sprint focus…"** placeholder, not a band.
 
 ## Purpose
 The primary editing surface: every task in the sprint, grouped by assignee in

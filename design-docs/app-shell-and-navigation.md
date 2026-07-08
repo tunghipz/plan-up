@@ -1,8 +1,8 @@
 # App shell & navigation
 
 **Status:** Implemented
-**Last updated:** 2026-07-06
-**Code:** `app/src/App.tsx`
+**Last updated:** 2026-07-08
+**Code:** `app/src/App.tsx` (`SprintPageHeader`, `SprintNoteBanner`, `LegendDot`)
 
 > **v3 · Project switcher + compact sprint rows (2026-07-06)** — the always-on
 > **58px icon rail** (one squircle per project) is **removed**. Project switching
@@ -19,10 +19,26 @@
 > lands on `screen === 'home'`, and `HomeDashboard` is never rendered. Everything else
 > below is unchanged. To restore, flip `HOME_ENABLED` back to `true`. See
 > [home-dashboard.md](./home-dashboard.md).
+>
+> **v4 · Sprint page header — merged & Notion-style (2026-07-08)** — the sprint's
+> identity, note, and capacity used to be **three stacked bands** (pinned title/date
+> bar → pinned "Add sprint note" strip → floating capacity card) split by two
+> hairlines: tall and fragmented. They now collapse into **one Notion-style page
+> header** (`SprintPageHeader`) at the top of the scroll area: a large sprint **title**,
+> the note as an inline **description** line, a **Dates** property, and the capacity
+> folded into a soft recessed **inset** panel (`--color-fill`, no floating card). The
+> pinned top bar keeps only the **toolbar** (Roll over + view toggle + search +
+> activity + Export/Import); the sprint name/date **no longer live there** — the
+> sidebar's accent row is the persistent "which sprint" context, so nothing is lost
+> when the header scrolls away. Separation is by **material** (white header → grey
+> canvas list), not lines. Collections keep their existing bar identity unchanged.
+> Approved via demo `demo/sprint-header-merge-notion.html` (variant **A+B**). See
+> [list-view.md](./list-view.md) / [sprints.md](./sprints.md).
 
 ## Purpose
 The two-pane macOS-style frame (sidebar + main) that hosts everything, plus the
-at-a-glance capacity banner above the active view.
+**sprint page header** (title · note · dates · capacity inset) at the top of the
+active view.
 
 ## Top-level screen (`screen`)
 `App.tsx` holds a top-level `screen: 'home' | 'project'`, persisted at
@@ -55,8 +71,13 @@ Left → right:
      sprint, then Collections. Both are collapsible sections (unchanged).
    - **Footer** — `plan-up · v{version}` (see below) with the **dark-mode toggle** (`Moon`/`Sun`)
      pinned at its right. **Drag the right edge** of the sidebar to resize.
-2. **Main column** — header toolbar (sprint name, date range, Roll over, view
-   toggle, search, Export/Import), then the **capacity banner**, then the List/Board view.
+2. **Main column** — a slim pinned **toolbar** (Roll over, view toggle, search,
+   activity, Export/Import), then the scrolling view whose top is the **sprint page
+   header** (`SprintPageHeader`: large title · inline note/description · **Dates**
+   property · capacity **inset** panel), then the List/Board view. The header scrolls
+   with content (Notion-style); the toolbar and the List's sticky column header stay
+   pinned. *(Collections show `CollectionBarIdentity` + status editor in the toolbar
+   instead, and render no page header.)*
 
 The **Home overview** (portfolio) *(currently hidden — see banner)* replaces the main column
 full-width when `screen==='home'`; its header carries its own **New project** + **dark-mode

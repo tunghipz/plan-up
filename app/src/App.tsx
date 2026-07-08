@@ -1382,19 +1382,11 @@ function App() {
             {selKind === 'collection' && currentCollection ? (
               <CollectionBarIdentity collection={currentCollection} />
             ) : currentSprint ? (
-              <>
-                {/* Sprint name is automatic + locked (no rename). Context lives
-                    in the optional goal note below the header. See sprints.md. */}
-                <span className="font-semibold text-ink display-tight truncate">
-                  {currentSprint.name}
-                </span>
-                <span className="inline-flex items-center text-xs text-ink-muted shrink-0 tab-data bg-fill rounded-full px-2.5 py-1">
-                  {formatSprintRange(
-                    currentSprint.startDate,
-                    currentSprint.endDate
-                  )}
-                </span>
-              </>
+              // Sprint identity (name · date range · note · capacity) now lives in
+              // the SprintPageHeader at the top of the scroll area, Notion-style —
+              // the toolbar stays a slim chrome strip. The sidebar's accent row is
+              // the persistent "which sprint" context. See app-shell v4.
+              null
             ) : (
               <span className="text-ink-faint">No sprint selected</span>
             )}
@@ -1592,23 +1584,15 @@ function App() {
           </div>
         </header>
 
-        {/* Goal note banner — chrome strip under the header, sprint-only.
-            Editable inline; collapses to a calm dashed "+ Add sprint note"
-            slot when empty (§5.11 idiom). See sprints.md. */}
-        {selKind === 'sprint' && currentSprint && (
-          <SprintNoteBanner key={currentSprint.id} sprint={currentSprint} />
-        )}
-
         <div ref={scrollRef} className="flex-1 overflow-auto">
+          {/* Merged Notion-style sprint page header: title · note (description) ·
+              Dates · capacity inset. Scrolls with content; keyed by sprint so the
+              note draft + capacity reset on sprint change. See app-shell v4. */}
           {selKind === 'sprint' && currentSprint && (
-            <CapacityBanner
-              total={capacity.total}
-              pctAssigned={capacity.pctAssigned}
-              done={capacity.done}
-              pctDone={capacity.pctDone}
-              inFlight={capacity.inFlight}
-              open={capacity.open}
-              notEstimated={capacity.notEstimated}
+            <SprintPageHeader
+              key={currentSprint.id}
+              sprint={currentSprint}
+              capacity={capacity}
             />
           )}
 
@@ -2009,87 +1993,101 @@ function SearchPalette({
 }
 
 /**
- * Capacity = single slim stacked bar + inline numbers (design-system §4.7).
- * The bar partitions the sprint's leaf tasks into three disjoint segments —
- * done / in-flight (owned, not done) / open (unowned) — that sum to `total`.
- * `notEstimated` rides the legend as a warning, never the bar.
+ * Sprint page header (Notion-style — see app-shell-and-navigation.md v4). Merges what
+ * used to be three stacked bands (pinned title/date bar · "Add sprint note" strip ·
+ * floating capacity card) into ONE header at the top of the scroll area:
+ *   • large sprint title
+ *   • the note as an inline description (`SprintNoteBanner`)
+ *   • a Dates property
+ *   • capacity folded into a soft recessed inset panel (`--color-fill`, no card)
+ * Sits on a white surface region; the grey canvas list below separates by material,
+ * not a hairline. Capacity = one slim stacked bar partitioning leaf tasks into three
+ * disjoint segments (done / in-flight / open) that sum to `total`; `notEstimated`
+ * rides the legend as a warning, never the bar (design-system §4.7).
  */
-function CapacityBanner({
-  total,
-  pctAssigned,
-  done,
-  pctDone,
-  inFlight,
-  open,
-  notEstimated,
+function SprintPageHeader({
+  sprint,
+  capacity,
 }: {
-  total: number
-  pctAssigned: number
-  done: number
-  pctDone: number
-  inFlight: number
-  open: number
-  notEstimated: number
-}) {
-  if (total === 0) {
-    return (
-      <div className="px-6 pt-5 pb-2">
-        <div className="bg-surface rounded-[14px] px-5 py-4 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_6px_16px_rgba(0,0,0,0.04)]">
-          <div className="text-[15px] font-semibold tracking-[-0.01em] text-ink">
-            Sprint capacity
-          </div>
-          <div className="text-[13px] text-ink-muted mt-0.5">
-            No tasks yet — <span className="text-accent">add your first task below</span>.
-          </div>
-        </div>
-      </div>
-    )
+  sprint: Sprint
+  capacity: {
+    total: number
+    pctAssigned: number
+    done: number
+    pctDone: number
+    inFlight: number
+    open: number
+    notEstimated: number
   }
+}) {
+  const { total, pctAssigned, done, pctDone, inFlight, open, notEstimated } = capacity
   const pct = (n: number) => `${(n / total) * 100}%`
   return (
-    <div className="px-6 pt-5 pb-2">
-      <div className="bg-surface rounded-[14px] px-5 py-4 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_6px_16px_rgba(0,0,0,0.04)]">
-        <div className="flex items-baseline justify-between gap-3">
-          <div className="text-[15px] font-semibold tracking-[-0.01em] text-ink">
-            Sprint capacity
-          </div>
-          <div className="text-[12.5px] text-ink-muted tab-data">
-            <span className="font-semibold text-ink">{total}</span> task
-            {total === 1 ? '' : 's'} ·{' '}
-            <span className="font-semibold text-ink">{pctDone}%</span> done ·{' '}
-            <span className="font-semibold text-ink">{pctAssigned}%</span> assigned
-          </div>
-        </div>
-        <div className="mt-2.5 flex h-2.5 w-full overflow-hidden rounded-full bg-[var(--color-canvas-sunk)]">
-          {done > 0 && (
-            <span
-              className="capacity-seg h-full bg-status-done"
-              style={{ width: pct(done) }}
-            />
-          )}
-          {inFlight > 0 && (
-            <span
-              className="capacity-seg h-full bg-accent"
-              style={{ width: pct(inFlight) }}
-            />
-          )}
-          {open > 0 && (
-            <span
-              className="capacity-seg h-full bg-border-strong"
-              style={{ width: pct(open) }}
-            />
-          )}
-        </div>
-        <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[12.5px] text-ink-muted tab-data">
-          <LegendDot color="var(--color-status-done)" n={done} label="done" />
-          <LegendDot color="var(--color-accent)" n={inFlight} label="in progress" />
-          <LegendDot color="var(--color-border-strong)" n={open} label="open" />
-          {notEstimated > 0 && (
-            <span className="text-warn-ink">
-              ⚠ {notEstimated} not estimated
-            </span>
-          )}
-        </div>
+    <div className="bg-surface px-6 pt-5 pb-5">
+      <h1 className="text-[21px] font-bold tracking-[-0.022em] text-ink leading-tight">
+        {sprint.name}
+      </h1>
+
+      {/* Note as an inline description right under the title. */}
+      <SprintNoteBanner sprint={sprint} />
+
+      {/* Dates property — Notion-style muted label + value pill. */}
+      <div className="mt-3 flex items-center gap-2.5 text-[13px]">
+        <span className="inline-flex items-center gap-2 text-ink-muted">
+          <Calendar size={14} strokeWidth={1.8} className="text-ink-faint" aria-hidden />
+          Dates
+        </span>
+        <span className="text-ink tab-data bg-fill rounded-full px-2.5 py-1">
+          {formatSprintRange(sprint.startDate, sprint.endDate)}
+        </span>
+      </div>
+
+      {/* Capacity — recessed soft-fill inset (keeps a touch of Cupertino depth
+          without a floating card). */}
+      <div className="mt-3.5 rounded-[12px] bg-fill px-4 py-3">
+        {total === 0 ? (
+          <>
+            <div className="text-[12px] font-semibold tracking-[0.01em] text-ink-muted">
+              Capacity
+            </div>
+            <div className="text-[13px] text-ink-muted mt-1">
+              No tasks yet — <span className="text-accent">add your first task below</span>.
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="flex items-baseline justify-between gap-3">
+              <div className="text-[12px] font-semibold tracking-[0.01em] text-ink-muted">
+                Capacity
+              </div>
+              <div className="text-[12.5px] text-ink-muted tab-data">
+                <span className="font-semibold text-ink">{total}</span> task
+                {total === 1 ? '' : 's'} ·{' '}
+                <span className="font-semibold text-ink">{pctDone}%</span> done ·{' '}
+                <span className="font-semibold text-ink">{pctAssigned}%</span> assigned
+              </div>
+            </div>
+            <div className="mt-2.5 flex h-2.5 w-full overflow-hidden rounded-full bg-[var(--color-canvas-sunk)]">
+              {done > 0 && (
+                <span className="capacity-seg h-full bg-status-done" style={{ width: pct(done) }} />
+              )}
+              {inFlight > 0 && (
+                <span className="capacity-seg h-full bg-accent" style={{ width: pct(inFlight) }} />
+              )}
+              {open > 0 && (
+                <span className="capacity-seg h-full bg-border-strong" style={{ width: pct(open) }} />
+              )}
+            </div>
+            <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[12.5px] text-ink-muted tab-data">
+              <LegendDot color="var(--color-status-done)" n={done} label="done" />
+              <LegendDot color="var(--color-accent)" n={inFlight} label="in progress" />
+              <LegendDot color="var(--color-border-strong)" n={open} label="open" />
+              {notEstimated > 0 && (
+                <span className="text-warn-ink">⚠ {notEstimated} not estimated</span>
+              )}
+            </div>
+          </>
+        )}
       </div>
     </div>
   )
@@ -2671,11 +2669,12 @@ function RolloverPopover({
 }
 
 /**
- * Sprint goal-note banner (design-system §5.11 idiom). A thin chrome strip
- * under the header. Has a note → editable text (click to edit; ⌘/Ctrl+Enter or
- * blur commits, Esc cancels). No note → calm dashed "+ Add sprint note" slot
- * that turns accent on hover. Replaces the old inline rename — sprint names are
- * locked now; this carries the free-text context. See sprints.md.
+ * Sprint note — an inline **description** under the sprint title inside
+ * `SprintPageHeader` (app-shell v4; was a full-width goal banner). Has a note →
+ * editable text (click to edit; ⌘/Ctrl+Enter or blur commits, Esc cancels). No note
+ * → a quiet **"Add sprint focus…"** placeholder. The page header keys it by
+ * `sprint.id`; the unmount-flush guard below still protects a mid-edit draft when the
+ * sprint changes. Carries the free-text context locked sprint names can't. See sprints.md.
  */
 function SprintNoteBanner({ sprint }: { sprint: Sprint }) {
   const [editing, setEditing] = useState(false)
@@ -2727,63 +2726,50 @@ function SprintNoteBanner({ sprint }: { sprint: Sprint }) {
 
   if (editing) {
     return (
-      <div className="shrink-0 bg-surface border-b border-border-hair px-5 py-2.5">
-        <textarea
-          ref={taRef}
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-              e.preventDefault()
-              void commit()
-            } else if (e.key === 'Escape') {
-              e.preventDefault()
-              cancel()
-            }
-          }}
-          onBlur={() => void commit()}
-          rows={2}
-          placeholder="What's the focus of this sprint?"
-          className="w-full px-2.5 py-1.5 text-[13.5px] leading-relaxed text-ink bg-surface border border-accent rounded-[8px] resize-y focus:outline-none focus:ring-2 focus:ring-accent/40 transition"
-          aria-label="Sprint note"
-        />
-      </div>
+      <textarea
+        ref={taRef}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+            e.preventDefault()
+            void commit()
+          } else if (e.key === 'Escape') {
+            e.preventDefault()
+            cancel()
+          }
+        }}
+        onBlur={() => void commit()}
+        rows={2}
+        placeholder="What's the focus of this sprint?"
+        className="mt-1.5 w-full max-w-[640px] block px-2.5 py-1.5 text-[14px] leading-relaxed text-ink bg-surface border border-accent rounded-[8px] resize-y focus:outline-none focus:ring-2 focus:ring-accent/40 transition"
+        aria-label="Sprint note"
+      />
     )
   }
 
   if (!sprint.note) {
-    // Slim, left-aligned ghost affordance — a sprint note is a secondary action,
-    // so the empty state no longer takes a full-width dashed bar. See list-view.md v4.
+    // Empty state = a quiet Notion-style placeholder line, not a band. Faint at
+    // rest, ink on hover. See app-shell v4 / list-view.md.
     return (
-      <div className="shrink-0 bg-surface border-b border-border-hair px-5 py-1.5">
-        <button
-          onClick={beginEdit}
-          className="inline-flex items-center gap-1.5 px-2 py-1 text-[12.5px] font-medium text-ink-faint rounded-[8px] transition hover:text-accent hover:bg-accent-soft"
-        >
-          <StickyNote size={13} strokeWidth={2} />
-          Add sprint note
-        </button>
-      </div>
+      <button
+        onClick={beginEdit}
+        className="mt-1 block text-left text-[14px] text-ink-faint rounded-[6px] -mx-1.5 px-1.5 py-0.5 transition hover:bg-surface-hover hover:text-ink"
+      >
+        Add sprint focus…
+      </button>
     )
   }
 
   return (
-    <div className="shrink-0 bg-surface border-b border-border-hair px-5 py-2.5">
-      <div
-        className="group/note flex items-start gap-2.5 cursor-text rounded-[8px] -mx-1.5 px-1.5 py-1 hover:bg-surface-hover transition"
-        onClick={beginEdit}
-        title="Click to edit note"
-      >
-        <StickyNote
-          size={15}
-          strokeWidth={1.9}
-          className="text-accent shrink-0 mt-0.5"
-          aria-hidden
-        />
-        <span className="flex-1 min-w-0 text-[13.5px] leading-relaxed text-ink whitespace-pre-wrap break-words">
-          {sprint.note}
-        </span>
-      </div>
+    <div
+      className="group/note mt-1 cursor-text rounded-[6px] -mx-1.5 px-1.5 py-0.5 hover:bg-surface-hover transition"
+      onClick={beginEdit}
+      title="Click to edit"
+    >
+      <span className="block text-[14px] leading-relaxed text-ink whitespace-pre-wrap break-words">
+        {sprint.note}
+      </span>
     </div>
   )
 }

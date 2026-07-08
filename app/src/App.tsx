@@ -1142,14 +1142,14 @@ function App() {
                   className="absolute inset-0 bg-gradient-to-b from-transparent to-canvas/55"
                   aria-hidden
                 />
-                <div className="relative flex items-center gap-1.5 pr-1.5">
+                <div className="relative flex items-center">
                   <button
                     ref={switcherRef}
                     onClick={() => setSwitcherOpen((v) => !v)}
                     aria-haspopup="menu"
                     aria-expanded={switcherOpen}
                     title="Switch project"
-                    className="flex-1 min-w-0 flex items-center gap-3 px-2.5 py-2.5 rounded-[12px] text-left hover:bg-surface-hover/60 transition"
+                    className="flex-1 min-w-0 flex items-center gap-3 px-2.5 py-2.5 text-left hover:bg-surface-hover/60 transition"
                   >
                     <ProjectTile
                       project={currentProject}

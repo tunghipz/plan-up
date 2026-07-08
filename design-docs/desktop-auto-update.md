@@ -47,7 +47,7 @@ update-pill của `SwVersionFooter` (version-and-updates.md):
 
 ## Release flow
 
-1. Bump version + tag `v*` push → workflow build universal DMG **+ updater
+1. Bump version + tag `v*` push → workflow build Apple Silicon DMG **+ updater
    artifacts** (`.app.tar.gz` + `.sig` + `latest.json`), ký bằng secret.
 2. Release tạo ở trạng thái **draft** — `latest.json` chỉ resolve sau khi
    **publish release**. Publish = phát hành update cho mọi user.

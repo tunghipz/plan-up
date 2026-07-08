@@ -12,7 +12,7 @@ macOS only for now; Windows would be a CI-only addition later.
 
 ## User-facing behavior
 - Standalone app window, 1280×800 (min 900×600), title "plan-up".
-- Distributed as a universal (Intel + Apple Silicon) `.dmg` from GitHub Releases,
+- Distributed as an **Apple Silicon–only** `.dmg` from GitHub Releases (Intel dropped 2026-07-08 — halves CI build time; user runs M-series),
   built on every `v*` tag.
 - **Unsigned** — first launch needs right-click → Open (or
   `xattr -dr com.apple.quarantine /Applications/plan-up.app`) to pass Gatekeeper.
@@ -48,12 +48,12 @@ reset — the auto-backup feature is the durability mitigation.
   all `@tauri-apps/*` imports are dynamic so the web bundle doesn't grow.
 
 ## Build & release
-- Local dev: `rustup` + `rustup target add x86_64-apple-darwin aarch64-apple-darwin`,
+- Local dev: `rustup` + `rustup target add aarch64-apple-darwin` (x86_64 no longer needed),
   then from `app/`: `npm run tauri dev`.
-- Local bundle: `npm run tauri build -- --target universal-apple-darwin` →
-  `app/src-tauri/target/universal-apple-darwin/release/bundle/dmg/`.
+- Local bundle: `npm run tauri build -- --target aarch64-apple-darwin` →
+  `app/src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/`.
 - CI: `.github/workflows/release.yml` — push a `v*` tag → macos runner builds the
-  universal DMG via `tauri-apps/tauri-action` and attaches it to a **draft** GitHub
+  Apple Silicon DMG via `tauri-apps/tauri-action` and attaches it to a **draft** GitHub
   Release. No signing secrets configured (unsigned by choice).
 
 ## Rules & edge cases

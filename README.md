@@ -28,10 +28,10 @@ npm run lint       # eslint .
 # prereq: rustup + both darwin targets
 cd app
 npm run tauri dev                                      # dev window
-npm run tauri build -- --target universal-apple-darwin # universal .dmg
+npm run tauri build -- --target aarch64-apple-darwin   # Apple Silicon .dmg
 ```
 
-Releases: push a `v*` tag → GitHub Actions builds an unsigned universal DMG (first
+Releases: push a `v*` tag → GitHub Actions builds an unsigned Apple Silicon DMG (first
 launch: right-click → Open). **Auto update**: the desktop app checks GitHub Releases
 on launch (+ every 6 h) and shows the same `Update · vX.Y.Z` footer pill as the web —
 click to download the signed update and relaunch (see

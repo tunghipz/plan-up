@@ -83,7 +83,13 @@ card + drag ghost nhận rim (`inset var(--glass-edge)/var(--glass-ring)`) nhưn
 nền vẫn solid; `PngExportCard` group box có **rim tĩnh inline hex** (PNG
 pipeline không render được backdrop-filter, card cố tình token-free);
 **3 dlg-sheet tự dựng ngoài ModalSheet** — search palette ⌘K (App.tsx),
-rollover popover (App.tsx), `ConfirmDialog` — cũng sang `.glass-modal`.
+rollover popover (App.tsx), `ConfirmDialog` — cũng sang `.glass-modal`;
+selection bar (SprintView) nhận rim trắng hardcode (bar tối cả 2 theme,
+token light là ring đen sẽ chìm); **sticky column header của List** đổi
+từ dải `ambient-canvas` đục full-bleed sang **capsule kính nổi**
+(`.glass-toolbar rounded-full`, sticky top-2, `TaskColumnHeader bare`
+bỏ border-b vì rim capsule là edge) — option C của
+`demo/liquid-column-header.html`.
 
 **Phase 2 (còn lại):** popover/menu/toast sang glass; sidebar vibrancy
 đồng bộ recipe.

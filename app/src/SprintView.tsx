@@ -313,15 +313,19 @@ export function SprintView({
       {/* One column header for the whole list — pinned to the top of the scroll
           area (sticks because nothing between here and the scroller is an overflow
           box; the per-card overflow-x-auto that trapped the old per-group headers
-          is now BELOW this element). Member layout (no Assignee column); the
-          Unassigned card keeps its own header since it adds that column. Matches
-          the member cards' overflow-x-auto/min-w so columns line up on wide screens.
-          See design-docs/list-view.md v4. */}
+          is now BELOW this element). Floating glass capsule (same material as the
+          app toolbar) instead of an opaque full-bleed strip — option C of
+          demo/liquid-column-header.html; see liquid-glass-material.md. Member
+          layout (no Assignee column); the Unassigned card keeps its own header
+          since it adds that column. Matches the member cards' overflow-x-auto/
+          min-w so columns line up on wide screens. See design-docs/list-view.md v4. */}
       {groups.length > 0 && (
-        <div className="sticky top-0 z-20 -mx-6 px-6 ambient-canvas">
-          <div className="overflow-x-auto">
-            <div className="min-w-[820px]">
-              <TaskColumnHeader sort={sort} setSort={setSort} showAssignee={false} />
+        <div className="sticky top-2 z-20">
+          <div className="glass-toolbar rounded-full overflow-hidden">
+            <div className="overflow-x-auto">
+              <div className="min-w-[820px]">
+                <TaskColumnHeader sort={sort} setSort={setSort} showAssignee={false} bare />
+              </div>
             </div>
           </div>
         </div>
@@ -1905,12 +1909,15 @@ function TaskColumnHeader({
   sort,
   setSort,
   showAssignee = true,
+  bare = false,
 }: {
   sort: Sort
   setSort: React.Dispatch<
     React.SetStateAction<Sort>
   >
   showAssignee?: boolean
+  /** Inside the floating capsule: the capsule's rim is the edge, so no border-b. */
+  bare?: boolean
 }) {
   // Three-state cycle per column: asc → desc → off. "Off" clears back to the
   // default seq order (DEFAULT_SORT), which also re-enables drag-to-reorder.
@@ -1928,7 +1935,7 @@ function TaskColumnHeader({
     // the rows. (Sticky was attempted but the per-card overflow-x-auto + Card
     // overflow-hidden trap the sticky context, so it can't pin to the viewport
     // without a scroll-architecture refactor — deferred. See design-docs/list-view.md v4.)
-    <div className="flex items-center gap-3 px-4 py-1 border-b border-border-hair">
+    <div className={`flex items-center gap-3 px-4 ${bare ? 'py-1.5' : 'py-1 border-b border-border-hair'}`}>
       <div className={COL.lead} />
       <div className={COL.dot} />
       <SortHeader

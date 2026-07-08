@@ -1,7 +1,7 @@
 # List view
 
 **Status:** Implemented
-**Last updated:** 2026-07-08 (sprint note → inline description in the merged Notion-style page header, see app-shell v4; prior: calm refinements — time-on-hover dates, quiet empty cells, sticky-light group headers, compact rows, `#`-prefixed prereq)
+**Last updated:** 2026-07-08 (column header → floating glass capsule; sprint note → inline description in the merged Notion-style page header, see app-shell v4; prior: calm refinements — time-on-hover dates, quiet empty cells, sticky-light group headers, compact rows, `#`-prefixed prereq)
 **Code:** `app/src/SprintView.tsx` (`MemberCard`, `UnassignedCard`, `GroupHeader`,
 `TaskColumnHeader`, `SortHeader`, `COL`, `TaskRows` drag state, `TaskRow` grip),
 `app/src/DatePicker.tsx` (`DatePickCell` time-on-hover), `app/src/db.ts` (`orderBetween`, `setListOrder`)
@@ -44,8 +44,11 @@ inset-grouped cards, fully editable inline.
 - One **card per member** (plus an **Unassigned** card, and a collapsed "members with no
   tasks" section). Each card = a `GroupHeader` + task rows + an "Add task" row. The
   **column header is a single sticky bar** at the top of the list (not repeated per card) —
-  see v4 note above. (The Unassigned card is the one exception that keeps an inline header,
-  since it carries an extra Assignee column.)
+  see v4 note above. Since 2026-07-08 it renders as a **floating glass capsule**
+  (`.glass-toolbar rounded-full`, sticky `top-2`, no border-b — the capsule rim is the
+  edge; see liquid-glass-material.md) instead of an opaque full-bleed strip. (The
+  Unassigned card is the one exception that keeps an inline header, since it carries an
+  extra Assignee column.)
 - **Collapse** a member card by clicking its header (persisted per sprint).
 - **Sort** by any column via its header (`ID, Task, Effort, Start, End, Status, Prereq`);
   clicking a column **cycles three states: asc → desc → off**. "Off" is a NEUTRAL state

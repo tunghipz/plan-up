@@ -1,13 +1,16 @@
 # Collections (task ngoài sprint)
 
 **Status:** Implemented
-**Last updated:** 2026-07-07 (xoá item có undo toast ~6s)
+**Last updated:** 2026-07-08 (share: Export ▾ menu — Copy for Telegram + Export as image)
 **Code:** `app/src/db.ts` (schema v9 + collection/section/status/item CRUD, export v3),
 `app/src/lib.ts` (buildMonthGrid/assignLanes/computeBarSegments — pure calendar helpers),
 `app/src/CollectionView.tsx` (List card-per-section + status editor + click-assign +
 editable Start/End dates via shared `DateRangePickCell` — a **date-range** picker, one popover
 sets both start+end in two clicks, no time-of-day; see [date-picker.md](./date-picker.md) "Range mode"),
 `app/src/CollectionCalendar.tsx` (month grid + seamless multi-day bars + multi-month chevrons),
+the toolbar **Export ▾** menu (context-aware in `App.tsx`: Copy for Telegram text + Export as image —
+see [copy-to-telegram.md](./copy-to-telegram.md), [export-png.md](./export-png.md)),
+`app/src/CollectionPngCard.tsx` + `CollectionImageModal.tsx` (the shareable PNG),
 `app/src/App.tsx` (sidebar SPRINTS/COLLECTIONS + routing)
 
 ## Purpose

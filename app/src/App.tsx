@@ -73,6 +73,13 @@ import { startAutoBackup } from './backup-tauri'
 import { BackupSettingsModal } from './BackupSettingsModal'
 import { ExportImageModal } from './ExportImageModal'
 import { CopyTelegramModal } from './CopyTelegramModal'
+import { CollectionImageModal } from './CollectionImageModal'
+import {
+  formatSprintTree,
+  membersWithTasks,
+  formatCollectionTree,
+  sectionsWithItems,
+} from './telegram-export'
 import { groupTasksByMember } from './png-export'
 import { computeAllWorkingPlans } from './scheduling'
 import { loadSort } from './task-sort'
@@ -288,6 +295,8 @@ function App() {
   const [backupSettingsOpen, setBackupSettingsOpen] = useState(false)
   const [exportImageOpen, setExportImageOpen] = useState(false)
   const [copyTgOpen, setCopyTgOpen] = useState(false)
+  const [collCopyOpen, setCollCopyOpen] = useState(false)
+  const [collImgOpen, setCollImgOpen] = useState(false)
   const [showNewProject, setShowNewProject] = useState(false)
   // Project switcher (header dropdown) — replaces the old icon rail. The popover
   // is `absolute` inside the switcher's `relative` header; usePinnedPopover only
@@ -522,6 +531,16 @@ function App() {
         ? db.tasks.where('sprintId').equals(currentSprintId).toArray()
         : Promise.resolve([] as Task[]),
     [currentSprintId]
+  )
+
+  // Items of the current collection — feeds the Export menu's collection share
+  // actions (Copy for Telegram / Export as image). See copy-to-telegram.md.
+  const collectionItems = useLiveQuery<Task[]>(
+    () =>
+      currentCollectionId
+        ? db.tasks.where('collectionId').equals(currentCollectionId).toArray()
+        : Promise.resolve([] as Task[]),
+    [currentCollectionId]
   )
 
   // Members of the current project — used by the search palette to show each
@@ -1572,31 +1591,82 @@ function App() {
                   onKeyDown={menuKeyNav}
                   className="absolute right-0 top-[calc(100%+6px)] z-30 min-w-[262px] p-1.5 rounded-[12px] bg-surface shadow-[0_12px_32px_rgba(0,0,0,0.16),0_0_0_0.5px_rgba(0,0,0,0.06)] dark:shadow-[0_12px_32px_rgba(0,0,0,0.55),0_0_0_0.5px_rgba(255,255,255,0.08)]"
                 >
-                  <button
-                    role="menuitem"
-                    disabled={
-                      selKind !== 'sprint' || !currentSprint || (tasks?.length ?? 0) === 0
-                    }
-                    onClick={() => {
-                      setExportMenuOpen(false)
-                      setExportImageOpen(true)
-                    }}
-                    className="w-full flex items-start gap-3 p-2.5 rounded-[8px] text-left hover:bg-surface-hover transition disabled:opacity-40 disabled:hover:bg-transparent"
-                  >
-                    <span className="shrink-0 w-[30px] h-[30px] rounded-[8px] flex items-center justify-center bg-accent-soft text-accent">
-                      <ImageIcon size={15} strokeWidth={1.9} />
-                    </span>
-                    <span className="min-w-0">
-                      <span className="block text-[13.5px] font-medium text-ink">Export as image…</span>
-                      <span className="block text-[12px] text-ink-muted truncate">
-                        {selKind !== 'sprint'
-                          ? 'Switch to a sprint to share tasks'
-                          : !currentSprint || (tasks?.length ?? 0) === 0
-                            ? 'No tasks in this sprint yet'
-                            : 'One PNG, grouped by member'}
+                  {/* Share the current view. Sprint → one image (grouped by
+                      member). Collection → Copy for Telegram (text tree by
+                      section) + Export as image. See copy-to-telegram.md. */}
+                  {selKind === 'collection' && currentCollection ? (
+                    <>
+                      <button
+                        role="menuitem"
+                        disabled={(collectionItems?.length ?? 0) === 0}
+                        onClick={() => {
+                          setExportMenuOpen(false)
+                          setCollCopyOpen(true)
+                        }}
+                        className="w-full flex items-start gap-3 p-2.5 rounded-[8px] text-left hover:bg-surface-hover transition disabled:opacity-40 disabled:hover:bg-transparent"
+                      >
+                        <span className="shrink-0 w-[30px] h-[30px] rounded-[8px] flex items-center justify-center bg-accent-soft text-accent">
+                          <Send size={15} strokeWidth={1.9} />
+                        </span>
+                        <span className="min-w-0">
+                          <span className="block text-[13.5px] font-medium text-ink">Copy for Telegram</span>
+                          <span className="block text-[12px] text-ink-muted truncate">
+                            {(collectionItems?.length ?? 0) === 0
+                              ? 'No items in this collection yet'
+                              : 'Plain-text tree, paste into chat'}
+                          </span>
+                        </span>
+                      </button>
+                      <div className="h-px bg-border-hair mx-2 my-1" />
+                      <button
+                        role="menuitem"
+                        disabled={(collectionItems?.length ?? 0) === 0}
+                        onClick={() => {
+                          setExportMenuOpen(false)
+                          setCollImgOpen(true)
+                        }}
+                        className="w-full flex items-start gap-3 p-2.5 rounded-[8px] text-left hover:bg-surface-hover transition disabled:opacity-40 disabled:hover:bg-transparent"
+                      >
+                        <span className="shrink-0 w-[30px] h-[30px] rounded-[8px] flex items-center justify-center bg-accent-soft text-accent">
+                          <ImageIcon size={15} strokeWidth={1.9} />
+                        </span>
+                        <span className="min-w-0">
+                          <span className="block text-[13.5px] font-medium text-ink">Export as image…</span>
+                          <span className="block text-[12px] text-ink-muted truncate">
+                            {(collectionItems?.length ?? 0) === 0
+                              ? 'No items in this collection yet'
+                              : 'One PNG, grouped by table'}
+                          </span>
+                        </span>
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      role="menuitem"
+                      disabled={
+                        selKind !== 'sprint' || !currentSprint || (tasks?.length ?? 0) === 0
+                      }
+                      onClick={() => {
+                        setExportMenuOpen(false)
+                        setExportImageOpen(true)
+                      }}
+                      className="w-full flex items-start gap-3 p-2.5 rounded-[8px] text-left hover:bg-surface-hover transition disabled:opacity-40 disabled:hover:bg-transparent"
+                    >
+                      <span className="shrink-0 w-[30px] h-[30px] rounded-[8px] flex items-center justify-center bg-accent-soft text-accent">
+                        <ImageIcon size={15} strokeWidth={1.9} />
                       </span>
-                    </span>
-                  </button>
+                      <span className="min-w-0">
+                        <span className="block text-[13.5px] font-medium text-ink">Export as image…</span>
+                        <span className="block text-[12px] text-ink-muted truncate">
+                          {selKind !== 'sprint'
+                            ? 'Switch to a sprint to share tasks'
+                            : !currentSprint || (tasks?.length ?? 0) === 0
+                              ? 'No tasks in this sprint yet'
+                              : 'One PNG, grouped by member'}
+                        </span>
+                      </span>
+                    </button>
+                  )}
                   <div className="h-px bg-border-hair mx-2 my-1" />
                   <button
                     role="menuitem"
@@ -1829,10 +1899,45 @@ function App() {
       {backupSettingsOpen && <BackupSettingsModal onClose={() => setBackupSettingsOpen(false)} />}
       {copyTgOpen && currentSprint && (
         <CopyTelegramModal
-          sprint={currentSprint}
-          members={paletteMembers ?? []}
-          tasks={tasks ?? []}
+          subtitle="Cây sprint · dán thẳng vào chat, không cần markdown"
+          scopes={[
+            { id: 'all', label: 'Cả sprint' },
+            ...membersWithTasks(paletteMembers ?? [], tasks ?? []).map((m) => ({
+              id: m.id,
+              label: m.name,
+            })),
+          ]}
+          build={(s) =>
+            formatSprintTree(currentSprint, paletteMembers ?? [], tasks ?? [], {
+              memberId: s === 'all' ? null : s,
+            })
+          }
           onClose={() => setCopyTgOpen(false)}
+        />
+      )}
+      {collCopyOpen && currentCollection && (
+        <CopyTelegramModal
+          subtitle="Cây collection theo table · dán thẳng vào chat"
+          scopes={[
+            { id: 'all', label: 'Cả collection' },
+            ...sectionsWithItems(currentCollection, collectionItems ?? []).map((s) => ({
+              id: s.id,
+              label: s.name,
+            })),
+          ]}
+          build={(s) =>
+            formatCollectionTree(currentCollection, collectionItems ?? [], {
+              sectionId: s === 'all' ? null : s,
+            })
+          }
+          onClose={() => setCollCopyOpen(false)}
+        />
+      )}
+      {collImgOpen && currentCollection && (
+        <CollectionImageModal
+          collection={currentCollection}
+          items={collectionItems ?? []}
+          onClose={() => setCollImgOpen(false)}
         />
       )}
       {exportImageOpen &&

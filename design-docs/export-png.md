@@ -1,8 +1,20 @@
 # Export as image (PNG)
 
 **Status:** Implemented
-**Last updated:** 2026-07-08
-**Code:** `app/src/png-export.ts`, `app/src/PngExportCard.tsx`, `app/src/ExportImageModal.tsx`, wired from `app/src/App.tsx`
+**Last updated:** 2026-07-08 (collection PNG: sections → Name·Start·End·Status table)
+**Code:** `app/src/png-export.ts` (shared render/copy/download glue), sprint card
+`app/src/PngExportCard.tsx` + `app/src/ExportImageModal.tsx` (wired from `App.tsx`),
+collection card `app/src/CollectionPngCard.tsx` + `app/src/CollectionImageModal.tsx`
+(wired from the context-aware Export ▾ menu in `App.tsx`)
+
+## Collection variant
+
+Collections export the same "one PNG for chat" but section-shaped: `CollectionPngCard`
+renders each section as a `Name · Start · End · Status` table (custom-status pills
+tinted from `CollectionStatus.color`; nested subtasks), no Effort/Assignee/prereq
+columns. `CollectionImageModal` reuses the same modal shell + `png-export.ts` glue.
+The text sibling (Copy for Telegram) lives in the same Export ▾ menu — see
+[copy-to-telegram.md](./copy-to-telegram.md).
 
 ## Purpose
 

@@ -1,14 +1,13 @@
 import { useMemo, useState } from 'react'
 import { Send, Check } from 'lucide-react'
-import type { Member, Sprint, Task } from './types'
 import { ModalSheet } from './ModalSheet'
-import { formatSprintTree, membersWithTasks } from './telegram-export'
 
 /**
- * Copy the current sprint as plain "Tree" text for pasting into Telegram (or any
- * chat). Opened from the Copy button in SprintPageHeader. Pure formatting lives
- * in telegram-export.ts (unit-tested); this owns scope/theme/clipboard UI only.
- * See design-docs/copy-to-telegram.md.
+ * Copy a sprint OR collection as plain "Tree" text for pasting into Telegram.
+ * Presentational + generic: the caller supplies the subtitle, the scope options
+ * (first is the "all" scope), and a `build(scopeId)` that returns the text for a
+ * scope (sprint → formatSprintTree, collection → formatCollectionTree). This owns
+ * scope/preview/clipboard only. See design-docs/copy-to-telegram.md.
  */
 
 const TG_MAX = 4096
@@ -19,20 +18,25 @@ const TG = {
   dark: { bg: '#0e1621', bubble: '#2b5278', ink: '#ffffff', meta: '#6ab0e8' },
 }
 
+export interface CopyScope {
+  id: string
+  label: string
+}
+
 export function CopyTelegramModal({
-  sprint,
-  members,
-  tasks,
+  subtitle,
+  scopes,
+  build,
   onClose,
 }: {
-  sprint: Sprint
-  members: Member[]
-  tasks: Task[]
+  subtitle: string
+  /** Scope options; the first should be the "all" scope (id used by `build`). */
+  scopes: CopyScope[]
+  /** Builds the copy text for a given scope id. */
+  build: (scopeId: string) => string
   onClose: () => void
 }) {
-  // scope = 'all' | a member id. Only members that actually own tasks appear.
-  const scopeMembers = useMemo(() => membersWithTasks(members, tasks), [members, tasks])
-  const [scope, setScope] = useState<string>('all')
+  const [scope, setScope] = useState<string>(scopes[0]?.id ?? 'all')
   const [copied, setCopied] = useState(false)
   // Preview follows the app theme (html.dark, set by useDarkMode). Read once —
   // the theme toggle lives in the sidebar footer, not reachable while this modal
@@ -41,16 +45,9 @@ export function CopyTelegramModal({
     typeof document !== 'undefined' && document.documentElement.classList.contains('dark')
   )
 
-  // A scoped member could vanish (deleted / reassigned) between opens — fall back.
-  const activeScope = scope !== 'all' && scopeMembers.some((m) => m.id === scope) ? scope : 'all'
-
-  const text = useMemo(
-    () =>
-      formatSprintTree(sprint, members, tasks, {
-        memberId: activeScope === 'all' ? null : activeScope,
-      }),
-    [sprint, members, tasks, activeScope]
-  )
+  // A scoped option could vanish between opens — fall back to the first scope.
+  const activeScope = scopes.some((s) => s.id === scope) ? scope : (scopes[0]?.id ?? 'all')
+  const text = useMemo(() => build(activeScope), [build, activeScope])
 
   const count = [...text].length
   const over = count > TG_MAX
@@ -89,24 +86,17 @@ export function CopyTelegramModal({
     <ModalSheet title="Copy cho Telegram" onClose={onClose}>
       <div className="-mt-1 flex items-center gap-2 text-[13px] text-ink-muted">
         <Send size={14} strokeWidth={1.9} className="text-accent" aria-hidden />
-        Cây sprint · dán thẳng vào chat, không cần markdown
+        {subtitle}
       </div>
 
-      {/* Scope: whole sprint or one member. */}
-      {scopeMembers.length > 0 && (
+      {/* Scope: whole sprint/collection or one lane/section. */}
+      {scopes.length > 1 && (
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
           <span className="text-[12px] text-ink-faint">Phạm vi</span>
           <div className="flex flex-wrap gap-1 bg-[var(--color-canvas-sunk)] rounded-[9px] p-1">
-            <button className={chip(activeScope === 'all')} onClick={() => setScope('all')}>
-              Cả sprint
-            </button>
-            {scopeMembers.map((m) => (
-              <button
-                key={m.id}
-                className={chip(activeScope === m.id)}
-                onClick={() => setScope(m.id)}
-              >
-                {m.name}
+            {scopes.map((s) => (
+              <button key={s.id} className={chip(activeScope === s.id)} onClick={() => setScope(s.id)}>
+                {s.label}
               </button>
             ))}
           </div>

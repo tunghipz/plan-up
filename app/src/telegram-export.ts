@@ -1,4 +1,4 @@
-import type { Member, Sprint, Status, Task } from './types'
+import type { Collection, Member, Section, Sprint, Status, Task } from './types'
 import { groupTasksByMember } from './png-export'
 import { formatShortDate, formatSprintRange } from './lib'
 
@@ -97,6 +97,103 @@ export function formatSprintTree(
       kids.forEach((k, ki) => {
         const lastK = ki === kids.length - 1
         L.push(`${gPipe}${tPipe}${lastK ? BRANCH_LAST : BRANCH_MID} ${k.title}${subMeta(k)}`)
+      })
+    })
+  })
+
+  return L.join('\n')
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Collections — same Tree, but grouped by SECTION (📁), no #seq (the collection
+// List has no ID column), status = the item's custom CollectionStatus NAME, and
+// dates render as a start→end range. See design-docs/copy-to-telegram.md.
+// ──────────────────────────────────────────────────────────────────────────
+
+export interface CollectionTreeOptions {
+  /** Restrict to one section (by Section.id). Omit/null = whole collection. */
+  sectionId?: string | null
+}
+
+/** `startDate → dueDate` range (either side may be absent; '' when neither). */
+function dateRange(t: Task): string {
+  const a = t.startDate ? formatShortDate(t.startDate) : ''
+  const b = t.dueDate ? formatShortDate(t.dueDate) : ''
+  if (a && b) return `${a} → ${b}`
+  return a || b || ''
+}
+
+/** Sections (in the collection's order) that own at least one item — the scope
+ * picker's per-section options. */
+export function sectionsWithItems(collection: Collection, tasks: Task[]): Section[] {
+  const used = new Set(tasks.map((t) => t.sectionId).filter(Boolean) as string[])
+  return collection.sections.filter((s) => used.has(s.id))
+}
+
+export function formatCollectionTree(
+  collection: Collection,
+  tasks: Task[],
+  opts: CollectionTreeOptions = {}
+): string {
+  const statusName = new Map(collection.statuses.map((s) => [s.id, s.name]))
+  const nameOf = (t: Task) =>
+    t.collectionStatusId ? statusName.get(t.collectionStatusId) : undefined
+  const meta = (t: Task) => {
+    const parts: string[] = []
+    const s = nameOf(t)
+    if (s) parts.push(s)
+    const d = dateRange(t)
+    if (d) parts.push(d)
+    return parts.length ? ' — ' + parts.join(' · ') : ''
+  }
+  const subMeta = (t: Task) => {
+    const s = nameOf(t)
+    return s ? ' — ' + s : ''
+  }
+
+  // Items per section, in the List's default order (listOrder ?? sequence).
+  const bySection = new Map<string, Task[]>()
+  for (const t of tasks) {
+    if (!t.sectionId) continue
+    const arr = bySection.get(t.sectionId) ?? []
+    arr.push(t)
+    bySection.set(t.sectionId, arr)
+  }
+  const ordered = (arr: Task[]) =>
+    [...arr].sort((a, b) => (a.listOrder ?? a.sequence) - (b.listOrder ?? b.sequence))
+
+  let sections = collection.sections
+  if (opts.sectionId != null) sections = sections.filter((s) => s.id === opts.sectionId)
+  const shown = sections.filter((s) => (bySection.get(s.id)?.length ?? 0) > 0)
+
+  const L: string[] = [`📋 ${collection.name}`]
+  shown.forEach((sec, si) => {
+    const lastS = si === shown.length - 1
+    const sPipe = lastS ? PIPE_LAST : PIPE_MID
+    L.push('│')
+    L.push(`${lastS ? BRANCH_LAST : BRANCH_MID} 📁 ${sec.name}`)
+
+    const items = ordered(bySection.get(sec.id) ?? [])
+    const idSet = new Set(items.map((t) => t.id))
+    const childrenByParent = new Map<string, Task[]>()
+    for (const t of items) {
+      if (t.parentId && idSet.has(t.parentId)) {
+        const arr = childrenByParent.get(t.parentId) ?? []
+        arr.push(t)
+        childrenByParent.set(t.parentId, arr)
+      }
+    }
+    const isChild = (t: Task) => !!(t.parentId && idSet.has(t.parentId))
+    const top = items.filter((t) => !isChild(t))
+
+    top.forEach((t, ti) => {
+      const lastT = ti === top.length - 1
+      const tPipe = lastT ? PIPE_LAST : PIPE_MID
+      L.push(`${sPipe}${lastT ? BRANCH_LAST : BRANCH_MID} ${t.title}${meta(t)}`)
+      const kids = childrenByParent.get(t.id) ?? []
+      kids.forEach((k, ki) => {
+        const lastK = ki === kids.length - 1
+        L.push(`${sPipe}${tPipe}${lastK ? BRANCH_LAST : BRANCH_MID} ${k.title}${subMeta(k)}`)
       })
     })
   })

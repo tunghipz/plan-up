@@ -2,7 +2,7 @@
 
 **Status:** Implemented
 **Last updated:** 2026-07-08
-**Code:** `app/src/telegram-export.ts` (pure formatter + tests), `app/src/CopyTelegramModal.tsx` (popover), `SprintPageHeader` in `app/src/App.tsx` (trigger button)
+**Code:** `app/src/telegram-export.ts` (pure formatters + tests), `app/src/CopyTelegramModal.tsx` (generic popover), `SprintPageHeader` in `app/src/App.tsx` (sprint trigger button), the toolbar **Export ▾** menu + collection modals in `app/src/App.tsx` (collection triggers), `app/src/CollectionImageModal.tsx` + `app/src/CollectionPngCard.tsx` (collection PNG)
 
 ## Purpose
 
@@ -95,6 +95,43 @@ parent thì hiện như task top-level ở lane của chính nó (đúng như Li
 - **`app/src/App.tsx`** — `SprintPageHeader` nhận `onCopy`, render nút Copy (khi
   có task); state `copyTgOpen`; render `<CopyTelegramModal>` với
   `currentSprint` / `paletteMembers` / `tasks`.
+
+## Collections (same feature, section-shaped)
+
+Collections get the **same** copy-text (+ a sibling image export), but adapted to
+their structure — see the parallel differences:
+
+- **Grouped by section 📁**, not member. `formatCollectionTree(collection, tasks,
+  { sectionId? })` walks `collection.sections` in order, buckets items by
+  `sectionId`, nests children per section (same as sprint).
+- **No `#seq`** — the collection List has no ID column, so items render as
+  `{title} — {status}[ · {start → end}]`.
+- **Status = the item's custom `CollectionStatus` NAME** (looked up via
+  `collectionStatusId` in `collection.statuses`), e.g. `EVENT`, `Idea`, `Shipped`
+  — NOT the fixed `STATUS_TEXT_VI`. Item with no status → status omitted.
+- **Dates = a `start → end` range** (`startDate`/`dueDate`, `formatShortDate`) —
+  collection items carry both mounts (range-mode date picker). One side only →
+  just that date; neither → omitted. No sprint date range on the header line
+  (just `📋 {collection.name}`).
+- **Scope** = whole collection / one section (`sectionsWithItems` helper).
+
+**Placement:** collections have **no page header** (identity + statuses + view
+toggle all live in the context bar), and the toolbar already carries the global
+**Export ▾** split-menu — so rather than add a second Export button, that menu is
+made **context-aware**: in a collection its top items become *Copy for Telegram*
+(opens the shared `CopyTelegramModal`) + *Export as image…* (opens
+`CollectionImageModal`), above the unchanged *Export this project / Export all /
+Auto backup*. In a sprint the menu keeps its single sprint *Export as image…*
+(the sprint text-copy lives in the page-header Copy button instead). Both
+collection items are disabled when the collection has no items.
+
+### Collection image export
+
+`CollectionImageModal` + `CollectionPngCard` render the collection as **one PNG**
+(sections → a `Name · Start · End · Status` table, custom-status pills, light
+palette, `plan-up` brand footer), reusing the `png-export.ts` glue
+(`renderNodeToPng` / `copyPngToClipboard` / `downloadPng`). Columns differ from
+the sprint PNG (no Effort/Assignee/prereq). See [export-png.md](./export-png.md).
 
 ## Non-goals
 

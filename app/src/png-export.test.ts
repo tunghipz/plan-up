@@ -70,11 +70,35 @@ describe('groupTasksByMember', () => {
     expect(groupTasksByMember([], [])).toEqual([])
   })
 
-  it('tolerates a task whose assignee is not in the member list', () => {
-    // Assignee id points at a deleted member → lands in no member group and,
-    // since it is not null, is NOT swept into Unassigned. It simply drops out.
+  it('sweeps a task with an unknown/deleted assignee into Unassigned (like the List orphan lane)', () => {
     const groups = groupTasksByMember([task('t1', 'ghost', 1)], [member('a', 'Alice', 0)])
-    expect(groups).toEqual([])
+    expect(groups).toHaveLength(1)
+    expect(groups[0].member).toBeNull()
+    expect(groups[0].tasks.map((t) => t.id)).toEqual(['t1'])
+  })
+
+  it('respects the active sort field (e.g. effort asc)', () => {
+    const members = [member('a', 'Alice', 0)]
+    const tasks = [
+      task('t1', 'a', 1, { estimate: 3 }),
+      task('t2', 'a', 2, { estimate: 1 }),
+      task('t3', 'a', 3, { estimate: 2 }),
+    ]
+    const groups = groupTasksByMember(tasks, members, { sort: { field: 'effort', dir: 'asc' } })
+    expect(groups[0].tasks.map((t) => t.id)).toEqual(['t2', 't3', 't1'])
+  })
+
+  it('nests children under their parent when nestChildren is set', () => {
+    const members = [member('a', 'Alice', 0)]
+    const tasks = [
+      task('p1', 'a', 1),
+      task('p2', 'a', 4),
+      task('c1', 'a', 2, { parentId: 'p1' }),
+      task('c2', 'a', 3, { parentId: 'p1' }),
+    ]
+    const groups = groupTasksByMember(tasks, members, { nestChildren: true })
+    // p1 then its children (seq order), then p2 — children float up under parent.
+    expect(groups[0].tasks.map((t) => t.id)).toEqual(['p1', 'c1', 'c2', 'p2'])
   })
 })
 

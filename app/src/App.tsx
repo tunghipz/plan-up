@@ -72,6 +72,7 @@ import { BackupSettingsModal } from './BackupSettingsModal'
 import { ExportImageModal } from './ExportImageModal'
 import { groupTasksByMember } from './png-export'
 import { computeAllWorkingPlans } from './scheduling'
+import { loadSort } from './task-sort'
 import { usePinnedPopover } from './usePinnedPopover'
 import { ProjectSettingsView } from './ProjectSettingsView'
 import { HomeDashboard } from './HomeDashboard'
@@ -1749,20 +1750,35 @@ function App() {
       )}
 
       {backupSettingsOpen && <BackupSettingsModal onClose={() => setBackupSettingsOpen(false)} />}
-      {exportImageOpen && currentProject && currentSprint && (
-        <ExportImageModal
-          projectName={currentProject.name}
-          viewName={currentSprint.name}
-          groups={groupTasksByMember(tasks ?? [], paletteMembers ?? [])}
-          planById={computeAllWorkingPlans(
-            tasks ?? [],
-            new Map((tasks ?? []).map((t) => [t.id, t])),
-            new Map((paletteMembers ?? []).map((m) => [m.id, m]))
-          )}
-          today={today}
-          onClose={() => setExportImageOpen(false)}
-        />
-      )}
+      {exportImageOpen &&
+        currentProject &&
+        currentSprint &&
+        (() => {
+          // Match the List view exactly: same computed schedule, same sort, and
+          // children nested under their parent. See design-docs/export-png.md.
+          const exportTasks = tasks ?? []
+          const exportMembers = paletteMembers ?? []
+          const planById = computeAllWorkingPlans(
+            exportTasks,
+            new Map(exportTasks.map((t) => [t.id, t])),
+            new Map(exportMembers.map((m) => [m.id, m]))
+          )
+          const groups = groupTasksByMember(exportTasks, exportMembers, {
+            sort: loadSort(),
+            planById,
+            nestChildren: true,
+          })
+          return (
+            <ExportImageModal
+              projectName={currentProject.name}
+              viewName={currentSprint.name}
+              groups={groups}
+              planById={planById}
+              today={today}
+              onClose={() => setExportImageOpen(false)}
+            />
+          )
+        })()}
 
       {showNewSprint && currentProjectId && (
         <NewSprintDialog

@@ -1,4 +1,7 @@
 import type { Member, Task } from './types'
+import type { WorkingPlan } from './scheduling'
+import { flattenDisplayOrder } from './lib'
+import { compareTasks, buildDateSortKeys, DEFAULT_SORT, type Sort } from './task-sort'
 
 /**
  * Export the current view's tasks as one shareable PNG, grouped by assignee.
@@ -15,54 +18,77 @@ export interface MemberGroup {
   tasks: Task[]
 }
 
-/** Sort key for a task within a member group: manual list order, else sequence. */
-function taskOrder(t: Task): number {
-  return t.listOrder ?? t.sequence
+/** Member lane order — mirrors `compareMembersByOrder` (order → name → id). */
+function compareMembers(a: Member, b: Member): number {
+  const d = (a.order ?? 0) - (b.order ?? 0)
+  if (d !== 0) return d
+  const n = a.name.localeCompare(b.name)
+  if (n !== 0) return n
+  return a.id.localeCompare(b.id)
+}
+
+export interface GroupOptions {
+  /** The List's active sort (field/dir). Defaults to neutral = manual order. */
+  sort?: Sort
+  /** Computed schedule, needed only when sorting by Start/End. */
+  planById?: Map<string, WorkingPlan>
+  /** Nest group children right under their parent (List display order). */
+  nestChildren?: boolean
 }
 
 /**
- * Group tasks by assignee, ordered for display:
- *  - member groups first, sorted by `Member.order` (lane order) then name,
- *  - the Unassigned bucket last (only when it has tasks),
- *  - empty member groups dropped (no point printing idle members),
- *  - tasks inside a group sorted by `listOrder ?? sequence`.
- * Pure — no DB, no DOM. This mirrors what the user sees in the List view.
+ * Group tasks by assignee EXACTLY as the List view lays them out — so the
+ * exported image matches the screen (design-docs/export-png.md, list-view.md):
+ *  - lanes ordered by `compareMembersByOrder` (order → name → id),
+ *  - a task whose assignee is missing/deleted falls into the Unassigned bucket
+ *    (same as the List's orphan lane), which sorts last (only when non-empty),
+ *  - empty member lanes dropped (no point printing idle members),
+ *  - tasks in a lane sorted with the shared `compareTasks` under the active
+ *    sort (default neutral → `listOrder ?? sequence`), then children nested
+ *    under their parent via `flattenDisplayOrder` when `nestChildren`.
+ * Pure — no DB, no DOM.
  */
 export function groupTasksByMember(
   tasks: Task[],
-  members: Member[]
+  members: Member[],
+  opts: GroupOptions = {}
 ): MemberGroup[] {
+  const sort = opts.sort ?? DEFAULT_SORT
+  const planById = opts.planById ?? new Map<string, WorkingPlan>()
+
+  const memberIds = new Set(members.map((m) => m.id))
   const byId = new Map<string, Task[]>()
   const unassigned: Task[] = []
   for (const t of tasks) {
-    if (t.assigneeId) {
-      const arr = byId.get(t.assigneeId)
+    // Orphan (null OR unknown assignee) → Unassigned, matching the List.
+    const owner = t.assigneeId && memberIds.has(t.assigneeId) ? t.assigneeId : null
+    if (owner) {
+      const arr = byId.get(owner)
       if (arr) arr.push(t)
-      else byId.set(t.assigneeId, [t])
+      else byId.set(owner, [t])
     } else {
       unassigned.push(t)
     }
   }
 
-  const ordered = [...members].sort((a, b) => {
-    const ao = a.order ?? 0
-    const bo = b.order ?? 0
-    if (ao !== bo) return ao - bo
-    return a.name.localeCompare(b.name)
-  })
+  const orderLane = (lane: Task[]): Task[] => {
+    const dateKeys =
+      sort.field === 'startDate' || sort.field === 'dueDate'
+        ? buildDateSortKeys(lane, planById)
+        : undefined
+    const sorted = [...lane].sort((a, b) =>
+      compareTasks(a, b, sort.field ?? 'seq', sort.field ? sort.dir : 'asc', dateKeys)
+    )
+    return opts.nestChildren ? flattenDisplayOrder([sorted]) : sorted
+  }
 
   const groups: MemberGroup[] = []
-  for (const m of ordered) {
+  for (const m of [...members].sort(compareMembers)) {
     const ts = byId.get(m.id)
-    if (ts && ts.length) {
-      groups.push({ member: m, tasks: [...ts].sort((a, b) => taskOrder(a) - taskOrder(b)) })
-    }
+    if (ts && ts.length) groups.push({ member: m, tasks: orderLane(ts) })
   }
   if (unassigned.length) {
-    groups.push({
-      member: null,
-      tasks: [...unassigned].sort((a, b) => taskOrder(a) - taskOrder(b)),
-    })
+    groups.push({ member: null, tasks: orderLane(unassigned) })
   }
   return groups
 }

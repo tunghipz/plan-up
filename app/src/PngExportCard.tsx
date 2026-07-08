@@ -1,6 +1,6 @@
 import { forwardRef } from 'react'
-import type { Priority, Status } from './types'
-import { STATUS_LABEL, PRIORITY_LABEL, fmtDays } from './lib'
+import type { Status } from './types'
+import { STATUS_LABEL, fmtDays } from './lib'
 import { colorForName } from './schema'
 import type { WorkingPlan } from './scheduling'
 import type { MemberGroup } from './png-export'
@@ -28,14 +28,6 @@ const C = {
   statusDone: '#34c759',
 }
 
-const PRIORITY_COLOR: Record<Priority, string> = {
-  urgent: '#ff3b30',
-  high: '#ff9500',
-  normal: '#0071e3',
-  low: '#8e8e93',
-  none: '#d1d1d6',
-}
-
 const STATUS_COLOR: Record<Status, string> = {
   todo: C.statusTodo,
   in_progress: C.statusProgress,
@@ -46,8 +38,8 @@ const FONT =
   '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif'
 
 // Shared column grid — the header row and every task row use the same template
-// so cells line up. seq · title · priority · status · start · end · effort.
-const GRID = '30px minmax(0,1fr) 72px 108px 58px 58px 44px'
+// so cells line up. seq · title · status · start · end · effort.
+const GRID = '30px minmax(0,1fr) 108px 58px 58px 44px'
 const COL_GAP = 12
 
 /** First user-perceived character of a name, for the avatar initial. */
@@ -138,29 +130,6 @@ function StatusPill({ status }: { status: Status }) {
   )
 }
 
-function PriorityChip({ priority }: { priority: Priority }) {
-  if (priority === 'none') return <span />
-  const color = PRIORITY_COLOR[priority]
-  return (
-    <span
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifySelf: 'start',
-        fontSize: 11,
-        fontWeight: 600,
-        color,
-        background: `${color}1f`, // ~12% alpha
-        borderRadius: 6,
-        padding: '2px 7px',
-        whiteSpace: 'nowrap',
-      }}
-    >
-      {PRIORITY_LABEL[priority]}
-    </span>
-  )
-}
-
 /** Small right-aligned numeric/date cell. */
 function metaCell(text: string, opts: { overdue?: boolean } = {}) {
   return (
@@ -212,7 +181,6 @@ export const PngExportCard = forwardRef<HTMLDivElement, PngExportCardProps>(
       >
         <span />
         <span>Task</span>
-        <span>Priority</span>
         <span>Status</span>
         <span style={{ textAlign: 'right' }}>Start</span>
         <span style={{ textAlign: 'right' }}>End</span>
@@ -348,7 +316,6 @@ export const PngExportCard = forwardRef<HTMLDivElement, PngExportCardProps>(
                           >
                             {t.title || 'Untitled'}
                           </span>
-                          <PriorityChip priority={t.priority} />
                           <StatusPill status={t.status} />
                           {metaCell(shortDate(start))}
                           {metaCell(isMilestone ? '—' : shortDate(end), { overdue })}

@@ -30,13 +30,20 @@ export (bàn giao dữ liệu). PNG là *người đọc*, JSON là *máy đọc
 ### Nội dung ảnh
 
 - **Header ảnh:** tên project · tên view (Sprint N / tên collection) · ngày xuất.
+- **Thứ tự khớp List view 1:1**: lanes sắp theo `compareMembersByOrder`; task
+  trong lane sắp bằng `compareTasks` theo **đúng sort đang chọn** (`loadSort()`,
+  mặc định neutral → `listOrder ?? sequence`); subtask nest dưới parent qua
+  `flattenDisplayOrder`. Cùng dùng module `task-sort.ts` với List (tách ra từ
+  SprintView) nên không lệch. Task có assignee đã xoá → rơi vào Unassigned
+  (giống orphan lane của List).
 - **Mỗi member = 1 section**, sắp theo `Member.order` (thứ tự lane trong List):
   - Hàng tiêu đề: avatar (ảnh/emoji/initial màu) + tên + `title` (role, nếu có)
     + đếm `x/y done` (mini).
-  - Một hàng **column header** (nhỏ, in hoa nhạt): TASK · PRIORITY · STATUS ·
-    START · END · EFFORT — để member đọc hiểu các cột.
+  - Một hàng **column header** (nhỏ, in hoa nhạt): TASK · STATUS · START · END ·
+    EFFORT — để member đọc hiểu các cột.
   - Danh sách task của member đó, mỗi row (grid cột cố định để thẳng hàng):
-    `#sequence · title · [priority chip] · [status dot + label] · start · end · effort`.
+    `#sequence · title · [status dot + label] · start · end · effort`.
+    (Không có cột Priority — bỏ theo yêu cầu; ưu tiên vẫn có trong app.)
     - **Start / End** = ngày **computed từ scheduling** (`computeAllWorkingPlans`
       → `WorkingPlan.startDate/dueDate`), khớp đúng cột Start/End trong List
       (giờ/nửa ngày chỉ hiện khi hover trong app → ảnh chỉ in ngày).
@@ -70,9 +77,11 @@ Xem [data-model.md](./data-model.md) cho `Task` / `Member`.
 
 ### `png-export.ts` (pure/glue, lazy import lib)
 
-- `groupTasksByMember(tasks, members)` — pure: trả mảng `{ member | null, tasks }`
-  đã sắp theo `order` (unassigned cuối), bỏ nhóm rỗng, task trong nhóm sắp theo
-  `listOrder ?? sequence`. **Unit-tested.**
+- `groupTasksByMember(tasks, members, opts?)` — pure: trả mảng `{ member | null,
+  tasks }` khớp List (member order, `compareTasks` theo `opts.sort`, nest
+  subtask khi `opts.nestChildren`, unassigned cuối, bỏ lane rỗng). Reuse
+  `compareTasks`/`buildDateSortKeys` từ `task-sort.ts` + `flattenDisplayOrder`
+  từ `lib.ts`. **Unit-tested.**
 - `pngFilename(viewName, dateISO)` — slug an toàn + ngày local.
 - `renderNodeToPng(node, scale=2)` — dynamic `import('modern-screenshot')`
   → `domToPng(node, { scale, backgroundColor: '#ffffff' })`; trả data-URL.

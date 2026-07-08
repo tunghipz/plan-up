@@ -810,7 +810,7 @@ const DragGhost = memo(function DragGhost({ task, innerRef }: { task: Task; inne
       style={{ transform: 'translate(-1000px,-1000px)' }}
       aria-hidden
     >
-      <div className="bg-surface rounded-[12px] p-3 rotate-[3deg] shadow-[0_14px_34px_rgba(0,0,0,0.24)] ring-1 ring-black/[0.04]">
+      <div className="bg-surface rounded-[12px] p-3 rotate-[3deg] shadow-[0_14px_34px_rgba(0,0,0,0.24),inset_0_1px_0_var(--glass-edge),inset_0_0_0_0.5px_var(--glass-ring)] ring-1 ring-black/[0.04]">
         <div className="flex items-start gap-2.5">
           <span className="w-[18px] h-[18px] shrink-0 mt-0.5" style={{ color: meta.varName }}>
             <StatusIcon status={task.status} />
@@ -1045,7 +1045,7 @@ const BoardCard = memo(function BoardCard({
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
       onDragOver={onDragOver}
-      className={`group relative bg-surface rounded-[12px] p-3 shadow-[0_1px_2px_rgba(0,0,0,0.05),0_3px_10px_rgba(0,0,0,0.05)] hover:shadow-[0_2px_4px_rgba(0,0,0,0.06),0_10px_24px_rgba(0,0,0,0.08)] transition ${
+      className={`group relative bg-surface rounded-[12px] p-3 shadow-[0_1px_2px_rgba(0,0,0,0.05),0_3px_10px_rgba(0,0,0,0.05),inset_0_1px_0_var(--glass-edge),inset_0_0_0_0.5px_var(--glass-ring)] hover:shadow-[0_2px_4px_rgba(0,0,0,0.06),0_10px_24px_rgba(0,0,0,0.08),inset_0_1px_0_var(--glass-edge),inset_0_0_0_0.5px_var(--glass-ring)] transition ${
         draggable ? 'cursor-grab active:cursor-grabbing' : ''
       } ${dragging ? 'hidden' : ''}`}
     >

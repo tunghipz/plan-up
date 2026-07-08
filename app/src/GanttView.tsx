@@ -448,9 +448,10 @@ export function GanttView({
       >
         <div className="relative" style={{ width: innerW }}>
           {/* Today — a soft accent column wash (Apple-Calendar style), behind
-              events. The sticky header's opaque bg-surface hides the wash over
-              the header band, so the header's accent date pill carries "today"
-              up top while the wash marks the column down through the lanes. */}
+              events. The sticky glass header blurs the wash over the header
+              band (it shows faintly through the material); the header's accent
+              date pill still carries "today" up top while the wash marks the
+              column down through the lanes. */}
           {todayIdx >= 0 && (
             <div
               className="absolute top-0 bottom-0 bg-accent-tint z-0 pointer-events-none"
@@ -461,9 +462,9 @@ export function GanttView({
 
           {/* Sticky date header */}
           <div
-            className="sticky top-0 z-20 flex bg-surface border-b border-border-hair"
+            className="sticky top-0 z-20 flex glass-flush border-b border-border-hair"
           >
-            <div className="sticky left-0 z-10 bg-surface" style={{ width: MGUT }} />
+            <div className="sticky left-0 z-10 glass-flush" style={{ width: MGUT }} />
             {workdays.map((date, i) => (
               <div
                 key={date}
@@ -507,7 +508,7 @@ export function GanttView({
                 <div className="flex border-b border-border-hair/70" style={{ minHeight: laneH }}>
                   {/* sticky label */}
                   <div
-                    className="sticky left-0 z-10 bg-surface flex items-start gap-2.5 px-3.5 py-2.5"
+                    className="sticky left-0 z-10 glass-flush flex items-start gap-2.5 px-3.5 py-2.5"
                     style={{ width: MGUT }}
                   >
                     <Avatar member={member} />

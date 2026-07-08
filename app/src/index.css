@@ -268,6 +268,15 @@ h1, h2, h3, .display-tight {
     inset 0 0 0 0.5px var(--glass-ring);
 }
 
+/* glass-flush: sticky cells INSIDE a glass card (gantt date header, member
+ * gutter). Same material as the card so they read flush with it while still
+ * masking content that scrolls beneath them. */
+.glass-flush {
+  background: var(--color-glass);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+}
+
 /* ambient-canvas: canvas + a faint accent wash top-right so the glass has
  * something to refract. background-attachment: fixed makes the gradient
  * viewport-anchored, so a sticky bar using the same class lines up exactly

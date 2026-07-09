@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import { Check, Copy, Download, Loader2 } from 'lucide-react'
 import { ModalSheet } from './ModalSheet'
 import { PngExportCard } from './PngExportCard'
+import { ScaledPreview } from './ScaledPreview'
 import type { WorkingPlan } from './scheduling'
 import type { MemberGroup } from './png-export'
 import {
@@ -92,10 +93,8 @@ export function ExportImageModal({
         One image of tasks grouped by member — copy straight into chat, or download.
       </p>
 
-      {/* Scaled preview (zoom reflows the box so the modal doesn't overflow). */}
-      <div className="rounded-[12px] border border-border-hair bg-canvas overflow-auto max-h-[52vh]">
-        <div style={{ zoom: 0.46 }}>{card()}</div>
-      </div>
+      {/* Auto-fit preview (measures the modal, scales the 940px card down). */}
+      <ScaledPreview cardWidth={940}>{card()}</ScaledPreview>
 
       {error && <p className="text-[12.5px] text-overdue">{error}</p>}
 

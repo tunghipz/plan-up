@@ -10,10 +10,14 @@ import type { MemberGroup } from './png-export'
  * Deliberately styled with INLINE HEX — no Tailwind classes, CSS vars or
  * `oklch()` — so `modern-screenshot` renders it identically regardless of the
  * app's cascade/theme. Always the light palette: shareable images must be
- * predictable and readable on a chat background. Mirrors the List view 1:1:
- * columns ID · Task · Effort (day) · Start · End · Status, a rich member header
- * (progress ring · done/total · overdue · next deadline · days off), the
- * Urgent/High priority pill, the ◆ Milestone tag, and nested subtasks.
+ * predictable and readable on a chat background.
+ *
+ * Layout (2026-07-09, option B of demo/export-table-layout.html): one hairline
+ * table for the whole sprint — a rowSpan Member gutter on the left (avatar +
+ * name + done/total), continuous 1..N numbering across the image, columns
+ * # · Task · Start · End · Effort · Status, 2px grey separators between member
+ * blocks. Priority pill, ◆ Milestone tag and ↳ subtask indent ride on the
+ * title as before.
  */
 
 // Light palette — hard-coded to match the light `--color-*` tokens in index.css.
@@ -22,12 +26,13 @@ const C = {
   muted: '#6e6e73',
   faint: '#a1a1a6',
   hair: '#e5e5ea',
+  groupHair: '#c9c9cf',
+  headHair: '#d7d7dc',
   surface: '#ffffff',
   panel: '#f5f5f7',
   accent: '#0071e3',
   accentSoft: '#eaf2fe',
   overdue: '#ff3b30',
-  ringTrack: '#e2e2e6',
   statusTodo: '#8e8e93',
   statusProgress: '#0071e3',
   statusDone: '#34c759',
@@ -52,11 +57,6 @@ const PRIORITY_PILL: Partial<Record<Priority, { label: string; bg: string; fg: s
 
 const FONT =
   '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif'
-
-// Shared column grid — header row and every task row use the same template so
-// cells line up. seq · title · effort · start · end · status.
-const GRID = '28px minmax(0,1fr) 86px 60px 60px 116px'
-const COL_GAP = 12
 
 /** First user-perceived character of a name, for the avatar initial. */
 function initial(name: string): string {
@@ -89,27 +89,14 @@ function memberStats(tasks: Task[], planById: Map<string, WorkingPlan>, today: s
   const leaf = tasks.filter((t) => !childParentIds.has(t.id))
   const total = leaf.length
   const done = leaf.filter((t) => t.status === 'done').length
-  const pct = total ? Math.round((done / total) * 100) : 0
   let overdue = 0
-  let nextDue: string | null = null
   for (const t of leaf) {
     if (t.status === 'done') continue
     const plan = planById.get(t.id)
     const due = t.estimate === 0 ? (plan?.startDate ?? t.startDate) : (plan?.dueDate ?? t.dueDate)
-    if (!due) continue
-    if (due < today) overdue++
-    else if (!nextDue || due < nextDue) nextDue = due
+    if (due && due < today) overdue++
   }
-  return { total, done, pct, overdue, nextDue }
-}
-
-function CalendarGlyph() {
-  return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" style={{ flexShrink: 0 }}>
-      <rect x="3" y="4.5" width="18" height="16" rx="2.5" stroke={C.faint} strokeWidth="2" />
-      <path d="M3 9h18M8 2.5v4M16 2.5v4" stroke={C.faint} strokeWidth="2" strokeLinecap="round" />
-    </svg>
-  )
+  return { total, done, overdue }
 }
 
 function Avatar({
@@ -156,48 +143,6 @@ function Avatar({
   return <span style={base}>{initial(name)}</span>
 }
 
-/** Avatar with the Activity-ring style progress arc (green = % done). */
-function AvatarRing({
-  name,
-  color,
-  image,
-  emoji,
-  pct,
-}: {
-  name: string
-  color: string
-  image?: string
-  emoji?: string
-  pct: number
-}) {
-  return (
-    <div
-      style={{
-        width: 42,
-        height: 42,
-        borderRadius: '50%',
-        flexShrink: 0,
-        display: 'grid',
-        placeItems: 'center',
-        background: `conic-gradient(${C.statusDone} 0 ${pct}%, ${C.ringTrack} ${pct}% 100%)`,
-      }}
-    >
-      <div
-        style={{
-          width: 36,
-          height: 36,
-          borderRadius: '50%',
-          background: C.surface,
-          display: 'grid',
-          placeItems: 'center',
-        }}
-      >
-        <Avatar name={name} color={color} image={image} emoji={emoji} size={32} />
-      </div>
-    </div>
-  )
-}
-
 function StatusPill({ status }: { status: Status }) {
   const c = STATUS_PILL[status]
   return (
@@ -206,7 +151,6 @@ function StatusPill({ status }: { status: Status }) {
         display: 'inline-flex',
         alignItems: 'center',
         gap: 6,
-        justifySelf: 'start',
         background: c.bg,
         color: c.fg,
         borderRadius: 999,
@@ -271,22 +215,28 @@ function MilestoneTag() {
   )
 }
 
-/** Right-aligned tabular numeric/date cell. */
-function metaCell(text: string, opts: { overdue?: boolean; center?: boolean } = {}) {
-  return (
-    <span
-      style={{
-        fontSize: 12,
-        textAlign: opts.center ? 'center' : 'right',
-        fontVariantNumeric: 'tabular-nums',
-        color: opts.overdue ? C.overdue : '#48484c',
-        fontWeight: opts.overdue ? 600 : 400,
-        whiteSpace: 'nowrap',
-      }}
-    >
-      {text}
-    </span>
-  )
+const CELL_PAD = '9px 12px'
+
+function dateCell(opts: { overdue?: boolean } = {}): React.CSSProperties {
+  return {
+    padding: CELL_PAD,
+    fontSize: 12.5,
+    fontVariantNumeric: 'tabular-nums',
+    color: opts.overdue ? C.overdue : '#48484c',
+    fontWeight: opts.overdue ? 600 : 400,
+    whiteSpace: 'nowrap',
+  }
+}
+
+const TH: React.CSSProperties = {
+  fontSize: 10.5,
+  fontWeight: 600,
+  letterSpacing: '0.045em',
+  textTransform: 'uppercase',
+  color: C.muted,
+  textAlign: 'left',
+  padding: '8px 12px',
+  borderBottom: `1px solid ${C.headHair}`,
 }
 
 export interface PngExportCardProps {
@@ -306,34 +256,12 @@ export interface PngExportCardProps {
 
 export const PngExportCard = forwardRef<HTMLDivElement, PngExportCardProps>(
   function PngExportCard(
-    { projectName, viewName, groups, planById, sprintStart, sprintEnd, today, width = 860 },
+    { projectName, viewName, groups, planById, sprintStart, sprintEnd, today, width = 940 },
     ref
   ) {
     const totalTasks = groups.reduce((n, g) => n + g.tasks.length, 0)
-
-    const columnHeader = (
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: GRID,
-          gap: COL_GAP,
-          alignItems: 'center',
-          padding: '0 14px 6px',
-          fontSize: 10,
-          fontWeight: 600,
-          letterSpacing: '0.045em',
-          textTransform: 'uppercase',
-          color: C.faint,
-        }}
-      >
-        <span>ID</span>
-        <span>Task</span>
-        <span style={{ textAlign: 'center' }}>Effort (day)</span>
-        <span style={{ textAlign: 'right' }}>Start</span>
-        <span style={{ textAlign: 'right' }}>End</span>
-        <span>Status</span>
-      </div>
-    )
+    // Continuous 1..N numbering across the whole image (not Task.sequence).
+    let seq = 0
 
     return (
       <div
@@ -364,192 +292,208 @@ export const PngExportCard = forwardRef<HTMLDivElement, PngExportCardProps>(
           </div>
         </div>
 
-        <div style={{ height: 1, background: C.hair, margin: '16px 0 8px' }} />
-
-        {/* Member sections */}
         {groups.length === 0 ? (
           <div style={{ padding: '32px 0', textAlign: 'center', color: C.faint, fontSize: 14 }}>
             No tasks to show.
           </div>
         ) : (
-          <>
-            {columnHeader}
-            {groups.map((g, gi) => {
-              const name = g.member?.name ?? 'Unassigned'
-              const color = g.member ? g.member.color || colorForName(name) : C.faint
-              const { total, done, pct, overdue, nextDue } = memberStats(g.tasks, planById, today)
-              const off = g.member
-                ? effectiveDaysOff(daysOffInRange(g.member.daysOff ?? [], sprintStart, sprintEnd))
-                : 0
-              // Children (nested under an in-group parent) get an indent.
-              const childIds = new Set(
-                g.tasks
-                  .filter((t) => t.parentId && g.tasks.some((x) => x.id === t.parentId))
-                  .map((t) => t.id)
-              )
-              return (
-                <div key={g.member?.id ?? '__unassigned'} style={{ marginTop: gi === 0 ? 12 : 20 }}>
-                  {/* Section header — progress ring + name + stats */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '0 2px 8px' }}>
-                    {g.member ? (
-                      <AvatarRing
-                        name={name}
-                        color={color}
-                        image={g.member.avatarImage}
-                        emoji={g.member.avatarEmoji}
-                        pct={pct}
-                      />
-                    ) : (
-                      <span
-                        style={{
-                          width: 42,
-                          height: 42,
-                          borderRadius: '50%',
-                          flexShrink: 0,
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          background: C.panel,
-                          color: C.faint,
-                          fontSize: 18,
-                          boxShadow: `0 0 0 1px ${C.hair}`,
-                        }}
-                      >
-                        ?
-                      </span>
-                    )}
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ fontSize: 15, fontWeight: 600, lineHeight: 1.15 }}>{name}</div>
-                      {g.member?.title ? (
-                        <div style={{ fontSize: 12, color: C.faint, marginTop: 1 }}>{g.member.title}</div>
-                      ) : null}
-                    </div>
-                    <div
-                      style={{
-                        marginLeft: 'auto',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 12,
-                        flexShrink: 0,
-                      }}
-                    >
-                      <span style={{ fontSize: 12, fontWeight: 600, color: '#3a3a3c' }}>
-                        {done}/{total}
-                      </span>
-                      {overdue > 0 && (
-                        <span
+          // Fixed layout: the width-less Task column absorbs the remainder, so
+          // the table can never grow past the card (auto layout + a percent
+          // cell overflowed and clipped the Status pills).
+          <table
+            style={{
+              tableLayout: 'fixed',
+              borderCollapse: 'collapse',
+              width: '100%',
+              marginTop: 16,
+              fontSize: 13,
+            }}
+          >
+            <thead>
+              <tr>
+                <th style={{ ...TH, width: 142 }}>Member</th>
+                <th style={{ ...TH, width: 34 }}>#</th>
+                <th style={TH}>Task</th>
+                <th style={{ ...TH, width: 64 }}>Start</th>
+                <th style={{ ...TH, width: 64 }}>End</th>
+                <th style={{ ...TH, width: 82, textAlign: 'center' }}>Effort (day)</th>
+                <th style={{ ...TH, width: 122 }}>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {groups.map((g, gi) => {
+                const name = g.member?.name ?? 'Unassigned'
+                const color = g.member ? g.member.color || colorForName(name) : C.faint
+                const { total, done, overdue } = memberStats(g.tasks, planById, today)
+                const off = g.member
+                  ? effectiveDaysOff(daysOffInRange(g.member.daysOff ?? [], sprintStart, sprintEnd))
+                  : 0
+                // Children (nested under an in-group parent) get an indent.
+                const childIds = new Set(
+                  g.tasks
+                    .filter((t) => t.parentId && g.tasks.some((x) => x.id === t.parentId))
+                    .map((t) => t.id)
+                )
+                // 2px separator on the first row of every block after the first
+                // (the thead's border already seats the first block).
+                const groupBorder = gi === 0 ? 'none' : `2px solid ${C.groupHair}`
+                return g.tasks.map((t, ti) => {
+                  seq++
+                  const plan = planById.get(t.id)
+                  const start = plan?.startDate ?? t.startDate
+                  const isMilestone = t.estimate === 0
+                  const end = isMilestone ? null : (plan?.dueDate ?? t.dueDate)
+                  const overdueRef = isMilestone ? start : end
+                  const isOverdue = !!overdueRef && t.status !== 'done' && overdueRef < today
+                  const isChild = childIds.has(t.id)
+                  const rowBorder = ti === 0 ? groupBorder : `1px solid ${C.hair}`
+                  const td: React.CSSProperties = { padding: CELL_PAD, borderTop: rowBorder }
+                  return (
+                    <tr key={t.id}>
+                      {ti === 0 && (
+                        <td
+                          rowSpan={g.tasks.length}
                           style={{
-                            fontSize: 12,
-                            fontWeight: 600,
-                            color: '#c62d24',
-                            background: 'rgba(255,59,48,0.12)',
-                            borderRadius: 999,
-                            padding: '2px 8px',
-                            whiteSpace: 'nowrap',
+                            padding: '12px 12px 9px',
+                            borderTop: groupBorder,
+                            verticalAlign: 'top',
                           }}
                         >
-                          {overdue} overdue
-                        </span>
-                      )}
-                      {nextDue && (
-                        <span style={{ fontSize: 12, color: C.muted, whiteSpace: 'nowrap' }}>
-                          due {shortDate(nextDue)}
-                        </span>
-                      )}
-                      {off > 0 && (
-                        <span
-                          style={{
-                            fontSize: 12,
-                            color: C.faint,
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: 4,
-                            whiteSpace: 'nowrap',
-                          }}
-                        >
-                          <CalendarGlyph />
-                          {fmtDays(off)} {off === 1 ? 'day' : 'days'} off
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Task rows */}
-                  {/* Static "liquid" rim (PNG can't render backdrop-filter):
-                      white specular top edge + 0.5px dark ring, fixed hex for
-                      the deterministic light palette. */}
-                  <div
-                    style={{
-                      background: C.panel,
-                      borderRadius: 12,
-                      overflow: 'hidden',
-                      boxShadow:
-                        'inset 0 1px 0 rgba(255,255,255,0.9), inset 0 0 0 0.5px rgba(0,0,0,0.07)',
-                    }}
-                  >
-                    {g.tasks.map((t, ti) => {
-                      const plan = planById.get(t.id)
-                      const start = plan?.startDate ?? t.startDate
-                      const isMilestone = t.estimate === 0
-                      const end = isMilestone ? null : (plan?.dueDate ?? t.dueDate)
-                      const overdueRef = isMilestone ? start : end
-                      const overdue = !!overdueRef && t.status !== 'done' && overdueRef < today
-                      const isChild = childIds.has(t.id)
-                      return (
-                        <div
-                          key={t.id}
-                          style={{
-                            display: 'grid',
-                            gridTemplateColumns: GRID,
-                            gap: COL_GAP,
-                            alignItems: 'center',
-                            padding: '9px 14px',
-                            borderTop: ti === 0 ? 'none' : `1px solid ${C.hair}`,
-                          }}
-                        >
-                          <span
-                            style={{ fontSize: 11, color: C.faint, fontVariantNumeric: 'tabular-nums' }}
-                          >
-                            #{t.sequence}
-                          </span>
-                          <span
-                            style={{
-                              minWidth: 0,
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: 7,
-                              paddingLeft: isChild ? 18 : 0,
-                            }}
-                          >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            {g.member ? (
+                              <Avatar
+                                name={name}
+                                color={color}
+                                image={g.member.avatarImage}
+                                emoji={g.member.avatarEmoji}
+                                size={24}
+                              />
+                            ) : (
+                              <span
+                                style={{
+                                  width: 24,
+                                  height: 24,
+                                  borderRadius: '50%',
+                                  flexShrink: 0,
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  background: C.panel,
+                                  color: C.faint,
+                                  fontSize: 12,
+                                  boxShadow: `0 0 0 1px ${C.hair}`,
+                                }}
+                              >
+                                ?
+                              </span>
+                            )}
                             <span
                               style={{
+                                fontWeight: 650,
                                 fontSize: 13.5,
-                                color: isChild ? '#3a3a3c' : C.ink,
-                                textDecoration: t.status === 'done' ? 'line-through' : 'none',
-                                opacity: t.status === 'done' ? 0.5 : 1,
+                                whiteSpace: 'nowrap',
                                 overflow: 'hidden',
                                 textOverflow: 'ellipsis',
+                              }}
+                            >
+                              {name}
+                            </span>
+                          </div>
+                          <div
+                            style={{
+                              fontSize: 11,
+                              color: C.faint,
+                              marginTop: 3,
+                              paddingLeft: 32,
+                              fontVariantNumeric: 'tabular-nums',
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            {done}/{total} done
+                          </div>
+                          {overdue > 0 && (
+                            <div
+                              style={{
+                                fontSize: 11,
+                                fontWeight: 600,
+                                color: '#c62d24',
+                                marginTop: 2,
+                                paddingLeft: 32,
                                 whiteSpace: 'nowrap',
                               }}
                             >
-                              {isChild ? '↳ ' : ''}
-                              {t.title || 'Untitled'}
-                            </span>
-                            <PriorityPill priority={t.priority} />
-                            {isMilestone && <MilestoneTag />}
+                              {overdue} overdue
+                            </div>
+                          )}
+                          {off > 0 && (
+                            <div
+                              style={{
+                                fontSize: 11,
+                                color: C.faint,
+                                marginTop: 2,
+                                paddingLeft: 32,
+                                whiteSpace: 'nowrap',
+                              }}
+                            >
+                              {fmtDays(off)}d off
+                            </div>
+                          )}
+                        </td>
+                      )}
+                      <td
+                        style={{
+                          ...td,
+                          fontSize: 12,
+                          color: C.faint,
+                          fontVariantNumeric: 'tabular-nums',
+                        }}
+                      >
+                        {seq}
+                      </td>
+                      <td style={{ ...td, overflow: 'hidden' }}>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: 7, paddingLeft: isChild ? 18 : 0 }}>
+                          <span
+                            style={{
+                              fontSize: 13.5,
+                              color: isChild ? '#3a3a3c' : C.ink,
+                              textDecoration: t.status === 'done' ? 'line-through' : 'none',
+                              opacity: t.status === 'done' ? 0.5 : 1,
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            {isChild ? '↳ ' : ''}
+                            {t.title || 'Untitled'}
                           </span>
-                          {metaCell(effortLabel(t.estimate), { center: true })}
-                          {metaCell(shortDate(start))}
-                          {metaCell(isMilestone ? '—' : shortDate(end), { overdue })}
-                          <StatusPill status={t.status} />
-                        </div>
-                      )
-                    })}
-                  </div>
-                </div>
-              )
-            })}
-          </>
+                          <PriorityPill priority={t.priority} />
+                          {isMilestone && <MilestoneTag />}
+                        </span>
+                      </td>
+                      <td style={{ ...dateCell(), borderTop: rowBorder }}>{shortDate(start)}</td>
+                      <td style={{ ...dateCell({ overdue: isOverdue }), borderTop: rowBorder }}>
+                        {isMilestone ? '—' : shortDate(end)}
+                      </td>
+                      <td
+                        style={{
+                          ...td,
+                          textAlign: 'center',
+                          fontSize: 12.5,
+                          fontVariantNumeric: 'tabular-nums',
+                          color: '#48484c',
+                        }}
+                      >
+                        {effortLabel(t.estimate)}
+                      </td>
+                      <td style={td}>
+                        <StatusPill status={t.status} />
+                      </td>
+                    </tr>
+                  )
+                })
+              })}
+            </tbody>
+          </table>
         )}
 
         {/* Footer watermark */}

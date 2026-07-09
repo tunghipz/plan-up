@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import { Check, Copy, Download, Loader2 } from 'lucide-react'
 import { ModalSheet } from './ModalSheet'
 import { CollectionPngCard } from './CollectionPngCard'
+import { ScaledPreview } from './ScaledPreview'
 import type { Collection, Task } from './types'
 import { todayLocalISO } from './lib'
 import {
@@ -72,10 +73,8 @@ export function CollectionImageModal({
         One PNG of the collection by table — copy straight into chat, or download.
       </p>
 
-      {/* Scaled preview (zoom reflows the box so the modal doesn't overflow). */}
-      <div className="rounded-[12px] border border-border-hair bg-canvas overflow-auto max-h-[52vh]">
-        <div style={{ zoom: 0.5 }}>{card()}</div>
-      </div>
+      {/* Auto-fit preview (measures the modal, scales the 660px card down). */}
+      <ScaledPreview cardWidth={660}>{card()}</ScaledPreview>
 
       {error && <p className="text-[12.5px] text-overdue">{error}</p>}
 

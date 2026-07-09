@@ -380,9 +380,26 @@ function App() {
     })
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
-  // Export split-menu (header) — "this project" vs "full backup".
+  // Export split-menu (header) — "this project" vs "full backup". The panel is
+  // PORTALED to <body>: the glass toolbar has its own backdrop-filter, which
+  // makes it a backdrop root — a nested .glass-popover inside it can't blur the
+  // page behind, so the menu rendered transparent (same reason every other
+  // popover in the app portals out).
   const [exportMenuOpen, setExportMenuOpen] = useState(false)
   const exportMenuRef = useRef<HTMLDivElement>(null)
+  const exportMenuPanelRef = useRef<HTMLDivElement>(null)
+  const exportMenuPos = usePinnedPopover({
+    open: exportMenuOpen,
+    onClose: () => setExportMenuOpen(false),
+    anchorRef: exportMenuRef,
+    popRef: exportMenuPanelRef,
+    place: () => {
+      const r = exportMenuRef.current?.getBoundingClientRect()
+      if (!r) return null
+      // Right-aligned under the trigger, like the old absolute placement.
+      return { top: r.bottom + 6, right: window.innerWidth - r.right }
+    },
+  })
   // Non-destructive import feedback (add-as-new). Replace-all keeps its dialog.
   const [toast, setToast] = useState<ToastState>(null)
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -391,23 +408,6 @@ function App() {
     setToast(t)
     toastTimer.current = setTimeout(() => setToast(null), 6000)
   }
-  // Close the export menu on outside-click / Escape; clear the toast timer on unmount.
-  useEffect(() => {
-    if (!exportMenuOpen) return
-    const onDown = (e: MouseEvent) => {
-      if (!exportMenuRef.current?.contains(e.target as Node))
-        setExportMenuOpen(false)
-    }
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setExportMenuOpen(false)
-    }
-    window.addEventListener('mousedown', onDown)
-    window.addEventListener('keydown', onKey)
-    return () => {
-      window.removeEventListener('mousedown', onDown)
-      window.removeEventListener('keydown', onKey)
-    }
-  }, [exportMenuOpen])
   useEffect(
     () => () => {
       if (toastTimer.current) clearTimeout(toastTimer.current)
@@ -1114,6 +1114,9 @@ function App() {
         aria-hidden={sidebarCollapsed}
         inert={sidebarCollapsed}
       >
+        {/* Desktop overlay title bar (desktop-app-tauri.md): the traffic lights
+            float over this strip; it doubles as the window drag region. */}
+        {IS_TAURI && <div data-tauri-drag-region className="h-[34px] shrink-0" />}
         {currentProject ? (
           <>
             <div className="px-2.5 pt-2.5 pb-2 relative">
@@ -1506,7 +1509,15 @@ function App() {
         {/* relative z-30: glass surfaces below create stacking contexts
             (backdrop-filter), so toolbar dropdowns need the whole header
             lifted above the scroll content. Below drawers/dialogs (z-50). */}
-        <header className="relative z-30 h-[46px] shrink-0 mx-3 mt-3 rounded-full glass-toolbar flex items-center px-4 gap-3">
+        {/* Desktop: capsule background doubles as a window drag region, and it
+            slides right when the collapsed sidebar leaves the traffic lights
+            over its left edge (desktop-app-tauri.md; same curve as the
+            sidebar's width transition). */}
+        <header
+          {...(IS_TAURI ? { 'data-tauri-drag-region': true } : {})}
+          className="relative z-30 h-[46px] shrink-0 mx-3 mt-3 rounded-full glass-toolbar flex items-center px-4 gap-3 transition-[margin] duration-300 ease-[cubic-bezier(.32,.72,0,1)] motion-reduce:transition-none"
+          style={{ marginLeft: IS_TAURI && sidebarCollapsed ? 74 : undefined }}
+        >
           {/* Sidebar toggle — macOS sidebar.left idiom (one button, both ways),
               far left so the breadcrumb keeps context when the panel is hidden. */}
           <button
@@ -1642,12 +1653,16 @@ function App() {
                 <Download size={13} /> Export
                 <ChevronDown size={12} className={`transition-transform ${exportMenuOpen ? 'rotate-180' : ''}`} />
               </button>
-              {exportMenuOpen && (
+              {exportMenuOpen && exportMenuPos && createPortal(
                 <div
-                  ref={focusFirstMenuItem}
+                  ref={(el) => {
+                    exportMenuPanelRef.current = el
+                    focusFirstMenuItem(el)
+                  }}
                   role="menu"
                   onKeyDown={menuKeyNav}
-                  className="absolute right-0 top-[calc(100%+6px)] z-30 min-w-[262px] p-1.5 rounded-[12px] glass-popover"
+                  style={{ position: 'fixed', top: exportMenuPos.top, right: exportMenuPos.right }}
+                  className="z-50 min-w-[262px] p-1.5 rounded-[12px] glass-popover"
                 >
                   {/* Share the current view. Sprint → one image (grouped by
                       member). Collection → Copy for Telegram (text tree by
@@ -1780,7 +1795,8 @@ function App() {
                       </button>
                     </>
                   )}
-                </div>
+                </div>,
+                document.body
               )}
             </div>
             <button

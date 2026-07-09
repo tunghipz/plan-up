@@ -1,7 +1,7 @@
 # Desktop app (Tauri 2, macOS)
 
 **Status:** Implemented
-**Last updated:** 2026-07-08
+**Last updated:** 2026-07-09 (overlay title bar — Finder-style, traffic lights over content)
 **Code:** `app/src-tauri/` (shell), `app/vite.config.ts`, `app/src/VersionFooter.tsx`, `.github/workflows/release.yml`
 
 ## Purpose
@@ -11,7 +11,20 @@ Chosen over Electron/PWA for weight (a few MB) and fit with the calm/local-first
 macOS only for now; Windows would be a CI-only addition later.
 
 ## User-facing behavior
-- Standalone app window, 1280×800 (min 900×600), title "plan-up".
+- Standalone app window, 1280×800 (min 900×600).
+- **Overlay title bar (2026-07-09, Finder-style — demo `demo/desktop-overlay-titlebar.html`):**
+  no separate title-bar strip; content runs to the top edge and the traffic lights
+  float over the sidebar. `tauri.conf.json` window: `titleBarStyle: "Overlay"` +
+  `hiddenTitle: true` + `trafficLightPosition {x:14,y:13}`. React side (all gated on
+  `IS_TAURI`, web unchanged):
+  - Sidebar gets a 34px top spacer that is a **window drag region**
+    (`data-tauri-drag-region` — the attribute only catches mousedown on the element
+    itself, so children stay clickable).
+  - The header toolbar capsule is also a drag region (its empty background).
+  - **Collapsed-sidebar edge case:** with the sidebar at width 0 the lights would sit
+    on the capsule's left buttons → the capsule takes `marginLeft: 74px` (inline style,
+    beats `mx-3`) with the same 300ms `cubic-bezier(.32,.72,0,1)` transition as the
+    sidebar collapse.
 - Distributed as an **Apple Silicon–only** `.dmg` from GitHub Releases (Intel dropped 2026-07-08 — halves CI build time; user runs M-series),
   built on every `v*` tag.
 - **Unsigned** — first launch needs right-click → Open (or

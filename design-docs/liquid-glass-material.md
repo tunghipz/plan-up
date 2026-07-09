@@ -108,6 +108,17 @@ prefix đứng sau là "đè" dòng chuẩn và xoá `backdrop-filter` khỏi bu
 prod — Chromium không apply bản `-webkit-` nên mặt kính mất blur trên
 bản deploy (dev serve CSS thô nên không lộ). Prefix-first giữ cả hai.
 
+## Gotcha backdrop root (2026-07-09)
+
+Element có `backdrop-filter` là **backdrop root**: descendant có
+backdrop-filter chỉ blur được nội dung BÊN TRONG root đó, không xuyên ra
+page phía sau. Hệ quả: popover `.glass-popover` đặt lồng trong
+`.glass-toolbar` (menu Export cũ, absolute trong header) hiện trong suốt
+không mờ. Fix: **portal popover ra `document.body`** (idiom
+`usePinnedPopover` + `createPortal` mà DatePicker/members đã dùng —
+vì thế chúng không dính). Quy tắc: KHÔNG bao giờ đặt glass popover là
+con DOM của một surface glass khác.
+
 ## Trade-offs đã cân nhắc
 
 - `backdrop-filter` nhiều card = GPU cost — chấp nhận vì nội dung sau card là

@@ -1,7 +1,8 @@
 # Export as image (PNG)
 
 **Status:** Implemented
-**Last updated:** 2026-07-08 (collection PNG: sections → Name·Start·End·Status table)
+**Last updated:** 2026-07-09 (sprint PNG: member sections → one hairline table, member
+gutter column rowspan + continuous numbering — option B of `demo/export-table-layout.html`)
 **Code:** `app/src/png-export.ts` (shared render/copy/download glue), sprint card
 `app/src/PngExportCard.tsx` + `app/src/ExportImageModal.tsx` (wired from `App.tsx`),
 collection card `app/src/CollectionPngCard.tsx` + `app/src/CollectionImageModal.tsx`
@@ -48,30 +49,33 @@ export (bàn giao dữ liệu). PNG là *người đọc*, JSON là *máy đọc
   `flattenDisplayOrder`. Cùng dùng module `task-sort.ts` với List (tách ra từ
   SprintView) nên không lệch. Task có assignee đã xoá → rơi vào Unassigned
   (giống orphan lane của List).
-- **Column header** (một hàng, in hoa nhạt): ID · TASK · EFFORT (DAY) · START ·
-  END · STATUS — **đúng cột & thứ tự List view** (nhóm theo member nên bỏ cột
-  Assignee; **không có cột Prereq** — bỏ theo yêu cầu).
-- **Mỗi member = 1 section**, sắp theo `Member.order` (thứ tự lane trong List):
-  - **Member header giàu thông tin** (khớp `member-header-summary.md`):
-    **progress ring** xanh quanh avatar (% done) · `done/total` · **overdue chip**
-    đỏ (chỉ khi >0) · **next deadline** `due MMM d` (chỉ khi có) · **days off**
-    `N days off` (calendar glyph; đếm `effectiveDaysOff` trong `daysOffInRange`
-    theo sprint range). Stats tính trên **leaf tasks** (bỏ parent) từ computed plan.
-  - Danh sách task của member đó, mỗi row (grid cột cố định để thẳng hàng):
-    `#sequence · title[+ pill/tag] · effort · start · end · status`.
-    - **Title** kèm **Priority pill** (chỉ `urgent`/`high`, im lặng với các mức
-      khác — đúng `PRIORITY_TAG`), **◆ Milestone tag** (khi `estimate === 0`),
-      và **subtask thụt lề** (`↳`, khi parent nằm cùng lane).
-    - **Effort** = `fmtDays(estimate)` số trần (đơn vị "day" ở header); milestone
-      (0) & chưa ước lượng (null) → `—`.
-    - **Start / End** = ngày **computed từ scheduling** (`computeAllWorkingPlans`
-      → `WorkingPlan.startDate/dueDate`), khớp cột Start/End List (giờ/nửa ngày
-      chỉ hiện khi hover trong app → ảnh chỉ in ngày). Milestone: Start = mốc,
-      End = `—`.
+- **Một bảng duy nhất kiểu Cupertino hairline** (2026-07-09, option B của
+  `demo/export-table-layout.html`; thay layout cũ mỗi-member-1-card):
+  - **Column header** (in hoa nhạt): MEMBER · # · TASK · START · END ·
+    EFFORT (DAY) · STATUS. Không cột Assignee riêng (member là gutter),
+    không Prereq.
+  - **Cột Member bên trái rowspan** cho cả block task của member (sắp theo
+    `Member.order` như lane List): avatar 24px + tên đậm, dưới là dòng stats
+    nhỏ `done/total done` (leaf tasks, bỏ parent), thêm chip đỏ `N overdue`
+    khi >0 và `Nd off` nhạt khi có days off trong sprint range
+    (`effectiveDaysOff` / `daysOffInRange`). Không còn progress ring / next due.
+  - **`#` là số thứ tự liên tục toàn ảnh** (1..N theo thứ tự in), KHÔNG phải
+    `Task.sequence` — để đọc/điểm danh nhanh trong chat.
+  - Kẻ: **không kẻ dọc**; hairline ngang 1px giữa row; **vách nhóm 2px xám
+    (#c9c9cf)** ở row đầu mỗi member (trừ nhóm đầu — thead border đảm nhiệm).
+  - Row task: `# · title[+ pill/tag] · start · end · effort · status`.
+    - **Title** kèm **Priority pill** (chỉ `urgent`/`high` — đúng
+      `PRIORITY_TAG`), **◆ Milestone tag** (khi `estimate === 0`),
+      **subtask thụt lề** (`↳`, khi parent nằm cùng lane).
+    - **Effort** = `fmtDays(estimate)` số trần, căn giữa; milestone (0) & chưa
+      ước lượng (null) → `—`.
+    - **Start / End** = ngày computed từ scheduling (`computeAllWorkingPlans`
+      → `WorkingPlan.startDate/dueDate`), in kiểu ngắn `Jun 15`. Milestone:
+      Start = mốc, End = `—`.
     - **Status** = dot + label (To do / In progress / Done), pill soft-tint.
     - Quá hạn (End < hôm nay và chưa done; milestone dùng Start) → ngày đỏ.
 - **Bucket "Unassigned"** (task `assigneeId === null` hoặc member đã xoá) xuống
-  cuối, chỉ hiện khi có; header chỉ có `done/total` (không ring/days-off).
+  cuối, chỉ hiện khi có; gutter avatar `?` xám, stats chỉ `done/total`.
 - Section không có task → **ẩn** (không in member rảnh việc cho đỡ nhiễu).
 - Footer ảnh: "Made with plan-up" watermark nhạt.
 
@@ -114,20 +118,23 @@ Xem [data-model.md](./data-model.md) cho `Task` / `Member`.
 
 Component **thuần trình bày**, **inline style bằng hex** (không dùng class
 Tailwind / CSS var / oklch) để screenshot không phụ thuộc cascade và không vỡ
-màu. Nhận `{ project, viewName, groups, today }`. Cố định bề rộng (≈ 720px)
-cho khung ảnh ổn định. Palette light hard-code khớp token light:
-accent `#0071e3`, ink `#1d1d1f`, muted `#6e6e73`, overdue `#ff3b30`,
-status done `#34c759` / progress `#0071e3` / todo `#8e8e93`.
-Group box có **rim "liquid" tĩnh** (inset trắng 0.9 trên + ring đen 7%, hex
-cố định) cho khớp material glass của app — fake có chủ đích vì pipeline PNG
-không render được `backdrop-filter` (xem
-[liquid-glass-material.md](./liquid-glass-material.md)).
+màu. Nhận `{ project, viewName, groups, planById, sprintStart/End, today }`.
+Cố định bề rộng (≈ 940px) cho khung ảnh ổn định. Render bằng **HTML `<table>`
++ `rowSpan`** (không grid) — member gutter span đúng số row của block.
+Palette light hard-code khớp token light: accent `#0071e3`, ink `#1d1d1f`,
+muted `#6e6e73`, overdue `#ff3b30`, status done `#34c759` / progress
+`#0071e3` / todo `#8e8e93`. Không còn group box glass rim (layout cũ) —
+bảng phẳng trên nền trắng.
 
 ### `ExportImageModal.tsx`
 
-`ModalSheet`. Render `PngExportCard` ẩn (off-screen, `ref`) + 1 bản preview thu
-nhỏ (`transform: scale`). Nút Copy/Download gọi glue ở trên. Copy fail →
-disable nút + hint "Trình duyệt không cho copy ảnh — dùng Download".
+`ModalSheet`. Render `PngExportCard` ẩn (off-screen, `ref`) + 1 bản preview
+qua **`ScaledPreview`** (`ScaledPreview.tsx`, dùng chung với
+`CollectionImageModal`): đo bề rộng khung bằng ResizeObserver rồi `zoom =
+width/cardWidth` — card luôn khít khung (scale lên/xuống đều được, zoom
+re-rasterize DOM không mờ), thay zoom hard-code cũ bị lệch khi đổi bề rộng
+card. Nút Copy/Download gọi glue ở trên. Copy fail → disable nút + hint
+"Trình duyệt không cho copy ảnh — dùng Download".
 
 ### Wiring `App.tsx`
 

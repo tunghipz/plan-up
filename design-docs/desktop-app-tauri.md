@@ -15,8 +15,17 @@ macOS only for now; Windows would be a CI-only addition later.
 - **Overlay title bar (2026-07-09, Finder-style — demo `demo/desktop-overlay-titlebar.html`):**
   no separate title-bar strip; content runs to the top edge and the traffic lights
   float over the sidebar. `tauri.conf.json` window: `titleBarStyle: "Overlay"` +
-  `hiddenTitle: true` + `trafficLightPosition {x:14,y:13}`. React side (all gated on
+  `hiddenTitle: true` + `trafficLightPosition {x:14,y:24}`. React side (all gated on
   `IS_TAURI`, web unchanged):
+  - **tao inset gotcha (2026-07-09):** tao's `inset_traffic_lights` sets the titlebar
+    container height to `buttonHeight + y` but the buttons stay anchored to the
+    container *bottom* (~8pt offset), so the real top gap ≈ `y − 8`, not `y`.
+    `y: 24` lands the lights ~16pt from the top — optically centered in the 44pt
+    zone (34px drag strip + 10px sidebar padding) above the project cover.
+  - **Drag permission (2026-07-09):** `core:window:default` does NOT include
+    `allow-start-dragging` — without adding `core:window:allow-start-dragging` to
+    `capabilities/default.json`, every `data-tauri-drag-region` mousedown is
+    permission-denied and the window can't be moved.
   - Sidebar gets a 34px top spacer that is a **window drag region**
     (`data-tauri-drag-region` — the attribute only catches mousedown on the element
     itself, so children stay clickable).

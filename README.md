@@ -28,14 +28,14 @@ npm run lint       # eslint .
 # prereq: rustup + both darwin targets
 cd app
 npm run tauri dev                                      # dev window
-npm run tauri build -- --target aarch64-apple-darwin   # Apple Silicon .dmg
+npm run tauri build -- --target universal-apple-darwin # universal .dmg (Intel + Apple Silicon)
 ```
 
 The window has **no title bar** (Finder-style overlay): content runs to the top edge,
 the traffic lights float over the sidebar, and the sidebar's top strip + the toolbar
 capsule double as window drag regions.
-Releases: push a `v*` tag → GitHub Actions builds an unsigned Apple Silicon DMG (first
-launch: right-click → Open). **Auto update**: the desktop app checks GitHub Releases
+Releases: push a `v*` tag → GitHub Actions builds an unsigned universal DMG (runs on
+Intel + Apple Silicon; first launch: right-click → Open). **Auto update**: the desktop app checks GitHub Releases
 on launch (+ every 6 h) and shows the same `Update · vX.Y.Z` footer pill as the web —
 click to download the signed update and relaunch (see
 [`design-docs/desktop-auto-update.md`](./design-docs/desktop-auto-update.md)).

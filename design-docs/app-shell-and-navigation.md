@@ -160,10 +160,12 @@ computed from the current sprint's **leaf** tasks (parents excluded — see task
 - Resizable sidebar: `SIDEBAR_MIN=200`, `SIDEBAR_MAX=460`, default `248`. The sidebar is now
   the leftmost pane (no rail), so the drag handler maps `clientX` directly, clamped. Persisted
   to `localStorage`.
-- **Project switcher:** local `switcherOpen` state + `usePinnedPopover` for outside-press /
-  Escape (no `place` — the popover is `absolute` inside the switcher's `relative` header, so it
-  scrolls with the pane). Reuses `firstGrapheme`/`colorForName` for the squircle, same as the
-  old rail tiles + Home cards.
+- **Project switcher:** local `switcherOpen` state + `usePinnedPopover` (outside-press / Escape).
+  The popover is **portaled to `document.body`** and pinned to the trigger rect via `place`
+  (`{top, left, width}`) — it must NOT render as a DOM child of the sidebar `<aside>`, which has
+  `.vibrancy` (its own `backdrop-filter`, a backdrop root), or the glass blur is lost in WebKit
+  (see liquid-glass-material.md "Gotcha backdrop root"). Reuses `firstGrapheme`/`colorForName`
+  for the squircle, same as the old rail tiles + Home cards.
 - Live data via Dexie `useLiveQuery`: projects (by `createdAt`), sprints (by
   `currentProjectId`, ordered `startDate`), tasks (by `currentSprintId`), project-wide
   tasks (for sprint counts).

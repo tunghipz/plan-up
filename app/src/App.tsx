@@ -334,17 +334,25 @@ function App() {
   const [collCopyOpen, setCollCopyOpen] = useState(false)
   const [collImgOpen, setCollImgOpen] = useState(false)
   const [showNewProject, setShowNewProject] = useState(false)
-  // Project switcher (header dropdown) — replaces the old icon rail. The popover
-  // is `absolute` inside the switcher's `relative` header; usePinnedPopover only
-  // wires outside-press / Escape (no `place` — it scrolls with the pane).
+  // Project switcher (header dropdown) — replaces the old icon rail. PORTALED to
+  // <body>: the sidebar <aside> has `.vibrancy` (its own backdrop-filter), which
+  // makes it a backdrop root — a nested .glass-popover inside it renders with no
+  // blur (WebKit/WKWebView), so the menu looked transparent. Same fix as the
+  // export split-menu: portal out + pin to the trigger rect.
   const [switcherOpen, setSwitcherOpen] = useState(false)
   const switcherRef = useRef<HTMLButtonElement>(null)
   const switcherPopRef = useRef<HTMLDivElement>(null)
-  usePinnedPopover({
+  const switcherPos = usePinnedPopover({
     open: switcherOpen,
     onClose: () => setSwitcherOpen(false),
     anchorRef: switcherRef,
     popRef: switcherPopRef,
+    place: () => {
+      const r = switcherRef.current?.getBoundingClientRect()
+      if (!r) return null
+      // Full-width under the trigger, matching the old left-2.5/right-2.5 inset.
+      return { top: r.bottom + 6, left: r.left, width: r.width }
+    },
   })
   const [showNewCollection, setShowNewCollection] = useState(false)
   const confirm = useConfirm()
@@ -1180,7 +1188,7 @@ function App() {
                   </button>
                 </div>
               </div>
-              {switcherOpen && (
+              {switcherOpen && switcherPos && createPortal(
                 <div
                   ref={(el) => {
                     switcherPopRef.current = el
@@ -1188,7 +1196,13 @@ function App() {
                   }}
                   role="menu"
                   onKeyDown={menuKeyNav}
-                  className="absolute left-2.5 right-2.5 top-[calc(100%-2px)] z-40 glass-popover rounded-[13px] p-1.5"
+                  style={{
+                    position: 'fixed',
+                    top: switcherPos.top,
+                    left: switcherPos.left,
+                    width: switcherPos.width,
+                  }}
+                  className="z-50 glass-popover rounded-[13px] p-1.5"
                 >
                   <div className="px-2.5 pt-1 pb-1 text-[11px] font-semibold text-ink-faint tracking-[0.01em]">
                     Projects
@@ -1273,7 +1287,8 @@ function App() {
                       Home / All projects
                     </button>
                   )}
-                </div>
+                </div>,
+                document.body,
               )}
             </div>
             <div className="flex-1 overflow-auto">

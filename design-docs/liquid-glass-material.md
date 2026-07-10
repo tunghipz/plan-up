@@ -112,12 +112,13 @@ bản deploy (dev serve CSS thô nên không lộ). Prefix-first giữ cả hai.
 
 Element có `backdrop-filter` là **backdrop root**: descendant có
 backdrop-filter chỉ blur được nội dung BÊN TRONG root đó, không xuyên ra
-page phía sau. Hệ quả: popover `.glass-popover` đặt lồng trong
-`.glass-toolbar` (menu Export cũ, absolute trong header) hiện trong suốt
-không mờ. Fix: **portal popover ra `document.body`** (idiom
-`usePinnedPopover` + `createPortal` mà DatePicker/members đã dùng —
+page phía sau. Hệ quả: popover `.glass-popover` đặt lồng trong một surface
+glass khác hiện trong suốt không mờ. Đã dính 2 lần: (1) menu Export lồng
+trong `.glass-toolbar`; (2) **project switcher** lồng trong `<aside>` có
+`.vibrancy` (fix 2026-07-09). Fix: **portal popover ra `document.body`**
+(idiom `usePinnedPopover` + `createPortal` mà DatePicker/members đã dùng —
 vì thế chúng không dính). Quy tắc: KHÔNG bao giờ đặt glass popover là
-con DOM của một surface glass khác.
+con DOM của một surface glass khác (`.glass-*` HAY `.vibrancy`).
 
 ## Trade-offs đã cân nhắc
 

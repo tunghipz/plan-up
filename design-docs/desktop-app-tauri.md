@@ -1,7 +1,7 @@
 # Desktop app (Tauri 2, macOS)
 
 **Status:** Implemented
-**Last updated:** 2026-07-09 (overlay title bar — Finder-style, traffic lights over content)
+**Last updated:** 2026-07-10 (universal build — Intel restored, single DMG runs Intel + Apple Silicon)
 **Code:** `app/src-tauri/` (shell), `app/vite.config.ts`, `app/src/VersionFooter.tsx`, `.github/workflows/release.yml`
 
 ## Purpose
@@ -34,8 +34,9 @@ macOS only for now; Windows would be a CI-only addition later.
     on the capsule's left buttons → the capsule takes `marginLeft: 74px` (inline style,
     beats `mx-3`) with the same 300ms `cubic-bezier(.32,.72,0,1)` transition as the
     sidebar collapse.
-- Distributed as an **Apple Silicon–only** `.dmg` from GitHub Releases (Intel dropped 2026-07-08 — halves CI build time; user runs M-series),
-  built on every `v*` tag.
+- Distributed as a **universal** `.dmg` from GitHub Releases — one build runs on
+  both Intel and Apple Silicon Macs (`universal-apple-darwin`; Intel restored
+  2026-07-10 after being dropped 2026-07-08), built on every `v*` tag.
 - **Unsigned** — first launch needs right-click → Open (or
   `xattr -dr com.apple.quarantine /Applications/plan-up.app`) to pass Gatekeeper.
 - **Auto update (2026-07-08):** the desktop build now has its own update pill via
@@ -70,13 +71,19 @@ reset — the auto-backup feature is the durability mitigation.
   all `@tauri-apps/*` imports are dynamic so the web bundle doesn't grow.
 
 ## Build & release
-- Local dev: `rustup` + `rustup target add aarch64-apple-darwin` (x86_64 no longer needed),
+- Local dev: `rustup` + both targets
+  `rustup target add aarch64-apple-darwin x86_64-apple-darwin`,
   then from `app/`: `npm run tauri dev`.
-- Local bundle: `npm run tauri build -- --target aarch64-apple-darwin` →
-  `app/src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/`.
+- Local bundle (universal): `npm run tauri build -- --target universal-apple-darwin` →
+  `app/src-tauri/target/universal-apple-darwin/release/bundle/dmg/`. The universal
+  target compiles both arches and `lipo`s them into one binary — slower than a
+  single-arch build but the resulting DMG runs on Intel + Apple Silicon.
 - CI: `.github/workflows/release.yml` — push a `v*` tag → macos runner builds the
-  Apple Silicon DMG via `tauri-apps/tauri-action` and attaches it to a **draft** GitHub
+  universal DMG via `tauri-apps/tauri-action` and attaches it to a **draft** GitHub
   Release. No signing secrets configured (unsigned by choice).
+- Auto-update stays intact for both arches: for a universal build `tauri-action`
+  writes both `darwin-aarch64` and `darwin-x86_64` keys into `latest.json`, each
+  pointing at the same universal `.app.tar.gz` (see desktop-auto-update.md).
 
 ## Rules & edge cases
 - `app/src-tauri/target/` and `gen/` are gitignored (Rust build artifacts).

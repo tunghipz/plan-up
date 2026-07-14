@@ -158,14 +158,22 @@ function leafPlan(
       const p = byId.get(id)
       if (!p) continue
       const pPlan = planFor(p, byId, memberById, cache, ctx)
-      if (!pPlan.dueDate) continue
+      // A milestone (effort 0) is a zero-duration checkpoint whose date lives in
+      // `startDate` (milestones.md) — its `dueDate` is null or a stale leftover
+      // from before it became a milestone. Anchor successors on the milestone
+      // DATE (its startDate), completed at end of that day (fraction 1). Normal
+      // tasks anchor on their computed dueDate + wall fraction.
+      const isMilestone = p.estimate === 0
+      const pEnd = isMilestone ? pPlan.startDate : pPlan.dueDate
+      const pFrac = isMilestone ? 1 : pPlan.dueFraction
+      if (!pEnd) continue
       if (
         bestDate === null ||
-        pPlan.dueDate > bestDate ||
-        (pPlan.dueDate === bestDate && pPlan.dueFraction > bestFrac)
+        pEnd > bestDate ||
+        (pEnd === bestDate && pFrac > bestFrac)
       ) {
-        bestDate = pPlan.dueDate
-        bestFrac = pPlan.dueFraction
+        bestDate = pEnd
+        bestFrac = pFrac
       }
     }
     if (bestDate) {

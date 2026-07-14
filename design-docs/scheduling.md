@@ -20,10 +20,14 @@ times) automatically, so the plan stays correct as inputs change — no manual d
 1. **Start:** no prereqs → use the task's manual `startDate`. With prereqs → the start is
    **purely prereq-derived** (the cell is locked), so the stored `startDate` is ignored and
    the start is taken from the latest prereq's finish — same day if there's leftover capacity
-   after it, else the next working day. **If no prereq has a due date yet** (e.g. you re-link
-   to an unscheduled task) there's no anchor, so the start **clears to `null`** rather than
-   lingering at the value a *previous* prereq produced; it fills back in once a prereq is
-   scheduled (the BFS cascade re-runs).
+   after it, else the next working day. **A milestone prereq** (effort 0) is a zero-duration
+   checkpoint whose date lives in `startDate` (its `dueDate` is null / a stale leftover), so a
+   dependent anchors on the **milestone date**, treated as finished at end of that day → the
+   dependent starts the next working day (2026-07-14 fix — before this, a milestone prereq was
+   skipped or chained off its stale `dueDate`, so the successor didn't follow the milestone).
+   **If no prereq has a usable finish yet** (e.g. you re-link to an unscheduled task) there's no
+   anchor, so the start **clears to `null`** rather than lingering at the value a *previous*
+   prereq produced; it fills back in once a prereq is scheduled (the BFS cascade re-runs).
 2. **Normalize** start past weekends/off-days (and to the day's natural start if AM is off).
 3. **Consume effort** day by day, taking `min(remaining, available)` until the estimate is
    spent; the final day's wall position becomes the due fraction.

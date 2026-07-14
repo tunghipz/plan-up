@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Link2, Check, Copy, AlertTriangle } from 'lucide-react'
+import { Link2, Check, Copy, AlertTriangle, ExternalLink } from 'lucide-react'
 import { ModalSheet } from './ModalSheet'
 import { colorForName } from './schema'
 import type { Member } from './types'
@@ -208,17 +208,28 @@ export function ShareLinkModal({
         )
       )}
 
-      {/* Footer: Copy link. */}
-      <button
-        onClick={doCopy}
-        disabled={empty}
-        className={`w-full inline-flex items-center justify-center gap-2 rounded-[11px] px-4 py-2.5 text-[14px] font-semibold text-white transition active:scale-[0.98] disabled:opacity-40 disabled:active:scale-100 ${
-          copied ? 'bg-status-done' : 'brand-btn'
-        }`}
-      >
-        {copied ? <Check size={16} strokeWidth={2.4} /> : <Copy size={15} strokeWidth={2} />}
-        {copied ? 'Copied' : over ? 'Copy link anyway' : 'Copy link'}
-      </button>
+      {/* Footer: Open (preview the read-only link in a new tab) + Copy link. */}
+      <div className="flex items-center gap-2">
+        <button
+          onClick={() => !empty && window.open(url, '_blank', 'noopener,noreferrer')}
+          disabled={empty}
+          title="Mở link read-only trong tab mới (xem thử như người nhận)"
+          className="inline-flex items-center justify-center gap-2 rounded-[11px] bg-fill px-4 py-2.5 text-[14px] font-semibold text-ink transition hover:bg-[rgba(0,0,0,0.09)] active:scale-[0.98] disabled:opacity-40 disabled:active:scale-100 dark:hover:bg-white/10"
+        >
+          <ExternalLink size={15} strokeWidth={2} aria-hidden />
+          Open
+        </button>
+        <button
+          onClick={doCopy}
+          disabled={empty}
+          className={`flex-1 inline-flex items-center justify-center gap-2 rounded-[11px] px-4 py-2.5 text-[14px] font-semibold text-white transition active:scale-[0.98] disabled:opacity-40 disabled:active:scale-100 ${
+            copied ? 'bg-status-done' : 'brand-btn'
+          }`}
+        >
+          {copied ? <Check size={16} strokeWidth={2.4} /> : <Copy size={15} strokeWidth={2} />}
+          {copied ? 'Copied' : over ? 'Copy link anyway' : 'Copy link'}
+        </button>
+      </div>
     </ModalSheet>
   )
 }

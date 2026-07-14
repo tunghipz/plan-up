@@ -1,14 +1,21 @@
 # Share link — read-only snapshot
 
 **Status:** Implemented
-**Last updated:** 2026-07-14 (payload rewritten to **compact v2** — columnar + enum +
-member-index + date-as-day-offset, avatar-image dropped, dates **frozen**; **Import
-feature removed** — viewer is now purely read-only)
+**Last updated:** 2026-07-14 (viewer header re-arranged — capsule is now **2 zones**
+[brand · actions]; the sprint moved to a **full-width breadcrumb line below** the
+capsule so its name/date **never truncate or overlap** the Read-only chip / actions
+on narrow widths [arrangement A]; the body's `md:hidden` sprint header is gone.
+Earlier same-day: sender modal footer got an **Open** button next to Copy — opens the
+built read-only link in a new tab to preview it; fixed stale refs after the
+sprint-header **Copy for Telegram** button was removed; viewer header redesigned as a
+branded glass bar + **Export PNG** button reusing the app's
+`ExportImageModal`/`PngExportCard` + **dark-mode toggle** (`useDarkMode`); payload
+compact v2 + Import removed)
 **Code:** `app/src/share-snapshot.ts` (`buildSnapshot` + pack/encode/decode/parse,
 pure) + `app/src/share-snapshot.test.ts`, `app/src/StatusPill.tsx` (shared read-only
 status pill), `app/src/ShareLinkModal.tsx` (sender popover), `app/src/SnapshotViewer.tsx`
-(recipient read-only view), `app/src/main.tsx` (boot intercept), `SprintPageHeader` +
-`ShareLinkModal` wiring in `app/src/App.tsx`.
+(recipient read-only view — opens `ExportImageModal` for PNG), `app/src/main.tsx`
+(boot intercept), `SprintPageHeader` + `ShareLinkModal` wiring in `app/src/App.tsx`.
 Dep: `lz-string`. Demo: `demo/share-link-snapshot.html` + review `demo/share-link-review-v2.html`.
 
 ## Purpose
@@ -27,8 +34,9 @@ phía server, không auth.
 ## User-facing behavior
 
 ### Sender (người gửi)
-- Nút **Share** (icon link) ở header sprint (`SprintPageHeader`), **ngay cạnh nút
-  Copy** — cùng nhóm "share sprint này". Chỉ hiện khi sprint có task.
+- Nút **Share** (icon link) ở header sprint (`SprintPageHeader`), cạnh tiêu đề
+  sprint — action duy nhất ở đây (nút Copy-for-Telegram đã gỡ 2026-07-14). Chỉ
+  hiện khi sprint có task.
 - Bấm → popover **"Share link"** (dùng `ModalSheet`, giống `CopyTelegramModal`):
   - **Summary line**: `{sprint.name} · {project.name}` + `{N} tasks · {M} members` +
     kích thước — người gửi biết chính xác đang gửi gì.
@@ -40,7 +48,10 @@ phía server, không auth.
     đã là read-only.)
   - **Link** read-only, **truncate giữa** (hiển thị gọn; Copy vẫn lấy full URL).
   - **Size meter**: `X KB / ~8 KB` — xanh khi vừa, đỏ khi vượt.
-  - Nút **Copy link** → clipboard, đổi "Copied ✓" 1.4 s.
+  - **Footer 2 nút**: **Open** (ghost, icon external-link) mở link read-only vừa
+    dựng trong **tab mới** (`window.open`, noopener) để tự preview cái người nhận
+    sẽ thấy; **Copy link** (primary brand) → clipboard, đổi "Copied ✓" 1.4 s. Cả
+    hai khoá khi sprint rỗng.
 - **Quá lớn** (payload > ngưỡng ~8 KB): size meter chuyển **đỏ** + thẻ cảnh báo
   "một số chat cắt link dài; thu nhỏ scope theo 1 member hoặc tách sprint". Nút Copy
   đổi thành **"Copy link anyway"** — vẫn cho copy (tôn trọng user), không chặn cứng.
@@ -51,12 +62,40 @@ phía server, không auth.
 ### Recipient (người nhận)
 - Mở URL `…/#v=2&s=<blob>` → app phát hiện fragment lúc boot → **không vào app
   thường**, render `SnapshotViewer`:
-  - **Banner** đầu trang (nền accent-soft): 🔒 "Read-only snapshot · từ
-    {project.name} · **snapshot {ngày}** (từ `data.exportedAt`) · dữ liệu của bạn
-    không bị đụng tới". **Không có nút Import** — chỉ để xem.
+  - **Header bar** — **capsule Liquid Glass nổi** (`.glass-toolbar rounded-full`,
+    sticky, blur + specular rim; theo DNA §4 v2.1 / `liquid-glass-material.md`,
+    **không** phải bar bờ thẳng + border-b), **2 vùng** (brand · actions):
+    - **Trái — brand + read-only**: **app icon** (`/favicon.svg`) + wordmark
+      **plan-up** (`whitespace-nowrap`, luôn 1 dòng) + subline "shared snapshot ·
+      {ngày}" (từ `data.exportedAt`) + chip **🔒 Read-only** (title tooltip "dữ liệu
+      của bạn không bị đụng tới").
+    - **Phải — actions**: **dark-mode toggle** (icon Sun/Moon) + nút **Export PNG**
+      (`brand-btn`, icon ảnh) + link **Mở plan-up** (ghost accent). **Không có
+      Import** — chỉ để xem.
+  - **Sprint breadcrumb** — **1 dòng riêng ngay dưới capsule** (căn giữa, cùng khối
+    sticky): pill `bg-fill` bo tròn chứa `📋 {sprint.name} · {project.name}` │
+    **{range}** (start → end), **cả hai `whitespace-nowrap` — không bao giờ bị cắt**.
+    *(Quyết định 2026-07-14, arrangement A: trước đó sprint nhồi vào vùng giữa capsule
+    cùng brand + actions, ở màn hẹp bị bóp → tên sprint truncate / đè chip Read-only +
+    nút. Tách sprint ra dòng riêng cho nó full width, không tranh chỗ với ai.)* Đây là
+    chỗ thông tin sprint sống duy nhất → **bỏ luôn dòng sprint header ở body** (kể cả
+    bản `md:hidden` cũ, giờ breadcrumb hiện mọi kích thước).
+  - **Dark mode**: viewer chạy `useDarkMode` (init theo `prefers-color-scheme` của
+    người nhận, hoặc `plan-up:dark` đã lưu; toggle `.dark` trên `<html>` + lưu lại).
+    Toàn bộ token, `ambient-canvas`, `glass-card` (màn lỗi), pulse, `StatusPill` đều
+    theme-aware. **Không** chạy `useBrandTheme` → accent = blue mặc định (không fire
+    gradient), khớp bản đã ship.
+  - **Export PNG**: mở `ExportImageModal` (dùng lại của app) → `PngExportCard` render
+    đúng bảng member-gutter, có **Copy image** + **Download PNG** + preview thu nhỏ.
+    Vì snapshot **đóng băng ngày**, viewer truyền `planById` **rỗng** → card fallback
+    về `startDate/dueDate` đã đóng băng trên task; `today` = ngày snapshot
+    (`exportedAt`, dùng cho stamp + so overdue "tại thời điểm chụp").
+  - **Board = 1 glass card** (`.glass-card` bo 18px) nổi trên `ambient-canvas` (DNA
+    §4.1), chứa pulse + bảng + watermark:
   - **Pulse strip**: progress bar 3 màu + đếm `Done / In progress / To do` trên toàn
     sprint — đọc "sprint sao rồi" ngay đầu.
-  - **Board đóng băng xếp giống Export PNG** (khung `PngExportCard`): **một bảng
+  - **Board đóng băng xếp giống Export PNG** (bảng hairline như `PngExportCard`, trên
+    màn bọc trong glass card; PNG xuất ra vẫn là card trắng riêng): **một bảng
     hairline** — Member gutter (rowSpan: avatar + tên + `done/total`) · cột **# ·
     Task · Start · End · Effort · Status**, đánh số liên tục 1..N, separator 2px giữa
     block member. Task: `↳` indent cho subtask, done gạch ngang, priority pill
@@ -130,13 +169,16 @@ lặp key, đóng gói **columnar** + mã hoá chặt:
   (app hiện là single-page) → đây là điểm rẽ nhánh duy nhất; route riêng nghĩa là
   "URL có fragment `s=`", không phải path.
 - **`SnapshotViewer.tsx`**: `decodeSnapshot` → nếu null hiện trạng thái lỗi; nếu OK
-  render banner + board read-only từ `SnapshotData` **in-memory** (không đọc Dexie).
-  Không còn nút Import, không đụng `io`/Dexie.
-- **`ShareLinkModal.tsx`**: mirror `CopyTelegramModal` (scope picker → đây là link
-  field + size meter + fallback). Clipboard glue giống hệt (writeText + execCommand
-  fallback).
-- **`SprintPageHeader`** (`App.tsx`): thêm nút **Share** cạnh `onCopy`; state
-  `shareOpen`; render `<ShareLinkModal>` với sprint/members/tasks hiện tại.
+  render header bar 3 vùng + board read-only từ `SnapshotData` **in-memory** (không
+  đọc Dexie). Không còn nút Import, không đụng `io`/Dexie. Nút **Export PNG** mở
+  `ExportImageModal` với `groups = groupTasksByMember(tasks, members, {nestChildren})`,
+  `planById` rỗng (ngày đã đóng băng), `today` = `exportedAt` (yyyy-mm-dd) →
+  ảnh PNG **giống hệt** Export PNG trong app.
+- **`ShareLinkModal.tsx`**: scope picker (members checklist) + link field + size
+  meter + fallback. Clipboard glue (writeText + execCommand fallback). Footer =
+  **Open** (`window.open(url, '_blank', 'noopener,noreferrer')`) + **Copy link**.
+- **`SprintPageHeader`** (`App.tsx`): nút **Share** cạnh tiêu đề (prop `onShare`);
+  state `shareOpen`; render `<ShareLinkModal>` với sprint/members/tasks hiện tại.
 - **Dep mới**: `lz-string` (~3 KB) — import động nếu muốn giữ bundle web nhẹ.
 
 ## Rules & edge cases

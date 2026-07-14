@@ -30,7 +30,6 @@ import {
   Database,
   FolderDown,
   Check,
-  Send,
   Link2,
   Image as ImageIcon,
   TriangleAlert,
@@ -74,20 +73,10 @@ import { VersionFooter } from './VersionFooter'
 import { IS_TAURI } from './backup'
 import { startAutoBackup } from './backup-tauri'
 import { BackupSettingsModal } from './BackupSettingsModal'
-import { ExportImageModal } from './ExportImageModal'
-import { CopyTelegramModal } from './CopyTelegramModal'
 import { ShareLinkModal } from './ShareLinkModal'
 import { buildSnapshot } from './share-snapshot'
 import { CollectionImageModal } from './CollectionImageModal'
-import {
-  formatSprintTree,
-  membersWithTasks,
-  formatCollectionTree,
-  sectionsWithItems,
-} from './telegram-export'
-import { groupTasksByMember } from './png-export'
-import { computeAllWorkingPlans } from './scheduling'
-import { loadSort } from './task-sort'
+import { membersWithTasks } from './telegram-export'
 import { usePinnedPopover } from './usePinnedPopover'
 import { ProjectSettingsView } from './ProjectSettingsView'
 import { HomeDashboard } from './HomeDashboard'
@@ -332,10 +321,7 @@ function App() {
   }
   const [showNewSprint, setShowNewSprint] = useState(false)
   const [backupSettingsOpen, setBackupSettingsOpen] = useState(false)
-  const [exportImageOpen, setExportImageOpen] = useState(false)
-  const [copyTgOpen, setCopyTgOpen] = useState(false)
   const [shareOpen, setShareOpen] = useState(false)
-  const [collCopyOpen, setCollCopyOpen] = useState(false)
   const [collImgOpen, setCollImgOpen] = useState(false)
   const [showNewProject, setShowNewProject] = useState(false)
   // Project switcher (header dropdown) — replaces the old icon rail. PORTALED to
@@ -602,8 +588,8 @@ function App() {
     [currentSprintId]
   )
 
-  // Items of the current collection — feeds the Export menu's collection share
-  // actions (Copy for Telegram / Export as image). See copy-to-telegram.md.
+  // Items of the current collection — feeds the Export menu's collection
+  // "Export as image…" action. See export-png.md / copy-to-telegram.md.
   const collectionItems = useLiveQuery<Task[]>(
     () =>
       currentCollectionId
@@ -1683,33 +1669,11 @@ function App() {
                   style={{ position: 'fixed', top: exportMenuPos.top, right: exportMenuPos.right }}
                   className="z-50 min-w-[262px] p-1.5 rounded-[12px] glass-popover"
                 >
-                  {/* Share the current view. Sprint → one image (grouped by
-                      member). Collection → Copy for Telegram (text tree by
-                      section) + Export as image. See copy-to-telegram.md. */}
-                  {selKind === 'collection' && currentCollection ? (
+                  {/* Share the current view. Collection → Export as image (grouped
+                      by table). Copy for Telegram was removed 2026-07-14. See
+                      copy-to-telegram.md. */}
+                  {selKind === 'collection' && currentCollection && (
                     <>
-                      <button
-                        role="menuitem"
-                        disabled={(collectionItems?.length ?? 0) === 0}
-                        onClick={() => {
-                          setExportMenuOpen(false)
-                          setCollCopyOpen(true)
-                        }}
-                        className="w-full flex items-start gap-3 p-2.5 rounded-[8px] text-left hover:bg-surface-hover transition disabled:opacity-40 disabled:hover:bg-transparent"
-                      >
-                        <span className="shrink-0 w-[30px] h-[30px] rounded-[8px] flex items-center justify-center bg-accent-soft text-accent">
-                          <Send size={15} strokeWidth={1.9} />
-                        </span>
-                        <span className="min-w-0">
-                          <span className="block text-[13.5px] font-medium text-ink">Copy for Telegram</span>
-                          <span className="block text-[12px] text-ink-muted truncate">
-                            {(collectionItems?.length ?? 0) === 0
-                              ? 'No items in this collection yet'
-                              : 'Plain-text tree, paste into chat'}
-                          </span>
-                        </span>
-                      </button>
-                      <div className="h-px bg-border-hair mx-2 my-1" />
                       <button
                         role="menuitem"
                         disabled={(collectionItems?.length ?? 0) === 0}
@@ -1731,35 +1695,9 @@ function App() {
                           </span>
                         </span>
                       </button>
+                      <div className="h-px bg-border-hair mx-2 my-1" />
                     </>
-                  ) : (
-                    <button
-                      role="menuitem"
-                      disabled={
-                        selKind !== 'sprint' || !currentSprint || (tasks?.length ?? 0) === 0
-                      }
-                      onClick={() => {
-                        setExportMenuOpen(false)
-                        setExportImageOpen(true)
-                      }}
-                      className="w-full flex items-start gap-3 p-2.5 rounded-[8px] text-left hover:bg-surface-hover transition disabled:opacity-40 disabled:hover:bg-transparent"
-                    >
-                      <span className="shrink-0 w-[30px] h-[30px] rounded-[8px] flex items-center justify-center bg-accent-soft text-accent">
-                        <ImageIcon size={15} strokeWidth={1.9} />
-                      </span>
-                      <span className="min-w-0">
-                        <span className="block text-[13.5px] font-medium text-ink">Export as image…</span>
-                        <span className="block text-[12px] text-ink-muted truncate">
-                          {selKind !== 'sprint'
-                            ? 'Switch to a sprint to share tasks'
-                            : !currentSprint || (tasks?.length ?? 0) === 0
-                              ? 'No tasks in this sprint yet'
-                              : 'One PNG, grouped by member'}
-                        </span>
-                      </span>
-                    </button>
                   )}
-                  <div className="h-px bg-border-hair mx-2 my-1" />
                   <button
                     role="menuitem"
                     disabled={!currentProject}
@@ -1848,7 +1786,6 @@ function App() {
               key={currentSprint.id}
               sprint={currentSprint}
               capacity={capacity}
-              onCopy={() => setCopyTgOpen(true)}
               onShare={() => setShareOpen(true)}
             />
           )}
@@ -1991,24 +1928,6 @@ function App() {
       )}
 
       {backupSettingsOpen && <BackupSettingsModal onClose={() => setBackupSettingsOpen(false)} />}
-      {copyTgOpen && currentSprint && (
-        <CopyTelegramModal
-          subtitle="Sprint tree · paste straight into chat, no markdown needed"
-          scopes={[
-            { id: 'all', label: 'Whole sprint' },
-            ...membersWithTasks(paletteMembers ?? [], tasks ?? []).map((m) => ({
-              id: m.id,
-              label: m.name,
-            })),
-          ]}
-          build={(s) =>
-            formatSprintTree(currentSprint, paletteMembers ?? [], tasks ?? [], {
-              memberId: s === 'all' ? null : s,
-            })
-          }
-          onClose={() => setCopyTgOpen(false)}
-        />
-      )}
       {shareOpen && currentSprint && currentProject && (() => {
         const sprintTasksNow = (tasks ?? []).filter((t) => t.sprintId === currentSprint.id)
         const shareMembers = membersWithTasks(paletteMembers ?? [], sprintTasksNow)
@@ -2026,24 +1945,6 @@ function App() {
           />
         )
       })()}
-      {collCopyOpen && currentCollection && (
-        <CopyTelegramModal
-          subtitle="Collection tree by table · paste straight into chat"
-          scopes={[
-            { id: 'all', label: 'Whole collection' },
-            ...sectionsWithItems(currentCollection, collectionItems ?? []).map((s) => ({
-              id: s.id,
-              label: s.name,
-            })),
-          ]}
-          build={(s) =>
-            formatCollectionTree(currentCollection, collectionItems ?? [], {
-              sectionId: s === 'all' ? null : s,
-            })
-          }
-          onClose={() => setCollCopyOpen(false)}
-        />
-      )}
       {collImgOpen && currentCollection && (
         <CollectionImageModal
           collection={currentCollection}
@@ -2051,38 +1952,6 @@ function App() {
           onClose={() => setCollImgOpen(false)}
         />
       )}
-      {exportImageOpen &&
-        currentProject &&
-        currentSprint &&
-        (() => {
-          // Match the List view exactly: same computed schedule, same sort, and
-          // children nested under their parent. See design-docs/export-png.md.
-          const exportTasks = tasks ?? []
-          const exportMembers = paletteMembers ?? []
-          const planById = computeAllWorkingPlans(
-            exportTasks,
-            new Map(exportTasks.map((t) => [t.id, t])),
-            new Map(exportMembers.map((m) => [m.id, m]))
-          )
-          const groups = groupTasksByMember(exportTasks, exportMembers, {
-            sort: loadSort(),
-            planById,
-            nestChildren: true,
-          })
-          return (
-            <ExportImageModal
-              projectName={currentProject.name}
-              viewName={currentSprint.name}
-              groups={groups}
-              planById={planById}
-              sprintStart={currentSprint.startDate}
-              sprintEnd={currentSprint.endDate}
-              today={today}
-              onClose={() => setExportImageOpen(false)}
-            />
-          )
-        })()}
-
       {showNewSprint && currentProjectId && (
         <NewSprintDialog
           projectId={currentProjectId}
@@ -2352,7 +2221,6 @@ function SearchPalette({
 function SprintPageHeader({
   sprint,
   capacity,
-  onCopy,
   onShare,
 }: {
   sprint: Sprint
@@ -2365,8 +2233,6 @@ function SprintPageHeader({
     open: number
     notEstimated: number
   }
-  /** Open the "Copy for Telegram" popover. Button hidden when the sprint is empty. */
-  onCopy: () => void
   /** Open the "Share link" popover (read-only snapshot). Hidden when empty. */
   onShare: () => void
 }) {
@@ -2385,15 +2251,6 @@ function SprintPageHeader({
         </div>
         {total > 0 && (
           <div className="shrink-0 flex items-center gap-1.5">
-            <button
-              onClick={onCopy}
-              title="Copy for Telegram"
-              aria-label="Copy sprint for Telegram"
-              className="inline-flex items-center gap-1.5 rounded-[9px] bg-fill px-3 py-1.5 text-[13px] font-medium text-ink-muted transition hover:bg-[rgba(0,0,0,0.09)] hover:text-ink active:scale-[0.97] dark:hover:bg-white/10"
-            >
-              <Send size={14} strokeWidth={1.9} aria-hidden />
-              Copy
-            </button>
             <button
               onClick={onShare}
               title="Share read-only link"

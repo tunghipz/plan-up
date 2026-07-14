@@ -1,8 +1,8 @@
 # Copy sprint → Telegram (text)
 
-**Status:** Implemented
-**Last updated:** 2026-07-14 (task line now shows a `start → end` range + tasks sort by end date, undated last — both sprint & collection trees, subtasks included)
-**Code:** `app/src/telegram-export.ts` (pure formatters + tests), `app/src/CopyTelegramModal.tsx` (generic popover), `SprintPageHeader` in `app/src/App.tsx` (sprint trigger button), the toolbar **Export ▾** menu + collection modals in `app/src/App.tsx` (collection triggers), `app/src/CollectionImageModal.tsx` + `app/src/CollectionPngCard.tsx` (collection PNG)
+**Status:** Dormant — UI triggers hidden (formatter + modal retained)
+**Last updated:** 2026-07-14 (**Copy for Telegram trigger removed from both surfaces** — the sprint page-header **Copy** button and the collection **Export ▾** menu item are gone. The pure formatters `telegram-export.ts` + the `CopyTelegramModal` component are kept on disk (tested, un-wired) so the feature can be re-enabled without a rebuild. Everything below the User-facing section describes the retained implementation.)
+**Code:** `app/src/telegram-export.ts` (pure formatters + tests, still built/tested), `app/src/CopyTelegramModal.tsx` (generic popover, no longer imported by `App.tsx`), `app/src/CollectionImageModal.tsx` + `app/src/CollectionPngCard.tsx` (collection PNG — still wired via Export ▾)
 
 ## Purpose
 
@@ -13,9 +13,13 @@ cạnh [export-png.md](./export-png.md): PNG là ảnh đẹp để nhìn, còn 
 
 ## User-facing behavior
 
-- Nút **Copy** (icon paper-plane + chữ "Copy") ở góc phải header sprint
-  (`SprintPageHeader`), cạnh tiêu đề. Nền `--fill` xám nhạt (calm ở nghỉ, đậm khi
-  hover) — không thêm chrome vào toolbar. Chỉ hiện khi sprint có task.
+> **Hiện tại (2026-07-14): không còn entry point.** Nút Copy ở header sprint và
+> mục "Copy for Telegram" trong menu Export ▾ của collection đã bị gỡ khỏi UI.
+> Phần dưới mô tả hành vi **khi bật lại** (mã formatter + modal vẫn còn).
+
+- ~~Nút **Copy** (icon paper-plane + chữ "Copy") ở góc phải header sprint
+  (`SprintPageHeader`), cạnh tiêu đề~~ — **đã gỡ**. Khi còn: nền `--fill` xám nhạt
+  (calm ở nghỉ, đậm khi hover), chỉ hiện khi sprint có task.
 - Bấm → mở popover **"Copy for Telegram"** (dùng `ModalSheet`): chọn **Scope**
   (Whole sprint / một member), xem **Preview** trong bong bóng Telegram giả (bong
   bóng **theo theme app** — `html.dark` → Telegram-dark, sáng → Telegram-light),
@@ -113,9 +117,11 @@ còn thứ tự task trong lane là của riêng copy.
   date (undated cuối)**, scope 1 member, sprint rỗng.
 - **`app/src/CopyTelegramModal.tsx`** — popover (ModalSheet): scope picker,
   preview bubble (theo theme app qua `html.dark`), char count, Copy.
-- **`app/src/App.tsx`** — `SprintPageHeader` nhận `onCopy`, render nút Copy (khi
-  có task); state `copyTgOpen`; render `<CopyTelegramModal>` với
-  `currentSprint` / `paletteMembers` / `tasks`.
+- **`app/src/App.tsx`** — *(gỡ 2026-07-14)* trước đây `SprintPageHeader` nhận
+  `onCopy` + render nút Copy, state `copyTgOpen`/`collCopyOpen`, và 2 bản
+  `<CopyTelegramModal>` (sprint + collection). Nay đã gỡ hết trigger + wiring; App
+  không còn import `CopyTelegramModal`/`formatSprintTree`/`formatCollectionTree`/
+  `sectionsWithItems`/`Send` (chỉ còn `membersWithTasks` cho Share-link modal).
 
 ## Collections (same feature, section-shaped)
 
@@ -142,15 +148,15 @@ their structure — see the parallel differences:
   sequence` (thứ tự List) — nay copy chủ động sort lại theo end date.
 - **Scope** = whole collection / one section (`sectionsWithItems` helper).
 
-**Placement:** collections have **no page header** (identity + statuses + view
-toggle all live in the context bar), and the toolbar already carries the global
-**Export ▾** split-menu — so rather than add a second Export button, that menu is
-made **context-aware**: in a collection its top items become *Copy for Telegram*
-(opens the shared `CopyTelegramModal`) + *Export as image…* (opens
-`CollectionImageModal`), above the unchanged *Export this project / Export all /
-Auto backup*. In a sprint the menu keeps its single sprint *Export as image…*
-(the sprint text-copy lives in the page-header Copy button instead). Both
-collection items are disabled when the collection has no items.
+**Placement (2026-07-14 — Copy trigger removed):** collections have **no page
+header**, and the toolbar carries the global **Export ▾** split-menu. That menu
+is still **context-aware**, but its collection block is now **only** *Export as
+image…* (opens `CollectionImageModal`) above the unchanged *Export this project /
+Export all / Auto backup* — the *Copy for Telegram* item has been removed. In a
+sprint the Export ▾ menu carries no view-specific item (the sprint PNG export
+moved to the share viewer — see [export-png.md](./export-png.md)); the
+page-header now shows only the **Share** button (the **Copy** button is gone).
+The `CollectionImageModal` item is still disabled when the collection is empty.
 
 ### Collection image export
 

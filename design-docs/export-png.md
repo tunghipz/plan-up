@@ -1,11 +1,14 @@
 # Export as image (PNG)
 
 **Status:** Implemented
-**Last updated:** 2026-07-09 (sprint PNG: member sections → one hairline table, member
-gutter column rowspan + continuous numbering — option B of `demo/export-table-layout.html`)
+**Last updated:** 2026-07-14 (**sprint** "Export as image…" **removed from the app's
+Export ▾ menu** — sprint PNG export now lives only in the **share viewer**
+(`SnapshotViewer`, see [share-link-snapshot.md](./share-link-snapshot.md)); the
+`ExportImageModal`/`PngExportCard` pair is reused there. Collection variant unchanged.)
 **Code:** `app/src/png-export.ts` (shared render/copy/download glue), sprint card
-`app/src/PngExportCard.tsx` + `app/src/ExportImageModal.tsx` (wired from `App.tsx`),
-collection card `app/src/CollectionPngCard.tsx` + `app/src/CollectionImageModal.tsx`
+`app/src/PngExportCard.tsx` + `app/src/ExportImageModal.tsx` (now wired from
+`SnapshotViewer.tsx` — the read-only share view), collection card
+`app/src/CollectionPngCard.tsx` + `app/src/CollectionImageModal.tsx`
 (wired from the context-aware Export ▾ menu in `App.tsx`)
 
 ## Collection variant
@@ -14,7 +17,8 @@ Collections export the same "one PNG for chat" but section-shaped: `CollectionPn
 renders each section as a `Name · Start · End · Status` table (custom-status pills
 tinted from `CollectionStatus.color`; nested subtasks), no Effort/Assignee/prereq
 columns. `CollectionImageModal` reuses the same modal shell + `png-export.ts` glue.
-The text sibling (Copy for Telegram) lives in the same Export ▾ menu — see
+The collection Export ▾ menu now carries **only** this image item — the text
+sibling (Copy for Telegram) was removed 2026-07-14, see
 [copy-to-telegram.md](./copy-to-telegram.md).
 
 ## Purpose
@@ -29,8 +33,10 @@ export (bàn giao dữ liệu). PNG là *người đọc*, JSON là *máy đọc
 
 ## User-facing behavior
 
-- Menu **Export** (header dropdown) có thêm mục **"Export as image…"** (icon
-  `Image`), đặt trên cùng nhóm — vì đây là hành vi share thường dùng nhất.
+- Menu **Export** (header dropdown): mục **"Export as image…"** giờ **chỉ còn ở
+  context Collection** (icon `Image`, "grouped by table"). Với **sprint**, PNG export
+  đã dời sang **share viewer** (nút Export PNG trong `SnapshotViewer`) — mở link
+  read-only rồi Export PNG; không còn xuất PNG sprint thẳng từ toolbar app.
 - Bấm → mở **modal preview** (ModalSheet):
   - Vùng preview render đúng tấm ảnh sẽ xuất (thu nhỏ vừa khung).
   - Nút **Copy image** — copy PNG vào clipboard (dán thẳng vào chat). Hiện

@@ -1,48 +1,84 @@
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-/// Only files the frontend itself named `plan-up-YYYY-MM-DD.json` may ever be
-/// written or deleted — no separators possible, so the picked dir can't be escaped.
+/// Only files the frontend itself names may ever be written or deleted — no
+/// separators possible in either shape, so the picked dir can't be escaped:
+///   `plan-up-YYYY-MM-DD.json`         (23 chars) — daily rolling file
+///   `plan-up-YYYY-MM-DD-HHMMSS.json`  (30 chars) — immutable `versions/` snapshot
 fn is_backup_filename(name: &str) -> bool {
-    let bytes = name.as_bytes();
-    // plan-up-2026-07-07.json → 8 + 10 + 5 = 23 chars
-    if bytes.len() != 23 || !name.starts_with("plan-up-") || !name.ends_with(".json") {
+    if !name.starts_with("plan-up-") || !name.ends_with(".json") {
         return false;
     }
-    let date = &bytes[8..18];
-    date.iter().enumerate().all(|(i, b)| match i {
-        4 | 7 => *b == b'-',
-        _ => b.is_ascii_digit(),
-    })
+    let bytes = name.as_bytes();
+    // bytes[8..18] = "YYYY-MM-DD" in both shapes
+    let date_ok = |b: &[u8]| {
+        b.len() == 10
+            && b.iter().enumerate().all(|(i, c)| match i {
+                4 | 7 => *c == b'-',
+                _ => c.is_ascii_digit(),
+            })
+    };
+    match bytes.len() {
+        23 => date_ok(&bytes[8..18]),
+        // "-HHMMSS": a dash then 6 digits between the date and ".json"
+        30 => {
+            date_ok(&bytes[8..18])
+                && bytes[18] == b'-'
+                && bytes[19..25].iter().all(u8::is_ascii_digit)
+        }
+        _ => false,
+    }
+}
+
+/// Resolve the write/prune target: the picked folder, or its `versions/`
+/// subfolder. `subdir` is a hard-coded allow-list — the frontend can never name
+/// an arbitrary subdirectory, so path traversal via `subdir` is impossible too.
+fn resolve_dir(dir: &str, subdir: Option<&str>) -> Result<PathBuf, String> {
+    let base = Path::new(dir);
+    if !base.is_dir() {
+        return Err(format!("backup folder not found: {}", base.display()));
+    }
+    match subdir {
+        None | Some("") => Ok(base.to_path_buf()),
+        Some("versions") => Ok(base.join("versions")),
+        Some(other) => Err(format!("backup subdir not allowed: {other}")),
+    }
 }
 
 #[tauri::command]
-fn write_backup(dir: String, file_name: String, contents: String) -> Result<(), String> {
+fn write_backup(
+    dir: String,
+    file_name: String,
+    contents: String,
+    subdir: Option<String>,
+) -> Result<(), String> {
     if !is_backup_filename(&file_name) {
         return Err(format!("invalid backup filename: {file_name}"));
     }
-    let dir = Path::new(&dir);
-    if !dir.is_dir() {
-        return Err(format!("backup folder not found: {}", dir.display()));
-    }
-    fs::write(dir.join(&file_name), contents).map_err(|e| e.to_string())
+    let target = resolve_dir(&dir, subdir.as_deref())?;
+    fs::create_dir_all(&target).map_err(|e| e.to_string())?;
+    fs::write(target.join(&file_name), contents).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn prune_backups(dir: String, keep: usize) -> Result<Vec<String>, String> {
-    let dir = Path::new(&dir);
-    let entries = fs::read_dir(dir).map_err(|e| e.to_string())?;
+fn prune_backups(dir: String, keep: usize, subdir: Option<String>) -> Result<Vec<String>, String> {
+    let target = resolve_dir(&dir, subdir.as_deref())?;
+    if !target.is_dir() {
+        // e.g. versions/ not created yet — nothing to prune.
+        return Ok(Vec::new());
+    }
+    let entries = fs::read_dir(&target).map_err(|e| e.to_string())?;
     let mut names: Vec<String> = entries
         .filter_map(|e| e.ok())
         .filter(|e| e.path().is_file())
         .filter_map(|e| e.file_name().into_string().ok())
         .filter(|n| is_backup_filename(n))
         .collect();
-    // name == date → lexicographic desc is newest-first
+    // name == date[-time], fixed width → lexicographic desc is newest-first
     names.sort_by(|a, b| b.cmp(a));
     let mut deleted = Vec::new();
     for name in names.into_iter().skip(keep) {
-        fs::remove_file(dir.join(&name)).map_err(|e| e.to_string())?;
+        fs::remove_file(target.join(&name)).map_err(|e| e.to_string())?;
         deleted.push(name);
     }
     Ok(deleted)
@@ -73,8 +109,12 @@ mod tests {
 
     #[test]
     fn accepts_valid_names() {
+        // daily
         assert!(is_backup_filename("plan-up-2026-07-07.json"));
         assert!(is_backup_filename("plan-up-1999-12-31.json"));
+        // versioned (with -HHMMSS)
+        assert!(is_backup_filename("plan-up-2026-07-07-153045.json"));
+        assert!(is_backup_filename("plan-up-1999-12-31-000000.json"));
     }
 
     #[test]
@@ -85,28 +125,60 @@ mod tests {
         assert!(!is_backup_filename("plan-up-2026-07-07.json.bak"));
         assert!(!is_backup_filename("other-2026-07-07.json"));
         assert!(!is_backup_filename(""));
+        // version-shaped but malformed time
+        assert!(!is_backup_filename("plan-up-2026-07-07-15304.json")); // 5 time digits
+        assert!(!is_backup_filename("plan-up-2026-07-07_153045.json")); // wrong separator
+        assert!(!is_backup_filename("plan-up-2026-07-07-15304x.json")); // non-digit
     }
 
     #[test]
     fn write_backup_writes_and_overwrites() {
         let dir = temp_dir("write");
         let d = dir.to_string_lossy().to_string();
-        write_backup(d.clone(), "plan-up-2026-07-07.json".into(), "{\"v\":1}".into()).unwrap();
-        write_backup(d.clone(), "plan-up-2026-07-07.json".into(), "{\"v\":2}".into()).unwrap();
+        write_backup(d.clone(), "plan-up-2026-07-07.json".into(), "{\"v\":1}".into(), None).unwrap();
+        write_backup(d.clone(), "plan-up-2026-07-07.json".into(), "{\"v\":2}".into(), None).unwrap();
         let body = fs::read_to_string(dir.join("plan-up-2026-07-07.json")).unwrap();
         assert_eq!(body, "{\"v\":2}");
         fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
-    fn write_backup_rejects_bad_names_and_missing_dir() {
+    fn write_version_creates_subfolder() {
+        let dir = temp_dir("write-ver");
+        let d = dir.to_string_lossy().to_string();
+        write_backup(
+            d.clone(),
+            "plan-up-2026-07-07-153045.json".into(),
+            "{\"v\":1}".into(),
+            Some("versions".into()),
+        )
+        .unwrap();
+        let body =
+            fs::read_to_string(dir.join("versions").join("plan-up-2026-07-07-153045.json")).unwrap();
+        assert_eq!(body, "{\"v\":1}");
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn write_backup_rejects_bad_names_dir_and_subdir() {
         let dir = temp_dir("reject");
         let d = dir.to_string_lossy().to_string();
-        assert!(write_backup(d, "../evil.json".into(), "x".into()).is_err());
-        assert!(
-            write_backup("/nonexistent-dir-xyz".into(), "plan-up-2026-07-07.json".into(), "x".into())
-                .is_err()
-        );
+        assert!(write_backup(d.clone(), "../evil.json".into(), "x".into(), None).is_err());
+        assert!(write_backup(
+            "/nonexistent-dir-xyz".into(),
+            "plan-up-2026-07-07.json".into(),
+            "x".into(),
+            None
+        )
+        .is_err());
+        // arbitrary subdir is rejected — only "versions" is allowed
+        assert!(write_backup(
+            d,
+            "plan-up-2026-07-07.json".into(),
+            "x".into(),
+            Some("../escape".into())
+        )
+        .is_err());
         fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -118,12 +190,45 @@ mod tests {
         }
         fs::write(dir.join("notes.txt"), "keep me").unwrap();
         let d = dir.to_string_lossy().to_string();
-        let deleted = prune_backups(d, 3).unwrap();
+        let deleted = prune_backups(d, 3, None).unwrap();
         assert_eq!(deleted, vec!["plan-up-2026-01-02.json", "plan-up-2026-01-01.json"]);
         assert!(dir.join("plan-up-2026-01-05.json").exists());
         assert!(dir.join("plan-up-2026-01-03.json").exists());
         assert!(dir.join("notes.txt").exists());
         assert!(!dir.join("plan-up-2026-01-01.json").exists());
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn prune_versions_subfolder() {
+        let dir = temp_dir("prune-ver");
+        let versions = dir.join("versions");
+        fs::create_dir_all(&versions).unwrap();
+        for min in 1..=4 {
+            fs::write(
+                versions.join(format!("plan-up-2026-01-01-1000{min:02}.json")),
+                "{}",
+            )
+            .unwrap();
+        }
+        let d = dir.to_string_lossy().to_string();
+        let deleted = prune_backups(d, 2, Some("versions".into())).unwrap();
+        assert_eq!(
+            deleted,
+            vec!["plan-up-2026-01-01-100002.json", "plan-up-2026-01-01-100001.json"]
+        );
+        assert!(versions.join("plan-up-2026-01-01-100004.json").exists());
+        assert!(!versions.join("plan-up-2026-01-01-100001.json").exists());
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn prune_missing_versions_is_noop() {
+        let dir = temp_dir("prune-missing");
+        let d = dir.to_string_lossy().to_string();
+        // versions/ never created → no error, nothing deleted
+        let deleted = prune_backups(d, 5, Some("versions".into())).unwrap();
+        assert!(deleted.is_empty());
         fs::remove_dir_all(&dir).unwrap();
     }
 }

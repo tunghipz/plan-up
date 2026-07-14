@@ -3,6 +3,7 @@ import { FolderOpen } from 'lucide-react'
 import { ModalSheet } from './ModalSheet'
 import {
   BACKUP_KEEP,
+  VERSIONS_KEEP,
   getBackupDir,
   getLastBackupStatus,
   isBackupEnabled,
@@ -70,8 +71,10 @@ export function BackupSettingsModal({ onClose }: { onClose: () => void }) {
   return (
     <ModalSheet title="Auto backup" onClose={onClose}>
       <p className="text-[13px] text-ink-muted leading-snug">
-        Writes a full backup (<span className="tabular-nums">plan-up-YYYY-MM-DD.json</span>) to a
-        folder 30 s after any change. Keeps the newest {BACKUP_KEEP} daily files.
+        Writes a full backup to a folder 30 s after any change: a daily
+        <span className="tabular-nums"> plan-up-YYYY-MM-DD.json</span> (newest {BACKUP_KEEP} kept)
+        plus an immutable copy in <span className="tabular-nums">versions/</span> (newest{' '}
+        {VERSIONS_KEEP} kept) so a bad edit never overwrites your last good state.
       </p>
 
       <div className="flex items-center justify-between">

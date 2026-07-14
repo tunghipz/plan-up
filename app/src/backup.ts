@@ -12,8 +12,12 @@ export const IS_TAURI = typeof window !== 'undefined' && '__TAURI_INTERNALS__' i
 export const BACKUP_DIR_KEY = 'plan-up:backupDir'
 export const BACKUP_ENABLED_KEY = 'plan-up:backupEnabled'
 export const BACKUP_LAST_KEY = 'plan-up:backupLast'
+export const BACKUP_HASH_KEY = 'plan-up:backupHash'
 
 export const BACKUP_KEEP = 30
+/** Immutable timestamped snapshots kept in the `versions/` subfolder. */
+export const VERSIONS_DIR = 'versions'
+export const VERSIONS_KEEP = 200
 export const BACKUP_QUIET_MS = 30_000
 
 export interface BackupStatus {
@@ -53,6 +57,30 @@ export function setLastBackupStatus(status: BackupStatus): void {
   safeStorage.set(BACKUP_LAST_KEY, JSON.stringify(status))
 }
 
+/** Dedup hash of the last snapshot written to `versions/` (null if none yet). */
+export function getLastBackupHash(): string | null {
+  return safeStorage.get(BACKUP_HASH_KEY)
+}
+
+export function setLastBackupHash(hash: string): void {
+  safeStorage.set(BACKUP_HASH_KEY, hash)
+}
+
+/**
+ * Tiny non-crypto hash (FNV-1a, 32-bit) used only for backup dedup — "is this
+ * payload identical to the last one written?". A rare collision merely skips one
+ * `versions/` write (the daily file still carries the latest state), so the weak
+ * guarantee is acceptable here and keeps the hash cheap.
+ */
+export function hashString(s: string): string {
+  let h = 0x811c9dc5
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i)
+    h = Math.imul(h, 0x01000193)
+  }
+  return (h >>> 0).toString(16)
+}
+
 /**
  * Today's backup filename, from LOCAL date parts — "today's file" should follow
  * the user's clock. (The manual export slices the UTC `exportedAt` instead;
@@ -65,17 +93,45 @@ export function backupFilename(d: Date): string {
   return `plan-up-${y}-${m}-${day}.json`
 }
 
+/**
+ * Timestamped name for an immutable snapshot in `versions/`:
+ * `plan-up-YYYY-MM-DD-HHMMSS.json`. Same LOCAL-clock rationale as
+ * `backupFilename`; fixed-width so lexicographic order stays chronological.
+ */
+export function versionFilename(d: Date): string {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  const hh = String(d.getHours()).padStart(2, '0')
+  const mm = String(d.getMinutes()).padStart(2, '0')
+  const ss = String(d.getSeconds()).padStart(2, '0')
+  return `plan-up-${y}-${m}-${day}-${hh}${mm}${ss}.json`
+}
+
 const BACKUP_NAME_RE = /^plan-up-\d{4}-\d{2}-\d{2}\.json$/
+const VERSION_NAME_RE = /^plan-up-\d{4}-\d{2}-\d{2}-\d{6}\.json$/
 
 /**
- * Which files retention should delete: strict `plan-up-YYYY-MM-DD.json` matches
- * only, newest `keep` survive. Name == date, so lexicographic order is
+ * Which daily files retention should delete: strict `plan-up-YYYY-MM-DD.json`
+ * matches only, newest `keep` survive. Name == date, so lexicographic order is
  * chronological. Mirrors the Rust `prune_backups` — kept here as its executable
  * spec (backup.test.ts).
  */
 export function selectPrunable(names: string[], keep = BACKUP_KEEP): string[] {
   return names
     .filter((n) => BACKUP_NAME_RE.test(n))
+    .sort((a, b) => b.localeCompare(a))
+    .slice(keep)
+}
+
+/**
+ * Retention for the `versions/` subfolder: strict `plan-up-YYYY-MM-DD-HHMMSS.json`
+ * matches only, newest `keep` survive. Same fixed-width lexicographic ordering.
+ * Executable spec for the Rust `prune_backups` when called with `subdir: 'versions'`.
+ */
+export function selectPrunableVersions(names: string[], keep = VERSIONS_KEEP): string[] {
+  return names
+    .filter((n) => VERSION_NAME_RE.test(n))
     .sort((a, b) => b.localeCompare(a))
     .slice(keep)
 }

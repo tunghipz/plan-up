@@ -1,6 +1,13 @@
 import 'fake-indexeddb/auto'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { backupFilename, selectPrunable, BackupScheduler } from './backup'
+import {
+  backupFilename,
+  versionFilename,
+  selectPrunable,
+  selectPrunableVersions,
+  hashString,
+  BackupScheduler,
+} from './backup'
 
 describe('backupFilename', () => {
   it('uses LOCAL date parts, zero-padded', () => {
@@ -11,6 +18,45 @@ describe('backupFilename', () => {
 
   it('pads single-digit month and day', () => {
     expect(backupFilename(new Date(2026, 0, 3))).toBe('plan-up-2026-01-03.json')
+  })
+})
+
+describe('versionFilename', () => {
+  it('appends local HHMMSS, zero-padded', () => {
+    expect(versionFilename(new Date(2026, 6, 7, 15, 30, 45))).toBe(
+      'plan-up-2026-07-07-153045.json',
+    )
+  })
+
+  it('pads single-digit time parts and midnight', () => {
+    expect(versionFilename(new Date(2026, 0, 3, 1, 2, 5))).toBe('plan-up-2026-01-03-010205.json')
+    expect(versionFilename(new Date(2026, 0, 3, 0, 0, 0))).toBe('plan-up-2026-01-03-000000.json')
+  })
+})
+
+describe('selectPrunableVersions', () => {
+  const ver = (n: number) => `plan-up-2026-01-01-1000${String(n).padStart(2, '0')}.json`
+
+  it('drops the oldest beyond keep, newest survive', () => {
+    const names = Array.from({ length: 5 }, (_, i) => ver(i + 1))
+    expect(selectPrunableVersions(names, 2)).toEqual([ver(3), ver(2), ver(1)])
+  })
+
+  it('ignores daily files and other names — only strict version names count', () => {
+    const names = ['plan-up-2026-01-01.json', 'notes.txt', ver(1), ver(2)]
+    expect(selectPrunableVersions(names, 1)).toEqual([ver(1)])
+  })
+
+  it('defaults to keeping 200', () => {
+    const names = Array.from({ length: 200 }, (_, i) => ver(i + 1))
+    expect(selectPrunableVersions(names)).toEqual([])
+  })
+})
+
+describe('hashString', () => {
+  it('is stable for identical input and differs for changed input', () => {
+    expect(hashString('{"a":1}')).toBe(hashString('{"a":1}'))
+    expect(hashString('{"a":1}')).not.toBe(hashString('{"a":2}'))
   })
 })
 
@@ -144,7 +190,7 @@ describe('runBackupNow', () => {
     expect(status.error).toMatch(/No backup folder/)
   })
 
-  it('writes then prunes, and persists an ok status', async () => {
+  it('writes both tiers then prunes both, and persists an ok status', async () => {
     const invoke = vi.fn().mockResolvedValue(undefined)
     vi.doMock('@tauri-apps/api/core', () => ({ invoke }))
     store.set('plan-up:backupDir', '/tmp/backups')
@@ -152,13 +198,48 @@ describe('runBackupNow', () => {
     const status = await runBackupNow()
     expect(status.ok).toBe(true)
     expect(status.file).toMatch(/^plan-up-\d{4}-\d{2}-\d{2}\.json$/)
-    expect(invoke).toHaveBeenCalledTimes(2)
+    // daily write + prune, then version write + prune (first run has no prior hash)
+    expect(invoke).toHaveBeenCalledTimes(4)
+    // 1. daily rolling file (no subdir)
     expect(invoke.mock.calls[0][0]).toBe('write_backup')
-    const args = invoke.mock.calls[0][1] as { dir: string; fileName: string; contents: string }
-    expect(args.dir).toBe('/tmp/backups')
-    expect(JSON.parse(args.contents).version).toBe(5)
+    const daily = invoke.mock.calls[0][1] as {
+      dir: string
+      fileName: string
+      contents: string
+      subdir?: string
+    }
+    expect(daily.dir).toBe('/tmp/backups')
+    expect(daily.subdir).toBeUndefined()
+    expect(JSON.parse(daily.contents).version).toBe(5)
     expect(invoke.mock.calls[1]).toEqual(['prune_backups', { dir: '/tmp/backups', keep: 30 }])
+    // 2. immutable version into versions/ + its own prune (keep 200)
+    expect(invoke.mock.calls[2][0]).toBe('write_backup')
+    const ver = invoke.mock.calls[2][1] as { fileName: string; subdir: string }
+    expect(ver.fileName).toMatch(/^plan-up-\d{4}-\d{2}-\d{2}-\d{6}\.json$/)
+    expect(ver.subdir).toBe('versions')
+    expect(invoke.mock.calls[3]).toEqual([
+      'prune_backups',
+      { dir: '/tmp/backups', keep: 200, subdir: 'versions' },
+    ])
     expect(JSON.parse(store.get('plan-up:backupLast')!).ok).toBe(true)
+    expect(store.get('plan-up:backupHash')).toBeTruthy()
+  })
+
+  it('skips the version write when the payload is unchanged (dedup)', async () => {
+    const invoke = vi.fn().mockResolvedValue(undefined)
+    vi.doMock('@tauri-apps/api/core', () => ({ invoke }))
+    store.set('plan-up:backupDir', '/tmp/backups')
+    const { runBackupNow } = await import('./backup-tauri')
+    await runBackupNow() // 4 invokes, records the hash
+    invoke.mockClear()
+    const status = await runBackupNow() // same (empty) DB → hash matches
+    expect(status.ok).toBe(true)
+    // only the daily tier runs; no version write/prune
+    expect(invoke).toHaveBeenCalledTimes(2)
+    expect(invoke.mock.calls.map((c) => c[0])).toEqual(['write_backup', 'prune_backups'])
+    expect(invoke.mock.calls.every((c) => (c[1] as { subdir?: string }).subdir === undefined)).toBe(
+      true,
+    )
   })
 
   it('catches a failing write into a persisted error status — never throws', async () => {

@@ -7,9 +7,15 @@ import {
   BackupScheduler,
   backupFilename,
   getBackupDir,
+  getLastBackupHash,
+  hashString,
   IS_TAURI,
   isBackupEnabled,
+  setLastBackupHash,
   setLastBackupStatus,
+  versionFilename,
+  VERSIONS_DIR,
+  VERSIONS_KEEP,
   type BackupStatus,
 } from './backup'
 
@@ -28,9 +34,12 @@ export async function pickBackupDir(): Promise<string | null> {
 }
 
 /**
- * Export the whole DB and write it into the chosen folder, then prune to the
- * newest 30 files. Never throws — every failure lands in the returned (and
- * persisted) status so the settings modal can surface it.
+ * Export the whole DB and back it up in two tiers (design-docs/auto-backup.md):
+ *   1. the daily rolling file (overwritten in place), pruned to the newest 30;
+ *   2. unless the payload is unchanged since the last snapshot (content dedup),
+ *      an immutable `versions/plan-up-…-HHMMSS.json`, pruned to the newest 200.
+ * Never throws — every failure lands in the returned (and persisted) status so
+ * the settings modal can surface it.
  */
 export async function runBackupNow(): Promise<BackupStatus> {
   const dir = getBackupDir()
@@ -39,10 +48,29 @@ export async function runBackupNow(): Promise<BackupStatus> {
   }
   try {
     const { invoke } = await import('@tauri-apps/api/core')
+    const now = new Date()
     const payload = await exportAll()
-    const fileName = backupFilename(new Date())
-    await invoke('write_backup', { dir, fileName, contents: JSON.stringify(payload) })
+    const contents = JSON.stringify(payload)
+
+    // 1. Daily rolling file — overwrite the same-day file, prune to 30 days.
+    const fileName = backupFilename(now)
+    await invoke('write_backup', { dir, fileName, contents })
     await invoke('prune_backups', { dir, keep: BACKUP_KEEP })
+
+    // 2. Immutable version — dedup on the payload with `exportedAt` neutralised
+    // (that field changes every export, so hashing raw contents never matches).
+    const hash = hashString(JSON.stringify({ ...payload, exportedAt: '' }))
+    if (hash !== getLastBackupHash()) {
+      await invoke('write_backup', {
+        dir,
+        fileName: versionFilename(now),
+        contents,
+        subdir: VERSIONS_DIR,
+      })
+      await invoke('prune_backups', { dir, keep: VERSIONS_KEEP, subdir: VERSIONS_DIR })
+      setLastBackupHash(hash)
+    }
+
     const status: BackupStatus = { at: Date.now(), ok: true, file: fileName }
     setLastBackupStatus(status)
     return status

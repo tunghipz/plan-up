@@ -1,7 +1,11 @@
 # Share link — read-only snapshot
 
 **Status:** Implemented
-**Last updated:** 2026-07-14 (viewer header re-arranged — capsule is now **2 zones**
+**Last updated:** 2026-07-14 (sender modal: **removed the size readout** — the "Link size"
+meter + summary KB chip are gone; only a warning banner shows when the link is over the
+threshold. `SHARE_MAX_BYTES` recomputed `8000` → **`4000`** chars: the blob is in the URL
+fragment [not sent to a server], so the paste target [Telegram ~4096/message] is the real
+limit, not the browser. Earlier same-day: viewer header re-arranged — capsule is now **2 zones**
 [brand · actions]; the sprint moved to a **full-width breadcrumb line below** the
 capsule so its name/date **never truncate or overlap** the Read-only chip / actions
 on narrow widths [arrangement A]; the body's `md:hidden` sprint header is gone.
@@ -47,14 +51,17 @@ phía server, không auth.
     (Không còn scope-chip từng-người, không còn preview "người nhận thấy" — viewer
     đã là read-only.)
   - **Link** read-only, **truncate giữa** (hiển thị gọn; Copy vẫn lấy full URL).
-  - **Size meter**: `X KB / ~8 KB` — xanh khi vừa, đỏ khi vượt.
+  - **Không hiển thị size** (bỏ 2026-07-14). Trước đây có "Size meter" `X KB / ~8 KB`
+    + chip KB ở dòng summary; đã gỡ cả hai vì con số dung lượng chỉ gây nhiễu — link
+    chạy tốt vượt xa giới hạn trình duyệt, cái duy nhất đáng cảnh báo là chat cắt cụt.
+    Chỉ còn **thẻ cảnh báo** khi vượt ngưỡng (xem "Quá lớn" bên dưới).
   - **Footer 2 nút**: **Open** (ghost, icon external-link) mở link read-only vừa
     dựng trong **tab mới** (`window.open`, noopener) để tự preview cái người nhận
     sẽ thấy; **Copy link** (primary brand) → clipboard, đổi "Copied ✓" 1.4 s. Cả
     hai khoá khi sprint rỗng.
-- **Quá lớn** (payload > ngưỡng ~8 KB): size meter chuyển **đỏ** + thẻ cảnh báo
-  "một số chat cắt link dài; thu nhỏ scope theo 1 member hoặc tách sprint". Nút Copy
-  đổi thành **"Copy link anyway"** — vẫn cho copy (tôn trọng user), không chặn cứng.
+- **Quá lớn** (payload > ngưỡng `SHARE_MAX_BYTES` = **4000 ký tự**): bung thẻ cảnh báo
+  "một số chat (Telegram/Zalo) có thể cắt cụt; bỏ tick member nặng hoặc tách sprint".
+  Nút Copy đổi thành **"Copy link anyway"** — vẫn cho copy (tôn trọng user), không chặn cứng.
   Payload đã nén **compact v2** (xem *Data*) nên hiếm khi chạm ngưỡng; xuất `.html`
   không giới hạn size là **Future**.
 - **Không có QR** (chốt 2026-07-14 — cân nhắc sau, xem Future).
@@ -162,7 +169,7 @@ lặp key, đóng gói **columnar** + mã hoá chặt:
   - `decodeSnapshot(raw: string): SnapshotData | null` → giải nén + `unpackSnapshot`
     + validate; `null` khi hỏng/không đúng shape (không throw ra ngoài).
   - `buildShareUrl(blob)` cho `#v=2&s=…`, `parseShareHash` tách blob.
-  - Hằng `SHARE_MAX_BYTES` (~8 KB, conservative) — ngưỡng bật fallback;
+  - Hằng `SHARE_MAX_BYTES` (**4000 ký tự**, sát Telegram 4096) — ngưỡng bật cảnh báo;
     `SNAPSHOT_VERSION = 2`.
 - **Boot intercept** trong `main.tsx`: đọc `window.location.hash`; nếu khớp
   `#v=…&s=…` → render `<SnapshotViewer raw=… />` thay cho `<App/>`. Không có router
@@ -186,8 +193,10 @@ lặp key, đóng gói **columnar** + mã hoá chặt:
 - **Fragment không rời máy**: dữ liệu ở sau `#` — không gửi lên server; kể cả app
   chat fetch URL để dựng preview card cũng không thấy fragment (không lộ data,
   cũng không có rich preview).
-- **Size gate**: URL thực tế an toàn ~8 KB (một số chat cắt link dài). Vượt ngưỡng
-  → fallback `.html` file, **không** tạo link. Meter cảnh báo đỏ trước khi copy.
+- **Size gate**: blob ở fragment nên trình duyệt xử lý được URL rất dài; chặn thật là
+  **chỗ paste** (Telegram ~4096 ký tự/message). Ngưỡng `SHARE_MAX_BYTES = 4000` sát mức
+  đó. Vượt → thẻ cảnh báo (không hiển thị số KB), Copy vẫn cho phép; `.html` không giới
+  hạn size là fallback (Future).
 - **Untrusted input**: `decodeSnapshot` bọc `try/catch`, chặn payload quá dài
   (chống decompress bomb), validate shape trước khi render. Title/nội dung render
   bằng React như **text thuần** (React tự escape) — không `dangerouslySetInnerHTML`,

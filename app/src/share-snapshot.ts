@@ -19,9 +19,13 @@ import { byEnd } from './telegram-export'
 
 export const SNAPSHOT_VERSION = 2
 
-/** Conservative safe budget for the whole share URL (bytes). Chat apps truncate
- * long links well before the browser's own ~32 KB ceiling — warn past this. */
-export const SHARE_MAX_BYTES = 8000
+/** Warn threshold for the whole share URL (characters). The blob rides in the URL
+ * *fragment* (`#v=2&s=…`), which is never sent to a server, so the classic ~8 KB
+ * request-line limit doesn't apply and browsers handle far longer. The real limit
+ * is the paste target: chat apps cap a single message (Telegram ~4096 chars) and
+ * silently truncate past it. 4000 sits just under that — a typical snapshot is
+ * ~1 KB, so this only fires on genuinely huge sprints. */
+export const SHARE_MAX_BYTES = 4000
 
 // Reject an absurdly long blob before decompressing (cheap decompression-bomb
 // guard). No real sprint snapshot comes close.

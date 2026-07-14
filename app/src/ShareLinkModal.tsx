@@ -66,8 +66,6 @@ export function ShareLinkModal({
 
   const empty = bundle.tasks.length === 0
   const over = bytes > SHARE_MAX_BYTES
-  const pct = Math.min(100, Math.round((bytes / SHARE_MAX_BYTES) * 100))
-  const kb = (n: number) => `${(n / 1024).toFixed(1)} KB`
 
   const allOn = selected.size === members.length
   const toggle = (id: string) =>
@@ -117,9 +115,6 @@ export function ShareLinkModal({
         <span className="text-ink-muted">
           · {bundle.tasks.length} task{bundle.tasks.length === 1 ? '' : 's'} · {bundle.members.length} member
           {bundle.members.length === 1 ? '' : 's'}
-        </span>
-        <span className={`ml-auto tab-data font-semibold ${over ? 'text-[#ff3b30]' : 'text-status-done'}`}>
-          {empty ? '—' : kb(bytes)}
         </span>
       </div>
 
@@ -175,22 +170,8 @@ export function ShareLinkModal({
         </div>
       </div>
 
-      {/* Size meter — green under budget, red over (chat apps truncate long links). */}
-      <div>
-        <div className="flex items-center justify-between text-[11.5px] mb-1.5">
-          <span className="text-ink-faint">Link size</span>
-          <span className={`tab-data font-semibold ${over ? 'text-[#ff3b30]' : 'text-status-done'}`}>
-            {empty ? '—' : kb(bytes)} / ~{kb(SHARE_MAX_BYTES)}
-          </span>
-        </div>
-        <div className="h-[7px] rounded-full bg-[var(--color-canvas-sunk)] overflow-hidden">
-          <div
-            className={`h-full rounded-full transition-[width] ${over ? 'bg-[#ff3b30]' : 'bg-status-done'}`}
-            style={{ width: `${empty ? 0 : pct}%` }}
-          />
-        </div>
-      </div>
-
+      {/* No size readout — the link works well beyond the browser's limit; we only
+          warn when it's big enough that a chat app (Telegram/Zalo) might truncate. */}
       {empty ? (
         <div className="flex items-start gap-2.5 rounded-[11px] bg-fill border border-border px-3.5 py-3 text-[12.5px] text-ink-muted">
           <AlertTriangle size={16} strokeWidth={2} className="text-ink-faint shrink-0 mt-0.5" aria-hidden />

@@ -55,6 +55,53 @@ describe('formatSprintTree', () => {
     expect(out).not.toMatch(/#14 Refund — To do ·/)
   })
 
+  it('renders a full start → end range on the task line', () => {
+    const out = formatSprintTree(sprint, [member('a', 'An', 0)], [
+      task('t1', 'a', 12, {
+        title: 'Payment', status: 'in_progress',
+        startDate: '2026-07-08', dueDate: '2026-07-15',
+      }),
+    ])
+    expect(out).toContain('#12 Payment — In progress · Jul 8 → Jul 15')
+  })
+
+  it('shows a one-sided date (start-only / due-only) without an arrow', () => {
+    const out = formatSprintTree(sprint, [member('a', 'An', 0)], [
+      task('t1', 'a', 1, { title: 'StartOnly', startDate: '2026-07-08', dueDate: null }),
+      task('t2', 'a', 2, { title: 'DueOnly', startDate: null, dueDate: '2026-07-15' }),
+    ])
+    const line = (needle: string) => out.split('\n').find((l) => l.includes(needle))!
+    expect(line('StartOnly')).toContain('StartOnly — To do · Jul 8')
+    expect(line('StartOnly')).not.toContain('→')
+    expect(line('DueOnly')).toContain('DueOnly — To do · Jul 15')
+    expect(line('DueOnly')).not.toContain('→')
+  })
+
+  it('shows the start → end range on subtasks too (still no #seq)', () => {
+    const out = formatSprintTree(sprint, [member('a', 'An', 0)], [
+      task('p1', 'a', 12, { title: 'Parent' }),
+      task('c1', 'a', 13, {
+        title: 'Child', parentId: 'p1', status: 'done',
+        startDate: '2026-07-08', dueDate: '2026-07-11',
+      }),
+    ])
+    const child = out.split('\n').find((l) => l.includes('Child'))!
+    expect(child).toContain('Child — Done · Jul 8 → Jul 11')
+    expect(child).not.toContain('#13')
+  })
+
+  it('orders each lane by end date (ascending), undated tasks last', () => {
+    const out = formatSprintTree(sprint, [member('a', 'An', 0)], [
+      task('t1', 'a', 1, { title: 'Late', dueDate: '2026-07-22' }),
+      task('t2', 'a', 2, { title: 'Early', dueDate: '2026-07-10' }),
+      task('t3', 'a', 3, { title: 'NoDate' }),
+    ])
+    const seen = out.split('\n')
+      .map((l) => l.match(/Early|Late|NoDate/)?.[0])
+      .filter(Boolean)
+    expect(seen).toEqual(['Early', 'Late', 'NoDate'])
+  })
+
   it('never emits priority', () => {
     const out = formatSprintTree(sprint, [member('a', 'An', 0)], [
       task('t1', 'a', 1, { priority: 'urgent' }),
@@ -193,6 +240,30 @@ describe('formatCollectionTree', () => {
     const child = lines.findIndex((l) => l.includes('Child'))
     expect(child).toBe(parent + 1)
     expect(lines[child]).toContain('Child — Idea')
+  })
+
+  it('shows the start → end range on collection subtasks too', () => {
+    const out = formatCollectionTree(collection, [
+      citem('p1', 'jul', { title: 'Parent', startDate: null, dueDate: null }),
+      citem('c1', 'jul', {
+        title: 'Child', parentId: 'p1', collectionStatusId: 'idea',
+        startDate: '2026-07-03', dueDate: '2026-07-05',
+      }),
+    ])
+    const child = out.split('\n').find((l) => l.includes('Child'))!
+    expect(child).toContain('Child — Idea · Jul 3 → Jul 5')
+  })
+
+  it('orders items in a section by end date (ascending), undated last', () => {
+    const out = formatCollectionTree(collection, [
+      citem('a', 'jul', { title: 'Late', dueDate: '2026-07-20' }),
+      citem('b', 'jul', { title: 'Early', dueDate: '2026-07-05' }),
+      citem('c', 'jul', { title: 'NoDate', startDate: null, dueDate: null }),
+    ])
+    const seen = out.split('\n')
+      .map((l) => l.match(/Early|Late|NoDate/)?.[0])
+      .filter(Boolean)
+    expect(seen).toEqual(['Early', 'Late', 'NoDate'])
   })
 
   it('drops empty sections and can scope to one section', () => {

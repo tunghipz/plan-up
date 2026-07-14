@@ -1,7 +1,7 @@
 # Copy sprint → Telegram (text)
 
 **Status:** Implemented
-**Last updated:** 2026-07-08
+**Last updated:** 2026-07-14 (task line now shows a `start → end` range + tasks sort by end date, undated last — both sprint & collection trees, subtasks included)
 **Code:** `app/src/telegram-export.ts` (pure formatters + tests), `app/src/CopyTelegramModal.tsx` (generic popover), `SprintPageHeader` in `app/src/App.tsx` (sprint trigger button), the toolbar **Export ▾** menu + collection modals in `app/src/App.tsx` (collection triggers), `app/src/CollectionImageModal.tsx` + `app/src/CollectionPngCard.tsx` (collection PNG)
 
 ## Purpose
@@ -28,31 +28,42 @@ cạnh [export-png.md](./export-png.md): PNG là ảnh đẹp để nhìn, còn 
 Cây phân cấp kiểu lệnh `tree`: **người → task → subtask**. Ví dụ:
 
 ```
-📋 Sprint 12 · Checkout revamp  ·  Jul 8 → Jul 19
+📋 Sprint 12 · Checkout revamp  ·  Jul 5 → Jul 22
 │
 ├─ 👤 An
-│  ├─ #12 Payment gateway integration — In progress · Jul 15
-│  │  ├─ Idempotency keys — Done
-│  │  └─ Webhook retry logic — To do
-│  └─ #14 Refund API — To do · Jul 18
+│  ├─ #14 Refund API — In progress · Jul 5 → Jul 16
+│  ├─ #12 Payment gateway integration — In progress · Jul 8 → Jul 22
+│  │  ├─ Idempotency keys — Done · Jul 8 → Jul 11
+│  │  └─ Webhook retry logic — To do · Jul 12 → Jul 20
+│  └─ #21 Load testing — To do
 │
 └─ 👤 Unassigned
    └─ #18 QA regression pass — To do
 ```
+
+Tasks trong lane **An** đã sort theo end date: `#14` (Jul 16) trước `#12` (Jul 22),
+`#21` (không có end date) xuống cuối.
 
 Quy tắc grammar:
 - **Dòng đầu**: `📋 {sprint.name}  ·  {formatSprintRange}`.
 - **Nhánh**: `├─`/`└─` (cuối), continuation `│  `/`   `. Ký tự cây nằm **đầu
   dòng** nên đọc ra phân cấp cả trên font tỉ lệ của Telegram (đường `│` có thể
   lệch nhẹ theo bề rộng chữ — chấp nhận được, không phải căn cột).
-- **Task**: `#{sequence} {title} — {status}[ · {due}]`.
-- **Subtask** (child): `{title} — {status}` (không có `#seq`, không due).
+- **Task**: `#{sequence} {title} — {status}[ · {start → end}]`.
+- **Subtask** (child): `{title} — {status}[ · {start → end}]` (giống task, chỉ
+  khác là không có `#seq`).
 - **Status = chữ, KHÔNG ký hiệu**: `To do` / `In progress` / `Done`
   (reuse app's `STATUS_LABEL`). Không nhầm với gì khác, không lệ thuộc emoji render khác
   nhau giữa iOS/Android/Desktop.
 - **KHÔNG hiện priority** (chốt) — giữ dòng ngắn.
-- **Due**: `formatShortDate` (định dạng app "MMM d", vd `Jul 15`); task không due
-  thì bỏ.
+- **Dates = khoảng `start → end`** (2026-07-14): `formatShortDate` cả hai đầu (vd
+  `Jul 5 → Jul 16`), dùng chung helper `dateRange` với collection. Chỉ có một đầu
+  (start hoặc end) → hiện đúng đầu đó; không có đầu nào → bỏ hẳn. `→` khớp
+  `formatSprintRange` ở dòng đầu.
+- **Sắp xếp theo end date** (2026-07-14): trong mỗi lane, task top-level (và
+  subtask trong mỗi parent) sort theo **end date (`dueDate`) tăng dần**; task không
+  có end date → xuống **cuối**; tie → List order (`listOrder ?? sequence`). Đây là
+  order riêng của copy, **khác** order thủ công của List/PNG.
 - **Emoji** chỉ để định vị (📋 sprint, 👤 member), không mang nghĩa status.
 
 ## Grouping (khớp List/PNG)
@@ -62,6 +73,11 @@ lane theo `compareMembersByOrder` (order → name → id), bucket "Unassigned" c
 bỏ lane rỗng. Trong mỗi lane, **child (task có `parentId` trỏ tới task cùng
 lane) nest dưới parent** — mirror `flattenDisplayOrder`. Child khác assignee với
 parent thì hiện như task top-level ở lane của chính nó (đúng như List).
+
+**Order trong lane = end date, không phải manual order** (2026-07-14): sau khi
+group, copy tự sort lại top-level task (và subtask trong mỗi parent) theo end date
+tăng dần (`byEnd`, xem grammar) — chỉ *member order* và *nesting* là khớp List/PNG,
+còn thứ tự task trong lane là của riêng copy.
 
 ## Constraints Telegram (nghiên cứu)
 
@@ -89,9 +105,12 @@ parent thì hiện như task top-level ở lane của chính nó (đúng như Li
 
 - **`app/src/telegram-export.ts`** — `formatSprintTree(sprint,
   members, tasks, { memberId? })` (status via app's `STATUS_LABEL`),
-  `membersWithTasks(members, tasks)` helper cho scope picker.
+  `membersWithTasks(members, tasks)` helper cho scope picker. Shared helpers:
+  `dateRange(t)` (`start → end`, một đầu, hoặc rỗng) + `byEnd(a,b)` (sort theo end
+  date, undated cuối, tie List order) — dùng cho cả sprint & collection tree.
 - **`app/src/telegram-export.test.ts`** — grammar: header, nhánh mid/last, nest
-  child, status text, due bỏ khi null, scope 1 member, sprint rỗng.
+  child, status text, **range `start → end` + một-đầu + rỗng**, **sort theo end
+  date (undated cuối)**, scope 1 member, sprint rỗng.
 - **`app/src/CopyTelegramModal.tsx`** — popover (ModalSheet): scope picker,
   preview bubble (theo theme app qua `html.dark`), char count, Copy.
 - **`app/src/App.tsx`** — `SprintPageHeader` nhận `onCopy`, render nút Copy (khi
@@ -115,6 +134,12 @@ their structure — see the parallel differences:
   collection items carry both mounts (range-mode date picker). One side only →
   just that date; neither → omitted. No sprint date range on the header line
   (just `📋 {collection.name}`).
+- **Subtask cũng hiện range** (2026-07-14): child render `— {status}[ · {start →
+  end}]` như item cha (trước chỉ hiện status) — khớp sprint tree.
+- **Sắp xếp theo end date** (2026-07-14, khớp sprint): items trong mỗi section (và
+  subtask trong mỗi parent) sort theo end date (`dueDate`) tăng dần, không end →
+  cuối, tie → `listOrder ?? sequence`. **Trước đây** sort thuần theo `listOrder ??
+  sequence` (thứ tự List) — nay copy chủ động sort lại theo end date.
 - **Scope** = whole collection / one section (`sectionsWithItems` helper).
 
 **Placement:** collections have **no page header** (identity + statuses + view

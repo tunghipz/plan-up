@@ -21,16 +21,42 @@ const BRANCH_LAST = '└─'
 const PIPE_MID = '│  '
 const PIPE_LAST = '   '
 
-/** Task line meta: ` — Status[ · Due]` (due dropped when absent). */
-function taskMeta(t: Task): string {
-  const parts = [STATUS_LABEL[t.status]]
-  if (t.dueDate) parts.push(formatShortDate(t.dueDate))
-  return ' — ' + parts.join(' · ')
+/** `startDate → dueDate` range (either side may be absent; '' when neither).
+ * Shared by the sprint and collection trees so both read the same way. */
+function dateRange(t: Task): string {
+  const a = t.startDate ? formatShortDate(t.startDate) : ''
+  const b = t.dueDate ? formatShortDate(t.dueDate) : ''
+  if (a && b) return `${a} → ${b}`
+  return a || b || ''
 }
 
-/** Subtask line meta: ` — Status` (children never show #seq or due). */
-function subMeta(t: Task): string {
-  return ' — ' + STATUS_LABEL[t.status]
+/**
+ * Order a lane/section by END date: `dueDate` ascending (ISO `yyyy-mm-dd` strings
+ * compare chronologically), tasks with no end date sink to the BOTTOM, and ties
+ * fall back to the List's manual order (`listOrder ?? sequence`) so the result is
+ * stable. This is the copy's own order — it intentionally diverges from the
+ * List/PNG manual order (see design-docs/copy-to-telegram.md). Exported so the
+ * share-link read-only viewer orders its board the same way.
+ */
+export function byEnd(a: Task, b: Task): number {
+  const ea = a.dueDate ?? ''
+  const eb = b.dueDate ?? ''
+  if (ea !== eb) {
+    if (!ea) return 1 // a undated → after b
+    if (!eb) return -1 // b undated → after a
+    return ea < eb ? -1 : 1
+  }
+  return (a.listOrder ?? a.sequence) - (b.listOrder ?? b.sequence)
+}
+
+/** Task/subtask line meta: ` — Status[ · start → end]` (range dropped when both
+ * dates absent). Identical for top-level tasks and children — only the leading
+ * `#seq`, added by the caller, differs. */
+function taskMeta(t: Task): string {
+  const parts = [STATUS_LABEL[t.status]]
+  const d = dateRange(t)
+  if (d) parts.push(d)
+  return ' — ' + parts.join(' · ')
 }
 
 export interface TreeOptions {
@@ -82,16 +108,18 @@ export function formatSprintTree(
       }
     }
     const isChild = (t: Task) => !!(t.parentId && idSet.has(t.parentId))
-    const top = g.tasks.filter((t) => !isChild(t))
+    // Copy orders each lane by end date (undated last), not the List's manual
+    // order. `filter` already returns a fresh array, so sorting it is safe.
+    const top = g.tasks.filter((t) => !isChild(t)).sort(byEnd)
 
     top.forEach((t, ti) => {
       const lastT = ti === top.length - 1
       const tPipe = lastT ? PIPE_LAST : PIPE_MID
       L.push(`${gPipe}${lastT ? BRANCH_LAST : BRANCH_MID} #${t.sequence} ${t.title}${taskMeta(t)}`)
-      const kids = childrenByParent.get(t.id) ?? []
+      const kids = (childrenByParent.get(t.id) ?? []).slice().sort(byEnd)
       kids.forEach((k, ki) => {
         const lastK = ki === kids.length - 1
-        L.push(`${gPipe}${tPipe}${lastK ? BRANCH_LAST : BRANCH_MID} ${k.title}${subMeta(k)}`)
+        L.push(`${gPipe}${tPipe}${lastK ? BRANCH_LAST : BRANCH_MID} ${k.title}${taskMeta(k)}`)
       })
     })
   })
@@ -110,14 +138,6 @@ export interface CollectionTreeOptions {
   sectionId?: string | null
 }
 
-/** `startDate → dueDate` range (either side may be absent; '' when neither). */
-function dateRange(t: Task): string {
-  const a = t.startDate ? formatShortDate(t.startDate) : ''
-  const b = t.dueDate ? formatShortDate(t.dueDate) : ''
-  if (a && b) return `${a} → ${b}`
-  return a || b || ''
-}
-
 /** Sections (in the collection's order) that own at least one item — the scope
  * picker's per-section options. */
 export function sectionsWithItems(collection: Collection, tasks: Task[]): Section[] {
@@ -133,6 +153,8 @@ export function formatCollectionTree(
   const statusName = new Map(collection.statuses.map((s) => [s.id, s.name]))
   const nameOf = (t: Task) =>
     t.collectionStatusId ? statusName.get(t.collectionStatusId) : undefined
+  // Item AND subtask meta: custom status name + `start → end` range (either
+  // dropped when absent). Same for both — subtasks now carry the range too.
   const meta = (t: Task) => {
     const parts: string[] = []
     const s = nameOf(t)
@@ -140,10 +162,6 @@ export function formatCollectionTree(
     const d = dateRange(t)
     if (d) parts.push(d)
     return parts.length ? ' — ' + parts.join(' · ') : ''
-  }
-  const subMeta = (t: Task) => {
-    const s = nameOf(t)
-    return s ? ' — ' + s : ''
   }
 
   // Items per section, in the List's default order (listOrder ?? sequence).
@@ -154,8 +172,8 @@ export function formatCollectionTree(
     arr.push(t)
     bySection.set(t.sectionId, arr)
   }
-  const ordered = (arr: Task[]) =>
-    [...arr].sort((a, b) => (a.listOrder ?? a.sequence) - (b.listOrder ?? b.sequence))
+  // End-date order (undated last), matching the sprint tree — was listOrder.
+  const ordered = (arr: Task[]) => [...arr].sort(byEnd)
 
   let sections = collection.sections
   if (opts.sectionId != null) sections = sections.filter((s) => s.id === opts.sectionId)
@@ -188,7 +206,7 @@ export function formatCollectionTree(
       const kids = childrenByParent.get(t.id) ?? []
       kids.forEach((k, ki) => {
         const lastK = ki === kids.length - 1
-        L.push(`${sPipe}${tPipe}${lastK ? BRANCH_LAST : BRANCH_MID} ${k.title}${subMeta(k)}`)
+        L.push(`${sPipe}${tPipe}${lastK ? BRANCH_LAST : BRANCH_MID} ${k.title}${meta(k)}`)
       })
     })
   })

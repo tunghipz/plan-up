@@ -1031,8 +1031,10 @@ const BoardCard = memo(function BoardCard({
     return {
       bg: `color-mix(in srgb, ${c} 13%, transparent)`,
       fg: `color-mix(in srgb, ${c} 75%, var(--color-ink))`,
-      label: plan.startTime ? `${formatShortDate(sd)}, ${plan.startTime}` : formatShortDate(sd),
-      title: `Milestone ${sd}${plan.startTime ? ' ' + plan.startTime : ''}`,
+      // A milestone shows its END time (completion instant, e.g. 17:00), not the
+      // work-start slot — see SprintView milestone cell / milestones.md.
+      label: plan.endTime ? `${formatShortDate(sd)}, ${plan.endTime}` : formatShortDate(sd),
+      title: `Milestone ${sd}${plan.endTime ? ' ' + plan.endTime : ''}`,
     }
   })()
 

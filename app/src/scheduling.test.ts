@@ -30,22 +30,24 @@ function task(id: string, over: Partial<Task> = {}): Task {
 const byId = (...tasks: Task[]) => new Map(tasks.map((t) => [t.id, t]))
 
 describe('milestone prereq chaining', () => {
-  it('anchors a dependent on the milestone DATE (startDate), ignoring a stale dueDate', () => {
-    // Milestone on Tue Jul 14; a STALE early dueDate lingers from before it was a milestone.
+  it('anchors a dependent on the milestone DATE at the milestone time (same day), ignoring a stale dueDate', () => {
+    // Milestone on Tue Jul 14 at 08:00 (startOffset 0); a STALE early dueDate lingers.
     const m = task('m', { estimate: 0, startDate: '2026-07-14', dueDate: '2026-06-30' })
     const s = task('s', { estimate: 5, dependsOn: ['m'] })
     const plan = computeStartEnd(s, byId(m, s))
-    // Follows Jul 14 → next working day Jul 15, +5 working days (skip Sat/Sun 18-19) → Jul 21.
-    expect(plan.startDate).toBe('2026-07-15')
-    expect(plan.dueDate).toBe('2026-07-21')
+    // 08:00 milestone → dependent starts the SAME day (Jul 14), +5 working days
+    // (skip Sat/Sun 18-19) → Jul 20. (Was Jul 15/21 when a milestone was wrongly
+    // treated as finishing at end-of-day.)
+    expect(plan.startDate).toBe('2026-07-14')
+    expect(plan.dueDate).toBe('2026-07-20')
   })
 
-  it('chains off a proper milestone whose dueDate is null', () => {
+  it('chains off a proper milestone whose dueDate is null — same day at 08:00', () => {
     const m = task('mp', { estimate: 0, startDate: '2026-07-14', dueDate: null })
     const s = task('sp', { estimate: 1, dependsOn: ['mp'] })
     const plan = computeStartEnd(s, byId(m, s))
-    expect(plan.startDate).toBe('2026-07-15')
-    expect(plan.dueDate).toBe('2026-07-15')
+    expect(plan.startDate).toBe('2026-07-14')
+    expect(plan.dueDate).toBe('2026-07-14')
   })
 
   it('clears the start when the milestone prereq has no date at all', () => {
@@ -53,6 +55,16 @@ describe('milestone prereq chaining', () => {
     const s = task('s0', { estimate: 3, dependsOn: ['m0'] })
     const plan = computeStartEnd(s, byId(m, s))
     expect(plan.startDate).toBeNull()
+  })
+
+  it('a MILESTONE dependent sits on the prereq finish day, never pushed past a weekend', () => {
+    // Prereq effort 3 from Wed Jul 8 → ends Fri Jul 10 (17:00). A milestone
+    // depending on it is zero-duration, so it marks Jul 10 itself — NOT the next
+    // working day Mon Jul 13 (which is what a task needing capacity would get).
+    const n = task('nn', { estimate: 3, startDate: '2026-07-08' })
+    const ms = task('ms', { estimate: 0, dependsOn: ['nn'] })
+    const plan = computeStartEnd(ms, byId(n, ms))
+    expect(plan.startDate).toBe('2026-07-10')
   })
 
   it('regression: a NORMAL (effort) prereq still anchors on its computed dueDate', () => {

@@ -18,8 +18,11 @@ In the List view, a leaf task whose **Effort = 0** is shown as a milestone:
 - A small **`◆ Milestone`** pill sits after the task title (accent-tinted, like the
   priority chip), so it's labelled in plain words — discoverable without prior knowledge.
 - The **Start and End columns collapse into a single milestone date** (a milestone is
-  one point in time, so a `Start → End` span is meaningless). The date (with its
-  time) is shown in **accent color + bold** to read as a key marker.
+  one point in time, so a `Start → End` span is meaningless). The date is shown in
+  **accent color + bold** to read as a key marker. Its hover **time is the END time**
+  (`plan.endTime`, e.g. 17:00) — a milestone is a completion instant, so the work-start
+  slot (08:00/13:00) would be wrong; a milestone whose prereq finishes at 17:00 reads
+  `17:00`, not the bogus `13:00` the start-slot mapping produced (fixed 2026-07-14).
 - The **Effort cell still shows `0` and stays editable** — changing it to a non-zero
   value turns the row back into a normal task (and the two date columns return).
 

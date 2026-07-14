@@ -22,9 +22,19 @@ times) automatically, so the plan stays correct as inputs change — no manual d
    the start is taken from the latest prereq's finish — same day if there's leftover capacity
    after it, else the next working day. **A milestone prereq** (effort 0) is a zero-duration
    checkpoint whose date lives in `startDate` (its `dueDate` is null / a stale leftover), so a
-   dependent anchors on the **milestone date**, treated as finished at end of that day → the
-   dependent starts the next working day (2026-07-14 fix — before this, a milestone prereq was
-   skipped or chained off its stale `dueDate`, so the successor didn't follow the milestone).
+   dependent anchors on the **milestone date** at the milestone's **own wall time** (its
+   `startOffset`), not a hard-coded end-of-day. A milestone at 08:00 lets the dependent start
+   **the same day at 08:00** (there's a full working day of leftover capacity after the
+   instant); a milestone late in the day pushes the dependent to the next working day, exactly
+   like any other prereq's finish moment. **A milestone *dependent*** (the task being
+   scheduled is itself effort 0) is the mirror case: it consumes no capacity, so it sits on
+   the **prereq's finish day + fraction** and is **never pushed to the next working day** — a
+   prereq ending Fri 17:00 dates the milestone Fri, not Mon. Only tasks that need room to do
+   work take the capacity-then-next-day path. *(2026-07-14: first fix made a milestone prereq
+   anchor on its date at all — before that it was skipped / chained off its stale `dueDate`.
+   Later same-day: the milestone was mistakenly treated as finishing at end-of-day [fraction 1]
+   regardless of its shown time, costing the dependent a day — e.g. a 08:00 milestone pushed
+   the successor to the next day at 08:00. Now it honours the milestone's actual time.)*
    **If no prereq has a usable finish yet** (e.g. you re-link to an unscheduled task) there's no
    anchor, so the start **clears to `null`** rather than lingering at the value a *previous*
    prereq produced; it fills back in once a prereq is scheduled (the BFS cascade re-runs).

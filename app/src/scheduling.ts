@@ -161,11 +161,15 @@ function leafPlan(
       // A milestone (effort 0) is a zero-duration checkpoint whose date lives in
       // `startDate` (milestones.md) — its `dueDate` is null or a stale leftover
       // from before it became a milestone. Anchor successors on the milestone
-      // DATE (its startDate), completed at end of that day (fraction 1). Normal
-      // tasks anchor on their computed dueDate + wall fraction.
+      // DATE (its startDate) at the milestone's OWN wall time (its startOffset),
+      // NOT a hard-coded end-of-day: an 08:00 milestone (startOffset 0) leaves a
+      // full day of leftover capacity so the dependent starts the same day at
+      // 08:00; a late-day milestone pushes it to the next day, same as any prereq
+      // finish. (Hard-coding fraction 1 ignored the shown time and cost a day.)
+      // Normal tasks anchor on their computed dueDate + wall fraction.
       const isMilestone = p.estimate === 0
       const pEnd = isMilestone ? pPlan.startDate : pPlan.dueDate
-      const pFrac = isMilestone ? 1 : pPlan.dueFraction
+      const pFrac = isMilestone ? pPlan.startOffset : pPlan.dueFraction
       if (!pEnd) continue
       if (
         bestDate === null ||
@@ -177,10 +181,19 @@ function leafPlan(
       }
     }
     if (bestDate) {
-      // Can the dependent start the same day with leftover capacity?
-      // "Leftover" exists if this task's natural-end on bestDate extends
-      // beyond the wall position where the prereq stopped working.
-      if (naturalWallEnd(bestDate) > bestFrac + EPS) {
+      if (task.estimate === 0) {
+        // This task is itself a zero-duration MILESTONE — it consumes no
+        // capacity, so it just marks the instant its prereqs are all met. It
+        // sits on the prereq's finish day + fraction and is NEVER pushed to the
+        // next working day (a prereq ending Fri 17:00 → milestone dated Fri, not
+        // Mon). Only tasks that need room to DO work fall through to the
+        // capacity check below. See milestones.md / scheduling.md.
+        start = bestDate
+        startOffset = bestFrac
+      } else if (naturalWallEnd(bestDate) > bestFrac + EPS) {
+        // Can the dependent start the same day with leftover capacity?
+        // "Leftover" exists if this task's natural-end on bestDate extends
+        // beyond the wall position where the prereq stopped working.
         start = bestDate
         startOffset = Math.max(naturalWallStart(bestDate), bestFrac)
       } else {

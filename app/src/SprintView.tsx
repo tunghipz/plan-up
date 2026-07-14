@@ -1829,7 +1829,9 @@ const TaskRow = memo(function TaskRow({
         <div className="w-[236px] flex justify-center items-center shrink-0">
           <DatePickCell
             value={liveStart}
-            time={startTime}
+            /* A milestone is a completion point, so show its END time (its
+               prereq's finish moment, e.g. 17:00) — not the work-start slot. */
+            time={endTime}
             timeOnHover
             locked={task.dependsOn.length > 0}
             emptyHint={task.dependsOn.length > 0 ? undefined : 'Date'}

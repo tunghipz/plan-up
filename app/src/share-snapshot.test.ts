@@ -1,0 +1,165 @@
+import { describe, expect, it } from 'vitest'
+import {
+  buildShareUrl,
+  buildSnapshot,
+  decodeSnapshot,
+  encodeSnapshot,
+  parseShareHash,
+  SHARE_MAX_BYTES,
+  SNAPSHOT_VERSION,
+} from './share-snapshot'
+import type { Member, Project, Sprint, Task } from './types'
+
+const project: Project = { id: 'p', name: 'Checkout revamp', createdAt: 0 }
+const sprint: Sprint = { id: 's', projectId: 'p', name: 'Sprint 12', startDate: '2026-07-05', endDate: '2026-07-22' }
+
+function member(id: string, name: string, over: Partial<Member> = {}): Member {
+  return { id, projectId: 'p', name, color: '#c93a0f', daysOff: [], ...over }
+}
+function task(id: string, assigneeId: string | null, seq: number, over: Partial<Task> = {}): Task {
+  return {
+    id, projectId: 'p', sequence: seq, title: `Task ${seq}`, assigneeId,
+    sprintId: 's', status: 'todo', priority: 'normal',
+    startDate: null, dueDate: null, estimate: null, createdAt: seq, dependsOn: [],
+    ...over,
+  }
+}
+
+const members = [member('a', 'An'), member('b', 'Bình')]
+const tasks = [
+  task('t1', 'a', 12, { dueDate: '2026-07-22', startDate: '2026-07-15', estimate: 3 }),
+  task('t2', 'b', 18, { dueDate: '2026-07-19', status: 'in_progress' }),
+  task('t3', null, 21),
+]
+
+describe('buildSnapshot', () => {
+  it('scopes to the one sprint and normalizes ids/fields', () => {
+    const d = buildSnapshot(project, sprint, members, tasks)
+    expect(d.project.name).toBe('Checkout revamp')
+    expect(d.sprint).toEqual({ name: 'Sprint 12', startDate: '2026-07-05', endDate: '2026-07-22' })
+    expect(d.tasks).toHaveLength(3)
+    // synthetic ids, assignee remapped to member index
+    expect(d.members.map((m) => m.id)).toEqual(['m0', 'm1'])
+    expect(d.tasks.map((t) => t.id)).toEqual(['t0', 't1', 't2'])
+    expect(d.tasks[0].assigneeId).toBe('m0')
+    expect(d.tasks[2].assigneeId).toBeNull()
+  })
+
+  it('carries only members that own a task in scope', () => {
+    const d = buildSnapshot(project, sprint, members, tasks)
+    expect(d.members.map((m) => m.name).sort()).toEqual(['An', 'Bình'])
+  })
+
+  it('drops avatarImage from the payload (biggest bloat source)', () => {
+    const withImg = [member('a', 'An', { avatarImage: 'data:image/png;base64,AAAA', avatarEmoji: '🦊' }), member('b', 'Bình')]
+    const d = buildSnapshot(project, sprint, withImg, tasks)
+    expect(d.members[0].avatarImage).toBeUndefined()
+    expect(d.members[0].avatarEmoji).toBe('🦊')
+  })
+
+  it('narrows tasks + members to one assignee when scoped', () => {
+    const d = buildSnapshot(project, sprint, members, tasks, { memberId: 'a' })
+    expect(d.tasks).toHaveLength(1)
+    expect(d.tasks[0].assigneeId).toBe('m0')
+    expect(d.members.map((m) => m.name)).toEqual(['An'])
+  })
+
+  it('memberIds scope keeps only chosen members but always keeps unassigned tasks', () => {
+    // pick only Bình; t2 (Bình) + t3 (unassigned) stay, t1 (An) dropped.
+    const d = buildSnapshot(project, sprint, members, tasks, { memberIds: ['b'] })
+    expect(d.tasks).toHaveLength(2)
+    expect(d.members.map((m) => m.name)).toEqual(['Bình'])
+    expect(d.tasks.some((t) => t.assigneeId === null)).toBe(true)
+  })
+
+  it('memberIds = [] leaves just the unassigned tasks', () => {
+    const d = buildSnapshot(project, sprint, members, tasks, { memberIds: [] })
+    expect(d.tasks).toHaveLength(1)
+    expect(d.tasks[0].assigneeId).toBeNull()
+    expect(d.members).toHaveLength(0)
+  })
+
+  it('ignores tasks from other sprints', () => {
+    const foreign = task('x', 'a', 99, { sprintId: 'other' })
+    const d = buildSnapshot(project, sprint, members, [...tasks, foreign])
+    expect(d.tasks).toHaveLength(3)
+  })
+})
+
+describe('encode / decode round-trip', () => {
+  it('decodes back to an equal snapshot (frozen dates preserved)', () => {
+    const d = buildSnapshot(project, sprint, members, tasks)
+    const decoded = decodeSnapshot(encodeSnapshot(d))
+    expect(decoded).toEqual(d)
+  })
+
+  it('round-trips milestone (effort 0), a child, and a null-parent drop', () => {
+    const rich = [
+      task('p1', 'a', 1, { estimate: 0, startDate: '2026-07-10' }), // milestone
+      task('c1', 'a', 2, { parentId: 'p1', estimate: 2, dueDate: '2026-07-12' }), // child of p1
+      task('orphan', 'a', 3, { parentId: 'gone', dueDate: '2026-07-14' }), // parent not in scope → dropped
+    ]
+    const d = buildSnapshot(project, sprint, [member('a', 'An')], rich)
+    // milestone kept as estimate 0; child points at the milestone's new index; orphan flattened
+    expect(d.tasks[0].estimate).toBe(0)
+    expect(d.tasks[1].parentId).toBe('t0')
+    expect(d.tasks[2].parentId).toBeNull()
+    expect(decodeSnapshot(encodeSnapshot(d))).toEqual(d)
+  })
+
+  it('stays well under the size budget for a big sprint', () => {
+    const bigMembers = Array.from({ length: 5 }, (_, i) => member(`u${i}`, `user-${i}`))
+    const bigTasks = Array.from({ length: 30 }, (_, i) =>
+      task(`b${i}`, `u${i % 5}`, i, { dueDate: '2026-07-2' + (i % 9), startDate: '2026-07-1' + (i % 9), estimate: (i % 5) + 1 })
+    )
+    const d = buildSnapshot(project, sprint, bigMembers, bigTasks)
+    const url = buildShareUrl(encodeSnapshot(d), 'https://plan-up.app/')
+    expect(url.length).toBeLessThan(SHARE_MAX_BYTES)
+    expect(decodeSnapshot(parseShareHash(new URL(url).hash)!)).toEqual(d)
+  })
+
+  it('returns null for garbage / empty / non-snapshot payloads', () => {
+    expect(decodeSnapshot('')).toBeNull()
+    expect(decodeSnapshot('not-a-real-lz-blob!!!')).toBeNull()
+    expect(decodeSnapshot(encodeRaw(JSON.stringify({ hello: 'world' })))).toBeNull()
+    // right container, wrong version
+    expect(decodeSnapshot(encodeRaw(JSON.stringify({ v: 1, pj: 'x' })))).toBeNull()
+    // v2 but column lengths mismatch
+    expect(
+      decodeSnapshot(encodeRaw(JSON.stringify({ v: 2, pj: 'x', sn: 'y', d0: '2026-07-05', mb: [], ti: ['a'], ss: [], pp: [], am: [], pa: [], ef: [], s0: [], s1: [] })))
+    ).toBeNull()
+  })
+})
+
+describe('parseShareHash / buildShareUrl', () => {
+  it('extracts the blob from a #v=2&s=… hash', () => {
+    expect(parseShareHash('#v=2&s=ABC123')).toBe('ABC123')
+    expect(parseShareHash('v=2&s=ABC123')).toBe('ABC123') // leading # optional
+  })
+
+  it('rejects a wrong/absent version or missing blob', () => {
+    expect(parseShareHash('#v=1&s=ABC')).toBeNull() // old v1 no longer decodes
+    expect(parseShareHash('#v=3&s=ABC')).toBeNull()
+    expect(parseShareHash('#s=ABC')).toBeNull()
+    expect(parseShareHash('#v=2')).toBeNull()
+    expect(parseShareHash('')).toBeNull()
+  })
+
+  it('preserves a "+" in the blob (not turned into a space)', () => {
+    expect(parseShareHash('#v=2&s=aa+bb/cc')).toBe('aa+bb/cc')
+  })
+
+  it('round-trips through buildShareUrl', () => {
+    const blob = encodeSnapshot(buildSnapshot(project, sprint, members, tasks))
+    const url = buildShareUrl(blob, 'https://plan-up.app/')
+    expect(url).toBe(`https://plan-up.app/#v=${SNAPSHOT_VERSION}&s=${blob}`)
+    expect(parseShareHash(new URL(url).hash)).toBe(blob)
+  })
+})
+
+// Helper: compress an arbitrary JSON string the same way encodeSnapshot does,
+// so we can feed decodeSnapshot a valid-but-wrong payload.
+import LZString from 'lz-string'
+function encodeRaw(json: string): string {
+  return LZString.compressToEncodedURIComponent(json)
+}

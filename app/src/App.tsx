@@ -31,6 +31,7 @@ import {
   FolderDown,
   Check,
   Send,
+  Link2,
   Image as ImageIcon,
   TriangleAlert,
 } from 'lucide-react'
@@ -75,6 +76,8 @@ import { startAutoBackup } from './backup-tauri'
 import { BackupSettingsModal } from './BackupSettingsModal'
 import { ExportImageModal } from './ExportImageModal'
 import { CopyTelegramModal } from './CopyTelegramModal'
+import { ShareLinkModal } from './ShareLinkModal'
+import { buildSnapshot } from './share-snapshot'
 import { CollectionImageModal } from './CollectionImageModal'
 import {
   formatSprintTree,
@@ -331,6 +334,7 @@ function App() {
   const [backupSettingsOpen, setBackupSettingsOpen] = useState(false)
   const [exportImageOpen, setExportImageOpen] = useState(false)
   const [copyTgOpen, setCopyTgOpen] = useState(false)
+  const [shareOpen, setShareOpen] = useState(false)
   const [collCopyOpen, setCollCopyOpen] = useState(false)
   const [collImgOpen, setCollImgOpen] = useState(false)
   const [showNewProject, setShowNewProject] = useState(false)
@@ -1845,6 +1849,7 @@ function App() {
               sprint={currentSprint}
               capacity={capacity}
               onCopy={() => setCopyTgOpen(true)}
+              onShare={() => setShareOpen(true)}
             />
           )}
 
@@ -2004,6 +2009,23 @@ function App() {
           onClose={() => setCopyTgOpen(false)}
         />
       )}
+      {shareOpen && currentSprint && currentProject && (() => {
+        const sprintTasksNow = (tasks ?? []).filter((t) => t.sprintId === currentSprint.id)
+        const shareMembers = membersWithTasks(paletteMembers ?? [], sprintTasksNow)
+        const counts: Record<string, number> = {}
+        for (const t of sprintTasksNow) if (t.assigneeId) counts[t.assigneeId] = (counts[t.assigneeId] ?? 0) + 1
+        return (
+          <ShareLinkModal
+            subtitle="Read-only snapshot · nothing leaves your device"
+            members={shareMembers}
+            counts={counts}
+            buildBundle={(ids) =>
+              buildSnapshot(currentProject, currentSprint, paletteMembers ?? [], tasks ?? [], { memberIds: ids })
+            }
+            onClose={() => setShareOpen(false)}
+          />
+        )
+      })()}
       {collCopyOpen && currentCollection && (
         <CopyTelegramModal
           subtitle="Collection tree by table · paste straight into chat"
@@ -2331,6 +2353,7 @@ function SprintPageHeader({
   sprint,
   capacity,
   onCopy,
+  onShare,
 }: {
   sprint: Sprint
   capacity: {
@@ -2344,6 +2367,8 @@ function SprintPageHeader({
   }
   /** Open the "Copy for Telegram" popover. Button hidden when the sprint is empty. */
   onCopy: () => void
+  /** Open the "Share link" popover (read-only snapshot). Hidden when empty. */
+  onShare: () => void
 }) {
   const { total, pctAssigned, done, pctDone, inFlight, open, notEstimated } = capacity
   const pct = (n: number) => `${(n / total) * 100}%`
@@ -2359,15 +2384,26 @@ function SprintPageHeader({
           <SprintNoteBanner sprint={sprint} />
         </div>
         {total > 0 && (
-          <button
-            onClick={onCopy}
-            title="Copy for Telegram"
-            aria-label="Copy sprint for Telegram"
-            className="shrink-0 inline-flex items-center gap-1.5 rounded-[9px] bg-fill px-3 py-1.5 text-[13px] font-medium text-ink-muted transition hover:bg-[rgba(0,0,0,0.09)] hover:text-ink active:scale-[0.97] dark:hover:bg-white/10"
-          >
-            <Send size={14} strokeWidth={1.9} aria-hidden />
-            Copy
-          </button>
+          <div className="shrink-0 flex items-center gap-1.5">
+            <button
+              onClick={onCopy}
+              title="Copy for Telegram"
+              aria-label="Copy sprint for Telegram"
+              className="inline-flex items-center gap-1.5 rounded-[9px] bg-fill px-3 py-1.5 text-[13px] font-medium text-ink-muted transition hover:bg-[rgba(0,0,0,0.09)] hover:text-ink active:scale-[0.97] dark:hover:bg-white/10"
+            >
+              <Send size={14} strokeWidth={1.9} aria-hidden />
+              Copy
+            </button>
+            <button
+              onClick={onShare}
+              title="Share read-only link"
+              aria-label="Share sprint as a read-only link"
+              className="inline-flex items-center gap-1.5 rounded-[9px] bg-fill px-3 py-1.5 text-[13px] font-medium text-ink-muted transition hover:bg-[rgba(0,0,0,0.09)] hover:text-ink active:scale-[0.97] dark:hover:bg-white/10"
+            >
+              <Link2 size={14} strokeWidth={1.9} aria-hidden />
+              Share
+            </button>
+          </div>
         )}
       </div>
 

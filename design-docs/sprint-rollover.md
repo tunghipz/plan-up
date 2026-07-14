@@ -1,7 +1,12 @@
 # Sprint rollover
 
 **Status:** Implemented
-**Last updated:** 2026-07-06
+**Last updated:** 2026-07-14 (**left-behind prereqs are unlinked on rollover** — a
+moved task's `dependsOn` entries that point to tasks staying in the source sprint
+[done prereqs, ungrouped children] are dropped, so the moved task's start stops
+being prereq-locked and becomes editable again in the new sprint while keeping its
+dates. Links where both ends roll over are untouched. Partially reverses the
+2026-07-06 "dependsOn always survives" note.)
 **Code:** `app/src/App.tsx` (`RolloverPopover`, Roll over button), `app/src/db.ts`
 (`planSprintRollover`, `moveUnfinishedToNextSprint`, `dedupeSprints`)
 
@@ -21,15 +26,25 @@ without manual re-entry.
   `startDate` greater than source's); the popover closes and selection follows to the
   target sprint. It's move-all (no per-task selection) — matches `moveUnfinishedToNextSprint`.
 - **A moved task keeps ALL its information — including its start/due dates — unchanged.**
-  Only `sprintId` and `sequence` change on the move itself. Effort / prereq / off-day
-  recomputation still runs afterwards exactly as before (so an effort-driven end still
-  follows its start, a prereq-locked start still tracks its prerequisite), but the stored
-  `startDate` you set is **never rewritten to the target sprint's start**. *(Decision
-  2026-07-06: a rolled-over task must preserve its dates — the user's start time is theirs.
+  Only `sprintId`, `sequence`, and possibly `dependsOn` (see next bullet) change on the
+  move itself. Effort / prereq / off-day recomputation still runs afterwards exactly as
+  before (so an effort-driven end still follows its start, a prereq-locked start still
+  tracks its prerequisite), but the stored `startDate` you set is **never rewritten to the
+  target sprint's start**. *(Decision 2026-07-06: a rolled-over task must preserve its
+  dates — the user's start time is theirs.
   A consequence is that a task whose start predates the new sprint keeps that earlier start
   and so begins before the new sprint's window; that is accepted in exchange for never
   silently discarding a start the user chose. The earlier "pull stale starts forward to the
   target start" rule is removed; it lives in git history.)*
+- **Prereqs left behind are unlinked (2026-07-14).** A moved task's `dependsOn` entries
+  that point to tasks **staying in the source sprint** (a done prerequisite, an ungrouped
+  done child) are removed on the move. Rationale: such a prereq is no longer live in the
+  new sprint, yet it kept the dependent's start **prereq-locked** (uneditable, anchored to
+  a past-sprint date) — so the user could neither re-plan nor edit the start. Dropping just
+  those links unlocks the start while the task keeps its already-computed date (now a plain
+  manual value). Links where **both** ends roll over are kept intact — an in-sprint chain
+  still tracks correctly. *(Partial reversal of the 2026-07-06 "dependsOn always survives"
+  rule, which stranded rolled tasks behind satisfied prereqs.)*
 - Popover follows the date-picker portal pattern (§5.5): `createPortal` + fixed position
   pinned to the button rect (re-pins on scroll/resize, flips up if it would overflow the
   viewport), outside-click / **Esc** to dismiss. Lives in a portal because the main column
@@ -79,12 +94,18 @@ disagree.
    task (done children that stay).
 3. For each `moveIds` task: set `sprintId = target` and assign **`sequence = nextSequence(target)`**
    (awaited in-loop so each sees the prior insert). **`startDate`/`dueDate` are left untouched** —
-   the task keeps the dates the user set.
+   the task keeps the dates the user set. Also filter `dependsOn`: drop any id in
+   `stayedBehind` (= source-sprint tasks NOT in `moveIds` — done prereqs, ungrouped children),
+   so a prereq left behind stops locking this task's start. Written only when it actually
+   changed.
 4. `recomputeDates()` each moved task so prereq chains + off-days resettle in the new home
    (this re-derives dates for effort/prereq tasks the same way any edit does; it does not
-   clobber a manual start).
-- `dependsOn` links survive (they reference task IDs, not sequence). `movedCount` returned =
-  leaf tasks moved (excludes container parents).
+   clobber a manual start). Runs AFTER step 3's `dependsOn` filter, so a task that just lost
+   its only prereq recomputes as a plain manual-date task (start = its stored date) instead
+   of re-anchoring to the absent prereq.
+- `dependsOn` links to tasks that **also roll over** survive (same-sprint chains stay intact);
+  links to **left-behind** tasks are dropped (step 3). `movedCount` returned = leaf tasks
+  moved (excludes container parents).
 
 ## Rules & edge cases
 - **Renumbering on move is essential**: sequence is per-sprint, so a bare `sprintId` swap

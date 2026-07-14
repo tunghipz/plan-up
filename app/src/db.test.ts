@@ -971,6 +971,59 @@ describe('moveUnfinishedToNextSprint', () => {
     expect(t?.dueDate).toBe('2026-06-05') // 3-day effort from Wed → Fri, unchanged
   })
 
+  it('unlinks a prereq left behind, keeping the moved task editable + dated', async () => {
+    // A done prereq stays in the source sprint while its dependent rolls over.
+    // The dangling cross-sprint link would keep the dependent's start locked, so
+    // rollover drops it — the task keeps its date but becomes editable again.
+    // See design-docs/sprint-rollover.md (2026-07-14).
+    const s1 = { id: 's1', projectId: P, name: 'A', startDate: '2026-06-01', endDate: '2026-06-14' }
+    const s2 = { id: 's2', projectId: P, name: 'B', startDate: '2026-06-15', endDate: '2026-06-28' }
+    await db.sprints.bulkAdd([s1, s2])
+    await db.tasks.bulkAdd([
+      {
+        id: 'dep', projectId: P, sequence: 1, title: 'dep', assigneeId: null, sprintId: s1.id,
+        status: 'done', priority: 'normal',
+        startDate: '2026-06-02', dueDate: '2026-06-03', estimate: 1, createdAt: 0, dependsOn: [],
+      },
+      {
+        id: 't', projectId: P, sequence: 2, title: 't', assigneeId: null, sprintId: s1.id,
+        status: 'todo', priority: 'normal',
+        startDate: '2026-06-04', dueDate: null, estimate: null, createdAt: 0, dependsOn: ['dep'],
+      },
+    ])
+    await moveUnfinishedToNextSprint(s1.id)
+    const dep = await db.tasks.get('dep')
+    const t = await db.tasks.get('t')
+    expect(dep?.sprintId).toBe('s1') // done prereq stays behind
+    expect(t?.sprintId).toBe('s2') // dependent rolls over
+    expect(t?.dependsOn).toEqual([]) // stale link dropped → start unlocked
+    expect(t?.startDate).toBe('2026-06-04') // date preserved (now a manual value)
+  })
+
+  it('keeps a prereq link when both ends roll over together', async () => {
+    const s1 = { id: 's1', projectId: P, name: 'A', startDate: '2026-06-01', endDate: '2026-06-14' }
+    const s2 = { id: 's2', projectId: P, name: 'B', startDate: '2026-06-15', endDate: '2026-06-28' }
+    await db.sprints.bulkAdd([s1, s2])
+    await db.tasks.bulkAdd([
+      {
+        id: 'dep', projectId: P, sequence: 1, title: 'dep', assigneeId: null, sprintId: s1.id,
+        status: 'in_progress', priority: 'normal',
+        startDate: '2026-06-02', dueDate: null, estimate: 1, createdAt: 0, dependsOn: [],
+      },
+      {
+        id: 't', projectId: P, sequence: 2, title: 't', assigneeId: null, sprintId: s1.id,
+        status: 'todo', priority: 'normal',
+        startDate: '2026-06-04', dueDate: null, estimate: null, createdAt: 0, dependsOn: ['dep'],
+      },
+    ])
+    await moveUnfinishedToNextSprint(s1.id)
+    const dep = await db.tasks.get('dep')
+    const t = await db.tasks.get('t')
+    expect(dep?.sprintId).toBe('s2') // both roll over
+    expect(t?.sprintId).toBe('s2')
+    expect(t?.dependsOn).toEqual(['dep']) // in-sprint chain stays intact
+  })
+
   it('returns null target when there is no next sprint', async () => {
     await db.sprints.add({
       id: 'only', projectId: P, name: 'Only', startDate: '2026-06-01', endDate: '2026-06-14',

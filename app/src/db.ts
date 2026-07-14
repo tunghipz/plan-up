@@ -668,6 +668,16 @@ export async function moveUnfinishedToNextSprint(
     // so they don't render as orphans nested under an absent group head.
     for (const id of ungroupIds) await db.tasks.update(id, { parentId: null })
 
+    // Tasks that stay in the SOURCE sprint (done prereqs, ungrouped done
+    // children, anything not moving). A moved task's dependsOn pointing here is
+    // no longer live in the target and would keep the dependent's start
+    // prereq-LOCKED (uneditable, anchored to a past-sprint date) — so we drop
+    // those links on the move. Links where both ends roll over stay intact.
+    // See design-docs/sprint-rollover.md.
+    const stayedBehind = new Set(
+      sprintTasks.filter((t) => !moveIds.has(t.id)).map((t) => t.id)
+    )
+
     const toMove = sprintTasks.filter((t) => moveIds.has(t.id))
     const rolledAt = Date.now()
     for (const t of toMove) {
@@ -682,6 +692,9 @@ export async function moveUnfinishedToNextSprint(
         sprintId: target.id,
         sequence: await nextSequence(target.id),
       }
+      // Unlink prereqs left behind (see stayedBehind above); write only on change.
+      const keptDeps = t.dependsOn.filter((id) => !stayedBehind.has(id))
+      if (keptDeps.length !== t.dependsOn.length) patch.dependsOn = keptDeps
       await db.tasks.update(t.id, patch)
       // Record the carry-over on the TARGET sprint's activity log — leaf work
       // items only (container parents tag along silently; leaf-based counting).

@@ -157,8 +157,8 @@ function RestoreSection() {
                         </div>
                         <div className="flex gap-4">
                           <PreviewStat n={preview.projects?.length ?? 0} label="project" />
-                          <PreviewStat n={preview.sprints.length} label="sprint" />
-                          <PreviewStat n={preview.tasks.length} label="task" />
+                          <PreviewStat n={preview.sprints?.length ?? 0} label="sprint" />
+                          <PreviewStat n={preview.tasks?.length ?? 0} label="task" />
                         </div>
                         <div className="flex justify-end pt-3">
                           <button
@@ -309,7 +309,7 @@ export function BackupSettingsModal({ onClose }: { onClose: () => void }) {
         </button>
       </div>
 
-      {dir && <RestoreSection />}
+      {dir && <RestoreSection key={dir} />}
 
       <div className="flex justify-end pt-1">
         <button

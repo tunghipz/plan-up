@@ -156,17 +156,26 @@ export async function readVersion(file: string): Promise<ExportPayload> {
 }
 
 /**
- * Restore the whole DB to a chosen snapshot. Fail-safe order: snapshot the
- * CURRENT state first (so a mistaken restore is itself undoable) and abort if
- * that write fails — never destroy without a fresh net. Then read the target and
- * hand it to importAll (which validates before clearing and rolls back on error).
- * The caller reloads the app on success.
+ * Restore the whole DB to a chosen snapshot. Fail-safe order: read the target
+ * FIRST (non-destructive, so a bad or missing snapshot fails before we touch
+ * anything — and can't be evicted by the safety snapshot's own prune below),
+ * then snapshot the CURRENT state (so a mistaken restore is itself undoable),
+ * aborting if that write fails — never destroy without a fresh net. Finally
+ * hand the target to importAll (which validates before clearing and rolls
+ * back on error). The caller reloads the app on success.
  */
 export async function restoreVersion(file: string): Promise<void> {
+  // Read + parse the target FIRST — it's non-destructive, so a bad or missing
+  // snapshot fails before we touch anything, and the safety snapshot's prune
+  // (keeps newest VERSIONS_KEEP) can't evict the very file we're about to
+  // restore when versions/ is already at the cap.
+  const payload = await readVersion(file)
+  // Safety snapshot of CURRENT state next, so a mistaken restore is itself
+  // undoable. Abort if it fails — never destroy without a fresh net on disk.
   const snap = await runBackupNow()
   if (!snap.ok) {
     throw new Error(`Could not back up current data first: ${snap.error ?? 'unknown error'}`)
   }
-  const payload = await readVersion(file)
+  // Destructive replace: importAll validates before clearing and rolls back on error.
   await importAll(payload)
 }

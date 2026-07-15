@@ -4,7 +4,6 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import {
   Download,
   Upload,
-  Flame,
   Moon,
   Sun,
   Search,
@@ -412,7 +411,9 @@ function App() {
     []
   )
   const [dark, setDark] = useDarkMode()
-  const [brand, setBrand] = useBrandTheme()
+  // Brand theme still applies (Fire default / persisted), but the toggle is hidden
+  // — call for its side-effect only. See design-docs/brand-theme.md.
+  useBrandTheme()
   // Data-safety notices (persistence-and-backup.md §origin safety): an empty DB
   // on a known-good browser usually means a DIFFERENT ORIGIN (Vercel preview
   // URL, www vs apex) — surface it instead of silently seeding demo data.
@@ -1470,20 +1471,9 @@ function App() {
             toggle pinned at its right (it used to live on the removed icon rail). */}
         <div className="mt-auto shrink-0 border-t border-border-hair flex items-center">
           <VersionFooter />
-          {/* Brand theme — ZingPlay Fire ↔ Cupertino Blue (design-docs/brand-theme.md).
-              Same ghost-icon idiom as the dark toggle; flame tints accent when Fire is on. */}
-          <button
-            onClick={() => setBrand(brand === 'fire' ? 'blue' : 'fire')}
-            title={brand === 'fire' ? 'Switch to Cupertino Blue' : 'Switch to ZingPlay Fire'}
-            aria-label={brand === 'fire' ? 'Switch to Cupertino Blue theme' : 'Switch to ZingPlay Fire theme'}
-            className={`shrink-0 w-7 h-7 grid place-items-center rounded-md transition ${
-              brand === 'fire'
-                ? 'text-accent hover:bg-accent-soft'
-                : 'text-ink-faint hover:text-ink hover:bg-surface-hover'
-            }`}
-          >
-            <Flame size={16} />
-          </button>
+          {/* Brand-theme toggle (Fire ↔ Blue) hidden 2026-07-15 — the app stays on
+              its default Fire accent; theme still applied via useBrandTheme() above.
+              See design-docs/brand-theme.md. */}
           <button
             onClick={() => setDark(!dark)}
             title={dark ? 'Switch to light' : 'Switch to dark'}

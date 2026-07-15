@@ -1,8 +1,11 @@
 # Brand theme — ZingPlay Fire ↔ Cupertino Blue
 
-**Status:** Implemented
-**Last updated:** 2026-07-08
-**Code:** `app/src/index.css` (token overrides `[data-brand="fire"]` + `.brand-fill`/`.brand-btn`), `app/src/lib.ts` (`useBrandTheme`), `app/src/App.tsx` (footer toggle + signature classes)
+**Status:** Implemented (toggle **hidden** since 2026-07-15 — app stays on Fire)
+**Last updated:** 2026-07-15 (footer **flame toggle removed** — the app now locks to its
+default Fire brand; `useBrandTheme()` still runs for its side-effect [applies `data-brand`,
+reads any persisted `plan-up:brand`], so the theme is unchanged and switching is still
+possible by hand via localStorage. Removed the `Flame` import + the toggle button.)
+**Code:** `app/src/index.css` (token overrides `[data-brand="fire"]` + `.brand-fill`/`.brand-btn`), `app/src/lib.ts` (`useBrandTheme`), `app/src/App.tsx` (calls `useBrandTheme()` for effect; toggle button removed + signature classes)
 
 ## Purpose
 

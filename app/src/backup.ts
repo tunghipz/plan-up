@@ -41,6 +41,10 @@ export function setBackupEnabled(on: boolean): void {
 
 export function setBackupDir(dir: string): void {
   safeStorage.set(BACKUP_DIR_KEY, dir)
+  // A new folder starts empty. Drop the dedup hash so the first run writes a
+  // fresh versions/ snapshot instead of matching the OLD folder's last state
+  // (which would silently skip the immutable tier until the DB next changes).
+  safeStorage.remove(BACKUP_HASH_KEY)
 }
 
 export function getLastBackupStatus(): BackupStatus | null {

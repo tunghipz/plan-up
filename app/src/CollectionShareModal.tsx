@@ -2,10 +2,8 @@ import { useMemo, useState } from 'react'
 import { Link2, Check, Copy, AlertTriangle, ExternalLink, Rows3 } from 'lucide-react'
 import { ModalSheet } from './ModalSheet'
 import {
-  buildShareUrl,
-  encodeCollectionSnapshot,
+  buildCollectionShareUrl,
   SHARE_MAX_BYTES,
-  COLLECTION_SNAPSHOT_VERSION,
   type CollectionSnapshotData,
 } from './share-snapshot'
 
@@ -45,7 +43,7 @@ export function CollectionShareModal({
 
   const { bundle, url, bytes } = useMemo(() => {
     const bundle = buildBundle([...selected])
-    const url = buildShareUrl(encodeCollectionSnapshot(bundle), undefined, COLLECTION_SNAPSHOT_VERSION)
+    const url = buildCollectionShareUrl(bundle)
     return { bundle, url, bytes: url.length }
   }, [buildBundle, selected])
 

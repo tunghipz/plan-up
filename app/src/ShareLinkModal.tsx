@@ -4,8 +4,7 @@ import { ModalSheet } from './ModalSheet'
 import { colorForName } from './schema'
 import type { Member } from './types'
 import {
-  buildShareUrl,
-  encodeSnapshot,
+  buildSprintShareUrl,
   SHARE_MAX_BYTES,
   type SnapshotData,
 } from './share-snapshot'
@@ -60,7 +59,7 @@ export function ShareLinkModal({
 
   const { bundle, url, bytes } = useMemo(() => {
     const bundle = buildBundle([...selected])
-    const url = buildShareUrl(encodeSnapshot(bundle))
+    const url = buildSprintShareUrl(bundle)
     return { bundle, url, bytes: url.length }
   }, [buildBundle, selected])
 

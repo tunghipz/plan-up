@@ -305,12 +305,26 @@ export function decodeSnapshot(blob: string): SnapshotData | null {
   return unpackSnapshot(data)
 }
 
-/** The full share URL: origin+path + `#v=<n>&s=<blob>`. `version` defaults to the
- * sprint format; pass `COLLECTION_SNAPSHOT_VERSION` for a collection blob. */
+/** The full share URL: origin+path + `#v=<n>&s=<blob>`. Low-level — the `version`
+ * must match the blob's own format, so prefer the paired helpers below
+ * (`buildSprintShareUrl` / `buildCollectionShareUrl`) which bind encode+version
+ * together and can't drift. */
 export function buildShareUrl(blob: string, base?: string, version: number = SNAPSHOT_VERSION): string {
   const root =
     base ?? (typeof location !== 'undefined' ? location.origin + location.pathname : '')
   return `${root}#v=${version}&s=${blob}`
+}
+
+/** Encode a sprint snapshot and wrap it in its `v=2` URL — encode+version can't
+ * drift. Use this instead of `buildShareUrl(encodeSnapshot(…))`. */
+export function buildSprintShareUrl(data: SnapshotData, base?: string): string {
+  return buildShareUrl(encodeSnapshot(data), base, SNAPSHOT_VERSION)
+}
+
+/** Encode a collection snapshot and wrap it in its `v=3` URL — encode+version
+ * can't drift. Use this instead of `buildShareUrl(encodeCollectionSnapshot(…))`. */
+export function buildCollectionShareUrl(data: CollectionSnapshotData, base?: string): string {
+  return buildShareUrl(encodeCollectionSnapshot(data), base, COLLECTION_SNAPSHOT_VERSION)
 }
 
 /**

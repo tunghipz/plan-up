@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { computeStartEnd } from './scheduling'
+import { computeStartEnd, computeWorkingPlan } from './scheduling'
 import type { Task } from './types'
 
 // Scheduling: a MILESTONE (effort 0) prereq must anchor its dependents on the
@@ -75,5 +75,42 @@ describe('milestone prereq chaining', () => {
     const s = task('s2', { estimate: 1, dependsOn: ['n'] })
     const plan = computeStartEnd(s, byId(n, s))
     expect(plan.startDate).toBe('2026-07-08')
+  })
+})
+
+describe('milestone display time (computeWorkingPlan)', () => {
+  // A milestone is an INSTANT: its wall time is where it sits (startOffset), not
+  // the hardcoded end-of-day dueFraction. start & end read the same time. This
+  // pins the 2026-07-15 fix — before it, every milestone showed a bogus 17:00.
+
+  it('shows 17:00 when the prereq finishes end-of-day (17:00)', () => {
+    // Prereq effort 1 Mon Jul 6 → ends Jul 6 at 17:00 (dueFraction 1).
+    const n = task('n17', { estimate: 1, startDate: '2026-07-06' })
+    const ms = task('m17', { estimate: 0, dependsOn: ['n17'] })
+    const plan = computeWorkingPlan(ms, byId(n, ms))
+    expect(plan.startDate).toBe('2026-07-06')
+    expect(plan.endTime).toBe('17:00')
+    expect(plan.startTime).toBe('17:00') // instant → start === end
+  })
+
+  it('shows 12:00 (noon) when the prereq finishes at midday — NOT a bogus 17:00', () => {
+    // Prereq effort 0.5 Mon Jul 6 → ends Jul 6 at noon (dueFraction 0.5). The
+    // milestone marks that instant → 12:00. (Pre-fix this wrongly read 17:00.)
+    const n = task('nHalf', { estimate: 0.5, startDate: '2026-07-06' })
+    const ms = task('mNoon', { estimate: 0, dependsOn: ['nHalf'] })
+    const plan = computeWorkingPlan(ms, byId(n, ms))
+    expect(plan.startDate).toBe('2026-07-06')
+    expect(plan.endTime).toBe('12:00')
+    expect(plan.startTime).toBe('12:00')
+  })
+
+  it('shows 08:00 for a manual milestone with no prereq (day-start instant)', () => {
+    // No prereqs → startOffset 0 → 08:00, consistent with how an 08:00 milestone
+    // anchors its own dependents at day-start.
+    const ms = task('mMan', { estimate: 0, startDate: '2026-07-14' })
+    const plan = computeWorkingPlan(ms, byId(ms))
+    expect(plan.startDate).toBe('2026-07-14')
+    expect(plan.endTime).toBe('08:00')
+    expect(plan.startTime).toBe('08:00')
   })
 })

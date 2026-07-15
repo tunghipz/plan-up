@@ -1024,6 +1024,36 @@ describe('moveUnfinishedToNextSprint', () => {
     expect(t?.dependsOn).toEqual(['dep']) // in-sprint chain stays intact
   })
 
+  it('drops only left-behind SOURCE-sprint prereqs, keeping moved + cross-sprint links', async () => {
+    // The safety-critical property: unlink ONLY prereqs that stayed behind in the
+    // rolled sprint. A prereq in another sprint (never touched) and a prereq that
+    // rolls over WITH the dependent must both survive. See sprint-rollover.md.
+    const s0 = { id: 's0', projectId: P, name: 'Old', startDate: '2026-05-18', endDate: '2026-05-31' }
+    const s1 = { id: 's1', projectId: P, name: 'A', startDate: '2026-06-01', endDate: '2026-06-14' }
+    const s2 = { id: 's2', projectId: P, name: 'B', startDate: '2026-06-15', endDate: '2026-06-28' }
+    await db.sprints.bulkAdd([s0, s1, s2])
+    await db.tasks.bulkAdd([
+      // done prereq in an EARLIER sprint — not part of the rolled sprint → must survive
+      { id: 'ext', projectId: P, sequence: 1, title: 'ext', assigneeId: null, sprintId: s0.id,
+        status: 'done', priority: 'normal', startDate: '2026-05-20', dueDate: '2026-05-21', estimate: 1, createdAt: 0, dependsOn: [] },
+      // done prereq in the SOURCE sprint — stays behind → its link must be dropped
+      { id: 'stay', projectId: P, sequence: 2, title: 'stay', assigneeId: null, sprintId: s1.id,
+        status: 'done', priority: 'normal', startDate: '2026-06-02', dueDate: '2026-06-03', estimate: 1, createdAt: 0, dependsOn: [] },
+      // in-progress prereq in the source sprint — rolls over WITH the dependent → link kept
+      { id: 'moved', projectId: P, sequence: 3, title: 'moved', assigneeId: null, sprintId: s1.id,
+        status: 'in_progress', priority: 'normal', startDate: '2026-06-04', dueDate: null, estimate: 1, createdAt: 0, dependsOn: [] },
+      { id: 't', projectId: P, sequence: 4, title: 't', assigneeId: null, sprintId: s1.id,
+        status: 'todo', priority: 'normal', startDate: '2026-06-06', dueDate: null, estimate: null, createdAt: 0, dependsOn: ['ext', 'stay', 'moved'] },
+    ])
+    await moveUnfinishedToNextSprint(s1.id)
+    const t = await db.tasks.get('t')
+    expect(t?.sprintId).toBe('s2')
+    // 'stay' (left behind in source) dropped; 'ext' (other sprint) + 'moved' (rolled) kept, order preserved
+    expect(t?.dependsOn).toEqual(['ext', 'moved'])
+    expect((await db.tasks.get('ext'))?.sprintId).toBe('s0') // untouched
+    expect((await db.tasks.get('moved'))?.sprintId).toBe('s2') // rolled with t
+  })
+
   it('returns null target when there is no next sprint', async () => {
     await db.sprints.add({
       id: 'only', projectId: P, name: 'Only', startDate: '2026-06-01', endDate: '2026-06-14',

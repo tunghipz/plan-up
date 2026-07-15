@@ -264,6 +264,27 @@ export interface WorkingPlan {
   endTime: string
 }
 
+/**
+ * Wall-clock times for a plan. A normal task spans start→due, so start reads
+ * `startOffset` and end reads `dueFraction`. A MILESTONE (effort 0) is an
+ * INSTANT, not a span: its moment is `startOffset` (where its prereqs are met,
+ * or day-start if manual) — `dueFraction` is a hardcoded end-of-day leftover and
+ * must NOT drive its time. Map that instant as a completion moment
+ * (0 → 08:00, first half → 12:00, second half → 17:00) and use it for BOTH
+ * start & end so the milestone shows one consistent time that matches the moment
+ * it anchors dependents on (never a bogus 17:00). See milestones.md.
+ */
+function planWallTimes(plan: TaskPlan, isMilestone: boolean): { startTime: string; endTime: string } {
+  if (isMilestone) {
+    const t = plan.startOffset > 0.5 + EPS ? '17:00' : plan.startOffset > EPS ? '12:00' : '08:00'
+    return { startTime: t, endTime: t }
+  }
+  return {
+    startTime: plan.startOffset >= 0.5 - EPS ? '13:00' : '08:00',
+    endTime: plan.dueFraction > 0.5 + EPS ? '17:00' : '12:00',
+  }
+}
+
 export function computeWorkingPlan(
   task: Task,
   byId: Map<string, Task>,
@@ -273,8 +294,7 @@ export function computeWorkingPlan(
   return {
     startDate: plan.startDate,
     dueDate: plan.dueDate,
-    startTime: plan.startOffset >= 0.5 - EPS ? '13:00' : '08:00',
-    endTime: plan.dueFraction > 0.5 + EPS ? '17:00' : '12:00',
+    ...planWallTimes(plan, task.estimate === 0),
   }
 }
 
@@ -297,8 +317,7 @@ export function computeAllWorkingPlans(
     out.set(t.id, {
       startDate: plan.startDate,
       dueDate: plan.dueDate,
-      startTime: plan.startOffset >= 0.5 - EPS ? '13:00' : '08:00',
-      endTime: plan.dueFraction > 0.5 + EPS ? '17:00' : '12:00',
+      ...planWallTimes(plan, t.estimate === 0),
     })
   }
   return out

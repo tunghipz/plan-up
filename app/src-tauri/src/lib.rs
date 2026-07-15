@@ -84,6 +84,34 @@ fn prune_backups(dir: String, keep: usize, subdir: Option<String>) -> Result<Vec
     Ok(deleted)
 }
 
+#[tauri::command]
+fn list_backups(dir: String, subdir: Option<String>) -> Result<Vec<String>, String> {
+    let target = resolve_dir(&dir, subdir.as_deref())?;
+    if !target.is_dir() {
+        // versions/ not created yet — nothing to list.
+        return Ok(Vec::new());
+    }
+    let entries = fs::read_dir(&target).map_err(|e| e.to_string())?;
+    let mut names: Vec<String> = entries
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().is_file())
+        .filter_map(|e| e.file_name().into_string().ok())
+        .filter(|n| is_backup_filename(n))
+        .collect();
+    // name == date[-time], fixed width → lexicographic desc is newest-first
+    names.sort_by(|a, b| b.cmp(a));
+    Ok(names)
+}
+
+#[tauri::command]
+fn read_backup(dir: String, file_name: String, subdir: Option<String>) -> Result<String, String> {
+    if !is_backup_filename(&file_name) {
+        return Err(format!("invalid backup filename: {file_name}"));
+    }
+    let target = resolve_dir(&dir, subdir.as_deref())?;
+    fs::read_to_string(target.join(&file_name)).map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -91,14 +119,19 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![write_backup, prune_backups])
+        .invoke_handler(tauri::generate_handler![
+            write_backup,
+            prune_backups,
+            list_backups,
+            read_backup
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{is_backup_filename, prune_backups, write_backup};
+    use super::{is_backup_filename, list_backups, prune_backups, read_backup, write_backup};
     use std::fs;
 
     fn temp_dir(tag: &str) -> std::path::PathBuf {
@@ -230,6 +263,53 @@ mod tests {
         // versions/ never created → no error, nothing deleted
         let deleted = prune_backups(d, 5, Some("versions".into())).unwrap();
         assert!(deleted.is_empty());
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn list_backups_filters_and_sorts_newest_first() {
+        let dir = temp_dir("list");
+        let versions = dir.join("versions");
+        fs::create_dir_all(&versions).unwrap();
+        for (i, name) in ["plan-up-2026-01-01-100001.json", "plan-up-2026-01-01-100003.json", "plan-up-2026-01-01-100002.json"].iter().enumerate() {
+            fs::write(versions.join(name), format!("{{\"i\":{i}}}")).unwrap();
+        }
+        fs::write(versions.join("notes.txt"), "ignore").unwrap();
+        let d = dir.to_string_lossy().to_string();
+        let names = list_backups(d, Some("versions".into())).unwrap();
+        assert_eq!(
+            names,
+            vec![
+                "plan-up-2026-01-01-100003.json",
+                "plan-up-2026-01-01-100002.json",
+                "plan-up-2026-01-01-100001.json",
+            ]
+        );
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn list_backups_missing_dir_is_empty() {
+        let dir = temp_dir("list-missing");
+        let d = dir.to_string_lossy().to_string();
+        assert!(list_backups(d, Some("versions".into())).unwrap().is_empty());
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn read_backup_reads_valid_and_rejects_bad() {
+        let dir = temp_dir("read");
+        let versions = dir.join("versions");
+        fs::create_dir_all(&versions).unwrap();
+        fs::write(versions.join("plan-up-2026-07-07-153045.json"), "{\"ok\":true}").unwrap();
+        let d = dir.to_string_lossy().to_string();
+        // valid
+        let body = read_backup(d.clone(), "plan-up-2026-07-07-153045.json".into(), Some("versions".into())).unwrap();
+        assert_eq!(body, "{\"ok\":true}");
+        // bad name
+        assert!(read_backup(d.clone(), "../evil.json".into(), Some("versions".into())).is_err());
+        // disallowed subdir
+        assert!(read_backup(d, "plan-up-2026-07-07-153045.json".into(), Some("../escape".into())).is_err());
         fs::remove_dir_all(&dir).unwrap();
     }
 }

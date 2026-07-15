@@ -4,7 +4,8 @@
 without it the API returns 503 and the modal falls back to the in-URL link)
 **Last updated:** 2026-07-15
 **Code:** `app/api/share/index.ts` (POST create) + `app/api/share/[id].ts` (GET/PUT/DELETE)
-+ `app/api/_kv.ts` (Upstash client, token hash, CORS); `app/vercel.json` (`/view/*` → SPA) ·
++ `app/api/_kv.ts` (Upstash **REST via built-in `fetch`** — no npm client, so a function
+can't fail to load over a dependency; token hash, CORS); `app/vercel.json` (`/view/*` → SPA) ·
 `app/src/share-hosted.ts` (runtime client + `slugify`/`suffixFromPath`) ·
 `app/src/HostedShareControls.tsx` (Create/Copy/Update/Revoke UI + offline fallback) ·
 `app/src/schema.ts` (Dexie **v14** `shares` table) · `app/src/db.ts` (facade

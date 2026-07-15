@@ -3,10 +3,10 @@ import {
   cors,
   genSuffix,
   genToken,
-  getRedis,
   hashToken,
-  keyFor,
+  kvExists,
   kvReady,
+  kvSet,
   MAX_BLOB_LEN,
   validKind,
   TTL_SECONDS,
@@ -26,7 +26,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!kvReady) return res.status(503).json({ error: 'store unavailable' })
 
   try {
-    const redis = getRedis()
     const body = (req.body ?? {}) as { blob?: unknown; kind?: unknown }
     const { blob, kind } = body
     if (typeof blob !== 'string' || !blob || blob.length > MAX_BLOB_LEN)
@@ -39,7 +38,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let id = ''
     for (let i = 0; i < 6; i++) {
       const candidate = genSuffix(6)
-      if (!(await redis.exists(keyFor(candidate)))) {
+      if (!(await kvExists(candidate))) {
         id = candidate
         break
       }
@@ -47,14 +46,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!id) return res.status(500).json({ error: 'id generation failed' })
 
     const writeToken = genToken()
-    const value: ShareValue = {
-      v,
-      blob,
-      kind,
-      wt: hashToken(writeToken),
-      updatedAt: Date.now(),
-    }
-    await redis.set(keyFor(id), value, { ex: TTL_SECONDS })
+    const value: ShareValue = { v, blob, kind, wt: hashToken(writeToken), updatedAt: Date.now() }
+    await kvSet(id, value, TTL_SECONDS)
     return res.status(200).json({ id, writeToken })
   } catch (e) {
     return res.status(500).json({ error: 'server', detail: String((e as Error)?.message ?? e) })

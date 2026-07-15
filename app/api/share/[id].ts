@@ -1,9 +1,10 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import {
   cors,
-  getRedis,
-  keyFor,
+  kvDel,
+  kvGet,
   kvReady,
+  kvSet,
   MAX_BLOB_LEN,
   tokenOk,
   TTL_SECONDS,
@@ -25,13 +26,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const raw = req.query.id
   const id = String(Array.isArray(raw) ? raw[0] : raw ?? '')
   if (!/^[a-z0-9]{1,16}$/.test(id)) return res.status(400).json({ error: 'bad id' })
-  const key = keyFor(id)
 
   try {
-    const redis = getRedis()
-
     if (req.method === 'GET') {
-      const value = await redis.get<ShareValue>(key)
+      const value = await kvGet(id)
       if (!value) return res.status(404).json({ error: 'not found' })
       return res
         .status(200)
@@ -39,7 +37,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     if (req.method === 'PUT' || req.method === 'DELETE') {
-      const value = await redis.get<ShareValue>(key)
+      const value = await kvGet(id)
       if (!value) return res.status(404).json({ error: 'not found' })
       const hdr = req.headers['x-write-token']
       const provided = Array.isArray(hdr) ? hdr[0] : hdr
@@ -47,7 +45,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(403).json({ error: 'forbidden' })
 
       if (req.method === 'DELETE') {
-        await redis.del(key)
+        await kvDel(id)
         return res.status(200).json({ ok: true })
       }
       // PUT
@@ -55,7 +53,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (typeof body.blob !== 'string' || !body.blob || body.blob.length > MAX_BLOB_LEN)
         return res.status(400).json({ error: 'bad blob' })
       const next: ShareValue = { ...value, blob: body.blob, updatedAt: Date.now() }
-      await redis.set(key, next, { ex: TTL_SECONDS })
+      await kvSet(id, next, TTL_SECONDS)
       return res.status(200).json({ ok: true, updatedAt: next.updatedAt })
     }
 

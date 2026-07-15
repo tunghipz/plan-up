@@ -112,6 +112,22 @@ export function versionFilename(d: Date): string {
   return `plan-up-${y}-${m}-${day}-${hh}${mm}${ss}.json`
 }
 
+/**
+ * Inverse of `versionFilename`: parse `plan-up-YYYY-MM-DD-HHMMSS.json` back to a
+ * LOCAL Date (same clock the name was written with). Returns null for the daily
+ * shape (no time) or any malformed name — the version picker drops those.
+ */
+export function parseVersionFilename(name: string): Date | null {
+  if (!VERSION_NAME_RE.test(name)) return null
+  const y = Number(name.slice(8, 12))
+  const mo = Number(name.slice(13, 15))
+  const d = Number(name.slice(16, 18))
+  const hh = Number(name.slice(19, 21))
+  const mm = Number(name.slice(21, 23))
+  const ss = Number(name.slice(23, 25))
+  return new Date(y, mo - 1, d, hh, mm, ss)
+}
+
 const BACKUP_NAME_RE = /^plan-up-\d{4}-\d{2}-\d{2}\.json$/
 const VERSION_NAME_RE = /^plan-up-\d{4}-\d{2}-\d{2}-\d{6}\.json$/
 

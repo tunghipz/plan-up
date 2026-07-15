@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
   backupFilename,
   versionFilename,
+  parseVersionFilename,
   selectPrunable,
   selectPrunableVersions,
   hashString,
@@ -31,6 +32,30 @@ describe('versionFilename', () => {
   it('pads single-digit time parts and midnight', () => {
     expect(versionFilename(new Date(2026, 0, 3, 1, 2, 5))).toBe('plan-up-2026-01-03-010205.json')
     expect(versionFilename(new Date(2026, 0, 3, 0, 0, 0))).toBe('plan-up-2026-01-03-000000.json')
+  })
+})
+
+describe('parseVersionFilename', () => {
+  it('round-trips versionFilename (local parts)', () => {
+    const d = new Date(2026, 6, 7, 15, 30, 45)
+    expect(parseVersionFilename(versionFilename(d))).toEqual(d)
+  })
+
+  it('parses zero-padded midnight', () => {
+    expect(parseVersionFilename('plan-up-1999-12-31-000000.json')).toEqual(
+      new Date(1999, 11, 31, 0, 0, 0),
+    )
+  })
+
+  it('rejects the daily-file shape (no time)', () => {
+    expect(parseVersionFilename('plan-up-2026-07-07.json')).toBeNull()
+  })
+
+  it('rejects malformed names', () => {
+    expect(parseVersionFilename('plan-up-2026-07-07-1530.json')).toBeNull()
+    expect(parseVersionFilename('plan-up-2026-07-07_153045.json')).toBeNull()
+    expect(parseVersionFilename('other-2026-07-07-153045.json')).toBeNull()
+    expect(parseVersionFilename('')).toBeNull()
   })
 })
 

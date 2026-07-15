@@ -1,6 +1,6 @@
 import { liveQuery } from 'dexie'
 import { db } from './db'
-import { exportAll } from './io'
+import { exportAll, importAll, type ExportPayload } from './io'
 import {
   BACKUP_KEEP,
   BACKUP_QUIET_MS,
@@ -11,6 +11,7 @@ import {
   hashString,
   IS_TAURI,
   isBackupEnabled,
+  parseVersionFilename,
   setLastBackupHash,
   setLastBackupStatus,
   versionFilename,
@@ -120,4 +121,52 @@ export function startAutoBackup(): () => void {
     sub.unsubscribe()
     scheduler.dispose()
   }
+}
+
+/** A restorable snapshot in `versions/` — the file name and its parsed local time. */
+export interface VersionEntry {
+  file: string
+  at: Date
+}
+
+/**
+ * List the immutable `versions/` snapshots, newest first. Off-desktop or with no
+ * backup folder set there is nothing to list, so returns []. Names that don't
+ * parse as version files are dropped (the folder only ever holds our own writes,
+ * but be defensive).
+ */
+export async function listVersions(): Promise<VersionEntry[]> {
+  const dir = getBackupDir()
+  if (!IS_TAURI || !dir) return []
+  const { invoke } = await import('@tauri-apps/api/core')
+  const names = await invoke<string[]>('list_backups', { dir, subdir: VERSIONS_DIR })
+  return names
+    .map((file) => ({ file, at: parseVersionFilename(file) }))
+    .filter((e): e is VersionEntry => e.at !== null)
+    .sort((a, b) => b.at.getTime() - a.at.getTime())
+}
+
+/** Read + parse one `versions/` snapshot. Throws if unreadable or not JSON. */
+export async function readVersion(file: string): Promise<ExportPayload> {
+  const dir = getBackupDir()
+  if (!IS_TAURI || !dir) throw new Error('No backup folder chosen.')
+  const { invoke } = await import('@tauri-apps/api/core')
+  const contents = await invoke<string>('read_backup', { dir, fileName: file, subdir: VERSIONS_DIR })
+  return JSON.parse(contents) as ExportPayload
+}
+
+/**
+ * Restore the whole DB to a chosen snapshot. Fail-safe order: snapshot the
+ * CURRENT state first (so a mistaken restore is itself undoable) and abort if
+ * that write fails — never destroy without a fresh net. Then read the target and
+ * hand it to importAll (which validates before clearing and rolls back on error).
+ * The caller reloads the app on success.
+ */
+export async function restoreVersion(file: string): Promise<void> {
+  const snap = await runBackupNow()
+  if (!snap.ok) {
+    throw new Error(`Could not back up current data first: ${snap.error ?? 'unknown error'}`)
+  }
+  const payload = await readVersion(file)
+  await importAll(payload)
 }

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Check, Copy, ExternalLink, Link2, RefreshCw, Trash2, AlertTriangle } from 'lucide-react'
 import type { ShareRecord } from './types'
-import { getShareForRef, saveShareRecord, deleteShareRecord } from './db'
+import { getShareForRef, getProjectShare, saveShareRecord, deleteShareRecord } from './db'
 import {
   createShare,
   updateShare,
@@ -54,6 +54,8 @@ export function HostedShareControls({
   refId,
   projectId,
   kind,
+  scope = 'ref',
+  currentLabel,
   slug,
   blob,
   sig,
@@ -61,9 +63,16 @@ export function HostedShareControls({
   empty,
   fallbackUrl,
 }: {
+  /** The ref being shared right now — sprintId or collectionId. For a project-scope
+   * link this is the CURRENTLY-OPEN sprint (stored as `currentRefId`). */
   refId: string
   projectId: string
   kind: ShareKind
+  /** `'project'` (Hướng A, sprint) shares ONE link across the project, pointing at the
+   * open sprint; `'ref'` (default, collections + legacy) keys the link by `refId`. */
+  scope?: 'ref' | 'project'
+  /** Project-scope: display name of the open sprint (stored + shown as "đang hiển thị"). */
+  currentLabel?: string
   slug: string
   /** Current encoded snapshot for the selection (what gets pushed). */
   blob: string
@@ -89,7 +98,10 @@ export function HostedShareControls({
 
   useEffect(() => {
     let alive = true
-    getShareForRef(refId)
+    // Project-scope (sprint): the link belongs to the project, not this one sprint,
+    // so look it up by project. Per-ref (collections + legacy): keyed by refId.
+    const load = scope === 'project' ? getProjectShare(projectId, kind) : getShareForRef(refId)
+    load
       .then((r) => {
         if (alive) setRecord(r ?? null)
       })
@@ -102,13 +114,17 @@ export function HostedShareControls({
     return () => {
       alive = false
     }
-  }, [refId])
+  }, [refId, projectId, kind, scope])
 
   // Stale when the current board differs from what was last pushed to the store.
   // Comparing STORED-vs-current content signatures (not an at-open snapshot) means
   // edits made while this modal was closed — the normal case — are caught on
   // reopen. A record with no lastSig (created before the field existed) reads as stale.
   const dirty = !!record && record.lastSig !== sig
+  // Project-scope: the open sprint isn't the one currently live on the shared link.
+  // Switching sprint always reads dirty (its sig differs), so Cập nhật repoints the link.
+  const switching =
+    scope === 'project' && !!record && !!record.currentRefId && record.currentRefId !== refId
 
   async function doCreate() {
     setBusy('create')
@@ -118,7 +134,9 @@ export function HostedShareControls({
       const now = Date.now()
       const rec: ShareRecord = {
         id,
-        refId,
+        // Project-scope anchors the record to the project (survives sprint switches);
+        // per-ref anchors it to the shared sprint/collection.
+        refId: scope === 'project' ? projectId : refId,
         kind,
         slug,
         writeToken,
@@ -128,6 +146,7 @@ export function HostedShareControls({
         createdAt: now,
         updatedAt: now,
         projectId,
+        ...(scope === 'project' ? { scope, currentRefId: refId, currentLabel } : {}),
       }
       await saveShareRecord(rec)
       setRecord(rec)
@@ -146,6 +165,8 @@ export function HostedShareControls({
     try {
       await updateShare(record.id, record.writeToken, blob)
       // Refresh the slug too, so the URL prettifies after a rename (id unchanged).
+      // Project-scope: also move the live pointer to the sprint being pushed now — this
+      // is how "switch sprint + Cập nhật" repoints the same link at the open sprint.
       const rec: ShareRecord = {
         ...record,
         slug,
@@ -153,6 +174,7 @@ export function HostedShareControls({
         lastSig: sig,
         selectedIds,
         updatedAt: Date.now(),
+        ...(scope === 'project' ? { currentRefId: refId, currentLabel } : {}),
       }
       await saveShareRecord(rec)
       setRecord(rec)
@@ -278,16 +300,25 @@ export function HostedShareControls({
   return (
     <div className="flex flex-col gap-2.5">
       {/* Sync hint */}
-      <div className="flex items-center gap-2 text-[12px]">
-        {dirty ? (
-          <span className="inline-flex items-center gap-1.5 font-semibold text-[#c98a12] dark:text-[#e0a83a]">
-            <span className="w-[7px] h-[7px] rounded-full bg-[#e0a83a]" /> Link đang giữ bản cũ — bấm Cập nhật
-          </span>
-        ) : (
-          <span className="inline-flex items-center gap-1.5 font-semibold text-status-done">
-            <span className="w-[7px] h-[7px] rounded-full bg-status-done" />
-            {updated ? 'Đã cập nhật ✓' : 'Link đã đồng bộ'}
-          </span>
+      <div className="flex flex-col gap-1 text-[12px]">
+        <span className="flex items-center gap-2">
+          {dirty ? (
+            <span className="inline-flex items-center gap-1.5 font-semibold text-[#c98a12] dark:text-[#e0a83a]">
+              <span className="w-[7px] h-[7px] rounded-full bg-[#e0a83a]" />
+              {switching
+                ? `Link đang hiển thị ${record.currentLabel ?? 'sprint khác'} — Cập nhật để chuyển sang sprint này`
+                : 'Link đang giữ bản cũ — bấm Cập nhật'}
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1.5 font-semibold text-status-done">
+              <span className="w-[7px] h-[7px] rounded-full bg-status-done" />
+              {updated ? 'Đã cập nhật ✓' : 'Link đã đồng bộ'}
+            </span>
+          )}
+        </span>
+        {/* Project-scope: always show which sprint the single link currently serves. */}
+        {scope === 'project' && record.currentLabel && !switching && (
+          <span className="text-ink-faint">Link chung của project · đang hiển thị {record.currentLabel}</span>
         )}
       </div>
 
@@ -319,11 +350,17 @@ export function HostedShareControls({
           <button
             onClick={doUpdate}
             disabled={busy !== '' || empty}
-            title={empty ? 'Chọn ít nhất 1 mục để cập nhật' : 'Đẩy bản mới nhất lên (link không đổi)'}
+            title={
+              empty
+                ? 'Chọn ít nhất 1 mục để cập nhật'
+                : switching
+                  ? 'Chuyển link sang sprint đang mở (URL không đổi)'
+                  : 'Đẩy bản mới nhất lên (link không đổi)'
+            }
             className="inline-flex items-center justify-center gap-1.5 rounded-[11px] bg-fill px-3 py-2.5 text-[13.5px] font-semibold text-accent transition hover:bg-accent-soft active:scale-[0.98] disabled:opacity-50"
           >
             <RefreshCw size={15} strokeWidth={2} className={busy === 'update' ? 'animate-spin' : ''} />
-            {busy === 'update' ? 'Đang cập nhật…' : 'Cập nhật'}
+            {busy === 'update' ? 'Đang cập nhật…' : switching ? 'Chuyển sang sprint này' : 'Cập nhật'}
           </button>
         )}
         <button

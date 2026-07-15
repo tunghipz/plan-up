@@ -225,9 +225,20 @@ export interface Collection {
 export interface ShareRecord {
   /** The store key = the `<id>` suffix of the /view URL. */
   id: string
-  /** The shared sprintId or collectionId (indexed → "is this plan shared?"). */
+  /** For a per-ref share (collections + legacy sprint links): the shared sprintId
+   * or collectionId. For a PROJECT-scope sprint link (`scope: 'project'`, Hướng A):
+   * this is the `projectId` — the record is not bound to a single sprint. Indexed. */
   refId: string
   kind: 'sprint' | 'collection'
+  /** `'project'` = one hosted sprint link shared across the whole project (points at
+   * whichever sprint was last pushed; see design-docs/hosted-share-link.md). Absent
+   * (or `'ref'`) = classic per-ref link (every collection link + old sprint links). */
+  scope?: 'ref' | 'project'
+  /** Project-scope only: the sprintId whose snapshot is currently live on the link. */
+  currentRefId?: string
+  /** Project-scope only: display name of the live sprint (shown in the modal so the
+   * sender knows which sprint the link currently serves). */
+  currentLabel?: string
   /** Cosmetic slug at share time (URL prefix); rebuilt on Update after a rename. */
   slug: string
   /** Write-capability token for PUT/DELETE. Secret — local only. */

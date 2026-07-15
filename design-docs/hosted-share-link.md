@@ -2,7 +2,10 @@
 
 **Status:** Implemented (backend needs a Vercel KV/Upstash store bound to the project;
 without it the API returns 503 and the modal falls back to the in-URL link)
-**Last updated:** 2026-07-15
+**Last updated:** 2026-07-15 (**project-scope sprint link** — a sprint's hosted link is now
+**one per project**, not one per sprint: it points at whichever sprint was last pushed, so
+switching sprint + Cập nhật keeps the SAME URL and overwrites the live snapshot. See
+"Project-scope sprint link" below. Collections stay per-ref [one link per collection].)
 **Code:** `app/api/share/index.ts` (POST create) + `app/api/share/[id].ts` (GET/PUT/DELETE)
 — **self-contained** (each inlines its helpers, imports only Node builtins + `fetch`): a
 relative `../_kv` import crashed the ESM function at load (missing `.js` →
@@ -12,7 +15,7 @@ via the built-in `fetch` (no npm client). `app/vercel.json` (`/view/*` → SPA) 
 `app/src/share-hosted.ts` (runtime client + `slugify`/`suffixFromPath`) ·
 `app/src/HostedShareControls.tsx` (Create/Copy/Update/Revoke UI + offline fallback) ·
 `app/src/schema.ts` (Dexie **v14** `shares` table) · `app/src/db.ts` (facade
-`getShareForRef`/`saveShareRecord`/`deleteShareRecord`) · `app/src/io.ts` (backup v6) ·
+`getShareForRef`/`getProjectShare`/`saveShareRecord`/`deleteShareRecord`) · `app/src/io.ts` (backup v6) ·
 `app/src/ShareLinkModal.tsx` + `app/src/CollectionShareModal.tsx` (embed the controls) ·
 `app/src/main.tsx` + `app/src/HostedViewer.tsx` (`/view/:id` fetch + render) · reuse
 `app/src/share-snapshot.ts`, `app/src/SnapshotViewer.tsx`,
@@ -60,6 +63,33 @@ plan-up-eta.vercel.app/view/q3-launch-a7k2p9
    fragment dài kiểu cũ (bulletproof, offline, nhưng không update được). Giữ nguyên
    `share-snapshot.ts` + 2 viewer; không xoá gì.
 
+## Project-scope sprint link (Hướng A)
+
+**Vấn đề:** ban đầu mỗi sprint = 1 hosted link riêng (record khoá theo `refId = sprintId`).
+Đổi sang sprint khác trong cùng project → không thấy link cũ → phải tạo link mới, gửi lại.
+User muốn **một link cố định dùng chung** cho cả project.
+
+**Chốt:** hosted link của **sprint** giờ là **một link / project** (không phải / sprint). Link
+**trỏ tới sprint được push gần nhất**; mở Share ở *bất kỳ* sprint nào của project đều quản lý
+**cùng một link**. Bấm **Cập nhật** đẩy sprint đang mở lên → **cùng URL**, ghi đè snapshot cũ.
+
+- **Đang mở sprint chưa có link project** → nút **Tạo link chia sẻ** (tạo link project, live =
+  sprint đang mở).
+- **Đã có link project, đang mở đúng sprint đang live, nội dung đổi** → dirty "giữ bản cũ" →
+  Cập nhật đẩy nội dung mới (như per-ref cũ).
+- **Đã có link project, đang mở sprint KHÁC với sprint đang live** → dirty kiểu **"đang hiển thị
+  {sprint đang live} — Cập nhật để chuyển sang {sprint đang mở}"**. Cập nhật → link chuyển sang
+  sprint đang mở; **snapshot sprint cũ biến mất** với mọi người giữ link (tradeoff có chủ đích
+  của "một link").
+- Modal luôn hiện **sprint nào đang live** trên link (`currentLabel`) để người gửi khỏi push
+  nhầm.
+
+**Vì sao ghi đè, không bundle:** đây là Hướng A (đơn giản, không đổi grammar/viewer). Muốn "1
+link xem *tất cả* sprint, người nhận tự chuyển" là Hướng B (bundle `v=4` + viewer switcher) —
+chưa làm.
+
+**Collections không đổi:** vẫn per-ref (một link / collection), khoá `refId = collectionId`.
+
 ## User-facing behavior
 
 ### Sender — nút Share thông minh
@@ -94,9 +124,15 @@ Map plan cục bộ → hosted share, để nút Share biết đã share chưa +
 ```
 shares: 'id, refId, projectId'
 ```
-Fields: `id` (**= suffix**, key KV) · `refId` (sprintId **hoặc** collectionId — indexed để
-tra "plan này đã share?") · `kind` (`'sprint' | 'collection'`) · `slug` · `writeToken`
-(**secret, chỉ local**) · `url` (full) · `createdAt` · `updatedAt` · `projectId`.
+Fields: `id` (**= suffix**, key KV) · `refId` (per-ref: sprintId **hoặc** collectionId;
+**project-scope sprint** [Hướng A]: `= projectId` — record không cột chặt vào 1 sprint) ·
+`kind` (`'sprint' | 'collection'`) · `slug` · `writeToken` (**secret, chỉ local**) · `url`
+(full) · `createdAt` · `updatedAt` · `projectId` · `scope?` (`'ref'` [absent = mặc định, dùng
+cho collection + link sprint kiểu cũ] **hoặc** `'project'` [link sprint dùng chung / project])
+· `currentRefId?` (project-scope: sprintId **đang live** trên link) · `currentLabel?` (tên
+sprint đang live — hiện ở modal để người gửi biết đang push cái gì).
+Tra link project: `getProjectShare(projectId, kind)` = lọc `projectId` + `scope==='project'` +
+`kind` (index sẵn `projectId`, `.and()` lọc in-memory — vài record nên rẻ).
 Upgrade: bump version, thêm store; **không backfill** (chưa ai có share). Carry-forward mọi
 bảng v13. → cập nhật [data-model.md](./data-model.md).
 
@@ -150,6 +186,15 @@ dùng nguyên si). `wt` = hash của writeToken (không lưu token thô). TTL 90
   `ShareRecord.selectedIds` (lưu lúc share) được dùng để **seed lại** selection khi mở lại →
   share đã tỉa không bị coi là "stale" giả và bấm Cập nhật không lén mở rộng scope. Dirty so
   `lastSig` (bundle bỏ `exportedAt`) với hiện tại. Nút Cập nhật khoá khi selection rỗng.
+  - **Project-scope**: chỉ seed lại `selectedIds` khi `currentRefId === sprint đang mở` (đúng
+    sprint đang live được share lại). Mở **sprint khác** → trim reset về "all" (member set khác
+    nhau nên không kế thừa trim của sprint đang live). Đổi sprint làm `sig` khác `lastSig` nên
+    tự động dirty (đúng: cần Cập nhật để chuyển link sang sprint mới).
+- **Link sprint kiểu cũ (per-ref) còn sống** → sau Hướng A, `getProjectShare` không thấy record
+  cũ (`scope` absent). Mở Share ở sprint đó → hiện "Tạo link" → tạo link project mới; link
+  per-ref cũ thành **mồ côi** (UI không quản nữa) nhưng vẫn đọc được tới khi TTL 90 ngày dọn.
+  Chấp nhận được (single-user, chưa phát hành rộng); muốn dọn sớm thì Revoke thủ công trước khi
+  nâng cấp. Không auto-adopt để tránh mập mờ "record nào của sprint nào".
 - **Xoá plan → thu hồi link** → `deleteProject`/`deleteCollection` xoá `shares` row **và**
   gọi `revokeShare` best-effort (network; lỗi thì để TTL dọn) → link công khai không sống
   tiếp sau khi plan đã xoá. (Không có "delete sprint" riêng — sprint chỉ archive.)

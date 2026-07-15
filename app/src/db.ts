@@ -1114,6 +1114,21 @@ export async function getShareForRef(refId: string): Promise<ShareRecord | undef
   return db.shares.where('refId').equals(refId).first()
 }
 
+/** The PROJECT-scope share for a project (Hướng A): one hosted link per project that
+ * points at whichever ref was last pushed. Distinct from per-ref shares (collections +
+ * legacy sprint links) which stay keyed by their own id. `projectId` is indexed; the
+ * `.and()` filters a handful of rows in memory. */
+export async function getProjectShare(
+  projectId: string,
+  kind: ShareRecord['kind'],
+): Promise<ShareRecord | undefined> {
+  return db.shares
+    .where('projectId')
+    .equals(projectId)
+    .and((s) => s.kind === kind && s.scope === 'project')
+    .first()
+}
+
 /** Upsert a share record (keyed by store id). */
 export async function saveShareRecord(rec: ShareRecord): Promise<void> {
   await db.shares.put(rec)

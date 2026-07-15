@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link2, Check } from 'lucide-react'
 import { ModalSheet } from './ModalSheet'
 import { colorForName } from './schema'
-import { getShareForRef } from './db'
+import { getProjectShare } from './db'
 import type { Member } from './types'
 import { encodeSnapshot, buildSprintShareUrl, type SnapshotData } from './share-snapshot'
 import { slugify } from './share-hosted'
@@ -55,14 +55,16 @@ export function ShareLinkModal({
 }) {
   const [selected, setSelected] = useState<Set<string>>(() => new Set(members.map((m) => m.id)))
 
-  // If this sprint is already shared with a trimmed member set, seed the checklist
-  // from it (intersected with members that still own tasks) so reopening doesn't
-  // reset to "all" — which would falsely read stale and re-broaden scope on Update.
+  // The sprint link is PROJECT-scope (one link/project, Hướng A): look it up by project.
+  // Only seed the checklist from the stored trim when the link is CURRENTLY showing THIS
+  // sprint (`currentRefId === refId`) — re-sharing the live sprint keeps its trim so
+  // reopening doesn't reset to "all" (which would falsely read stale + re-broaden scope).
+  // Opening a DIFFERENT sprint leaves it at "all" (another sprint's member set won't map).
   useEffect(() => {
     let alive = true
-    getShareForRef(refId)
+    getProjectShare(projectId, 'sprint')
       .then((rec) => {
-        if (!alive || !rec?.selectedIds) return
+        if (!alive || !rec?.selectedIds || rec.currentRefId !== refId) return
         const ids = new Set(members.map((m) => m.id))
         setSelected(new Set(rec.selectedIds.filter((id) => ids.has(id))))
       })
@@ -71,7 +73,7 @@ export function ShareLinkModal({
       alive = false
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refId])
+  }, [refId, projectId])
 
   const { bundle, blob, sig, fallbackUrl, slug } = useMemo(() => {
     const bundle = buildBundle([...selected])
@@ -164,6 +166,8 @@ export function ShareLinkModal({
         refId={refId}
         projectId={projectId}
         kind="sprint"
+        scope="project"
+        currentLabel={bundle.sprint.name || 'Sprint'}
         slug={slug}
         blob={blob}
         sig={sig}

@@ -40,8 +40,12 @@ import {
   nextMemberOrder,
   setMemberOrder,
   renormalizeMemberOrder,
+  getProjectShare,
+  getShareForRef,
+  saveShareRecord,
   type Task,
   type Member,
+  type ShareRecord,
 } from './db'
 
 // All tests run inside this synthetic project. Saves having to thread a
@@ -1533,5 +1537,56 @@ describe('setMemberAvatar', () => {
     await setMemberAvatar(M, { avatarEmoji: '' })
     const m = await db.members.get(M)
     expect(m!.avatarEmoji ?? null).toBe(null)
+  })
+})
+
+describe('getProjectShare (project-scope sprint link, Hướng A)', () => {
+  const share = (over: Partial<ShareRecord>): ShareRecord => ({
+    id: uid(),
+    refId: 'x',
+    kind: 'sprint',
+    slug: 'plan',
+    writeToken: 'wt',
+    url: 'http://x/view/plan-abc',
+    createdAt: 0,
+    updatedAt: 0,
+    projectId: P,
+    ...over,
+  })
+
+  beforeEach(async () => {
+    await db.shares.clear()
+  })
+
+  it('finds the project-scope sprint link by project+kind, not a per-ref one', async () => {
+    // project-scope sprint link: refId = projectId, scope = 'project', points at sprint s1
+    await saveShareRecord(
+      share({ id: 'proj-sprint', refId: P, scope: 'project', currentRefId: 's1', currentLabel: 'Sprint 1' }),
+    )
+    // a legacy per-ref sprint link for some sprint (scope absent) must be ignored
+    await saveShareRecord(share({ id: 'legacy', refId: 's9' }))
+    // a per-ref collection link in the same project must not match kind 'sprint'
+    await saveShareRecord(share({ id: 'coll', refId: 'c1', kind: 'collection' }))
+
+    const rec = await getProjectShare(P, 'sprint')
+    expect(rec?.id).toBe('proj-sprint')
+    expect(rec?.currentRefId).toBe('s1')
+  })
+
+  it('returns undefined when only legacy per-ref sprint links exist', async () => {
+    await saveShareRecord(share({ id: 'legacy', refId: 's9' })) // scope absent
+    expect(await getProjectShare(P, 'sprint')).toBeUndefined()
+  })
+
+  it('scopes by project — a project-scope link in another project is not returned', async () => {
+    await saveShareRecord(
+      share({ id: 'other', refId: 'other-proj', projectId: 'other-proj', scope: 'project', currentRefId: 's1' }),
+    )
+    expect(await getProjectShare(P, 'sprint')).toBeUndefined()
+  })
+
+  it('getShareForRef still finds a per-ref link by its refId', async () => {
+    await saveShareRecord(share({ id: 'coll', refId: 'c1', kind: 'collection' }))
+    expect((await getShareForRef('c1'))?.id).toBe('coll')
   })
 })

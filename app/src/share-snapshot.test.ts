@@ -2,13 +2,17 @@ import { describe, expect, it } from 'vitest'
 import {
   buildShareUrl,
   buildSnapshot,
+  buildCollectionSnapshot,
   decodeSnapshot,
+  decodeCollectionSnapshot,
   encodeSnapshot,
+  encodeCollectionSnapshot,
   parseShareHash,
   SHARE_MAX_BYTES,
   SNAPSHOT_VERSION,
+  COLLECTION_SNAPSHOT_VERSION,
 } from './share-snapshot'
-import type { Member, Project, Sprint, Task } from './types'
+import type { Collection, Member, Project, Sprint, Task } from './types'
 
 const project: Project = { id: 'p', name: 'Checkout revamp', createdAt: 0 }
 const sprint: Sprint = { id: 's', projectId: 'p', name: 'Sprint 12', startDate: '2026-07-05', endDate: '2026-07-22' }
@@ -115,7 +119,7 @@ describe('encode / decode round-trip', () => {
     const d = buildSnapshot(project, sprint, bigMembers, bigTasks)
     const url = buildShareUrl(encodeSnapshot(d), 'https://plan-up.app/')
     expect(url.length).toBeLessThan(SHARE_MAX_BYTES)
-    expect(decodeSnapshot(parseShareHash(new URL(url).hash)!)).toEqual(d)
+    expect(decodeSnapshot(parseShareHash(new URL(url).hash)!.blob)).toEqual(d)
   })
 
   it('returns null for garbage / empty / non-snapshot payloads', () => {
@@ -132,28 +136,99 @@ describe('encode / decode round-trip', () => {
 })
 
 describe('parseShareHash / buildShareUrl', () => {
-  it('extracts the blob from a #v=2&s=… hash', () => {
-    expect(parseShareHash('#v=2&s=ABC123')).toBe('ABC123')
-    expect(parseShareHash('v=2&s=ABC123')).toBe('ABC123') // leading # optional
+  it('extracts version + blob from a #v=2&s=… hash', () => {
+    expect(parseShareHash('#v=2&s=ABC123')).toEqual({ version: 2, blob: 'ABC123' })
+    expect(parseShareHash('v=2&s=ABC123')).toEqual({ version: 2, blob: 'ABC123' }) // leading # optional
   })
 
-  it('rejects a wrong/absent version or missing blob', () => {
+  it('accepts the collection version (v=3) and rejects unknown / missing blob', () => {
+    expect(parseShareHash('#v=3&s=ABC')).toEqual({ version: 3, blob: 'ABC' }) // collection format
     expect(parseShareHash('#v=1&s=ABC')).toBeNull() // old v1 no longer decodes
-    expect(parseShareHash('#v=3&s=ABC')).toBeNull()
+    expect(parseShareHash('#v=4&s=ABC')).toBeNull() // unknown version
     expect(parseShareHash('#s=ABC')).toBeNull()
     expect(parseShareHash('#v=2')).toBeNull()
     expect(parseShareHash('')).toBeNull()
   })
 
   it('preserves a "+" in the blob (not turned into a space)', () => {
-    expect(parseShareHash('#v=2&s=aa+bb/cc')).toBe('aa+bb/cc')
+    expect(parseShareHash('#v=2&s=aa+bb/cc')).toEqual({ version: 2, blob: 'aa+bb/cc' })
   })
 
   it('round-trips through buildShareUrl', () => {
     const blob = encodeSnapshot(buildSnapshot(project, sprint, members, tasks))
     const url = buildShareUrl(blob, 'https://plan-up.app/')
     expect(url).toBe(`https://plan-up.app/#v=${SNAPSHOT_VERSION}&s=${blob}`)
-    expect(parseShareHash(new URL(url).hash)).toBe(blob)
+    expect(parseShareHash(new URL(url).hash)).toEqual({ version: SNAPSHOT_VERSION, blob })
+  })
+})
+
+// ── Collection snapshots (v3) ──────────────────────────────────────────────
+const collection: Collection = {
+  id: 'c', projectId: 'p', name: 'Live-ops 2026', order: 0, createdAt: 0,
+  sections: [
+    { id: 'sec1', name: 'Q3 Launches', color: '#ff9500' },
+    { id: 'sec2', name: 'Events', color: '#0071e3' },
+  ],
+  statuses: [
+    { id: 'st1', name: 'FEATURE', color: '#ff9500' },
+    { id: 'st2', name: 'EVENT', color: '#0071e3' },
+  ],
+}
+function collItem(id: string, over: Partial<Task> = {}): Task {
+  return {
+    id, projectId: 'p', sequence: 0, title: `Item ${id}`, assigneeId: null,
+    sprintId: null, status: 'todo', priority: 'none',
+    startDate: null, dueDate: null, estimate: null, createdAt: 0, dependsOn: [],
+    collectionId: 'c', sectionId: 'sec1', collectionStatusId: 'st1', ...over,
+  }
+}
+const collTasks = [
+  collItem('i1', { sectionId: 'sec1', collectionStatusId: 'st1', startDate: '2026-07-03', dueDate: '2026-07-18', listOrder: 0 }),
+  collItem('i2', { sectionId: 'sec2', collectionStatusId: 'st2', startDate: '2026-07-05', dueDate: null, listOrder: 1 }),
+  collItem('i3', { sectionId: 'sec1', collectionStatusId: null, startDate: null, dueDate: null, listOrder: 2 }),
+  // A stray sprint task + a task from another collection must NOT leak in.
+  task('x1', 'a', 99),
+  collItem('i9', { collectionId: 'other', sectionId: 'sec1' }),
+]
+
+describe('buildCollectionSnapshot', () => {
+  it('scopes to the one collection, keeps sections in use + all statuses', () => {
+    const d = buildCollectionSnapshot(project, collection, collTasks)
+    expect(d.project.name).toBe('Checkout revamp')
+    expect(d.collection).toEqual({ name: 'Live-ops 2026' })
+    expect(d.items).toHaveLength(3) // sprint task + other-collection item excluded
+    expect(d.sections.map((s) => s.name)).toEqual(['Q3 Launches', 'Events'])
+    expect(d.statuses.map((s) => s.name)).toEqual(['FEATURE', 'EVENT'])
+    // synthetic ids, item references remapped
+    expect(d.sections[0].id).toBe('s0')
+    expect(d.items[0]).toMatchObject({ title: 'Item i1', sectionId: 's0', statusId: 'x0', startDate: '2026-07-03', dueDate: '2026-07-18' })
+    expect(d.items.find((i) => i.title === 'Item i3')).toMatchObject({ statusId: null }) // no status
+  })
+
+  it('trims to selected sections', () => {
+    const d = buildCollectionSnapshot(project, collection, collTasks, { sectionIds: ['sec2'] })
+    expect(d.items).toHaveLength(1)
+    expect(d.sections.map((s) => s.name)).toEqual(['Events'])
+  })
+
+  it('round-trips through encode/decode with absolute dates', () => {
+    const d = buildCollectionSnapshot(project, collection, collTasks)
+    expect(decodeCollectionSnapshot(encodeCollectionSnapshot(d))).toEqual(d)
+  })
+
+  it('stays well under the size budget', () => {
+    const blob = encodeCollectionSnapshot(buildCollectionSnapshot(project, collection, collTasks))
+    const url = buildShareUrl(blob, 'https://plan-up.app/', COLLECTION_SNAPSHOT_VERSION)
+    expect(url).toContain(`#v=${COLLECTION_SNAPSHOT_VERSION}&s=`)
+    expect(url.length).toBeLessThan(SHARE_MAX_BYTES)
+    expect(parseShareHash(new URL(url).hash)).toEqual({ version: COLLECTION_SNAPSHOT_VERSION, blob })
+  })
+
+  it('returns null for a v2 blob (wrong version) and garbage', () => {
+    const v2 = encodeSnapshot(buildSnapshot(project, sprint, members, tasks))
+    expect(decodeCollectionSnapshot(v2)).toBeNull()
+    expect(decodeCollectionSnapshot('')).toBeNull()
+    expect(decodeCollectionSnapshot('not-lz!!!')).toBeNull()
   })
 })
 

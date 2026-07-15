@@ -1,5 +1,5 @@
 import LZString from 'lz-string'
-import type { Member, Priority, Project, Sprint, Status, Task } from './types'
+import type { Collection, Member, Priority, Project, Sprint, Status, Task } from './types'
 import { byEnd } from './telegram-export'
 
 /**
@@ -18,6 +18,11 @@ import { byEnd } from './telegram-export'
  */
 
 export const SNAPSHOT_VERSION = 2
+/** Collection snapshots use a distinct wire format (section-grouped, no members,
+ * user-defined statuses, absolute dates). v2 (sprint) stays untouched. */
+export const COLLECTION_SNAPSHOT_VERSION = 3
+/** Snapshot versions this build knows how to decode (boot picks the viewer). */
+const KNOWN_VERSIONS = new Set([SNAPSHOT_VERSION, COLLECTION_SNAPSHOT_VERSION])
 
 /** Warn threshold for the whole share URL (characters). The blob rides in the URL
  * *fragment* (`#v=2&s=…`), which is never sent to a server, so the classic ~8 KB
@@ -300,11 +305,12 @@ export function decodeSnapshot(blob: string): SnapshotData | null {
   return unpackSnapshot(data)
 }
 
-/** The full share URL: origin+path + `#v=<n>&s=<blob>`. */
-export function buildShareUrl(blob: string, base?: string): string {
+/** The full share URL: origin+path + `#v=<n>&s=<blob>`. `version` defaults to the
+ * sprint format; pass `COLLECTION_SNAPSHOT_VERSION` for a collection blob. */
+export function buildShareUrl(blob: string, base?: string, version: number = SNAPSHOT_VERSION): string {
   const root =
     base ?? (typeof location !== 'undefined' ? location.origin + location.pathname : '')
-  return `${root}#v=${SNAPSHOT_VERSION}&s=${blob}`
+  return `${root}#v=${version}&s=${blob}`
 }
 
 /**
@@ -313,7 +319,7 @@ export function buildShareUrl(blob: string, base?: string): string {
  * the lz-string blob can contain `+`, which `URLSearchParams` would turn into a
  * space and corrupt the payload.
  */
-export function parseShareHash(hash: string): string | null {
+export function parseShareHash(hash: string): { version: number; blob: string } | null {
   const h = hash.startsWith('#') ? hash.slice(1) : hash
   let v: string | null = null
   let s: string | null = null
@@ -325,6 +331,181 @@ export function parseShareHash(hash: string): string | null {
     if (key === 'v') v = val
     else if (key === 's') s = val
   }
-  if (v !== String(SNAPSHOT_VERSION)) return null
-  return s && s.length ? s : null
+  const version = v == null ? NaN : Number(v)
+  if (!KNOWN_VERSIONS.has(version) || !s || !s.length) return null
+  return { version, blob: s }
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Collection snapshots (v3). A collection groups by SECTION (no members), uses
+// user-defined statuses (each with a colour), and items carry only a date range
+// (no time / effort / priority). Different enough from the sprint format to get
+// its own version rather than overloading v2.
+// ──────────────────────────────────────────────────────────────────────────
+
+/** The normalized collection snapshot both sender and viewer speak. Section /
+ * status ids are synthetic indices (`s0…` / `x0…`); items reference them. */
+export interface CollectionSnapshotData {
+  exportedAt: string
+  project: { name: string }
+  collection: { name: string }
+  sections: { id: string; name: string; color?: string }[]
+  statuses: { id: string; name: string; color: string }[]
+  items: {
+    title: string
+    startDate: string | null
+    dueDate: string | null
+    sectionId: string | null
+    statusId: string | null
+  }[]
+}
+
+/**
+ * Build a collection snapshot from IN-MEMORY app data. `sectionIds` (optional)
+ * keeps only items in those sections (the modal's untick-to-trim). The full
+ * status set is carried (so the viewer's legend is complete); only sections that
+ * own a scoped item are carried. Items are ordered by section then listOrder.
+ */
+export function buildCollectionSnapshot(
+  project: Project,
+  collection: Collection,
+  items: Task[],
+  opts: { sectionIds?: string[] | null } = {}
+): CollectionSnapshotData {
+  const collItems = items.filter((t) => t.collectionId === collection.id)
+  const scoped =
+    opts.sectionIds != null
+      ? (() => {
+          const keep = new Set(opts.sectionIds)
+          return collItems.filter((t) => t.sectionId != null && keep.has(t.sectionId))
+        })()
+      : collItems
+
+  const usedSectionIds = new Set(scoped.map((t) => t.sectionId).filter(Boolean) as string[])
+  const usedSections = collection.sections.filter((s) => usedSectionIds.has(s.id))
+  const sectionIdx = new Map(usedSections.map((s, i) => [s.id, i]))
+  const statusIdx = new Map(collection.statuses.map((s, i) => [s.id, i]))
+
+  // Stable order: by section (collection order), then listOrder ?? sequence.
+  const ordered = [...scoped].sort((a, b) => {
+    const sa = a.sectionId != null ? sectionIdx.get(a.sectionId) ?? 999 : 999
+    const sb = b.sectionId != null ? sectionIdx.get(b.sectionId) ?? 999 : 999
+    if (sa !== sb) return sa - sb
+    return (a.listOrder ?? a.sequence) - (b.listOrder ?? b.sequence)
+  })
+
+  return {
+    exportedAt: new Date().toISOString(),
+    project: { name: project.name },
+    collection: { name: collection.name },
+    sections: usedSections.map((s, i) => ({ id: `s${i}`, name: s.name, color: s.color })),
+    statuses: collection.statuses.map((s, i) => ({ id: `x${i}`, name: s.name, color: s.color })),
+    items: ordered.map((t) => ({
+      title: t.title,
+      startDate: t.startDate ? t.startDate.slice(0, 10) : null,
+      dueDate: t.dueDate ? t.dueDate.slice(0, 10) : null,
+      sectionId: t.sectionId != null && sectionIdx.has(t.sectionId) ? `s${sectionIdx.get(t.sectionId)}` : null,
+      statusId:
+        t.collectionStatusId != null && statusIdx.has(t.collectionStatusId)
+          ? `x${statusIdx.get(t.collectionStatusId)}`
+          : null,
+    })),
+  }
+}
+
+/** Compact columnar wire shape (v3). */
+interface PackedCollection {
+  v: 3
+  ts: string
+  pj: string
+  cn: string
+  se: [string, string][] // [section name, color|'']
+  st: [string, string][] // [status name, color]
+  ti: string[]
+  sc: number[] // section index, -1 = none
+  xi: number[] // status index, -1 = none
+  a0: (string | null)[] // start yyyy-mm-dd (absolute)
+  a1: (string | null)[] // due yyyy-mm-dd (absolute)
+}
+
+function packCollection(d: CollectionSnapshotData): PackedCollection {
+  const secPos = new Map(d.sections.map((s, i) => [s.id, i]))
+  const stPos = new Map(d.statuses.map((s, i) => [s.id, i]))
+  return {
+    v: 3,
+    ts: d.exportedAt,
+    pj: d.project.name,
+    cn: d.collection.name,
+    se: d.sections.map((s) => [s.name, s.color ?? '']),
+    st: d.statuses.map((s) => [s.name, s.color]),
+    ti: d.items.map((t) => t.title),
+    sc: d.items.map((t) => (t.sectionId != null ? secPos.get(t.sectionId) ?? -1 : -1)),
+    xi: d.items.map((t) => (t.statusId != null ? stPos.get(t.statusId) ?? -1 : -1)),
+    a0: d.items.map((t) => t.startDate),
+    a1: d.items.map((t) => t.dueDate),
+  }
+}
+
+/** Compact columnar object → normalized collection snapshot; null if shape wrong. */
+function unpackCollection(o: unknown): CollectionSnapshotData | null {
+  if (!o || typeof o !== 'object') return null
+  const p = o as Record<string, unknown>
+  if (p.v !== 3) return null
+  if (typeof p.pj !== 'string' || typeof p.cn !== 'string') return null
+  const cols = [p.ti, p.sc, p.xi, p.a0, p.a1]
+  if (!isArr(p.se) || !isArr(p.st) || cols.some((c) => !isArr(c))) return null
+  const n = (p.ti as unknown[]).length
+  if (cols.some((c) => (c as unknown[]).length !== n)) return null
+
+  const sections = (p.se as unknown[]).map((row, i) => {
+    const r = (isArr(row) ? row : []) as unknown[]
+    return { id: `s${i}`, name: String(r[0] ?? ''), color: r[1] ? String(r[1]) : undefined }
+  })
+  const statuses = (p.st as unknown[]).map((row, i) => {
+    const r = (isArr(row) ? row : []) as unknown[]
+    return { id: `x${i}`, name: String(r[0] ?? ''), color: String(r[1] ?? '#8e8e93') }
+  })
+  const sc = p.sc as number[]
+  const xi = p.xi as number[]
+  const a0 = p.a0 as (string | null)[]
+  const a1 = p.a1 as (string | null)[]
+  const items = (p.ti as unknown[]).map((title, i) => ({
+    title: String(title ?? ''),
+    startDate: a0[i] != null ? String(a0[i]) : null,
+    dueDate: a1[i] != null ? String(a1[i]) : null,
+    sectionId: typeof sc[i] === 'number' && sc[i] >= 0 && sc[i] < sections.length ? `s${sc[i]}` : null,
+    statusId: typeof xi[i] === 'number' && xi[i] >= 0 && xi[i] < statuses.length ? `x${xi[i]}` : null,
+  }))
+  return {
+    exportedAt: typeof p.ts === 'string' ? p.ts : '',
+    project: { name: p.pj as string },
+    collection: { name: p.cn as string },
+    sections,
+    statuses,
+    items,
+  }
+}
+
+/** Pack + compress a collection snapshot to a URL-safe blob. */
+export function encodeCollectionSnapshot(data: CollectionSnapshotData): string {
+  return LZString.compressToEncodedURIComponent(JSON.stringify(packCollection(data)))
+}
+
+/** Decompress + validate a v3 blob back into a `CollectionSnapshotData`, or null. */
+export function decodeCollectionSnapshot(blob: string): CollectionSnapshotData | null {
+  if (!blob || blob.length > MAX_BLOB_LEN) return null
+  let json: string | null
+  try {
+    json = LZString.decompressFromEncodedURIComponent(blob)
+  } catch {
+    return null
+  }
+  if (!json) return null
+  let data: unknown
+  try {
+    data = JSON.parse(json)
+  } catch {
+    return null
+  }
+  return unpackCollection(data)
 }

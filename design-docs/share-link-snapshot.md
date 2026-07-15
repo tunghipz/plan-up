@@ -1,7 +1,10 @@
 # Share link — read-only snapshot
 
 **Status:** Implemented
-**Last updated:** 2026-07-14 (sender modal: **removed the size readout** — the "Link size"
+**Last updated:** 2026-07-15 (**collections share-link** — new `v=3` snapshot format +
+`CollectionShareModal` [trim by section] + `CollectionSnapshotViewer` [List + Calendar];
+Share button on the collection top bar next to Export; see "Collections (v3)" below.
+Earlier 2026-07-14: sender modal **removed the size readout** — the "Link size"
 meter + summary KB chip are gone; only a warning banner shows when the link is over the
 threshold. `SHARE_MAX_BYTES` recomputed `8000` → **`4000`** chars: the blob is in the URL
 fragment [not sent to a server], so the paste target [Telegram ~4096/message] is the real
@@ -210,10 +213,51 @@ lặp key, đóng gói **columnar** + mã hoá chặt:
   lạ. Link v1 cũ (bundle) không còn giải mã — chấp nhận được vì tính năng chưa phát
   hành.
 
+## Collections (v3)
+
+Collection cũng share được, **cùng cơ chế URL-fragment**, nhưng snapshot là **format
+riêng `v=3`** vì collection khác sprint về bản chất: nhóm theo **section** (không có
+member/assignee), status **do user tự tạo** (mỗi status có màu riêng), item chỉ có
+date-range (không giờ, không effort/priority/prereq). v2 (sprint) giữ nguyên; hai format
+sống song song, boot chọn viewer theo `version`.
+
+### Sender — `CollectionShareModal`
+- Nút **Share** nằm ở **top bar, ngang hàng nút Export** (không nhét trong menu) — chỉ
+  hiện khi collection có ≥1 item. (Sprint có nút Share ở page-header; collection không có
+  page-header nên đặt ở context bar.)
+- Modal mirror `ShareLinkModal` nhưng đơn vị tỉa là **section**: checklist mỗi row = ô
+  vuông bo màu-section + tên bảng + số item; untick để bỏ bảng khỏi link. Summary đếm
+  **items · sections** + dải chấm màu = bộ status của collection. Cùng luật size: **không
+  hiện KB**, chỉ cảnh báo khi vượt `SHARE_MAX_BYTES = 4000`; footer **Open** + **Copy link**.
+
+### Recipient — `CollectionSnapshotViewer`
+- Header capsule y hệt `SnapshotViewer` (icon + `plan-up` + "shared snapshot" + Read-only +
+  dark toggle + **Open plan-up** + **Export PNG**). Breadcrumb: `📚 {collection} · {project}`
+  + `N items` (không có dải ngày — collection không time-boxed).
+- Toggle **List | Calendar** (persist qua `plan-up:snapshotCollView`):
+  - **List** — card-per-section (Name · Start · End · Status); status = pill soft-tint màu
+    riêng; item không status → pill viền đứt. Item không ngày → cột hiện `—`.
+  - **Calendar** — tái dùng `buildMonthGrid`/`assignLanes`/`computeBarSegments` (lib.ts) như
+    `CollectionCalendar`: lưới tháng Mon-start, bar liền mạch màu theo status, legend, khay
+    **Unscheduled** cho item không ngày. Read-only: bar không mở popover.
+- **Export PNG** dựng lại `Collection` + `Task[]` tổng hợp từ snapshot rồi tái dùng
+  `CollectionImageModal`/`CollectionPngCard` (nhóm theo section).
+
+### Data (v3 wire — columnar)
+`CollectionSnapshotData` → `packCollection` (`v:3`): `pj` (project), `cn` (collection name),
+`se: [name,color][]` (sections), `st: [name,color][]` (statuses — **giữ đủ bộ** để legend
+đúng), `ti` titles, `sc` section-index/item (-1), `xi` status-index/item (-1), `a0`/`a1`
+start/due **yyyy-mm-dd tuyệt đối** (collection không có mốc `startDate` để neo offset như
+sprint). id section/status là synthetic (`s0…`/`x0…`). `decodeCollectionSnapshot` từ chối gì
+sai shape / `v≠3` (trả `null` → "Link không hợp lệ").
+
+### Wiring
+- `parseShareHash` giờ trả `{ version, blob }` (không phải chỉ blob); chỉ nhận version
+  **known** (2, 3). `buildShareUrl(blob, base?, version)` thêm tham số version.
+- `main.tsx`: `version === 3` → `<CollectionSnapshotViewer>`, còn lại → `<SnapshotViewer>`.
+
 ## Future / open questions
 
-- **Collection share-link**: cùng cơ chế, bundle thu hẹp về 1 collection; đặt trong
-  **Export ▾** cạnh *Copy for Telegram* (collection không có page header). Phase 2.
 - **Self-contained `.html` export**: hiện thực nhánh fallback "quá lớn" — xuất 1 file
   HTML tự chứa (viewer + bundle nhúng) gửi qua chat / host bất kỳ, không giới hạn
   size. Dùng chung `SnapshotViewer`.

@@ -74,7 +74,8 @@ import { IS_TAURI } from './backup'
 import { startAutoBackup } from './backup-tauri'
 import { BackupSettingsModal } from './BackupSettingsModal'
 import { ShareLinkModal } from './ShareLinkModal'
-import { buildSnapshot } from './share-snapshot'
+import { CollectionShareModal } from './CollectionShareModal'
+import { buildSnapshot, buildCollectionSnapshot } from './share-snapshot'
 import { CollectionImageModal } from './CollectionImageModal'
 import { membersWithTasks } from './telegram-export'
 import { usePinnedPopover } from './usePinnedPopover'
@@ -322,6 +323,7 @@ function App() {
   const [showNewSprint, setShowNewSprint] = useState(false)
   const [backupSettingsOpen, setBackupSettingsOpen] = useState(false)
   const [shareOpen, setShareOpen] = useState(false)
+  const [collShareOpen, setCollShareOpen] = useState(false)
   const [collImgOpen, setCollImgOpen] = useState(false)
   const [showNewProject, setShowNewProject] = useState(false)
   // Project switcher (header dropdown) — replaces the old icon rail. PORTALED to
@@ -1645,6 +1647,19 @@ function App() {
                 <History size={15} strokeWidth={1.9} />
               </button>
             )}
+            {/* Collection share link — sits on the top bar next to Export (the
+                collection has no page-header to hold a Share button like sprints
+                do). See design-docs/share-link-snapshot.md "Collections (v3)". */}
+            {selKind === 'collection' && currentCollection && (collectionItems?.length ?? 0) > 0 && (
+              <button
+                onClick={() => setCollShareOpen(true)}
+                title="Share read-only link"
+                aria-label="Share collection as a read-only link"
+                className="text-xs flex items-center gap-1.5 px-2 py-1.5 text-accent hover:bg-accent-soft rounded-md transition"
+              >
+                <Link2 size={13} strokeWidth={1.9} /> Share
+              </button>
+            )}
             {/* Export split-menu: "this project" (additive share file) vs the
                 full DB backup. See design-docs/project-export-import.md. */}
             <div className="relative" ref={exportMenuRef}>
@@ -1952,6 +1967,25 @@ function App() {
           onClose={() => setCollImgOpen(false)}
         />
       )}
+      {collShareOpen && currentCollection && currentProject && (() => {
+        const collItemsNow = (collectionItems ?? []).filter((t) => t.collectionId === currentCollection.id)
+        const counts: Record<string, number> = {}
+        for (const t of collItemsNow) if (t.sectionId) counts[t.sectionId] = (counts[t.sectionId] ?? 0) + 1
+        // Only sections that actually own an item become checklist rows.
+        const shareSections = currentCollection.sections.filter((s) => (counts[s.id] ?? 0) > 0)
+        return (
+          <CollectionShareModal
+            subtitle="Read-only snapshot · nothing leaves your device"
+            sections={shareSections}
+            counts={counts}
+            statusColors={currentCollection.statuses.map((s) => s.color)}
+            buildBundle={(ids) =>
+              buildCollectionSnapshot(currentProject, currentCollection, collectionItems ?? [], { sectionIds: ids })
+            }
+            onClose={() => setCollShareOpen(false)}
+          />
+        )
+      })()}
       {showNewSprint && currentProjectId && (
         <NewSprintDialog
           projectId={currentProjectId}

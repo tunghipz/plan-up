@@ -68,7 +68,7 @@ describe('exportAll/importAll People round-trip', () => {
   it('exports people (payload v5)', async () => {
     await seedTwoProjects()
     const data = await exportAll()
-    expect(data.version).toBe(5)
+    expect(data.version).toBe(6)
     expect(data.people).toHaveLength(2)
   })
 

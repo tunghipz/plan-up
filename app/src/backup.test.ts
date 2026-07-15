@@ -210,7 +210,7 @@ describe('runBackupNow', () => {
     }
     expect(daily.dir).toBe('/tmp/backups')
     expect(daily.subdir).toBeUndefined()
-    expect(JSON.parse(daily.contents).version).toBe(5)
+    expect(JSON.parse(daily.contents).version).toBe(6)
     expect(invoke.mock.calls[1]).toEqual(['prune_backups', { dir: '/tmp/backups', keep: 30 }])
     // 2. immutable version into versions/ + its own prune (keep 200)
     expect(invoke.mock.calls[2][0]).toBe('write_backup')

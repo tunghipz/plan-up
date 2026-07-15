@@ -1,28 +1,20 @@
 import { useMemo, useState } from 'react'
-import { Link2, Check, Copy, AlertTriangle, ExternalLink } from 'lucide-react'
+import { Link2, Check } from 'lucide-react'
 import { ModalSheet } from './ModalSheet'
 import { colorForName } from './schema'
 import type { Member } from './types'
-import {
-  buildSprintShareUrl,
-  SHARE_MAX_BYTES,
-  type SnapshotData,
-} from './share-snapshot'
-import { shareBaseUrl, openExternal } from './share-runtime'
+import { encodeSnapshot, buildSprintShareUrl, type SnapshotData } from './share-snapshot'
+import { slugify } from './share-hosted'
+import { shareBaseUrl } from './share-runtime'
+import { HostedShareControls } from './HostedShareControls'
 
 /**
- * Turn a sprint into a read-only share link (data packed into the URL fragment,
- * no server). Always whole-sprint; a member checklist lets the sender untick
- * people to trim the payload (rarely needed — compact v2 keeps links ~1 KB). The
- * caller supplies the members-with-tasks, a per-member task count, and a
- * `buildBundle(selectedIds)` returning the SnapshotData for that selection. See
- * design-docs/share-link-snapshot.md.
+ * Turn a sprint into a read-only share link. The primary link is a short,
+ * updatable HOSTED link (`/view/<slug>-<id>`, data on the store); an in-URL
+ * fragment link stays available as an offline fallback (via HostedShareControls).
+ * A member checklist lets the sender untick people to trim the snapshot. See
+ * design-docs/hosted-share-link.md + share-link-snapshot.md.
  */
-
-/** Middle-ellipsis so the long lz blob reads as a tidy link (copy uses the full URL). */
-function truncateMiddle(s: string, head = 30, tail = 8): string {
-  return s.length <= head + tail + 1 ? s : `${s.slice(0, head)}…${s.slice(-tail)}`
-}
 
 function Avatar({ member }: { member: Member }) {
   const color = member.color || colorForName(member.name)
@@ -41,12 +33,17 @@ function Avatar({ member }: { member: Member }) {
 
 export function ShareLinkModal({
   subtitle,
+  refId,
+  projectId,
   members,
   counts,
   buildBundle,
   onClose,
 }: {
   subtitle: string
+  /** The sprint id — key for the local share record. */
+  refId: string
+  projectId: string
   /** Members that own at least one task in the sprint (checklist rows). */
   members: Member[]
   /** Assignee-only task count per member id (for the row's count). */
@@ -56,16 +53,18 @@ export function ShareLinkModal({
   onClose: () => void
 }) {
   const [selected, setSelected] = useState<Set<string>>(() => new Set(members.map((m) => m.id)))
-  const [copied, setCopied] = useState(false)
 
-  const { bundle, url, bytes } = useMemo(() => {
+  const { bundle, blob, fallbackUrl, slug } = useMemo(() => {
     const bundle = buildBundle([...selected])
-    const url = buildSprintShareUrl(bundle, shareBaseUrl())
-    return { bundle, url, bytes: url.length }
+    return {
+      bundle,
+      blob: encodeSnapshot(bundle),
+      fallbackUrl: buildSprintShareUrl(bundle, shareBaseUrl()),
+      slug: slugify(bundle.sprint.name || bundle.project.name),
+    }
   }, [buildBundle, selected])
 
   const empty = bundle.tasks.length === 0
-  const over = bytes > SHARE_MAX_BYTES
 
   const allOn = selected.size === members.length
   const toggle = (id: string) =>
@@ -76,28 +75,6 @@ export function ShareLinkModal({
       return next
     })
   const toggleAll = () => setSelected(allOn ? new Set() : new Set(members.map((m) => m.id)))
-
-  const doCopy = async () => {
-    if (empty) return
-    try {
-      await navigator.clipboard.writeText(url)
-    } catch {
-      const ta = document.createElement('textarea')
-      ta.value = url
-      ta.style.position = 'fixed'
-      ta.style.opacity = '0'
-      document.body.appendChild(ta)
-      ta.select()
-      try {
-        document.execCommand('copy')
-      } catch {
-        /* give up silently — the field is still selectable */
-      }
-      ta.remove()
-    }
-    setCopied(true)
-    window.setTimeout(() => setCopied(false), 1400)
-  }
 
   return (
     <ModalSheet title="Share link" onClose={onClose}>
@@ -127,7 +104,7 @@ export function ShareLinkModal({
               {allOn ? 'Bỏ chọn tất cả' : 'Chọn tất cả'}
             </button>
           </div>
-          <div className="rounded-[11px] border border-border overflow-hidden max-h-[214px] overflow-y-auto">
+          <div className="rounded-[11px] border border-border overflow-hidden max-h-[196px] overflow-y-auto">
             {members.map((m, i) => {
               const on = selected.has(m.id)
               return (
@@ -158,59 +135,16 @@ export function ShareLinkModal({
         </div>
       )}
 
-      {/* The link. Read-only, middle-truncated; copy uses the full URL. */}
-      <div>
-        <div className="mb-1.5 text-[12px] text-ink-faint">Link</div>
-        <div
-          onClick={() => !empty && navigator.clipboard?.writeText(url).catch(() => {})}
-          title={url}
-          className="w-full rounded-[10px] bg-fill border border-border px-3 py-2 text-[12px] font-mono text-ink-muted truncate cursor-pointer"
-        >
-          {empty ? '—' : truncateMiddle(url)}
-        </div>
-      </div>
-
-      {/* No size readout — the link works well beyond the browser's limit; we only
-          warn when it's big enough that a chat app (Telegram/Zalo) might truncate. */}
-      {empty ? (
-        <div className="flex items-start gap-2.5 rounded-[11px] bg-fill border border-border px-3.5 py-3 text-[12.5px] text-ink-muted">
-          <AlertTriangle size={16} strokeWidth={2} className="text-ink-faint shrink-0 mt-0.5" aria-hidden />
-          <span>Chọn ít nhất 1 member để tạo link.</span>
-        </div>
-      ) : (
-        over && (
-          <div className="flex items-start gap-2.5 rounded-[11px] bg-accent-soft border border-accent/25 px-3.5 py-3 text-[12.5px] text-ink">
-            <AlertTriangle size={16} strokeWidth={2} className="text-accent shrink-0 mt-0.5" aria-hidden />
-            <span>
-              Sprint lớn — link vượt ngưỡng, một số chat (Telegram/Zalo) có thể cắt cụt. Bỏ tick member nặng để thu
-              nhỏ. Vẫn copy được nếu muốn thử.
-            </span>
-          </div>
-        )
-      )}
-
-      {/* Footer: Open (preview the read-only link in a new tab) + Copy link. */}
-      <div className="flex items-center gap-2">
-        <button
-          onClick={() => !empty && openExternal(url)}
-          disabled={empty}
-          title="Mở link read-only trong tab mới (xem thử như người nhận)"
-          className="inline-flex items-center justify-center gap-2 rounded-[11px] bg-fill px-4 py-2.5 text-[14px] font-semibold text-ink transition hover:bg-[rgba(0,0,0,0.09)] active:scale-[0.98] disabled:opacity-40 disabled:active:scale-100 dark:hover:bg-white/10"
-        >
-          <ExternalLink size={15} strokeWidth={2} aria-hidden />
-          Open
-        </button>
-        <button
-          onClick={doCopy}
-          disabled={empty}
-          className={`flex-1 inline-flex items-center justify-center gap-2 rounded-[11px] px-4 py-2.5 text-[14px] font-semibold text-white transition active:scale-[0.98] disabled:opacity-40 disabled:active:scale-100 ${
-            copied ? 'bg-status-done' : 'brand-btn'
-          }`}
-        >
-          {copied ? <Check size={16} strokeWidth={2.4} /> : <Copy size={15} strokeWidth={2} />}
-          {copied ? 'Copied' : over ? 'Copy link anyway' : 'Copy link'}
-        </button>
-      </div>
+      {/* Hosted link (short, updatable) + offline fallback. */}
+      <HostedShareControls
+        refId={refId}
+        projectId={projectId}
+        kind="sprint"
+        slug={slug}
+        blob={blob}
+        empty={empty}
+        fallbackUrl={fallbackUrl}
+      />
     </ModalSheet>
   )
 }

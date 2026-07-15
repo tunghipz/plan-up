@@ -44,14 +44,14 @@ async function seedV1(name: string) {
   old.close()
 }
 
-describe('v1 → v13 migration chain (through Dexie, not the extracted fns)', () => {
+describe('v1 → v14 migration chain (through Dexie, not the extracted fns)', () => {
   it('upgrades a v1 database end-to-end', async () => {
     const name = freshName()
     await seedV1(name)
 
     const db = new PlanDB(name)
     await db.open()
-    expect(db.verno).toBe(13)
+    expect(db.verno).toBe(14)
 
     const tasks = await db.tasks.toArray()
     const byId = new Map(tasks.map((t) => [t.id, t]))

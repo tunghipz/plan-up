@@ -5,6 +5,7 @@ import type {
   Member,
   Person,
   Project,
+  ShareRecord,
   Sprint,
   Task,
 } from './types'
@@ -14,7 +15,7 @@ import { defaultSprintDates, todayLocalISO } from './lib'
 import { remapBundle, type ProjectBundle } from './project-io'
 
 export interface ExportPayload {
-  version: 1 | 2 | 3 | 4 | 5
+  version: 1 | 2 | 3 | 4 | 5 | 6
   exportedAt: string
   /** v2 introduces multi-project. v1 payloads have no `projects` field. */
   projects?: Project[]
@@ -30,10 +31,16 @@ export interface ExportPayload {
    * people from member names, silently undoing merges, renames and colors.
    */
   people?: Person[]
+  /**
+   * v6 carries hosted share links (write tokens included) so a restore on the
+   * same or another machine can still Update/Revoke existing links. Older
+   * payloads have none — shares simply start empty. See design-docs/hosted-share-link.md.
+   */
+  shares?: ShareRecord[]
 }
 
 export async function exportAll(): Promise<ExportPayload> {
-  const [projects, members, sprints, collections, tasks, events, people] =
+  const [projects, members, sprints, collections, tasks, events, people, shares] =
     await Promise.all([
       db.projects.toArray(),
       db.members.toArray(),
@@ -42,9 +49,10 @@ export async function exportAll(): Promise<ExportPayload> {
       db.tasks.toArray(),
       db.events.toArray(),
       db.people.toArray(),
+      db.shares.toArray(),
     ])
   return {
-    version: 5,
+    version: 6,
     exportedAt: new Date().toISOString(),
     projects,
     members,
@@ -53,11 +61,12 @@ export async function exportAll(): Promise<ExportPayload> {
     tasks,
     events,
     people,
+    shares,
   }
 }
 
 export async function importAll(data: ExportPayload) {
-  if (!data || ![1, 2, 3, 4, 5].includes(data.version)) {
+  if (!data || ![1, 2, 3, 4, 5, 6].includes(data.version)) {
     throw new Error('Unsupported export version')
   }
   // Validate shape BEFORE the transaction clears anything. A payload can carry
@@ -73,14 +82,15 @@ export async function importAll(data: ExportPayload) {
     (data.projects !== undefined && !Array.isArray(data.projects)) ||
     (data.collections !== undefined && !Array.isArray(data.collections)) ||
     (data.events !== undefined && !Array.isArray(data.events)) ||
-    (data.people !== undefined && !Array.isArray(data.people))
+    (data.people !== undefined && !Array.isArray(data.people)) ||
+    (data.shares !== undefined && !Array.isArray(data.shares))
   ) {
     throw new Error('Not a valid plan-up backup')
   }
   try {
    await db.transaction(
     'rw',
-    [db.projects, db.members, db.sprints, db.collections, db.tasks, db.events, db.people],
+    [db.projects, db.members, db.sprints, db.collections, db.tasks, db.events, db.people, db.shares],
     async () => {
       await db.events.clear()
       await db.tasks.clear()
@@ -89,6 +99,7 @@ export async function importAll(data: ExportPayload) {
       await db.collections.clear()
       await db.projects.clear()
       await db.people.clear()
+      await db.shares.clear()
       // v1 payloads predate multi-project — synthesize a default project
       // and stamp it onto every row. Any payload that carries `projects`
       // (v2, v3, …) must keep its real project ids, otherwise sprints/
@@ -200,6 +211,13 @@ export async function importAll(data: ExportPayload) {
       // (taskId/sprintId/projectId) which are preserved above for v2+ payloads.
       if (data.version >= 4 && Array.isArray(data.events) && data.events.length) {
         await db.events.bulkAdd(data.events)
+      }
+
+      // v6+ carries hosted share links (with write tokens). Restore verbatim so
+      // existing links stay Updatable/Revocable after a restore. refId points at
+      // a sprint/collection id, both preserved above for v2+ payloads.
+      if (data.version >= 6 && Array.isArray(data.shares) && data.shares.length) {
+        await db.shares.bulkAdd(data.shares)
       }
     }
    )

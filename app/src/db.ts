@@ -20,6 +20,7 @@ import {
   type Person,
   type Priority,
   type Project,
+  type ShareRecord,
   type Status,
   type Task,
 } from './types'
@@ -1090,6 +1091,23 @@ export async function mergePeople(srcId: string, dstId: string): Promise<void> {
     await db.members.where('personId').equals(srcId).modify({ personId: dstId })
     await db.people.delete(srcId)
   })
+}
+
+// ---- Hosted share links (design-docs/hosted-share-link.md) ----
+
+/** The hosted-share record for a sprint/collection, or undefined if not shared. */
+export async function getShareForRef(refId: string): Promise<ShareRecord | undefined> {
+  return db.shares.where('refId').equals(refId).first()
+}
+
+/** Upsert a share record (keyed by store id). */
+export async function saveShareRecord(rec: ShareRecord): Promise<void> {
+  await db.shares.put(rec)
+}
+
+/** Forget a share locally (after a successful revoke). */
+export async function deleteShareRecord(id: string): Promise<void> {
+  await db.shares.delete(id)
 }
 
 /** Rename a person (display name only; does not touch member.name). */

@@ -1,5 +1,11 @@
 # Share link — read-only snapshot
 
+> **Companion:** [hosted-share-link.md](./hosted-share-link.md) adds a SECOND share mode —
+> a short, updatable `…/view/<slug>-<id>` link backed by a store. This doc describes the
+> original **in-URL fragment** link, which is now the **offline fallback** for that mode
+> (still fully functional on its own). The pure encode/decode + both viewers here are reused
+> verbatim by the hosted mode.
+
 **Status:** Implemented
 **Last updated:** 2026-07-15 (**collections share-link** — new `v=3` snapshot format +
 `CollectionShareModal` [trim by section] + `CollectionSnapshotViewer` [List + Calendar];

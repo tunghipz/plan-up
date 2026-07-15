@@ -6,6 +6,7 @@ import type {
   Member,
   Person,
   Project,
+  ShareRecord,
   Sprint,
   Task,
 } from './types'
@@ -19,6 +20,7 @@ export class PlanDB extends Dexie {
   collections!: Table<Collection, string>
   events!: Table<ActivityEvent, string>
   people!: Table<Person, string>
+  shares!: Table<ShareRecord, string>
 
   constructor(name = 'plan-up') {
     super(name)
@@ -227,6 +229,21 @@ export class PlanDB extends Dexie {
           await tx.table('members').update(memberId, { personId })
         }
       })
+    // v14 (2026-07-15): hosted share links (design-docs/hosted-share-link.md).
+    // New `shares` table mapping a sprint/collection to its short `/view/<id>`
+    // link + the local-only write token. No backfill — nobody has a share yet.
+    // Carry forward every v13 table (only `shares` is added). `refId` is indexed
+    // to answer "is this plan already shared?"; `projectId` for project-scoped wipes.
+    this.version(14).stores({
+      projects: 'id, name, createdAt',
+      members: 'id, name, projectId, personId',
+      sprints: 'id, startDate, projectId',
+      collections: 'id, projectId, order',
+      tasks: 'id, sprintId, assigneeId, status, createdAt, projectId, collectionId',
+      events: 'id, sprintId, ts, projectId',
+      people: 'id, name',
+      shares: 'id, refId, projectId',
+    })
   }
 }
 

@@ -1,27 +1,26 @@
 import { useMemo, useState } from 'react'
-import { Link2, Check, Copy, AlertTriangle, ExternalLink, Rows3 } from 'lucide-react'
+import { Link2, Check, Rows3 } from 'lucide-react'
 import { ModalSheet } from './ModalSheet'
 import {
+  encodeCollectionSnapshot,
   buildCollectionShareUrl,
-  SHARE_MAX_BYTES,
   type CollectionSnapshotData,
 } from './share-snapshot'
-import { shareBaseUrl, openExternal } from './share-runtime'
+import { slugify } from './share-hosted'
+import { shareBaseUrl } from './share-runtime'
+import { HostedShareControls } from './HostedShareControls'
 
 /**
- * Turn a collection into a read-only share link (v3 snapshot in the URL
- * fragment, no server). The trim unit is the SECTION (collections have no
- * members/assignees): a checklist lets the sender untick a table to leave it
- * out. Mirrors ShareLinkModal's shell/idiom. See design-docs/share-link-snapshot.md.
+ * Turn a collection into a read-only share link. Primary = short updatable HOSTED
+ * link (`/view/<slug>-<id>`); in-URL fragment link stays as an offline fallback
+ * (via HostedShareControls). The trim unit is the SECTION (collections have no
+ * members): a checklist lets the sender untick a table to leave it out. See
+ * design-docs/hosted-share-link.md + share-link-snapshot.md.
  */
-
-/** Middle-ellipsis so the long lz blob reads as a tidy link (copy uses the full URL). */
-function truncateMiddle(s: string, head = 30, tail = 8): string {
-  return s.length <= head + tail + 1 ? s : `${s.slice(0, head)}…${s.slice(-tail)}`
-}
-
 export function CollectionShareModal({
   subtitle,
+  refId,
+  projectId,
   sections,
   counts,
   statusColors,
@@ -29,6 +28,9 @@ export function CollectionShareModal({
   onClose,
 }: {
   subtitle: string
+  /** The collection id — key for the local share record. */
+  refId: string
+  projectId: string
   /** Sections that own at least one item (checklist rows). */
   sections: { id: string; name: string; color?: string }[]
   /** Item count per section id (for the row's count). */
@@ -40,16 +42,18 @@ export function CollectionShareModal({
   onClose: () => void
 }) {
   const [selected, setSelected] = useState<Set<string>>(() => new Set(sections.map((s) => s.id)))
-  const [copied, setCopied] = useState(false)
 
-  const { bundle, url, bytes } = useMemo(() => {
+  const { bundle, blob, fallbackUrl, slug } = useMemo(() => {
     const bundle = buildBundle([...selected])
-    const url = buildCollectionShareUrl(bundle, shareBaseUrl())
-    return { bundle, url, bytes: url.length }
+    return {
+      bundle,
+      blob: encodeCollectionSnapshot(bundle),
+      fallbackUrl: buildCollectionShareUrl(bundle, shareBaseUrl()),
+      slug: slugify(bundle.collection.name),
+    }
   }, [buildBundle, selected])
 
   const empty = bundle.items.length === 0
-  const over = bytes > SHARE_MAX_BYTES
 
   const allOn = selected.size === sections.length
   const toggle = (id: string) =>
@@ -60,28 +64,6 @@ export function CollectionShareModal({
       return next
     })
   const toggleAll = () => setSelected(allOn ? new Set() : new Set(sections.map((s) => s.id)))
-
-  const doCopy = async () => {
-    if (empty) return
-    try {
-      await navigator.clipboard.writeText(url)
-    } catch {
-      const ta = document.createElement('textarea')
-      ta.value = url
-      ta.style.position = 'fixed'
-      ta.style.opacity = '0'
-      document.body.appendChild(ta)
-      ta.select()
-      try {
-        document.execCommand('copy')
-      } catch {
-        /* give up silently — the field is still selectable */
-      }
-      ta.remove()
-    }
-    setCopied(true)
-    window.setTimeout(() => setCopied(false), 1400)
-  }
 
   return (
     <ModalSheet title="Share link" onClose={onClose}>
@@ -115,7 +97,7 @@ export function CollectionShareModal({
               {allOn ? 'Bỏ chọn tất cả' : 'Chọn tất cả'}
             </button>
           </div>
-          <div className="rounded-[11px] border border-border overflow-hidden max-h-[214px] overflow-y-auto">
+          <div className="rounded-[11px] border border-border overflow-hidden max-h-[196px] overflow-y-auto">
             {sections.map((s, i) => {
               const on = selected.has(s.id)
               return (
@@ -151,59 +133,16 @@ export function CollectionShareModal({
         </div>
       )}
 
-      {/* The link. Read-only, middle-truncated; copy uses the full URL. */}
-      <div>
-        <div className="mb-1.5 text-[12px] text-ink-faint">Link</div>
-        <div
-          onClick={() => !empty && navigator.clipboard?.writeText(url).catch(() => {})}
-          title={url}
-          className="w-full rounded-[10px] bg-fill border border-border px-3 py-2 text-[12px] font-mono text-ink-muted truncate cursor-pointer"
-        >
-          {empty ? '—' : truncateMiddle(url)}
-        </div>
-      </div>
-
-      {/* No size readout — the link works well beyond the browser's limit; we only
-          warn when it's big enough that a chat app (Telegram/Zalo) might truncate. */}
-      {empty ? (
-        <div className="flex items-start gap-2.5 rounded-[11px] bg-fill border border-border px-3.5 py-3 text-[12.5px] text-ink-muted">
-          <AlertTriangle size={16} strokeWidth={2} className="text-ink-faint shrink-0 mt-0.5" aria-hidden />
-          <span>Chọn ít nhất 1 section để tạo link.</span>
-        </div>
-      ) : (
-        over && (
-          <div className="flex items-start gap-2.5 rounded-[11px] bg-accent-soft border border-accent/25 px-3.5 py-3 text-[12.5px] text-ink">
-            <AlertTriangle size={16} strokeWidth={2} className="text-accent shrink-0 mt-0.5" aria-hidden />
-            <span>
-              Collection lớn — link vượt ngưỡng, một số chat (Telegram/Zalo) có thể cắt cụt. Bỏ tick section nặng để
-              thu nhỏ. Vẫn copy được nếu muốn thử.
-            </span>
-          </div>
-        )
-      )}
-
-      {/* Footer: Open (preview the read-only link in a new tab) + Copy link. */}
-      <div className="flex items-center gap-2">
-        <button
-          onClick={() => !empty && openExternal(url)}
-          disabled={empty}
-          title="Mở link read-only trong tab mới (xem thử như người nhận)"
-          className="inline-flex items-center justify-center gap-2 rounded-[11px] bg-fill px-4 py-2.5 text-[14px] font-semibold text-ink transition hover:bg-[rgba(0,0,0,0.09)] active:scale-[0.98] disabled:opacity-40 disabled:active:scale-100 dark:hover:bg-white/10"
-        >
-          <ExternalLink size={15} strokeWidth={2} aria-hidden />
-          Open
-        </button>
-        <button
-          onClick={doCopy}
-          disabled={empty}
-          className={`flex-1 inline-flex items-center justify-center gap-2 rounded-[11px] px-4 py-2.5 text-[14px] font-semibold text-white transition active:scale-[0.98] disabled:opacity-40 disabled:active:scale-100 ${
-            copied ? 'bg-status-done' : 'brand-btn'
-          }`}
-        >
-          {copied ? <Check size={16} strokeWidth={2.4} /> : <Copy size={15} strokeWidth={2} />}
-          {copied ? 'Copied' : over ? 'Copy link anyway' : 'Copy link'}
-        </button>
-      </div>
+      {/* Hosted link (short, updatable) + offline fallback. */}
+      <HostedShareControls
+        refId={refId}
+        projectId={projectId}
+        kind="collection"
+        slug={slug}
+        blob={blob}
+        empty={empty}
+        fallbackUrl={fallbackUrl}
+      />
     </ModalSheet>
   )
 }

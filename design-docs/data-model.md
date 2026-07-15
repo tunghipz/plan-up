@@ -112,6 +112,17 @@ Seven IndexedDB tables (Dexie database name **`plan-up`**): `projects`, `members
   zero remaining members is kept (hidden from the roster), not deleted. Rename/recolor/merge
   via the People roster. See [home-dashboard.md](./home-dashboard.md).
 
+### `ShareRecord` (`types.ts`, table `shares`)
+`id` (= the `/view` URL suffix — the store key) · `refId` (the shared `sprintId` or
+`collectionId`, **indexed**) · `kind` (`'sprint' | 'collection'`) · `slug` (cosmetic URL
+prefix) · `writeToken` (**secret**, local only — authorizes PUT/DELETE on the store) ·
+`url` (full shareable link) · `createdAt` · `updatedAt` · `projectId`. Added in **v14**.
+- Local map of a plan → its **hosted share link** (short, updatable `/view/<slug>-<id>`,
+  data on a Vercel KV / Upstash store). Lets the Share button know a plan is already shared
+  and drives Update/Revoke. Travels in the full backup (v6) so a restore keeps the token.
+- **Not cascade-deleted** on project/plan delete — the store entry's TTL (90 days) cleans it
+  up. See [hosted-share-link.md](./hosted-share-link.md).
+
 ### Value types
 - `ChangeLogEntry`: `{ field: LoggableField; from: string|null; to: string|null;
   ts: number }` over 8 loggable fields (title, status, priority, assigneeId, startDate,
@@ -131,7 +142,7 @@ All dates are stored as `yyyy-mm-dd` strings.
 
 ## Schema versioning
 
-Dexie `version().stores()` + an upgrade callback per bump. Current version: **13**.
+Dexie `version().stores()` + an upgrade callback per bump. Current version: **14**.
 
 | Ver | Change |
 | --- | --- |
@@ -148,6 +159,7 @@ Dexie `version().stores()` + an upgrade callback per bump. Current version: **13
 | 11 | Remove the per-task `Task.changeLog` field (per-task change log removed). Upgrade strips the dead property from existing task rows; no index change. |
 | 12 | Add `Member.order` (non-indexed manual lane order); backfill per project to `0..N-1` in current `toArray()` order. See [member-lane-order.md](./member-lane-order.md). |
 | 13 | Add `people` table + indexed `Member.personId` (re-declare full `members` store). Backfill groups existing members by normalized name across all projects → one person each, linked. Scheduler untouched. See [home-dashboard.md](./home-dashboard.md). |
+| 14 | Add `shares` table (hosted share links). No backfill — nobody has a share yet. See [hosted-share-link.md](./hosted-share-link.md). |
 
 Current indexes:
 - `projects`: `id, name, createdAt`
@@ -157,6 +169,7 @@ Current indexes:
 - `tasks`: `id, sprintId, assigneeId, status, createdAt, projectId, collectionId`
 - `collections`: `id, projectId, order`
 - `events`: `id, sprintId, ts, projectId`
+- `shares`: `id, refId, projectId`
 
 ## Rules & edge cases
 - **Bump the version + add an upgrade callback whenever a field/index changes.** Never

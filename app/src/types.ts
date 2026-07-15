@@ -215,6 +215,30 @@ export interface Collection {
   createdAt: number
 }
 
+/**
+ * Local record of a hosted share link (Dexie `shares`, v14). Maps a sprint /
+ * collection to its short `/view/<slug>-<id>` link so the Share button knows it's
+ * already shared and can Update/Revoke it. The `writeToken` is a secret that
+ * authorizes writes to the store — it lives ONLY on this machine (and travels in
+ * the full backup) and is never sent to a viewer. See design-docs/hosted-share-link.md.
+ */
+export interface ShareRecord {
+  /** The store key = the `<id>` suffix of the /view URL. */
+  id: string
+  /** The shared sprintId or collectionId (indexed → "is this plan shared?"). */
+  refId: string
+  kind: 'sprint' | 'collection'
+  /** Cosmetic slug at share time (URL prefix); rebuilt on Update after a rename. */
+  slug: string
+  /** Write-capability token for PUT/DELETE. Secret — local only. */
+  writeToken: string
+  /** The full shareable URL last shown/copied. */
+  url: string
+  createdAt: number
+  updatedAt: number
+  projectId: string
+}
+
 export interface Task {
   id: string
   projectId: string

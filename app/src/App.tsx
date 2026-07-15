@@ -1921,7 +1921,9 @@ function App() {
         for (const t of sprintTasksNow) if (t.assigneeId) counts[t.assigneeId] = (counts[t.assigneeId] ?? 0) + 1
         return (
           <ShareLinkModal
-            subtitle="Read-only snapshot · nothing leaves your device"
+            subtitle="Read-only · link ngắn, cập nhật tại chỗ"
+            refId={currentSprint.id}
+            projectId={currentProject.id}
             members={shareMembers}
             counts={counts}
             buildBundle={(ids) =>
@@ -1939,7 +1941,9 @@ function App() {
         const shareSections = currentCollection.sections.filter((s) => (counts[s.id] ?? 0) > 0)
         return (
           <CollectionShareModal
-            subtitle="Read-only snapshot · nothing leaves your device"
+            subtitle="Read-only · link ngắn, cập nhật tại chỗ"
+            refId={currentCollection.id}
+            projectId={currentProject.id}
             sections={shareSections}
             counts={counts}
             statusColors={currentCollection.statuses.map((s) => s.color)}

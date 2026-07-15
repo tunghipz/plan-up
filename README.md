@@ -41,8 +41,13 @@ click to download the signed update and relaunch (see
 [`design-docs/desktop-auto-update.md`](./design-docs/desktop-auto-update.md)).
 Desktop-only **Auto backup**: Export menu → *Auto backup…*
 → pick a folder; the app writes `plan-up-YYYY-MM-DD.json` there 30 s after any data
-change, keeping the newest 30 files. See [`design-docs/desktop-app-tauri.md`](./design-docs/desktop-app-tauri.md)
-and [`design-docs/auto-backup.md`](./design-docs/auto-backup.md).
+change, keeping the newest 30 files (plus an immutable `versions/` snapshot per change,
+newest 200). Desktop-only **Restore từ version**: the backup settings modal lists those
+`versions/` snapshots — pick one, preview its project/sprint/task counts, and restore the
+whole DB to it (it auto-snapshots the current state first, so a mistaken restore is
+undoable). See [`design-docs/desktop-app-tauri.md`](./design-docs/desktop-app-tauri.md),
+[`design-docs/auto-backup.md`](./design-docs/auto-backup.md) and
+[`design-docs/restore-versions.md`](./design-docs/restore-versions.md).
 
 ## What's inside
 

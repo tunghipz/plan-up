@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { FolderOpen } from 'lucide-react'
 import { ModalSheet } from './ModalSheet'
 import {
@@ -69,6 +69,10 @@ function RestoreSection() {
   const [preview, setPreview] = useState<ExportPayload | null>(null)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+  // Monotonic id so an out-of-order readVersion (rapid row switching) can't
+  // paint a stale snapshot's counts into the currently-selected row's preview —
+  // the preview is the verify-before-restore check, so wrong counts are unsafe.
+  const reqId = useRef(0)
 
   useEffect(() => {
     listVersions()
@@ -77,16 +81,20 @@ function RestoreSection() {
   }, [])
 
   const pick = async (file: string) => {
+    const myReq = ++reqId.current
     setSelected(file)
     setPreview(null)
     setErr(null)
     setBusy(true)
     try {
-      setPreview(await readVersion(file))
+      const p = await readVersion(file)
+      if (myReq !== reqId.current) return // superseded by a newer pick
+      setPreview(p)
     } catch (e) {
+      if (myReq !== reqId.current) return
       setErr(`Không đọc được version: ${String(e)}`)
     } finally {
-      setBusy(false)
+      if (myReq === reqId.current) setBusy(false)
     }
   }
 

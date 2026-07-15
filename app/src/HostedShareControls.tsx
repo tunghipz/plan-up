@@ -122,9 +122,12 @@ export function HostedShareControls({
   // reopen. A record with no lastSig (created before the field existed) reads as stale.
   const dirty = !!record && record.lastSig !== sig
   // Project-scope: the open sprint isn't the one currently live on the shared link.
-  // Switching sprint always reads dirty (its sig differs), so Cập nhật repoints the link.
+  // Switching sprint normally reads dirty too (its sig differs), but two sprints CAN
+  // share a byte-identical snapshot — so track switching independently and drive the
+  // Update affordance off `needsUpdate` (not `dirty` alone) or the pointer never moves.
   const switching =
     scope === 'project' && !!record && !!record.currentRefId && record.currentRefId !== refId
+  const needsUpdate = dirty || switching
 
   async function doCreate() {
     setBusy('create')
@@ -302,11 +305,13 @@ export function HostedShareControls({
       {/* Sync hint */}
       <div className="flex flex-col gap-1 text-[12px]">
         <span className="flex items-center gap-2">
-          {dirty ? (
+          {needsUpdate ? (
             <span className="inline-flex items-center gap-1.5 font-semibold text-[#c98a12] dark:text-[#e0a83a]">
               <span className="w-[7px] h-[7px] rounded-full bg-[#e0a83a]" />
               {switching
-                ? `Link đang hiển thị ${record.currentLabel ?? 'sprint khác'} — Cập nhật để chuyển sang sprint này`
+                ? empty
+                  ? `Sprint này chưa có task — link vẫn đang hiển thị ${record.currentLabel ?? 'sprint khác'}`
+                  : `Link đang hiển thị ${record.currentLabel ?? 'sprint khác'} — Cập nhật để chuyển sang sprint này`
                 : 'Link đang giữ bản cũ — bấm Cập nhật'}
             </span>
           ) : (
@@ -346,7 +351,7 @@ export function HostedShareControls({
           <ExternalLink size={15} strokeWidth={2} />
           Open
         </button>
-        {dirty && (
+        {needsUpdate && (
           <button
             onClick={doUpdate}
             disabled={busy !== '' || empty}
@@ -357,7 +362,7 @@ export function HostedShareControls({
                   ? 'Chuyển link sang sprint đang mở (URL không đổi)'
                   : 'Đẩy bản mới nhất lên (link không đổi)'
             }
-            className="inline-flex items-center justify-center gap-1.5 rounded-[11px] bg-fill px-3 py-2.5 text-[13.5px] font-semibold text-accent transition hover:bg-accent-soft active:scale-[0.98] disabled:opacity-50"
+            className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-[11px] bg-fill px-3 py-2.5 text-[13.5px] font-semibold text-accent transition hover:bg-accent-soft active:scale-[0.98] disabled:opacity-50"
           >
             <RefreshCw size={15} strokeWidth={2} className={busy === 'update' ? 'animate-spin' : ''} />
             {busy === 'update' ? 'Đang cập nhật…' : switching ? 'Chuyển sang sprint này' : 'Cập nhật'}
@@ -365,7 +370,7 @@ export function HostedShareControls({
         )}
         <button
           onClick={doCopy}
-          className={`flex-1 inline-flex items-center justify-center gap-2 rounded-[11px] px-4 py-2.5 text-[14px] font-semibold text-white transition active:scale-[0.98] ${
+          className={`flex-1 inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-[11px] px-4 py-2.5 text-[14px] font-semibold text-white transition active:scale-[0.98] ${
             copied ? 'bg-status-done' : 'brand-btn'
           }`}
         >

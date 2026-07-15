@@ -190,11 +190,16 @@ dùng nguyên si). `wt` = hash của writeToken (không lưu token thô). TTL 90
     sprint đang live được share lại). Mở **sprint khác** → trim reset về "all" (member set khác
     nhau nên không kế thừa trim của sprint đang live). Đổi sprint làm `sig` khác `lastSig` nên
     tự động dirty (đúng: cần Cập nhật để chuyển link sang sprint mới).
-- **Link sprint kiểu cũ (per-ref) còn sống** → sau Hướng A, `getProjectShare` không thấy record
-  cũ (`scope` absent). Mở Share ở sprint đó → hiện "Tạo link" → tạo link project mới; link
-  per-ref cũ thành **mồ côi** (UI không quản nữa) nhưng vẫn đọc được tới khi TTL 90 ngày dọn.
-  Chấp nhận được (single-user, chưa phát hành rộng); muốn dọn sớm thì Revoke thủ công trước khi
-  nâng cấp. Không auto-adopt để tránh mập mờ "record nào của sprint nào".
+- **Link sprint kiểu cũ (per-ref) → auto-adopt ở Dexie v15** → record sprint cũ (`scope`
+  absent, `refId=sprintId`) được **migration v15** viết lại thành project-scope
+  (`scope='project'`, `currentRefId=<sprintId cũ>`, `refId=projectId`) → `getProjectShare`
+  thấy lại → UI quản/Update/Revoke được như thường (không còn mồ côi). Collection giữ per-ref
+  (migration chỉ đụng `kind==='sprint'`). Trường hợp hiếm 1 project có **nhiều** link per-ref
+  sprint cũ (share riêng từng sprint trước Hướng A): tất cả thành `scope='project'` cùng
+  `refId=projectId` → `getProjectShare().first()` lấy 1, các row còn lại vẫn nằm trong bảng
+  (không mồ côi — `deleteProject` theo `projectId` vẫn revoke hết) nhưng dư; single-user gần như
+  không xảy ra. `currentLabel` để trống sau migration (chưa có tên) → hiện "sprint khác" tới lần
+  Update kế.
 - **Xoá plan → thu hồi link** → `deleteProject`/`deleteCollection` xoá `shares` row **và**
   gọi `revokeShare` best-effort (network; lỗi thì để TTL dọn) → link công khai không sống
   tiếp sau khi plan đã xoá. (Không có "delete sprint" riêng — sprint chỉ archive.)

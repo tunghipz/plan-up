@@ -16,10 +16,14 @@ export function ModalSheet({
   title,
   onClose,
   children,
+  maxWidth = 'max-w-md',
 }: {
   title: string
   onClose: () => void
   children: React.ReactNode
+  /** Tailwind max-width for the sheet. Default `max-w-md`; widen (e.g. `max-w-lg`)
+   * when a footer's actions would otherwise wrap. */
+  maxWidth?: string
 }) {
   const sheetRef = useRef<HTMLDivElement>(null)
 
@@ -51,7 +55,7 @@ export function ModalSheet({
         aria-modal="true"
         aria-label={title}
         tabIndex={-1}
-        className="dlg-sheet glass-modal text-ink rounded-[16px] w-full max-w-md p-6 space-y-4 outline-none"
+        className={`dlg-sheet glass-modal text-ink rounded-[16px] w-full ${maxWidth} p-6 space-y-4 outline-none`}
         onClick={(e) => e.stopPropagation()}
       >
         <h2 className="text-[19px] font-bold tracking-[-0.014em]">{title}</h2>

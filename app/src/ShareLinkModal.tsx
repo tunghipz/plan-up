@@ -62,13 +62,23 @@ export function ShareLinkModal({
   // Opening a DIFFERENT sprint leaves it at "all" (another sprint's member set won't map).
   useEffect(() => {
     let alive = true
+    const allIds = new Set(members.map((m) => m.id))
     getProjectShare(projectId, 'sprint')
       .then((rec) => {
-        if (!alive || !rec?.selectedIds || rec.currentRefId !== refId) return
-        const ids = new Set(members.map((m) => m.id))
-        setSelected(new Set(rec.selectedIds.filter((id) => ids.has(id))))
+        if (!alive) return
+        // Seed the stored trim ONLY when the link already shows THIS sprint. Otherwise
+        // (new share, or a different sprint is live) start from "all" — inheriting another
+        // sprint's trim maps the wrong member set, and NOT resetting would leave a stale
+        // selection if the modal stays mounted across an in-place sprint switch.
+        if (rec?.selectedIds && rec.currentRefId === refId) {
+          setSelected(new Set(rec.selectedIds.filter((id) => allIds.has(id))))
+        } else {
+          setSelected(allIds)
+        }
       })
-      .catch(() => {})
+      .catch(() => {
+        if (alive) setSelected(allIds)
+      })
     return () => {
       alive = false
     }
@@ -103,7 +113,7 @@ export function ShareLinkModal({
   const toggleAll = () => setSelected(allOn ? new Set() : new Set(members.map((m) => m.id)))
 
   return (
-    <ModalSheet title="Share link" onClose={onClose}>
+    <ModalSheet title="Share link" onClose={onClose} maxWidth="max-w-lg">
       <div className="-mt-1 flex items-center gap-2 text-[13px] text-ink-muted">
         <Link2 size={14} strokeWidth={1.9} className="text-accent" aria-hidden />
         {subtitle}

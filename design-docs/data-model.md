@@ -113,13 +113,22 @@ Seven IndexedDB tables (Dexie database name **`plan-up`**): `projects`, `members
   via the People roster. See [home-dashboard.md](./home-dashboard.md).
 
 ### `ShareRecord` (`types.ts`, table `shares`)
-`id` (= the `/view` URL suffix — the store key) · `refId` (the shared `sprintId` or
-`collectionId`, **indexed**) · `kind` (`'sprint' | 'collection'`) · `slug` (cosmetic URL
-prefix) · `writeToken` (**secret**, local only — authorizes PUT/DELETE on the store) ·
-`url` (full shareable link) · `lastSig` (content signature of the snapshot last pushed —
-the bundle JSON minus the volatile `exportedAt`; compared to the current board to know if
-the link is stale, driving the **Update** button) · `createdAt` · `updatedAt` · `projectId`.
-Added in **v14** (`lastSig` is a non-indexed field, no bump).
+`id` (= the `/view` URL suffix — the store key) · `refId` (per-ref link: the shared
+`sprintId` or `collectionId`; **project-scope sprint link** [`scope: 'project'`]: the
+`projectId` — record isn't bound to one sprint; **indexed**) · `kind`
+(`'sprint' | 'collection'`) · `scope?` (`'ref'` [absent = default: collections + legacy
+sprint links] or `'project'` [one sprint link shared across the whole project, points at
+the last-pushed sprint — Hướng A]) · `currentRefId?` (project-scope: the sprintId whose
+snapshot is currently live) · `currentLabel?` (project-scope: display name of the live
+sprint, shown in the modal) · `slug` (cosmetic URL prefix) · `writeToken` (**secret**,
+local only — authorizes PUT/DELETE on the store) · `url` (full shareable link) · `lastSig`
+(content signature of the snapshot last pushed — the bundle JSON minus the volatile
+`exportedAt`; compared to the current board to know if the link is stale, driving the
+**Update** button) · `createdAt` · `updatedAt` · `projectId`.
+Table added in **v14**. `scope`/`currentRefId`/`currentLabel` are non-indexed optional
+fields (no store-shape change), but **v15** runs a data migration adopting legacy per-ref
+sprint rows into project-scope (see the version table below). Project-scope lookup:
+`getProjectShare(projectId, kind)`. See [hosted-share-link.md](./hosted-share-link.md).
 - Local map of a plan → its **hosted share link** (short, updatable `/view/<slug>-<id>`,
   data on a Vercel KV / Upstash store). Lets the Share button know a plan is already shared
   and drives Update/Revoke. Travels in the full backup (v6) so a restore keeps the token.
@@ -163,6 +172,7 @@ Dexie `version().stores()` + an upgrade callback per bump. Current version: **14
 | 12 | Add `Member.order` (non-indexed manual lane order); backfill per project to `0..N-1` in current `toArray()` order. See [member-lane-order.md](./member-lane-order.md). |
 | 13 | Add `people` table + indexed `Member.personId` (re-declare full `members` store). Backfill groups existing members by normalized name across all projects → one person each, linked. Scheduler untouched. See [home-dashboard.md](./home-dashboard.md). |
 | 14 | Add `shares` table (hosted share links). No backfill — nobody has a share yet. See [hosted-share-link.md](./hosted-share-link.md). |
+| 15 | Adopt legacy per-ref **sprint** shares into the project-scope model (Hướng A): each `shares` row with `kind='sprint'` and no `scope` is rewritten `scope='project'`, `currentRefId=<old sprintId>`, `refId=projectId`. Collections untouched. No index change. See [hosted-share-link.md](./hosted-share-link.md). |
 
 Current indexes:
 - `projects`: `id, name, createdAt`

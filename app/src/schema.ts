@@ -233,7 +233,8 @@ export class PlanDB extends Dexie {
     // New `shares` table mapping a sprint/collection to its short `/view/<id>`
     // link + the local-only write token. No backfill — nobody has a share yet.
     // Carry forward every v13 table (only `shares` is added). `refId` is indexed
-    // to answer "is this plan already shared?"; `projectId` for project-scoped wipes.
+    // (per-ref: sprintId/collectionId; project-scope sprint link: projectId) and
+    // `projectId` for project-scoped lookups (getProjectShare) + wipes.
     this.version(14).stores({
       projects: 'id, name, createdAt',
       members: 'id, name, projectId, personId',
@@ -244,6 +245,36 @@ export class PlanDB extends Dexie {
       people: 'id, name',
       shares: 'id, refId, projectId',
     })
+    // v15: adopt legacy per-ref sprint shares into the project-scope model (Hướng A).
+    // Before this, a sprint link was keyed by refId=sprintId with no `scope`. The Share
+    // modal now looks sprint links up by project (getProjectShare), so a legacy row would
+    // be invisible — the user would create a duplicate link and the old public link would
+    // be unrevocable from the UI. Rewrite each legacy sprint share so refId=projectId,
+    // scope='project', currentRefId=<old sprintId>. Collections stay per-ref (skipped).
+    // Same store shape — no index change; the upgrade only mutates rows.
+    this.version(15)
+      .stores({
+        projects: 'id, name, createdAt',
+        members: 'id, name, projectId, personId',
+        sprints: 'id, startDate, projectId',
+        collections: 'id, projectId, order',
+        tasks: 'id, sprintId, assigneeId, status, createdAt, projectId, collectionId',
+        events: 'id, sprintId, ts, projectId',
+        people: 'id, name',
+        shares: 'id, refId, projectId',
+      })
+      .upgrade(async (tx) => {
+        await tx
+          .table('shares')
+          .toCollection()
+          .modify((s) => {
+            if (s.kind === 'sprint' && !s.scope) {
+              s.scope = 'project'
+              s.currentRefId = s.refId // capture the old sprintId BEFORE overwriting refId
+              s.refId = s.projectId
+            }
+          })
+      })
   }
 }
 

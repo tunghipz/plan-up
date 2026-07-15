@@ -51,7 +51,7 @@ describe('v1 → v14 migration chain (through Dexie, not the extracted fns)', ()
 
     const db = new PlanDB(name)
     await db.open()
-    expect(db.verno).toBe(14)
+    expect(db.verno).toBe(15)
 
     const tasks = await db.tasks.toArray()
     const byId = new Map(tasks.map((t) => [t.id, t]))
@@ -192,6 +192,61 @@ describe('v1 → v14 migration chain (through Dexie, not the extracted fns)', ()
     const m = (await db.members.toArray())[0]
     expect(m.personId).toBeTruthy()
     expect(await db.people.count()).toBe(1)
+
+    await db.delete()
+  })
+})
+
+describe('v14 → v15 migration (legacy per-ref sprint share → project-scope)', () => {
+  // Seed a v14 DB the way the app wrote share rows before Hướng A: a sprint link
+  // keyed by refId=sprintId with no `scope`, plus a collection link (must stay put).
+  async function seedV14(name: string) {
+    const old = new Dexie(name)
+    old.version(14).stores({
+      projects: 'id, name, createdAt',
+      members: 'id, name, projectId, personId',
+      sprints: 'id, startDate, projectId',
+      collections: 'id, projectId, order',
+      tasks: 'id, sprintId, assigneeId, status, createdAt, projectId, collectionId',
+      events: 'id, sprintId, ts, projectId',
+      people: 'id, name',
+      shares: 'id, refId, projectId',
+    })
+    await old.open()
+    await old.table('projects').add({ id: 'p1', name: 'Alpha', createdAt: 0 })
+    await old.table('shares').bulkAdd([
+      // legacy per-ref SPRINT share: refId = sprintId, no scope
+      { id: 'sh-sprint', refId: 'sprint-1', kind: 'sprint', slug: 'alpha', writeToken: 'wt1', url: 'u1', createdAt: 0, updatedAt: 0, projectId: 'p1' },
+      // per-ref COLLECTION share: must be left untouched
+      { id: 'sh-coll', refId: 'coll-1', kind: 'collection', slug: 'alpha', writeToken: 'wt2', url: 'u2', createdAt: 0, updatedAt: 0, projectId: 'p1' },
+    ])
+    old.close()
+  }
+
+  it('adopts the sprint share into project-scope and leaves the collection share alone', async () => {
+    const name = freshName()
+    await seedV14(name)
+
+    const db = new PlanDB(name)
+    await db.open()
+    expect(db.verno).toBe(15)
+
+    const sprintShare = await db.shares.get('sh-sprint')
+    expect(sprintShare!.scope).toBe('project')
+    expect(sprintShare!.refId).toBe('p1') // rewritten to projectId
+    expect(sprintShare!.currentRefId).toBe('sprint-1') // old sprintId captured
+
+    const collShare = await db.shares.get('sh-coll')
+    expect(collShare!.scope).toBeUndefined() // untouched
+    expect(collShare!.refId).toBe('coll-1')
+
+    // getProjectShare now finds the adopted sprint link.
+    const found = await db.shares
+      .where('projectId')
+      .equals('p1')
+      .and((s) => s.kind === 'sprint' && s.scope === 'project')
+      .first()
+    expect(found!.id).toBe('sh-sprint')
 
     await db.delete()
   })

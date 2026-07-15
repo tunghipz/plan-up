@@ -214,8 +214,10 @@ export async function importAll(data: ExportPayload) {
       }
 
       // v6+ carries hosted share links (with write tokens). Restore verbatim so
-      // existing links stay Updatable/Revocable after a restore. refId points at
-      // a sprint/collection id, both preserved above for v2+ payloads.
+      // existing links stay Updatable/Revocable after a restore (incl. the optional
+      // scope/currentRefId/currentLabel fields — plain objects, no field-aware code).
+      // refId points at a sprint/collection id (or projectId for a project-scope sprint
+      // link), all preserved above for v2+ payloads.
       if (data.version >= 6 && Array.isArray(data.shares) && data.shares.length) {
         await db.shares.bulkAdd(data.shares)
       }

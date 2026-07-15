@@ -55,6 +55,7 @@ export function HostedShareControls({
   kind,
   slug,
   blob,
+  sig,
   empty,
   fallbackUrl,
 }: {
@@ -62,8 +63,11 @@ export function HostedShareControls({
   projectId: string
   kind: ShareKind
   slug: string
-  /** Current encoded snapshot for the selection. */
+  /** Current encoded snapshot for the selection (what gets pushed). */
   blob: string
+  /** Stable content signature (bundle minus the volatile exportedAt) — drives the
+   * stale/Update state without the timestamp making everything look changed. */
+  sig: string
   /** Nothing selected → can't create. */
   empty: boolean
   /** The long in-URL link, shown as an offline fallback. */
@@ -77,26 +81,22 @@ export function HostedShareControls({
   const [updated, setUpdated] = useState(false)
   const [fallbackOpen, setFallbackOpen] = useState(false)
   const [fbCopied, setFbCopied] = useState(false)
-  // Blob known to be on the server (assume synced at open); drives the dirty hint.
-  const [syncedBlob, setSyncedBlob] = useState(blob)
 
   useEffect(() => {
     let alive = true
     getShareForRef(refId).then((r) => {
-      if (!alive) return
-      setRecord(r ?? null)
-      setSyncedBlob(blob)
+      if (alive) setRecord(r ?? null)
     })
     return () => {
       alive = false
     }
-    // Reload only when the shared plan changes; blob is intentionally excluded
-    // (it changes as the user ticks sections/members — we don't want to reset the
-    // record then). syncedBlob is seeded here to "in sync at open".
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refId])
 
-  const dirty = !!record && blob !== syncedBlob
+  // Stale when the current board differs from what was last pushed to the store.
+  // Comparing STORED-vs-current content signatures (not an at-open snapshot) means
+  // edits made while this modal was closed — the normal case — are caught on
+  // reopen. A record with no lastSig (created before the field existed) reads as stale.
+  const dirty = !!record && record.lastSig !== sig
 
   async function doCreate() {
     setBusy('create')
@@ -111,13 +111,13 @@ export function HostedShareControls({
         slug,
         writeToken,
         url: viewUrl(slug, id),
+        lastSig: sig,
         createdAt: now,
         updatedAt: now,
         projectId,
       }
       await saveShareRecord(rec)
       setRecord(rec)
-      setSyncedBlob(blob)
     } catch (e) {
       setErr(errMsg(e))
       setFallbackOpen(true)
@@ -133,10 +133,15 @@ export function HostedShareControls({
     try {
       await updateShare(record.id, record.writeToken, blob)
       // Refresh the slug too, so the URL prettifies after a rename (id unchanged).
-      const rec: ShareRecord = { ...record, slug, url: viewUrl(slug, record.id), updatedAt: Date.now() }
+      const rec: ShareRecord = {
+        ...record,
+        slug,
+        url: viewUrl(slug, record.id),
+        lastSig: sig,
+        updatedAt: Date.now(),
+      }
       await saveShareRecord(rec)
       setRecord(rec)
-      setSyncedBlob(blob)
       setUpdated(true)
       window.setTimeout(() => setUpdated(false), 1600)
     } catch (e) {

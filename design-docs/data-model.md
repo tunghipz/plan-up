@@ -116,7 +116,10 @@ Seven IndexedDB tables (Dexie database name **`plan-up`**): `projects`, `members
 `id` (= the `/view` URL suffix — the store key) · `refId` (the shared `sprintId` or
 `collectionId`, **indexed**) · `kind` (`'sprint' | 'collection'`) · `slug` (cosmetic URL
 prefix) · `writeToken` (**secret**, local only — authorizes PUT/DELETE on the store) ·
-`url` (full shareable link) · `createdAt` · `updatedAt` · `projectId`. Added in **v14**.
+`url` (full shareable link) · `lastSig` (content signature of the snapshot last pushed —
+the bundle JSON minus the volatile `exportedAt`; compared to the current board to know if
+the link is stale, driving the **Update** button) · `createdAt` · `updatedAt` · `projectId`.
+Added in **v14** (`lastSig` is a non-indexed field, no bump).
 - Local map of a plan → its **hosted share link** (short, updatable `/view/<slug>-<id>`,
   data on a Vercel KV / Upstash store). Lets the Share button know a plan is already shared
   and drives Update/Revoke. Travels in the full backup (v6) so a restore keeps the token.

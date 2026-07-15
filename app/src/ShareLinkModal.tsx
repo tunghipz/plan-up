@@ -54,11 +54,14 @@ export function ShareLinkModal({
 }) {
   const [selected, setSelected] = useState<Set<string>>(() => new Set(members.map((m) => m.id)))
 
-  const { bundle, blob, fallbackUrl, slug } = useMemo(() => {
+  const { bundle, blob, sig, fallbackUrl, slug } = useMemo(() => {
     const bundle = buildBundle([...selected])
     return {
       bundle,
       blob: encodeSnapshot(bundle),
+      // Content signature for staleness — exportedAt is volatile (rebuilt each
+      // render), so exclude it or the link would always look out of date.
+      sig: JSON.stringify({ ...bundle, exportedAt: '' }),
       fallbackUrl: buildSprintShareUrl(bundle, shareBaseUrl()),
       slug: slugify(bundle.sprint.name || bundle.project.name),
     }
@@ -142,6 +145,7 @@ export function ShareLinkModal({
         kind="sprint"
         slug={slug}
         blob={blob}
+        sig={sig}
         empty={empty}
         fallbackUrl={fallbackUrl}
       />

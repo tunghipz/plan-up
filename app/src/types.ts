@@ -234,6 +234,12 @@ export interface ShareRecord {
   writeToken: string
   /** The full shareable URL last shown/copied. */
   url: string
+  /** Content signature of the snapshot last pushed (the bundle JSON with the
+   * volatile `exportedAt` stripped) — compared against the current board to know
+   * whether the link is stale, which drives the **Update** button. NOT the blob
+   * itself: the blob embeds a fresh `exportedAt` every build, so it would always
+   * differ. Absent on records created before this field existed → reads as stale. */
+  lastSig?: string
   createdAt: number
   updatedAt: number
   projectId: string

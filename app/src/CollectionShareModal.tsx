@@ -43,11 +43,13 @@ export function CollectionShareModal({
 }) {
   const [selected, setSelected] = useState<Set<string>>(() => new Set(sections.map((s) => s.id)))
 
-  const { bundle, blob, fallbackUrl, slug } = useMemo(() => {
+  const { bundle, blob, sig, fallbackUrl, slug } = useMemo(() => {
     const bundle = buildBundle([...selected])
     return {
       bundle,
       blob: encodeCollectionSnapshot(bundle),
+      // Content signature for staleness — exclude the volatile exportedAt.
+      sig: JSON.stringify({ ...bundle, exportedAt: '' }),
       fallbackUrl: buildCollectionShareUrl(bundle, shareBaseUrl()),
       slug: slugify(bundle.collection.name),
     }
@@ -140,6 +142,7 @@ export function CollectionShareModal({
         kind="collection"
         slug={slug}
         blob={blob}
+        sig={sig}
         empty={empty}
         fallbackUrl={fallbackUrl}
       />

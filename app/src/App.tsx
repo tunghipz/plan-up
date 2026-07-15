@@ -31,7 +31,6 @@ import {
   FolderDown,
   Check,
   Link2,
-  Image as ImageIcon,
   TriangleAlert,
 } from 'lucide-react'
 import {
@@ -76,7 +75,6 @@ import { BackupSettingsModal } from './BackupSettingsModal'
 import { ShareLinkModal } from './ShareLinkModal'
 import { CollectionShareModal } from './CollectionShareModal'
 import { buildSnapshot, buildCollectionSnapshot } from './share-snapshot'
-import { CollectionImageModal } from './CollectionImageModal'
 import { membersWithTasks } from './telegram-export'
 import { usePinnedPopover } from './usePinnedPopover'
 import { ProjectSettingsView } from './ProjectSettingsView'
@@ -324,7 +322,6 @@ function App() {
   const [backupSettingsOpen, setBackupSettingsOpen] = useState(false)
   const [shareOpen, setShareOpen] = useState(false)
   const [collShareOpen, setCollShareOpen] = useState(false)
-  const [collImgOpen, setCollImgOpen] = useState(false)
   const [showNewProject, setShowNewProject] = useState(false)
   // Project switcher (header dropdown) — replaces the old icon rail. PORTALED to
   // <body>: the sidebar <aside> has `.vibrancy` (its own backdrop-filter), which
@@ -1684,35 +1681,9 @@ function App() {
                   style={{ position: 'fixed', top: exportMenuPos.top, right: exportMenuPos.right }}
                   className="z-50 min-w-[262px] p-1.5 rounded-[12px] glass-popover"
                 >
-                  {/* Share the current view. Collection → Export as image (grouped
-                      by table). Copy for Telegram was removed 2026-07-14. See
-                      copy-to-telegram.md. */}
-                  {selKind === 'collection' && currentCollection && (
-                    <>
-                      <button
-                        role="menuitem"
-                        disabled={(collectionItems?.length ?? 0) === 0}
-                        onClick={() => {
-                          setExportMenuOpen(false)
-                          setCollImgOpen(true)
-                        }}
-                        className="w-full flex items-start gap-3 p-2.5 rounded-[8px] text-left hover:bg-surface-hover transition disabled:opacity-40 disabled:hover:bg-transparent"
-                      >
-                        <span className="shrink-0 w-[30px] h-[30px] rounded-[8px] flex items-center justify-center bg-accent-soft text-accent">
-                          <ImageIcon size={15} strokeWidth={1.9} />
-                        </span>
-                        <span className="min-w-0">
-                          <span className="block text-[13.5px] font-medium text-ink">Export as image…</span>
-                          <span className="block text-[12px] text-ink-muted truncate">
-                            {(collectionItems?.length ?? 0) === 0
-                              ? 'No items in this collection yet'
-                              : 'One PNG, grouped by table'}
-                          </span>
-                        </span>
-                      </button>
-                      <div className="h-px bg-border-hair mx-2 my-1" />
-                    </>
-                  )}
+                  {/* Collection "Export as image…" was removed 2026-07-15 — a
+                      collection PNG is reached via its Share link (the viewer's
+                      Export PNG). This menu is now data-export only. */}
                   <button
                     role="menuitem"
                     disabled={!currentProject}
@@ -1960,13 +1931,6 @@ function App() {
           />
         )
       })()}
-      {collImgOpen && currentCollection && (
-        <CollectionImageModal
-          collection={currentCollection}
-          items={collectionItems ?? []}
-          onClose={() => setCollImgOpen(false)}
-        />
-      )}
       {collShareOpen && currentCollection && currentProject && (() => {
         const collItemsNow = (collectionItems ?? []).filter((t) => t.collectionId === currentCollection.id)
         const counts: Record<string, number> = {}

@@ -1,16 +1,19 @@
 # Collections (task ngoài sprint)
 
 **Status:** Implemented
-**Last updated:** 2026-07-08 (share: Export ▾ menu — Copy for Telegram + Export as image)
+**Last updated:** 2026-07-15 (collection **Share link** on the top bar next to Export —
+see [share-link-snapshot.md](./share-link-snapshot.md) "Collections (v3)"; the old **Export as
+image…** menu item was removed — a collection PNG is now reached via its Share link viewer)
 **Code:** `app/src/db.ts` (schema v9 + collection/section/status/item CRUD, export v3),
 `app/src/lib.ts` (buildMonthGrid/assignLanes/computeBarSegments — pure calendar helpers),
 `app/src/CollectionView.tsx` (List card-per-section + status editor + click-assign +
 editable Start/End dates via shared `DateRangePickCell` — a **date-range** picker, one popover
 sets both start+end in two clicks, no time-of-day; see [date-picker.md](./date-picker.md) "Range mode"),
 `app/src/CollectionCalendar.tsx` (month grid + seamless multi-day bars + multi-month chevrons),
-the toolbar **Export ▾** menu (context-aware in `App.tsx`: Copy for Telegram text + Export as image —
-see [copy-to-telegram.md](./copy-to-telegram.md), [export-png.md](./export-png.md)),
-`app/src/CollectionPngCard.tsx` + `CollectionImageModal.tsx` (the shareable PNG),
+`app/src/CollectionShareModal.tsx` + `CollectionSnapshotViewer.tsx` (read-only share link, see
+[share-link-snapshot.md](./share-link-snapshot.md)),
+`app/src/CollectionPngCard.tsx` + `CollectionImageModal.tsx` (the shareable PNG — now reached
+from the share viewer's **Export PNG**, no longer a toolbar menu item; see [export-png.md](./export-png.md)),
 `app/src/App.tsx` (sidebar SPRINTS/COLLECTIONS + routing)
 
 ## Purpose

@@ -10,7 +10,15 @@ const url = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL
 const token = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN
 
 export const kvReady = Boolean(url && token)
-export const redis = kvReady ? new Redis({ url: url!, token: token! }) : null
+
+// Construct lazily (and once) so a bad/missing config surfaces as a caught error
+// inside the request handler — not an uncatchable module-load crash.
+let _redis: Redis | null = null
+export function getRedis(): Redis {
+  if (!kvReady) throw new Error('KV env missing')
+  if (!_redis) _redis = new Redis({ url: url!, token: token! })
+  return _redis
+}
 
 /** Links live 90 days from the last write; each PUT resets the clock. */
 export const TTL_SECONDS = 90 * 24 * 60 * 60

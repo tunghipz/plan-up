@@ -87,9 +87,23 @@ Ordered, fail-safe — current data is only touched at the last, transactional s
 
 ### UI — `app/src/BackupSettingsModal.tsx`
 
-New section under the existing controls. States: idle (button "Xem lịch sử version") →
-loading → list of timestamp rows → selected row shows inline preview + **Restore** button
-→ restoring (disabled + spinner). Reuses the modal's existing status-line styling.
+New **"Restore từ version"** section under the existing auto-backup controls, separated by
+the same `border-t border-border-hair` idiom. Layout = **Variant A · inline expand**
+(single column, fits the current `max-w-md` sheet — no widening):
+
+- A scrollable list (`max-h`) of version rows, newest first, **grouped by day** with a
+  small uppercase day label (`Hôm nay` / `14 Jul 2026` / …).
+- Each row: a leading dot, the local time (`15 Jul 2026, 14:03:07`, `tabular-nums`), and a
+  faint relative hint (`2 phút trước`). Row parsed from the filename only — no file read.
+- Clicking a row selects it (`bg-accent-tint`) and **expands a preview card inline below
+  the list**: the snapshot's `exportedAt` + counts of projects / sprints / tasks, and a
+  Fire-accent **Restore** button.
+- States: empty (`Chưa có version nào.`) · confirm dialog (stacked, reuses `ConfirmDialog`,
+  with a callout that current state is auto-snapshotted first) · restoring (spinner, list
+  disabled). Section shown only when a backup dir is set (§Scope).
+
+Layout was chosen from a demo (`demo/restore-versions-layout.html`, Variant A) over a
+two-pane picker — inline expand keeps the narrow-modal idiom without widening the sheet.
 
 ## Rules & edge cases
 

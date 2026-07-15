@@ -8,6 +8,7 @@ import {
   SHARE_MAX_BYTES,
   type SnapshotData,
 } from './share-snapshot'
+import { shareBaseUrl, openExternal } from './share-runtime'
 
 /**
  * Turn a sprint into a read-only share link (data packed into the URL fragment,
@@ -59,7 +60,7 @@ export function ShareLinkModal({
 
   const { bundle, url, bytes } = useMemo(() => {
     const bundle = buildBundle([...selected])
-    const url = buildSprintShareUrl(bundle)
+    const url = buildSprintShareUrl(bundle, shareBaseUrl())
     return { bundle, url, bytes: url.length }
   }, [buildBundle, selected])
 
@@ -191,7 +192,7 @@ export function ShareLinkModal({
       {/* Footer: Open (preview the read-only link in a new tab) + Copy link. */}
       <div className="flex items-center gap-2">
         <button
-          onClick={() => !empty && window.open(url, '_blank', 'noopener,noreferrer')}
+          onClick={() => !empty && openExternal(url)}
           disabled={empty}
           title="Mở link read-only trong tab mới (xem thử như người nhận)"
           className="inline-flex items-center justify-center gap-2 rounded-[11px] bg-fill px-4 py-2.5 text-[14px] font-semibold text-ink transition hover:bg-[rgba(0,0,0,0.09)] active:scale-[0.98] disabled:opacity-40 disabled:active:scale-100 dark:hover:bg-white/10"

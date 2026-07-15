@@ -193,6 +193,18 @@ lặp key, đóng gói **columnar** + mã hoá chặt:
 
 ## Rules & edge cases
 
+- **Desktop (Tauri)** — hai điều chỉnh vì webview không phải browser web (`share-runtime.ts`):
+  - **Base URL**: origin của bản desktop đóng gói là `tauri://localhost` (prod) —
+    người nhận không mở được. Nên **PROD desktop** trỏ link vào web đã deploy
+    (`https://plan-up-eta.vercel.app/`); bản web và Tauri **dev** dùng `location.origin`
+    (dev = `localhost:5173`, chạy được ngay trên máy dev). Quyết định qua
+    `IS_TAURI && import.meta.env.PROD`.
+  - **Nút Open**: `window.open` là **no-op trong webview Tauri** → dùng
+    `@tauri-apps/plugin-opener` (`openUrl`) để mở link ở **browser hệ thống**
+    (plugin đăng ký ở `lib.rs`). Capability cần **cả hai**: `opener:allow-open-url`
+    (bật command) **và** `opener:allow-default-urls` (cấp scope `http/https/mailto/tel`)
+    — chỉ `allow-open-url` thì scope rỗng, mọi URL bị chặn → `openUrl` throw → Open im.
+    Web vẫn `window.open`. Copy link dùng `navigator.clipboard` (chạy tốt trong webview).
 - **Fragment không rời máy**: dữ liệu ở sau `#` — không gửi lên server; kể cả app
   chat fetch URL để dựng preview card cũng không thấy fragment (không lộ data,
   cũng không có rich preview).

@@ -89,108 +89,114 @@ export function CollectionSnapshotViewer({ raw }: { raw: string }) {
 
   return (
     <div className="min-h-screen ambient-canvas pb-16">
-      {/* Read-only header — same floating glass capsule as the sprint viewer. */}
-      <div className="sticky top-0 z-20 px-3 sm:px-4 pt-3 pb-1">
-        <div className="glass-toolbar rounded-full flex items-center gap-3 max-w-3xl mx-auto pl-3 pr-2 py-1.5">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <img src="/favicon.svg" alt="" aria-hidden className="w-[26px] h-[26px] shrink-0 rounded-[6px]" />
-            <div className="flex flex-col leading-tight min-w-0">
-              <span className="text-[14px] font-bold tracking-[-0.01em] text-ink whitespace-nowrap">plan-up</span>
-              <span className="text-[10.5px] text-ink-faint truncate">
-                shared snapshot{stamp !== '—' ? ` · ${stamp}` : ''}
-              </span>
+      <div className="mx-auto max-w-[1240px] px-3 sm:px-4 pt-5 sm:pt-6 select-text">
+        {/* Two columns — a sticky meta rail + the board. Mirrors SnapshotViewer's
+            left-rail layout (design-docs/share-link-snapshot.md); the old floating
+            capsule + breadcrumb + toggle line now live in the rail. The status
+            legend, shared by both views, sits in the rail too. Stacks below lg. */}
+        <div className="grid gap-4 items-start grid-cols-1 lg:grid-cols-[300px_minmax(0,1fr)]">
+
+          {/* ── Left rail ── */}
+          <aside className="flex flex-col gap-3.5 lg:sticky lg:top-6">
+            {/* Brand + dark toggle */}
+            <div className="flex items-center gap-2.5">
+              <img src="/favicon.svg" alt="" aria-hidden className="w-[30px] h-[30px] shrink-0 rounded-[8px]" />
+              <div className="flex flex-col leading-tight min-w-0">
+                <span className="text-[15px] font-bold tracking-[-0.01em] text-ink whitespace-nowrap">plan-up</span>
+                <span className="text-[10.5px] text-ink-faint truncate">
+                  shared snapshot{stamp !== '—' ? ` · ${stamp}` : ''}
+                </span>
+              </div>
+              <button
+                onClick={() => setDark((d) => !d)}
+                aria-label={dark ? 'Chuyển sang chế độ sáng' : 'Chuyển sang chế độ tối'}
+                title={dark ? 'Light mode' : 'Dark mode'}
+                className="ml-auto inline-flex items-center justify-center rounded-[9px] p-1.5 text-ink-muted hover:bg-fill hover:text-ink transition"
+              >
+                {dark ? <Sun size={16} strokeWidth={2} aria-hidden /> : <Moon size={16} strokeWidth={2} aria-hidden />}
+              </button>
             </div>
             <span
               title="dữ liệu của bạn không bị đụng tới"
-              className="hidden sm:inline-flex items-center gap-1.5 text-[11px] font-semibold text-accent bg-accent-soft rounded-full px-2.5 py-1 shrink-0"
+              className="inline-flex w-max items-center gap-1.5 text-[11px] font-semibold text-accent bg-accent-soft rounded-full px-2.5 py-1"
             >
               <Lock size={12} strokeWidth={2.4} aria-hidden />
               Read-only
             </span>
-          </div>
 
-          <div className="ml-auto flex items-center justify-end gap-1.5">
-            <button
-              onClick={() => setDark((d) => !d)}
-              aria-label={dark ? 'Chuyển sang chế độ sáng' : 'Chuyển sang chế độ tối'}
-              title={dark ? 'Light mode' : 'Dark mode'}
-              className="inline-flex items-center justify-center rounded-[9px] p-1.5 text-ink-muted hover:bg-fill hover:text-ink transition"
-            >
-              {dark ? <Sun size={16} strokeWidth={2} aria-hidden /> : <Moon size={16} strokeWidth={2} aria-hidden />}
-            </button>
-            <button
-              onClick={() => setExportOpen(true)}
-              className="brand-btn inline-flex items-center gap-1.5 rounded-[9px] px-3 py-1.5 text-[12.5px] font-semibold text-white whitespace-nowrap shrink-0 transition active:scale-[0.97] motion-reduce:active:scale-100"
-            >
-              <Image size={14} strokeWidth={2} aria-hidden />
-              Export PNG
-            </button>
-            <button
-              onClick={openApp}
-              className="inline-flex items-center gap-1.5 rounded-[9px] px-2.5 py-1.5 text-[12.5px] font-semibold text-accent hover:bg-accent-soft transition whitespace-nowrap"
-            >
-              <ArrowUpRight size={14} strokeWidth={2} aria-hidden />
-              <span className="hidden sm:inline">Mở plan-up</span>
-            </button>
-          </div>
-        </div>
+            {/* Collection card */}
+            <div className="glass-card rounded-[16px] p-4">
+              <div className="text-[10px] font-bold tracking-[0.06em] uppercase text-ink-faint">Collection</div>
+              <div className="text-[15px] font-bold tracking-[-0.01em] text-ink mt-2 leading-snug">
+                📚 {data.collection.name} · {data.project.name}
+              </div>
+              <div className="inline-flex items-center text-[12.5px] text-ink-muted mt-2.5 bg-fill rounded-full px-3 py-1.5 tab-data whitespace-nowrap">
+                {data.items.length} item{data.items.length === 1 ? '' : 's'}
+              </div>
+            </div>
 
-        {/* Breadcrumb — collection · project + item count (no date range). */}
-        <div className="max-w-3xl mx-auto mt-2 flex justify-center px-1">
-          <div className="inline-flex items-center gap-2.5 bg-fill border border-border-hair rounded-full px-3.5 py-1.5 max-w-full">
-            <span className="text-[13.5px] font-[680] tracking-[-0.01em] text-ink whitespace-nowrap">
-              📚 {data.collection.name} · {data.project.name}
-            </span>
-            <span className="w-px h-[15px] bg-border-strong shrink-0" aria-hidden />
-            <span className="text-[12px] text-ink-muted tab-data whitespace-nowrap">
-              {data.items.length} item{data.items.length === 1 ? '' : 's'}
-            </span>
-          </div>
-        </div>
+            {/* Status legend — the collection's own statuses; shared by both views */}
+            {data.statuses.length > 0 && (
+              <div className="glass-card rounded-[16px] p-4">
+                <div className="text-[10px] font-bold tracking-[0.06em] uppercase text-ink-faint mb-3">Statuses</div>
+                <div className="flex flex-col gap-2.5">
+                  {data.statuses.map((s) => (
+                    <span key={s.id} className="inline-flex items-center gap-2.5 text-[12.5px] text-ink-muted">
+                      <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: s.color }} aria-hidden />
+                      {s.name}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
 
-        {/* View toggle — List | Calendar. */}
-        <div className="max-w-3xl mx-auto mt-2 flex justify-center">
-          <div className="inline-flex bg-fill rounded-[10px] p-[3px]">
-            {(['list', 'cal'] as const).map((v) => (
+            {/* View toggle — List | Calendar */}
+            <div className="flex bg-fill rounded-[11px] p-[3px]">
+              {(['list', 'cal'] as const).map((v) => (
+                <button
+                  key={v}
+                  onClick={() => setViewPersist(v)}
+                  className={`flex-1 text-[13px] font-semibold py-2 rounded-[9px] transition ${
+                    view === v ? 'bg-surface text-ink shadow-sm' : 'text-ink-muted hover:text-ink'
+                  }`}
+                >
+                  {v === 'list' ? 'List' : 'Calendar'}
+                </button>
+              ))}
+            </div>
+
+            {/* Actions */}
+            <div className="flex flex-col gap-2">
               <button
-                key={v}
-                onClick={() => setViewPersist(v)}
-                className={`text-[13px] font-semibold px-4 py-1.5 rounded-[8px] transition ${
-                  view === v ? 'bg-surface text-ink shadow-sm' : 'text-ink-muted hover:text-ink'
-                }`}
+                onClick={() => setExportOpen(true)}
+                className="brand-btn inline-flex items-center justify-center gap-1.5 rounded-[11px] px-4 py-2.5 text-[13px] font-semibold text-white transition active:scale-[0.98] motion-reduce:active:scale-100"
               >
-                {v === 'list' ? 'List' : 'Calendar'}
+                <Image size={15} strokeWidth={2} aria-hidden />
+                Export PNG
               </button>
-            ))}
-          </div>
-        </div>
-      </div>
+              <button
+                onClick={openApp}
+                className="inline-flex items-center justify-center gap-1.5 rounded-[11px] px-4 py-2.5 text-[13px] font-semibold text-accent bg-fill hover:bg-accent-soft transition"
+              >
+                <ArrowUpRight size={15} strokeWidth={2} aria-hidden />
+                Mở plan-up
+              </button>
+            </div>
+          </aside>
 
-      <div className="mx-auto max-w-3xl px-3 sm:px-4 pt-4 select-text">
-        {view === 'list' ? <ListBoard data={data} /> : <CalBoard data={data} />}
+          {/* ── Board ── */}
+          <main className="min-w-0">
+            {view === 'list' ? <ListBoard data={data} /> : <CalBoard data={data} />}
 
-        <div className="mt-4 flex items-center gap-2 text-[11px] text-ink-faint px-1">
-          <span className="w-3 h-3 rounded-[3px] bg-accent inline-block" />
-          Made with plan-up · read-only snapshot — không realtime, không đồng bộ về sau
+            <div className="mt-4 flex items-center gap-2 text-[11px] text-ink-faint px-1">
+              <span className="w-3 h-3 rounded-[3px] bg-accent inline-block" />
+              Made with plan-up · read-only snapshot — không realtime, không đồng bộ về sau
+            </div>
+          </main>
         </div>
       </div>
 
       {exportOpen && <ExportBridge data={data} onClose={() => setExportOpen(false)} />}
-    </div>
-  )
-}
-
-/** Legend row of the collection's user-defined statuses (color → name). */
-function Legend({ data }: { data: Snap }) {
-  if (data.statuses.length === 0) return null
-  return (
-    <div className="flex items-center gap-3.5 flex-wrap mb-3 px-1">
-      {data.statuses.map((s) => (
-        <span key={s.id} className="inline-flex items-center gap-1.5 text-[11.5px] text-ink-muted">
-          <span className="w-2.5 h-2.5 rounded-full" style={{ background: s.color }} aria-hidden />
-          {s.name}
-        </span>
-      ))}
     </div>
   )
 }
@@ -234,7 +240,6 @@ function ListBoard({ data }: { data: Snap }) {
 
   return (
     <div className="space-y-4">
-      <Legend data={data} />
       {sections.length === 0 ? (
         <p className="text-ink-muted text-[13px] py-10 text-center">Collection rỗng.</p>
       ) : (
@@ -330,19 +335,8 @@ function CalBoard({ data }: { data: Snap }) {
 
   return (
     <div>
-      <div className="flex items-center justify-between gap-2 mb-3 flex-wrap">
-        {data.statuses.length > 0 ? (
-          <div className="flex items-center gap-3.5 flex-wrap">
-            {data.statuses.map((s) => (
-              <span key={s.id} className="inline-flex items-center gap-1.5 text-[11.5px] text-ink-muted">
-                <span className="w-2.5 h-2.5 rounded-full" style={{ background: s.color }} aria-hidden />
-                {s.name}
-              </span>
-            ))}
-          </div>
-        ) : (
-          <span />
-        )}
+      {/* Month nav only — the status legend lives in the left rail now. */}
+      <div className="flex items-center justify-end gap-2 mb-3 flex-wrap">
         <div className="flex items-center gap-2 text-[14px] font-semibold text-ink">
           {!onCurrentMonth && (
             <button

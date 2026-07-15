@@ -7,7 +7,9 @@
 > verbatim by the hosted mode.
 
 **Status:** Implemented
-**Last updated:** 2026-07-15 (**viewer left-rail layout** — recipient page moved from a
+**Last updated:** 2026-07-15 (**viewer left-rail layout** — applied to **BOTH** recipient
+viewers [sprint `SnapshotViewer` + collection `CollectionSnapshotViewer`, kept in sync]:
+recipient page moved from a
 centered single column [`max-w-3xl`, empty flanks on wide screens] to a **2-column grid**
 [`max-w-[1240px]`]: a **sticky left rail** [~300px] now holds all the meta that used to
 stack across the top — brand + Read-only chip, Sprint card [name/project + date range],
@@ -258,15 +260,27 @@ sống song song, boot chọn viewer theo `version`.
   hiện KB**, chỉ cảnh báo khi vượt `SHARE_MAX_BYTES = 4000`; footer **Open** + **Copy link**.
 
 ### Recipient — `CollectionSnapshotViewer`
-- Header capsule y hệt `SnapshotViewer` (icon + `plan-up` + "shared snapshot" + Read-only +
-  dark toggle + **Open plan-up** + **Export PNG**). Breadcrumb: `📚 {collection} · {project}`
-  + `N items` (không có dải ngày — collection không time-boxed).
-- Toggle **List | Calendar** (persist qua `plan-up:snapshotCollView`):
+- **Layout = left-rail 2 cột, y hệt `SnapshotViewer`** (2026-07-15, arrangement A —
+  `max-w-[1240px]`, rail trái sticky ~300px, board cột phải, xếp dọc <`lg`). Không còn
+  capsule glass-toolbar nổi + breadcrumb full-width. **Rail trái** (xếp dọc):
+  - **Brand + dark toggle** (Sun/Moon cuối hàng) + subline "shared snapshot · {ngày}";
+    chip **🔒 Read-only** dưới.
+  - **Collection card** (`glass-card`): label `COLLECTION` + `📚 {collection} · {project}`
+    + pill `{N} items` (không dải ngày — collection không time-boxed).
+  - **Status legend card** (`glass-card`, chỉ khi có status): label `STATUSES` + list dọc
+    mỗi status (chấm màu + tên) — bộ status user tự tạo. Dùng chung cho cả List & Calendar
+    nên sống ở rail (bỏ legend inline cũ trong từng board).
+  - **List | Calendar** toggle (segmented, persist qua `plan-up:snapshotCollView`).
+  - **Actions**: **Export PNG** (`brand-btn`) + **Mở plan-up** (ghost), full-width.
+- **Board (cột phải)**:
   - **List** — card-per-section (Name · Start · End · Status); status = pill soft-tint màu
     riêng; item không status → pill viền đứt. Item không ngày → cột hiện `—`.
   - **Calendar** — tái dùng `buildMonthGrid`/`assignLanes`/`computeBarSegments` (lib.ts) như
-    `CollectionCalendar`: lưới tháng Mon-start, bar liền mạch màu theo status, legend, khay
-    **Unscheduled** cho item không ngày. Read-only: bar không mở popover.
+    `CollectionCalendar`: lưới tháng Mon-start, bar liền mạch màu theo status, khay
+    **Unscheduled** cho item không ngày. Read-only: bar không mở popover. **Thanh điều hướng
+    tháng** (`Today ‹ {Month Year} ›`) nằm ở **đầu cột phải** (không vào rail) vì là
+    interaction riêng của view Calendar; legend đã chuyển sang rail. Demo:
+    `demo/collection-snapshot-flanks.html`.
 - **Export PNG** dựng lại `Collection` + `Task[]` tổng hợp từ snapshot rồi tái dùng
   `CollectionImageModal`/`CollectionPngCard` (nhóm theo section).
 

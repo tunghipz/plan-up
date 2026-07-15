@@ -1,4 +1,4 @@
-import type { VercelRequest, VercelResponse } from '@vercel/node'
+import type { IncomingMessage, ServerResponse } from 'node:http'
 import {
   cors,
   genSuffix,
@@ -8,6 +8,8 @@ import {
   kvReady,
   kvSet,
   MAX_BLOB_LEN,
+  readJsonBody,
+  send,
   validKind,
   TTL_SECONDS,
   type ShareValue,
@@ -16,21 +18,25 @@ import {
 /**
  * POST /api/share — create a hosted share. Body `{ blob, kind }`. Generates a
  * unique short suffix + a write-capability token, stores the snapshot with a TTL,
- * and returns `{ id, writeToken }`. The client composes the `/view/<slug>-<id>`
- * URL and keeps the token locally. See design-docs/hosted-share-link.md.
+ * and returns `{ id, writeToken }`. Uses the raw Node req/res API (no `.status()`
+ * helper). See design-docs/hosted-share-link.md.
  */
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+export default async function handler(req: IncomingMessage, res: ServerResponse) {
   cors(res)
-  if (req.method === 'OPTIONS') return res.status(204).end()
-  if (req.method !== 'POST') return res.status(405).json({ error: 'method' })
-  if (!kvReady) return res.status(503).json({ error: 'store unavailable' })
+  if (req.method === 'OPTIONS') {
+    res.statusCode = 204
+    res.end()
+    return
+  }
+  if (req.method !== 'POST') return send(res, 405, { error: 'method' })
+  if (!kvReady) return send(res, 503, { error: 'store unavailable' })
 
   try {
-    const body = (req.body ?? {}) as { blob?: unknown; kind?: unknown }
+    const body = await readJsonBody(req)
     const { blob, kind } = body
     if (typeof blob !== 'string' || !blob || blob.length > MAX_BLOB_LEN)
-      return res.status(400).json({ error: 'bad blob' })
-    if (!validKind(kind)) return res.status(400).json({ error: 'bad kind' })
+      return send(res, 400, { error: 'bad blob' })
+    if (!validKind(kind)) return send(res, 400, { error: 'bad kind' })
 
     const v = kind === 'collection' ? 3 : 2
 
@@ -43,13 +49,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         break
       }
     }
-    if (!id) return res.status(500).json({ error: 'id generation failed' })
+    if (!id) return send(res, 500, { error: 'id generation failed' })
 
     const writeToken = genToken()
     const value: ShareValue = { v, blob, kind, wt: hashToken(writeToken), updatedAt: Date.now() }
     await kvSet(id, value, TTL_SECONDS)
-    return res.status(200).json({ id, writeToken })
+    return send(res, 200, { id, writeToken })
   } catch (e) {
-    return res.status(500).json({ error: 'server', detail: String((e as Error)?.message ?? e) })
+    return send(res, 500, { error: 'server', detail: String((e as Error)?.message ?? e) })
   }
 }

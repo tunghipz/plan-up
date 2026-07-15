@@ -1,4 +1,4 @@
-import type { VercelRequest, VercelResponse } from '@vercel/node'
+import type { IncomingMessage, ServerResponse } from 'node:http'
 import {
   cors,
   kvDel,
@@ -6,59 +6,69 @@ import {
   kvReady,
   kvSet,
   MAX_BLOB_LEN,
+  readJsonBody,
+  send,
   tokenOk,
   TTL_SECONDS,
   type ShareValue,
 } from '../_kv'
+
+/** The id is the last path segment (`/api/share/<id>`); parsed from the raw URL
+ * so we don't depend on the `req.query` helper. */
+function idFromUrl(rawUrl: string | undefined): string {
+  const path = new URL(rawUrl || '', 'http://x').pathname
+  const parts = path.split('/').filter(Boolean)
+  return parts[parts.length - 1] || ''
+}
 
 /**
  * /api/share/:id
  * - GET    — public read (no token): returns `{ v, blob, kind, updatedAt }`.
  * - PUT    — overwrite the blob (requires `x-write-token`); resets the TTL.
  * - DELETE — revoke (requires `x-write-token`).
- * See design-docs/hosted-share-link.md.
+ * Raw Node req/res API. See design-docs/hosted-share-link.md.
  */
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+export default async function handler(req: IncomingMessage, res: ServerResponse) {
   cors(res)
-  if (req.method === 'OPTIONS') return res.status(204).end()
-  if (!kvReady) return res.status(503).json({ error: 'store unavailable' })
+  if (req.method === 'OPTIONS') {
+    res.statusCode = 204
+    res.end()
+    return
+  }
+  if (!kvReady) return send(res, 503, { error: 'store unavailable' })
 
-  const raw = req.query.id
-  const id = String(Array.isArray(raw) ? raw[0] : raw ?? '')
-  if (!/^[a-z0-9]{1,16}$/.test(id)) return res.status(400).json({ error: 'bad id' })
+  const id = idFromUrl(req.url)
+  if (!/^[a-z0-9]{1,16}$/.test(id)) return send(res, 400, { error: 'bad id' })
 
   try {
     if (req.method === 'GET') {
       const value = await kvGet(id)
-      if (!value) return res.status(404).json({ error: 'not found' })
-      return res
-        .status(200)
-        .json({ v: value.v, blob: value.blob, kind: value.kind, updatedAt: value.updatedAt })
+      if (!value) return send(res, 404, { error: 'not found' })
+      return send(res, 200, { v: value.v, blob: value.blob, kind: value.kind, updatedAt: value.updatedAt })
     }
 
     if (req.method === 'PUT' || req.method === 'DELETE') {
       const value = await kvGet(id)
-      if (!value) return res.status(404).json({ error: 'not found' })
+      if (!value) return send(res, 404, { error: 'not found' })
       const hdr = req.headers['x-write-token']
       const provided = Array.isArray(hdr) ? hdr[0] : hdr
-      if (!provided || !tokenOk(String(provided), value.wt))
-        return res.status(403).json({ error: 'forbidden' })
+      if (!provided || !tokenOk(String(provided), value.wt)) return send(res, 403, { error: 'forbidden' })
 
       if (req.method === 'DELETE') {
         await kvDel(id)
-        return res.status(200).json({ ok: true })
+        return send(res, 200, { ok: true })
       }
       // PUT
-      const body = (req.body ?? {}) as { blob?: unknown }
+      const body = await readJsonBody(req)
       if (typeof body.blob !== 'string' || !body.blob || body.blob.length > MAX_BLOB_LEN)
-        return res.status(400).json({ error: 'bad blob' })
+        return send(res, 400, { error: 'bad blob' })
       const next: ShareValue = { ...value, blob: body.blob, updatedAt: Date.now() }
       await kvSet(id, next, TTL_SECONDS)
-      return res.status(200).json({ ok: true, updatedAt: next.updatedAt })
+      return send(res, 200, { ok: true, updatedAt: next.updatedAt })
     }
 
-    return res.status(405).json({ error: 'method' })
+    return send(res, 405, { error: 'method' })
   } catch (e) {
-    return res.status(500).json({ error: 'server', detail: String((e as Error)?.message ?? e) })
+    return send(res, 500, { error: 'server', detail: String((e as Error)?.message ?? e) })
   }
 }

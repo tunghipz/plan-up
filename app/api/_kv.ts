@@ -5,6 +5,7 @@
 // Talks to Upstash over its REST API with the built-in `fetch` (NO npm client) —
 // so a function can never fail to load over a missing/incompatible dependency.
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
+import type { IncomingMessage, ServerResponse } from 'node:http'
 
 // Vercel KV and a plain Upstash integration inject differently-named env vars;
 // accept either so the store works regardless of how it was attached.
@@ -88,8 +89,39 @@ export const validKind = (k: unknown): k is 'sprint' | 'collection' =>
 
 /** Permissive CORS so the packaged desktop app (origin `tauri://localhost`) can
  * reach the deployed API. Reads are public; writes are token-gated regardless. */
-export function cors(res: { setHeader: (k: string, v: string) => void }): void {
+export function cors(res: ServerResponse): void {
   res.setHeader('Access-Control-Allow-Origin', '*')
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS')
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-write-token')
+}
+
+/** Write a JSON response using ONLY the raw Node API — the `@vercel/node`
+ * `.status()`/`.json()` helpers aren't reliably attached on ESM functions, and
+ * calling a missing helper is what crashed every request (FUNCTION_INVOCATION_FAILED). */
+export function send(res: ServerResponse, code: number, obj: unknown): void {
+  res.statusCode = code
+  res.setHeader('content-type', 'application/json; charset=utf-8')
+  res.end(JSON.stringify(obj))
+}
+
+/** Parse a JSON request body from the raw stream (don't rely on `req.body`, which
+ * the helper layer may not populate on ESM). Caps at 1 MB; bad JSON → {}. */
+export async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
+  const existing = (req as unknown as { body?: unknown }).body
+  if (existing && typeof existing === 'object') return existing as Record<string, unknown>
+  let data = ''
+  try {
+    for await (const chunk of req) {
+      data += chunk
+      if (data.length > 1_048_576) return {}
+    }
+  } catch {
+    return {}
+  }
+  if (!data) return {}
+  try {
+    return JSON.parse(data) as Record<string, unknown>
+  } catch {
+    return {}
+  }
 }

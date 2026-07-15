@@ -51,7 +51,7 @@ Non-obvious behaviors, defaults, persistence keys.
 | [persistence-and-backup.md](./persistence-and-backup.md) | Local-first storage, export/import JSON, seeding |
 | [export-png.md](./export-png.md) | Export the current view's tasks as one shareable PNG image, grouped by member (Copy to clipboard / Download) |
 | [copy-to-telegram.md](./copy-to-telegram.md) | Copy the sprint as plain-text "Tree" (member → task → subtask, status as words) from a header button — paste straight into Telegram/chat |
-| [share-link-snapshot.md](./share-link-snapshot.md) | Share a sprint as a read-only snapshot packed into the URL fragment (`#s=…`, no server) — recipient opens a frozen board + can Import as a new project; Share button next to Copy |
+| [share-link-snapshot.md](./share-link-snapshot.md) | Share a **sprint or collection** as a read-only link packed into the URL fragment (`#v=2…` sprint / `#v=3…` collection, no server) — recipient opens a frozen board (collection viewer adds a List/Calendar toggle), warning-only when a chat might truncate (no size meter), Export PNG in the viewer; Share button on the top bar |
 | [auto-backup.md](./auto-backup.md) | Desktop-only: auto-write daily full-backup JSON to a user-picked folder (30 s debounce on change, keep newest 30) |
 | [desktop-app-tauri.md](./desktop-app-tauri.md) | macOS desktop app — Tauri 2 shell in `app/src-tauri/`, universal DMG via GitHub Actions on `v*` tag |
 | [desktop-auto-update.md](./desktop-auto-update.md) | Desktop-only: in-app auto update via Tauri updater — signed artifacts on GitHub Releases, update pill in the footer |

@@ -291,13 +291,16 @@ export function HostedShareControls({
         )}
       </div>
 
-      {/* The short link */}
+      {/* The short link — shown IN FULL. It's short & fixed-length by design, so
+          the w-full box (break-all wraps if it can't fit one line) displays the
+          whole URL; no middle-truncation (that's only for the long in-URL
+          fallback below, which can be thousands of chars). */}
       <div
         onClick={doCopy}
         title={record.url}
         className="w-full rounded-[10px] bg-fill border border-border px-3 py-2.5 text-[13px] font-mono text-ink cursor-pointer break-all"
       >
-        {truncateMiddle(record.url)}
+        {record.url}
       </div>
 
       {err && <div className="text-[12px] text-[#ff3b30]">{err}</div>}

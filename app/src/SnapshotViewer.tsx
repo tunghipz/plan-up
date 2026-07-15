@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Lock, AlertTriangle, Image, ArrowUpRight, Sun, Moon } from 'lucide-react'
+import { Lock, AlertTriangle, Image, ArrowUpRight, Sun, Moon, Calendar } from 'lucide-react'
 import type { Priority, Status, Task } from './types'
 import type { WorkingPlan } from './scheduling'
 import { decodeSnapshot, laneRows } from './share-snapshot'
@@ -70,6 +70,58 @@ function MilestoneTag() {
 
 const TH = 'text-[10px] font-semibold tracking-[0.045em] uppercase text-ink-muted text-left px-[9px] py-2'
 
+/** Sidebar progress ring — whole-sprint status split, % done in the middle. Replaces
+ *  the old horizontal pulse strip; reads better in the narrow left rail. */
+function PulseDonut({ counts, total }: { counts: Record<Status, number>; total: number }) {
+  const R = 44
+  const C = 2 * Math.PI * R
+  let offset = 0
+  const arcs = PULSE_ORDER.map((s) => {
+    const len = total > 0 ? (counts[s] / total) * C : 0
+    const arc = (
+      <circle
+        key={s}
+        cx="52"
+        cy="52"
+        r={R}
+        fill="none"
+        stroke={STATUS_META[s].varName}
+        strokeWidth="11"
+        strokeDasharray={`${len} ${C - len}`}
+        strokeDashoffset={-offset}
+        transform="rotate(-90 52 52)"
+      />
+    )
+    offset += len
+    return arc
+  })
+  const pctDone = total > 0 ? Math.round((counts.done / total) * 100) : 0
+  return (
+    <div className="flex items-center gap-4">
+      <div className="relative w-24 h-24 shrink-0">
+        <svg viewBox="0 0 104 104" className="w-full h-full">
+          <circle cx="52" cy="52" r={R} fill="none" stroke="var(--color-canvas-sunk)" strokeWidth="11" />
+          {arcs}
+        </svg>
+        <div className="absolute inset-0 grid place-content-center text-center">
+          <div className="text-[22px] font-extrabold tracking-[-0.02em] leading-none tab-data text-ink">{pctDone}%</div>
+          <div className="text-[9.5px] font-semibold text-ink-faint tracking-[0.04em] uppercase mt-0.5">done</div>
+        </div>
+      </div>
+      <div className="flex flex-col gap-2 flex-1 min-w-0">
+        <div className="text-[12px] text-ink-faint tab-data">{total} tasks</div>
+        {PULSE_ORDER.map((s) => (
+          <div key={s} className="flex items-center gap-2 text-[12.5px] text-ink-muted">
+            <span className="w-[9px] h-[9px] rounded-[3px] shrink-0" style={{ background: STATUS_META[s].varName }} />
+            {STATUS_META[s].label}
+            <b className="ml-auto text-ink font-bold tab-data">{counts[s]}</b>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export function SnapshotViewer({ raw }: { raw: string }) {
   const data = useMemo(() => decodeSnapshot(raw), [raw])
   const [exportOpen, setExportOpen] = useState(false)
@@ -119,94 +171,82 @@ export function SnapshotViewer({ raw }: { raw: string }) {
 
   return (
     <div className="min-h-screen ambient-canvas pb-16">
-      {/* Read-only header bar — a floating Liquid-Glass capsule (DNA §4 v2.1 /
-          liquid-glass-material.md), 2 zones: brand · actions. Sprint lives on the
-          breadcrumb line below so its name/date never squeeze against them. */}
-      <div className="sticky top-0 z-20 px-3 sm:px-4 pt-3 pb-1">
-        <div className="glass-toolbar rounded-full flex items-center gap-3 max-w-3xl mx-auto pl-3 pr-2 py-1.5">
-        {/* Left — brand + read-only badge */}
-        <div className="flex items-center gap-2.5 min-w-0">
-          <img src="/favicon.svg" alt="" aria-hidden className="w-[26px] h-[26px] shrink-0 rounded-[6px]" />
-          <div className="flex flex-col leading-tight min-w-0">
-            <span className="text-[14px] font-bold tracking-[-0.01em] text-ink whitespace-nowrap">plan-up</span>
-            <span className="text-[10.5px] text-ink-faint truncate">
-              shared snapshot{stamp !== '—' ? ` · ${stamp}` : ''}
-            </span>
-          </div>
-          <span
-            title="dữ liệu của bạn không bị đụng tới"
-            className="hidden sm:inline-flex items-center gap-1.5 text-[11px] font-semibold text-accent bg-accent-soft rounded-full px-2.5 py-1 shrink-0"
-          >
-            <Lock size={12} strokeWidth={2.4} aria-hidden />
-            Read-only
-          </span>
-        </div>
+      <div className="mx-auto max-w-[1240px] px-3 sm:px-4 pt-5 sm:pt-6 select-text">
+        {/* Two columns: a sticky meta rail (brand · sprint · progress · actions) +
+            the board. Was a centered max-w-3xl single column whose flanks sat empty
+            on wide screens; the rail fills the left flank and lets the table breathe.
+            Stacks to one column below lg. See design-docs/share-link-snapshot.md. */}
+        <div className="grid gap-4 items-start grid-cols-1 lg:grid-cols-[300px_minmax(0,1fr)]">
 
-        {/* Right — actions */}
-        <div className="ml-auto flex items-center justify-end gap-1.5">
-          <button
-            onClick={() => setDark((d) => !d)}
-            aria-label={dark ? 'Chuyển sang chế độ sáng' : 'Chuyển sang chế độ tối'}
-            title={dark ? 'Light mode' : 'Dark mode'}
-            className="inline-flex items-center justify-center rounded-[9px] p-1.5 text-ink-muted hover:bg-fill hover:text-ink transition"
-          >
-            {dark ? <Sun size={16} strokeWidth={2} aria-hidden /> : <Moon size={16} strokeWidth={2} aria-hidden />}
-          </button>
-          <button
-            onClick={() => setExportOpen(true)}
-            className="brand-btn inline-flex items-center gap-1.5 rounded-[9px] px-3 py-1.5 text-[12.5px] font-semibold text-white whitespace-nowrap shrink-0 transition active:scale-[0.97] motion-reduce:active:scale-100"
-          >
-            <Image size={14} strokeWidth={2} aria-hidden />
-            Export PNG
-          </button>
-          <button
-            onClick={openApp}
-            className="inline-flex items-center gap-1.5 rounded-[9px] px-2.5 py-1.5 text-[12.5px] font-semibold text-accent hover:bg-accent-soft transition whitespace-nowrap"
-          >
-            <ArrowUpRight size={14} strokeWidth={2} aria-hidden />
-            <span className="hidden sm:inline">Mở plan-up</span>
-          </button>
-        </div>
-        </div>
-
-        {/* Sprint breadcrumb — its own full-width line under the capsule so the
-            name + range are never squeezed against the brand/actions zones (they
-            stay whitespace-nowrap and simply take the room they need). */}
-        <div className="max-w-3xl mx-auto mt-2 flex justify-center px-1">
-          <div className="inline-flex items-center gap-2.5 bg-fill border border-border-hair rounded-full px-3.5 py-1.5 max-w-full">
-            <span className="text-[13.5px] font-[680] tracking-[-0.01em] text-ink whitespace-nowrap">
-              📋 {sprint.name} · {data.project.name}
-            </span>
-            <span className="w-px h-[15px] bg-border-strong shrink-0" aria-hidden />
-            <span className="text-[12px] text-ink-muted tab-data whitespace-nowrap">{range}</span>
-          </div>
-        </div>
-      </div>
-
-      <div className="mx-auto max-w-3xl px-3 sm:px-4 pt-4 select-text">
-        {/* Board floats on the ambient canvas as one glass card (DNA §4.1). */}
-        <div className="glass-card rounded-[18px] px-4 sm:px-5 py-4 sm:py-5">
-        {/* Pulse — status breakdown across the whole sprint. */}
-        {totalTasks > 0 && (
-          <div className="bg-fill rounded-[12px] p-3 mb-4">
-            <div className="h-2 rounded-full bg-[var(--color-canvas-sunk)] overflow-hidden flex">
-              {PULSE_ORDER.map((s) =>
-                counts[s] > 0 ? (
-                  <span key={s} style={{ width: `${(counts[s] / totalTasks) * 100}%`, background: STATUS_META[s].varName }} />
-                ) : null
-              )}
-            </div>
-            <div className="flex flex-wrap gap-x-3.5 gap-y-1 mt-2 text-[11.5px] text-ink-muted">
-              <span>{totalTasks} tasks</span>
-              {PULSE_ORDER.map((s) => (
-                <span key={s} className="inline-flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-[2px]" style={{ background: STATUS_META[s].varName }} />
-                  <b className="text-ink font-semibold tab-data">{counts[s]}</b> {STATUS_META[s].label}
+          {/* ── Left rail — everything that used to stack across the top ── */}
+          <aside className="flex flex-col gap-3.5 lg:sticky lg:top-6">
+            {/* Brand + dark toggle */}
+            <div className="flex items-center gap-2.5">
+              <img src="/favicon.svg" alt="" aria-hidden className="w-[30px] h-[30px] shrink-0 rounded-[8px]" />
+              <div className="flex flex-col leading-tight min-w-0">
+                <span className="text-[15px] font-bold tracking-[-0.01em] text-ink whitespace-nowrap">plan-up</span>
+                <span className="text-[10.5px] text-ink-faint truncate">
+                  shared snapshot{stamp !== '—' ? ` · ${stamp}` : ''}
                 </span>
-              ))}
+              </div>
+              <button
+                onClick={() => setDark((d) => !d)}
+                aria-label={dark ? 'Chuyển sang chế độ sáng' : 'Chuyển sang chế độ tối'}
+                title={dark ? 'Light mode' : 'Dark mode'}
+                className="ml-auto inline-flex items-center justify-center rounded-[9px] p-1.5 text-ink-muted hover:bg-fill hover:text-ink transition"
+              >
+                {dark ? <Sun size={16} strokeWidth={2} aria-hidden /> : <Moon size={16} strokeWidth={2} aria-hidden />}
+              </button>
             </div>
-          </div>
-        )}
+            <span
+              title="dữ liệu của bạn không bị đụng tới"
+              className="inline-flex w-max items-center gap-1.5 text-[11px] font-semibold text-accent bg-accent-soft rounded-full px-2.5 py-1"
+            >
+              <Lock size={12} strokeWidth={2.4} aria-hidden />
+              Read-only
+            </span>
+
+            {/* Sprint card */}
+            <div className="glass-card rounded-[16px] p-4">
+              <div className="text-[10px] font-bold tracking-[0.06em] uppercase text-ink-faint">Sprint</div>
+              <div className="text-[15px] font-bold tracking-[-0.01em] text-ink mt-2 leading-snug">
+                📋 {sprint.name} · {data.project.name}
+              </div>
+              <div className="inline-flex items-center gap-2 text-[12.5px] text-ink-muted mt-2.5 bg-fill rounded-full px-3 py-1.5 tab-data whitespace-nowrap">
+                <Calendar size={13} strokeWidth={2} aria-hidden />
+                {range}
+              </div>
+            </div>
+
+            {/* Progress — donut + legend (replaces the old top pulse strip) */}
+            {totalTasks > 0 && (
+              <div className="glass-card rounded-[16px] p-4">
+                <div className="text-[10px] font-bold tracking-[0.06em] uppercase text-ink-faint mb-3.5">Progress</div>
+                <PulseDonut counts={counts} total={totalTasks} />
+              </div>
+            )}
+
+            {/* Actions */}
+            <div className="flex flex-col gap-2">
+              <button
+                onClick={() => setExportOpen(true)}
+                className="brand-btn inline-flex items-center justify-center gap-1.5 rounded-[11px] px-4 py-2.5 text-[13px] font-semibold text-white transition active:scale-[0.98] motion-reduce:active:scale-100"
+              >
+                <Image size={15} strokeWidth={2} aria-hidden />
+                Export PNG
+              </button>
+              <button
+                onClick={openApp}
+                className="inline-flex items-center justify-center gap-1.5 rounded-[11px] px-4 py-2.5 text-[13px] font-semibold text-accent bg-fill hover:bg-accent-soft transition"
+              >
+                <ArrowUpRight size={15} strokeWidth={2} aria-hidden />
+                Mở plan-up
+              </button>
+            </div>
+          </aside>
+
+          {/* ── Board — the task table (DNA §4.1 glass card) ── */}
+          <main className="glass-card rounded-[18px] px-4 sm:px-5 py-4 sm:py-5 min-w-0">
 
         {groups.length === 0 ? (
           <p className="text-ink-muted text-[13px] py-10 text-center">Sprint rỗng.</p>
@@ -289,6 +329,7 @@ export function SnapshotViewer({ raw }: { raw: string }) {
           <span className="w-3 h-3 rounded-[3px] bg-accent inline-block" />
           Made with plan-up · read-only snapshot — không realtime, không đồng bộ về sau
         </div>
+          </main>
         </div>
       </div>
 

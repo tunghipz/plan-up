@@ -7,7 +7,17 @@
 > verbatim by the hosted mode.
 
 **Status:** Implemented
-**Last updated:** 2026-07-15 (**collections share-link** — new `v=3` snapshot format +
+**Last updated:** 2026-07-15 (**viewer left-rail layout** — recipient page moved from a
+centered single column [`max-w-3xl`, empty flanks on wide screens] to a **2-column grid**
+[`max-w-[1240px]`]: a **sticky left rail** [~300px] now holds all the meta that used to
+stack across the top — brand + Read-only chip, Sprint card [name/project + date range],
+a **Progress donut** [replaces the horizontal pulse strip: ring with % done in the
+center + vertical legend], and the actions [dark toggle · Export PNG · Mở plan-up]. The
+task table gets the whole right column [wider, less vertical scroll]. Stacks back to one
+column below `lg` [<1024px] so mobile is unchanged in spirit. The floating glass-toolbar
+capsule + full-width sprint breadcrumb are **gone** — their content lives in the rail.
+Demo: `demo/snapshot-flanks-layout.html` [layout A]. Earlier 2026-07-15: **collections
+share-link** — new `v=3` snapshot format +
 `CollectionShareModal` [trim by section] + `CollectionSnapshotViewer` [List + Calendar];
 Share button on the collection top bar next to Export; see "Collections (v3)" below.
 Earlier 2026-07-14: sender modal **removed the size readout** — the "Link size"
@@ -78,24 +88,24 @@ phía server, không auth.
 ### Recipient (người nhận)
 - Mở URL `…/#v=2&s=<blob>` → app phát hiện fragment lúc boot → **không vào app
   thường**, render `SnapshotViewer`:
-  - **Header bar** — **capsule Liquid Glass nổi** (`.glass-toolbar rounded-full`,
-    sticky, blur + specular rim; theo DNA §4 v2.1 / `liquid-glass-material.md`,
-    **không** phải bar bờ thẳng + border-b), **2 vùng** (brand · actions):
-    - **Trái — brand + read-only**: **app icon** (`/favicon.svg`) + wordmark
-      **plan-up** (`whitespace-nowrap`, luôn 1 dòng) + subline "shared snapshot ·
-      {ngày}" (từ `data.exportedAt`) + chip **🔒 Read-only** (title tooltip "dữ liệu
-      của bạn không bị đụng tới").
-    - **Phải — actions**: **dark-mode toggle** (icon Sun/Moon) + nút **Export PNG**
-      (`brand-btn`, icon ảnh) + link **Mở plan-up** (ghost accent). **Không có
-      Import** — chỉ để xem.
-  - **Sprint breadcrumb** — **1 dòng riêng ngay dưới capsule** (căn giữa, cùng khối
-    sticky): pill `bg-fill` bo tròn chứa `📋 {sprint.name} · {project.name}` │
-    **{range}** (start → end), **cả hai `whitespace-nowrap` — không bao giờ bị cắt**.
-    *(Quyết định 2026-07-14, arrangement A: trước đó sprint nhồi vào vùng giữa capsule
-    cùng brand + actions, ở màn hẹp bị bóp → tên sprint truncate / đè chip Read-only +
-    nút. Tách sprint ra dòng riêng cho nó full width, không tranh chỗ với ai.)* Đây là
-    chỗ thông tin sprint sống duy nhất → **bỏ luôn dòng sprint header ở body** (kể cả
-    bản `md:hidden` cũ, giờ breadcrumb hiện mọi kích thước).
+  - **Layout = 2 cột** (`max-w-[1240px]`, giữa canvas): **rail trái sticky** (~300px)
+    + **bảng chiếm cột phải** (rộng, cuộn dọc ngắn hơn). Dưới `lg` (<1024px) rail
+    **xếp lại thành 1 cột trên bảng** (mobile như cũ). *(Quyết định 2026-07-15,
+    arrangement A: bản cũ là 1 cột căn giữa `max-w-3xl` → màn rộng trống 2 bên; dồn
+    meta vào rail trái để lấp flank + cho bảng thở. Bỏ hẳn capsule glass-toolbar nổi
+    + dòng breadcrumb full-width — nội dung của chúng chuyển vào rail.)*
+  - **Rail trái** (sticky `top`, các khối xếp dọc):
+    - **Brand + read-only**: **app icon** (`/favicon.svg`) + wordmark **plan-up** +
+      subline "shared snapshot · {ngày}" (từ `data.exportedAt`); **dark-mode toggle**
+      (Sun/Moon) nằm cuối hàng brand; chip **🔒 Read-only** ngay dưới.
+    - **Sprint card** (`glass-card`): label `SPRINT` + `📋 {sprint.name} ·
+      {project.name}` + pill ngày `{range}` (start → end, `whitespace-nowrap`).
+    - **Progress card** (`glass-card`, chỉ khi có task): label `PROGRESS` + **donut**
+      (ring 3 màu theo `PULSE_ORDER`, tâm hiện **% done** + "done") + **legend dọc**
+      (`{N} tasks` + Done / In progress / To do, số căn phải). *(Thay cho pulse strip
+      ngang cũ — donut hợp cột hẹp hơn, đọc "% done" ngay.)*
+    - **Actions**: **Export PNG** (`brand-btn`, full-width) + **Mở plan-up** (ghost
+      accent, full-width). **Không có Import** — chỉ để xem.
   - **Dark mode**: viewer chạy `useDarkMode` (init theo `prefers-color-scheme` của
     người nhận, hoặc `plan-up:dark` đã lưu; toggle `.dark` trên `<html>` + lưu lại).
     Toàn bộ token, `ambient-canvas`, `glass-card` (màn lỗi), pulse, `StatusPill` đều
@@ -106,10 +116,9 @@ phía server, không auth.
     Vì snapshot **đóng băng ngày**, viewer truyền `planById` **rỗng** → card fallback
     về `startDate/dueDate` đã đóng băng trên task; `today` = ngày snapshot
     (`exportedAt`, dùng cho stamp + so overdue "tại thời điểm chụp").
-  - **Board = 1 glass card** (`.glass-card` bo 18px) nổi trên `ambient-canvas` (DNA
-    §4.1), chứa pulse + bảng + watermark:
-  - **Pulse strip**: progress bar 3 màu + đếm `Done / In progress / To do` trên toàn
-    sprint — đọc "sprint sao rồi" ngay đầu.
+  - **Board = 1 glass card** (`.glass-card` bo 18px) ở cột phải, nổi trên
+    `ambient-canvas` (DNA §4.1), chứa **bảng + watermark** (pulse đã chuyển sang
+    Progress card ở rail trái — board không còn strip đầu bảng).
   - **Board đóng băng xếp giống Export PNG** (bảng hairline như `PngExportCard`, trên
     màn bọc trong glass card; PNG xuất ra vẫn là card trắng riêng): **một bảng
     hairline** — Member gutter (rowSpan: avatar + tên + `done/total`) · cột **# ·

@@ -1,7 +1,8 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link2, Check } from 'lucide-react'
 import { ModalSheet } from './ModalSheet'
 import { colorForName } from './schema'
+import { getShareForRef } from './db'
 import type { Member } from './types'
 import { encodeSnapshot, buildSprintShareUrl, type SnapshotData } from './share-snapshot'
 import { slugify } from './share-hosted'
@@ -54,6 +55,24 @@ export function ShareLinkModal({
 }) {
   const [selected, setSelected] = useState<Set<string>>(() => new Set(members.map((m) => m.id)))
 
+  // If this sprint is already shared with a trimmed member set, seed the checklist
+  // from it (intersected with members that still own tasks) so reopening doesn't
+  // reset to "all" — which would falsely read stale and re-broaden scope on Update.
+  useEffect(() => {
+    let alive = true
+    getShareForRef(refId)
+      .then((rec) => {
+        if (!alive || !rec?.selectedIds) return
+        const ids = new Set(members.map((m) => m.id))
+        setSelected(new Set(rec.selectedIds.filter((id) => ids.has(id))))
+      })
+      .catch(() => {})
+    return () => {
+      alive = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refId])
+
   const { bundle, blob, sig, fallbackUrl, slug } = useMemo(() => {
     const bundle = buildBundle([...selected])
     return {
@@ -63,7 +82,9 @@ export function ShareLinkModal({
       // render), so exclude it or the link would always look out of date.
       sig: JSON.stringify({ ...bundle, exportedAt: '' }),
       fallbackUrl: buildSprintShareUrl(bundle, shareBaseUrl()),
-      slug: slugify(bundle.sprint.name || bundle.project.name),
+      // Slug = PROJECT name (the sprint name is the auto/locked "Sprint N", which
+      // makes a meaningless link); only the suffix is the store key anyway.
+      slug: slugify(bundle.project.name || bundle.sprint.name),
     }
   }, [buildBundle, selected])
 
@@ -146,6 +167,7 @@ export function ShareLinkModal({
         slug={slug}
         blob={blob}
         sig={sig}
+        selectedIds={[...selected]}
         empty={empty}
         fallbackUrl={fallbackUrl}
       />

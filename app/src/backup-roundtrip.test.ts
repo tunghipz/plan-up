@@ -11,6 +11,7 @@ import {
   renamePerson,
   recolorPerson,
   type ExportPayload,
+  type ShareRecord,
 } from './db'
 
 async function clearAll() {
@@ -22,6 +23,7 @@ async function clearAll() {
     db.tasks.clear(),
     db.events.clear(),
     db.people.clear(),
+    db.shares.clear(),
   ])
 }
 
@@ -182,6 +184,55 @@ describe('deleteProject wipes everything the project owns', () => {
     expect(await db.events.where('projectId').equals(pidA).count()).toBe(0)
     // The OTHER project's rows survive.
     expect(await db.collections.where('projectId').equals(pidB).count()).toBe(1)
+  })
+})
+
+describe('exportAll/importAll shares round-trip', () => {
+  beforeEach(clearAll)
+
+  const shareRec = (over: Partial<ShareRecord> = {}): ShareRecord => ({
+    id: 'abc123',
+    refId: 'sprint-x',
+    kind: 'sprint',
+    slug: 'alpha',
+    writeToken: 'tok-secret',
+    url: 'https://plan-up-eta.vercel.app/view/alpha-abc123',
+    lastSig: 'sig1',
+    selectedIds: ['m1', 'm2'],
+    createdAt: 1,
+    updatedAt: 2,
+    projectId: 'pA',
+    ...over,
+  })
+
+  it('a hosted share (with its write token) survives export → import (v6)', async () => {
+    await db.projects.add({ id: 'pA', name: 'Alpha', createdAt: 1 })
+    await db.shares.add(shareRec())
+    const data = await exportAll()
+    expect(data.version).toBe(6)
+    expect(data.shares).toHaveLength(1)
+
+    await importAll(data)
+    const got = await db.shares.get('abc123')
+    expect(got?.writeToken).toBe('tok-secret')
+    expect(got?.lastSig).toBe('sig1')
+    expect(got?.selectedIds).toEqual(['m1', 'm2'])
+  })
+
+  it('a pre-v6 backup (no shares) imports cleanly, leaving shares empty', async () => {
+    await db.projects.add({ id: 'pA', name: 'Alpha', createdAt: 1 })
+    await db.shares.add(shareRec()) // a local share that must be cleared by the restore
+    const data = await exportAll()
+    const old = { ...data, version: 5, shares: undefined } as ExportPayload
+    await importAll(old)
+    expect(await db.shares.count()).toBe(0)
+  })
+
+  it('rejects a payload whose shares field is not an array', async () => {
+    await db.projects.add({ id: 'pA', name: 'Alpha', createdAt: 1 })
+    const data = await exportAll()
+    const evil = { ...data, shares: 'nope' } as unknown as ExportPayload
+    await expect(importAll(evil)).rejects.toThrow('Not a valid plan-up backup')
   })
 })
 

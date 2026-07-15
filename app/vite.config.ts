@@ -65,4 +65,13 @@ export default defineConfig({
   // Tauri: keep its CLI output visible and expose TAURI_ENV_* to the client.
   clearScreen: false,
   envPrefix: ['VITE_', 'TAURI_ENV_'],
+  // Dev-only: `vite dev` runs no serverless functions, so forward `/api/*` to the
+  // deployed functions. Lets the hosted share-link flow (create/update/revoke +
+  // the /view viewer) be exercised locally. Only affects the dev server — the
+  // production build never uses it. See design-docs/hosted-share-link.md.
+  server: {
+    proxy: {
+      '/api': { target: 'https://plan-up-eta.vercel.app', changeOrigin: true, secure: true },
+    },
+  },
 })

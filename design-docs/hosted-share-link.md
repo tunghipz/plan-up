@@ -143,15 +143,32 @@ dùng nguyên si). `wt` = hash của writeToken (không lưu token thô). TTL 90
 - **Đổi tên plan** → slug URL lệch tên nhưng link vẫn mở (chỉ suffix tra store). Có thể
   "refresh" URL hiển thị khi Copy (dựng lại slug mới + suffix cũ) — cosmetic.
 - **Trùng suffix** → server retry gen tới khi trống. Slug trùng nhau vô hại (suffix phân biệt).
-- **Ghi trái phép** → API công khai nhưng `PUT`/`DELETE` cần `writeToken` đúng → người lạ
-  không sửa/xoá được share của mình. Đoán suffix chỉ cho **đọc** (đã chấp nhận công khai).
+- **Ghi trái phép** → API công khai nhưng `PUT`/`DELETE` cần `writeToken` đúng (so hash
+  sha256 **timing-safe**) → người lạ không sửa/xoá được share của mình. Đoán suffix chỉ cho
+  **đọc** (đã chấp nhận công khai). `GET` không bao giờ trả `wt`.
+- **Trim + staleness** → checklist member/section reset về "all" mỗi lần mở modal, nên
+  `ShareRecord.selectedIds` (lưu lúc share) được dùng để **seed lại** selection khi mở lại →
+  share đã tỉa không bị coi là "stale" giả và bấm Cập nhật không lén mở rộng scope. Dirty so
+  `lastSig` (bundle bỏ `exportedAt`) với hiện tại. Nút Cập nhật khoá khi selection rỗng.
+- **Xoá plan → thu hồi link** → `deleteProject`/`deleteCollection` xoá `shares` row **và**
+  gọi `revokeShare` best-effort (network; lỗi thì để TTL dọn) → link công khai không sống
+  tiếp sau khi plan đã xoá. (Không có "delete sprint" riêng — sprint chỉ archive.)
 - **Size** → cap 512 KB ở server (KV value có hạn); blob nén nên collection rất lớn mới chạm.
+- **Lỗi server** → 500 chỉ trả `{ error: 'server' }`; chi tiết (`console.error`) chỉ ở log
+  Vercel, **không lộ** ra client vô danh. `fetch` tới Upstash có `AbortSignal.timeout(8s)` để
+  function không treo khi store chậm.
 - **Untrusted input** → decode vẫn qua `decodeSnapshot`/`decodeCollectionSnapshot` (try/catch,
   validate shape, chống decompress bomb). Render bằng React text thuần → không XSS. Không đổi.
 - **Desktop (Tauri)** → link base = `DEPLOYED_BASE` (prod), API gọi cùng origin đó; mở link
   ở browser hệ thống qua `openExternal` (đã có). Offline → fallback in-URL.
 - **Privacy** → server (người vận hành Vercel) đọc được blob. Task planner độ nhạy thấp,
   đã chốt. Note rõ ở modal khi cần.
+- **⚠️ Token trong backup** → full backup JSON chứa `writeToken` (secret cho phép ghi
+  đè/xoá link). Có chủ đích (restore máy khác vẫn update được) nhưng nghĩa là: **ai có file
+  backup = hijack/xoá được mọi link đang sống của mày**. Đừng chia sẻ backup bừa. (Project
+  export **không** kèm shares — bản copy không trỏ tới link gốc.)
+- **⚠️ Abuse / rate-limit** → `POST /api/share` không auth, không giới hạn tần suất (tradeoff
+  của "ai cũng tạo được"). Spam có thể phình store/đội phí Upstash. Chưa có trần — xem Future.
 
 ## Future / open questions
 
@@ -159,4 +176,6 @@ dùng nguyên si). `wt` = hash của writeToken (không lưu token thô). TTL 90
   `#fragment`, link ~53 ký tự. Đã thiết kế nhưng loại vì "không cần giấu".
 - **QR** từ link ngắn (giờ ngắn nên QR gọn) — cân nhắc.
 - **Gia hạn TTL khi có người đọc** — hiện chỉ reset khi ghi; có thể touch TTL trên `GET`.
-- **Dọn share khi xoá plan** — xoá collection/sprint nên `DELETE` share tương ứng (hoặc để TTL lo).
+- **Rate-limit / abuse ceiling** — `POST` công khai không trần. Cân nhắc: per-IP cap, counter
+  global trong KV, TTL ngắn hơn cho link chưa từng update, hoặc hạ `MAX_BLOB_LEN`.
+- **Cảnh báo token khi export** — 1 dòng note lúc tải backup rằng file chứa write-token.

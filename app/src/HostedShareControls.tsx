@@ -11,6 +11,7 @@ import {
   type ShareKind,
 } from './share-hosted'
 import { openExternal } from './share-runtime'
+import { useConfirm } from './confirm-context'
 
 /**
  * The lower half of both share modals: turns the current snapshot `blob` into a
@@ -56,6 +57,7 @@ export function HostedShareControls({
   slug,
   blob,
   sig,
+  selectedIds,
   empty,
   fallbackUrl,
 }: {
@@ -68,11 +70,14 @@ export function HostedShareControls({
   /** Stable content signature (bundle minus the volatile exportedAt) — drives the
    * stale/Update state without the timestamp making everything look changed. */
   sig: string
+  /** The included member/section ids (persisted so reopen keeps the trim). */
+  selectedIds: string[]
   /** Nothing selected → can't create. */
   empty: boolean
   /** The long in-URL link, shown as an offline fallback. */
   fallbackUrl: string
 }) {
+  const confirm = useConfirm()
   // undefined = still loading the local record; null = not shared yet.
   const [record, setRecord] = useState<ShareRecord | null | undefined>(undefined)
   const [busy, setBusy] = useState<'' | 'create' | 'update' | 'revoke'>('')
@@ -84,9 +89,16 @@ export function HostedShareControls({
 
   useEffect(() => {
     let alive = true
-    getShareForRef(refId).then((r) => {
-      if (alive) setRecord(r ?? null)
-    })
+    getShareForRef(refId)
+      .then((r) => {
+        if (alive) setRecord(r ?? null)
+      })
+      // A failed local read (e.g. a blocked v14 upgrade) must not leave the UI
+      // stuck on the loading skeleton with no Create/fallback — fall back to
+      // "not shared" so the user can still act.
+      .catch(() => {
+        if (alive) setRecord(null)
+      })
     return () => {
       alive = false
     }
@@ -112,6 +124,7 @@ export function HostedShareControls({
         writeToken,
         url: viewUrl(slug, id),
         lastSig: sig,
+        selectedIds,
         createdAt: now,
         updatedAt: now,
         projectId,
@@ -127,7 +140,7 @@ export function HostedShareControls({
   }
 
   async function doUpdate() {
-    if (!record) return
+    if (!record || empty) return
     setBusy('update')
     setErr(null)
     try {
@@ -138,6 +151,7 @@ export function HostedShareControls({
         slug,
         url: viewUrl(slug, record.id),
         lastSig: sig,
+        selectedIds,
         updatedAt: Date.now(),
       }
       await saveShareRecord(rec)
@@ -161,6 +175,15 @@ export function HostedShareControls({
 
   async function doRevoke() {
     if (!record) return
+    if (
+      !(await confirm({
+        title: 'Thu hồi link?',
+        message: 'Link sẽ chết với mọi người đã nhận. Không hoàn tác.',
+        confirmLabel: 'Thu hồi',
+        destructive: true,
+      }))
+    )
+      return
     setBusy('revoke')
     setErr(null)
     try {
@@ -292,8 +315,8 @@ export function HostedShareControls({
         {dirty && (
           <button
             onClick={doUpdate}
-            disabled={busy !== ''}
-            title="Đẩy bản mới nhất lên (link không đổi)"
+            disabled={busy !== '' || empty}
+            title={empty ? 'Chọn ít nhất 1 mục để cập nhật' : 'Đẩy bản mới nhất lên (link không đổi)'}
             className="inline-flex items-center justify-center gap-1.5 rounded-[11px] bg-fill px-3 py-2.5 text-[13.5px] font-semibold text-accent transition hover:bg-accent-soft active:scale-[0.98] disabled:opacity-50"
           >
             <RefreshCw size={15} strokeWidth={2} className={busy === 'update' ? 'animate-spin' : ''} />

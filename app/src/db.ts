@@ -27,6 +27,7 @@ import {
 import { db, uid, colorForName, nextSequence } from './schema'
 import { recomputeDates, wouldCreateCycle } from './scheduling'
 import { logEvent, logTaskEdits } from './activity-log'
+import { revokeShare } from './share-hosted'
 
 /** Status mặc định khi tạo collection (user sửa được sau). */
 function defaultStatuses(): CollectionStatus[] {
@@ -63,12 +64,18 @@ export async function renameCollection(id: string, name: string): Promise<void> 
   await db.collections.update(id, { name: n })
 }
 
-/** Xoá collection + toàn bộ item của nó (destructive — caller confirm trước). */
+/** Xoá collection + toàn bộ item của nó (destructive — caller confirm trước).
+ * Cũng dọn + thu hồi hosted share link của collection (nếu có) — không để link
+ * công khai sống tiếp sau khi plan đã xoá. */
 export async function deleteCollection(id: string): Promise<void> {
-  await db.transaction('rw', db.collections, db.tasks, async () => {
+  const shares = await db.shares.where('refId').equals(id).toArray()
+  await db.transaction('rw', db.collections, db.tasks, db.shares, async () => {
     await db.tasks.where('collectionId').equals(id).delete()
     await db.collections.delete(id)
+    await db.shares.where('refId').equals(id).delete()
   })
+  // Best-effort: revoke the store entry (network; a failure just leaves it to TTL).
+  for (const s of shares) revokeShare(s.id, s.writeToken).catch(() => {})
 }
 
 export async function addSection(collectionId: string, name: string): Promise<void> {
@@ -437,11 +444,15 @@ export async function updateProject(
  * by tasks in OTHER projects (rare) are stripped from those references.
  */
 export async function deleteProject(projectId: string): Promise<void> {
+  // Gather this project's hosted shares first, so we can revoke them after the
+  // local wipe (best-effort; network) — a deleted project must not leave public
+  // links serving its old board until TTL.
+  const shares = await db.shares.where('projectId').equals(projectId).toArray()
   // Table-array form: Dexie's variadic transaction() overloads stop at 5
-  // tables and this wipe spans 6.
+  // tables and this wipe spans 7.
   await db.transaction(
     'rw',
-    [db.projects, db.members, db.sprints, db.tasks, db.collections, db.events],
+    [db.projects, db.members, db.sprints, db.tasks, db.collections, db.events, db.shares],
     async () => {
       const taskIds = (
         await db.tasks.where('projectId').equals(projectId).toArray()
@@ -462,9 +473,12 @@ export async function deleteProject(projectId: string): Promise<void> {
       await db.members.where('projectId').equals(projectId).delete()
       await db.collections.where('projectId').equals(projectId).delete()
       await db.events.where('projectId').equals(projectId).delete()
+      await db.shares.where('projectId').equals(projectId).delete()
       await db.projects.delete(projectId)
     }
   )
+  // Best-effort revoke of each hosted link (network; TTL cleans up on failure).
+  for (const s of shares) revokeShare(s.id, s.writeToken).catch(() => {})
 }
 
 // ──────────────────────────────────────────────────────────────────────────

@@ -29,6 +29,7 @@ async function cmd(args: (string | number)[]): Promise<unknown> {
     method: 'POST',
     headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(args),
+    signal: AbortSignal.timeout(8000), // don't hang the function on a stuck store
   })
   if (!r.ok) throw new Error(`upstash ${r.status}: ${await r.text()}`)
   return (await r.json()).result
@@ -105,6 +106,7 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
     await cmd(['SET', `share:${id}`, JSON.stringify(value), 'EX', String(TTL_SECONDS)])
     return send(res, 200, { id, writeToken })
   } catch (e) {
-    return send(res, 500, { error: 'server', detail: String((e as Error)?.message ?? e) })
+    console.error('POST /api/share failed:', e) // log detail server-side, not to the client
+    return send(res, 500, { error: 'server' })
   }
 }

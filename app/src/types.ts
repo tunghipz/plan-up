@@ -240,6 +240,11 @@ export interface ShareRecord {
    * itself: the blob embeds a fresh `exportedAt` every build, so it would always
    * differ. Absent on records created before this field existed → reads as stale. */
   lastSig?: string
+  /** The trim selection at share time — member ids (sprint) or section ids
+   * (collection) that the link INCLUDES. Reopening the modal seeds its checklist
+   * from this so a trimmed share doesn't reset to "all" (which would falsely read
+   * stale and, on Update, silently re-broaden the shared scope). */
+  selectedIds?: string[]
   createdAt: number
   updatedAt: number
   projectId: string

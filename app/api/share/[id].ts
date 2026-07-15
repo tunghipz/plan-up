@@ -26,6 +26,7 @@ async function cmd(args: (string | number)[]): Promise<unknown> {
     method: 'POST',
     headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(args),
+    signal: AbortSignal.timeout(8000), // don't hang the function on a stuck store
   })
   if (!r.ok) throw new Error(`upstash ${r.status}: ${await r.text()}`)
   return (await r.json()).result
@@ -117,6 +118,7 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
 
     return send(res, 405, { error: 'method' })
   } catch (e) {
-    return send(res, 500, { error: 'server', detail: String((e as Error)?.message ?? e) })
+    console.error(`${req.method} /api/share/${id} failed:`, e) // server-side only
+    return send(res, 500, { error: 'server' })
   }
 }

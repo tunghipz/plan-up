@@ -1,6 +1,7 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link2, Check, Rows3 } from 'lucide-react'
 import { ModalSheet } from './ModalSheet'
+import { getShareForRef } from './db'
 import {
   encodeCollectionSnapshot,
   buildCollectionShareUrl,
@@ -42,6 +43,22 @@ export function CollectionShareModal({
   onClose: () => void
 }) {
   const [selected, setSelected] = useState<Set<string>>(() => new Set(sections.map((s) => s.id)))
+
+  // Seed the checklist from an existing trimmed share (see ShareLinkModal note).
+  useEffect(() => {
+    let alive = true
+    getShareForRef(refId)
+      .then((rec) => {
+        if (!alive || !rec?.selectedIds) return
+        const ids = new Set(sections.map((s) => s.id))
+        setSelected(new Set(rec.selectedIds.filter((id) => ids.has(id))))
+      })
+      .catch(() => {})
+    return () => {
+      alive = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refId])
 
   const { bundle, blob, sig, fallbackUrl, slug } = useMemo(() => {
     const bundle = buildBundle([...selected])
@@ -143,6 +160,7 @@ export function CollectionShareModal({
         slug={slug}
         blob={blob}
         sig={sig}
+        selectedIds={[...selected]}
         empty={empty}
         fallbackUrl={fallbackUrl}
       />

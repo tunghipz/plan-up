@@ -109,6 +109,19 @@ import {
 const CURRENT_PROJECT_KEY = 'plan-up:currentProjectId'
 const CURRENT_SPRINT_KEY = 'plan-up:currentSprintId'
 const VIEW_KEY = 'plan-up:view'
+
+// Desktop window chrome (overlay title bar + traffic-light icon rail) is normally
+// gated on the real Tauri runtime. FORCE_DESKTOP_CHROME lets the browser dev server
+// render the exact same chrome — with fake traffic lights — against real IndexedDB
+// data, for previewing the desktop layout. Toggle with `?desktop=1` or
+// localStorage['plan-up:forceDesktopChrome']='1'. True Tauri-only features
+// (auto-backup, updater) stay gated on IS_TAURI and are never faked. See
+// desktop-app-tauri.md.
+const FORCE_DESKTOP_CHROME =
+  typeof window !== 'undefined' &&
+  (new URLSearchParams(window.location.search).has('desktop') ||
+    window.localStorage?.getItem('plan-up:forceDesktopChrome') === '1')
+const DESKTOP_CHROME = IS_TAURI || FORCE_DESKTOP_CHROME
 type ViewMode = 'list' | 'board' | 'timeline'
 type CollectionViewMode = 'list' | 'calendar'
 
@@ -1123,6 +1136,15 @@ function App() {
 
   return (
     <div className="h-screen flex ambient-canvas text-ink overflow-hidden">
+      {/* Browser-only preview: paint fake macOS traffic lights so `?desktop=1`
+          shows the real desktop layout. Real Tauri draws OS lights instead. */}
+      {FORCE_DESKTOP_CHROME && !IS_TAURI && (
+        <div className="fixed top-[11px] left-[18px] z-[60] flex gap-2 pointer-events-none">
+          <span className="w-3 h-3 rounded-full bg-[#ff5f57]" />
+          <span className="w-3 h-3 rounded-full bg-[#febc2e]" />
+          <span className="w-3 h-3 rounded-full bg-[#28c840]" />
+        </div>
+      )}
       {HOME_ENABLED && screen === 'home' ? (
         <HomeDashboard
           projects={projects ?? []}
@@ -1150,7 +1172,7 @@ function App() {
       >
         {/* Desktop overlay title bar (desktop-app-tauri.md): the traffic lights
             float over this strip; it doubles as the window drag region. */}
-        {IS_TAURI && <div data-tauri-drag-region className="h-[34px] shrink-0" />}
+        {DESKTOP_CHROME && <div data-tauri-drag-region className="h-[34px] shrink-0" />}
         {currentProject ? (
           <>
             <div className="px-2.5 pt-2.5 pb-2 relative">
@@ -1531,6 +1553,57 @@ function App() {
         </div>
       </aside>
 
+      {/* Desktop collapsed → 74px icon rail (desktop-app-tauri.md; app-shell v4.3).
+          Fills the traffic-light safe zone instead of leaving an orphaned gutter, and
+          puts the toolbar + content on one shared left rail. Web collapse stays a bare
+          width-0 gap. Rail width = the 74px lights safe zone. */}
+      {DESKTOP_CHROME && sidebarCollapsed && (
+        <div className="w-[74px] shrink-0 flex flex-col items-center vibrancy border-r border-border-hair">
+          {/* Drag strip — the traffic lights float over this; window drag region. */}
+          <div data-tauri-drag-region className="h-[34px] w-full shrink-0" />
+          <div className="flex flex-col items-center gap-1.5 pt-1">
+            <button
+              onClick={() => setSidebarCollapsed(false)}
+              title="Show sidebar (⌘\)"
+              aria-label="Show sidebar"
+              className="w-9 h-9 rounded-lg inline-flex items-center justify-center text-ink-faint hover:text-ink hover:bg-surface-hover transition"
+            >
+              <PanelLeft size={17} strokeWidth={1.9} />
+            </button>
+            <div className="w-5 h-px bg-border-hair my-0.5" />
+            {currentProject && (
+              <button
+                onClick={() => setSidebarCollapsed(false)}
+                title={`${currentProject.name} — show sidebar`}
+                aria-label={`${currentProject.name} — show sidebar`}
+                className="rounded-[9px] transition hover:opacity-90"
+              >
+                <ProjectTile project={currentProject} size={34} />
+              </button>
+            )}
+            {selKind === 'sprint' && currentSprint && (
+              <button
+                onClick={() => setPaletteOpen(true)}
+                title="Search tasks (/ or ⌘K)"
+                aria-label="Search tasks"
+                className="w-9 h-9 rounded-lg inline-flex items-center justify-center text-ink-faint hover:text-ink hover:bg-surface-hover transition"
+              >
+                <Search size={16} strokeWidth={1.9} />
+              </button>
+            )}
+          </div>
+          {/* Dark-mode toggle pinned at the bottom, mirroring the sidebar footer. */}
+          <button
+            onClick={() => setDark(!dark)}
+            title="Toggle dark mode (⌘⇧L)"
+            aria-label="Toggle dark mode"
+            className="mt-auto mb-3 w-9 h-9 rounded-lg inline-flex items-center justify-center text-ink-faint hover:text-ink hover:bg-surface-hover transition"
+          >
+            {dark ? <Sun size={16} /> : <Moon size={16} />}
+          </button>
+        </div>
+      )}
+
       {/* Main column: thin header + capacity + sprint view. Always rendered;
           settings opens as a right-side drawer overlay (below), not a takeover. */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
@@ -1539,26 +1612,27 @@ function App() {
         {/* relative z-30: glass surfaces below create stacking contexts
             (backdrop-filter), so toolbar dropdowns need the whole header
             lifted above the scroll content. Below drawers/dialogs (z-50). */}
-        {/* Desktop: capsule background doubles as a window drag region, and it
-            slides right when the collapsed sidebar leaves the traffic lights
-            over its left edge (desktop-app-tauri.md; same curve as the
-            sidebar's width transition). */}
+        {/* Desktop: capsule background doubles as a window drag region. On desktop
+            the collapsed state renders a 74px icon rail (above) so the capsule flows
+            to its right — no marginLeft shove needed (app-shell v4.3). */}
         <header
-          {...(IS_TAURI ? { 'data-tauri-drag-region': true } : {})}
-          className="relative z-30 h-[46px] shrink-0 mx-3 mt-3 rounded-full glass-toolbar flex items-center px-4 gap-3 transition-[margin] duration-300 ease-[cubic-bezier(.32,.72,0,1)] motion-reduce:transition-none"
-          style={{ marginLeft: IS_TAURI && sidebarCollapsed ? 74 : undefined }}
+          {...(DESKTOP_CHROME ? { 'data-tauri-drag-region': true } : {})}
+          className="relative z-30 h-[46px] shrink-0 mx-3 mt-3 rounded-full glass-toolbar flex items-center px-4 gap-3"
         >
-          {/* Sidebar toggle — macOS sidebar.left idiom (one button, both ways),
-              far left so the breadcrumb keeps context when the panel is hidden. */}
-          <button
-            onClick={() => setSidebarCollapsed((c) => !c)}
-            title={`${sidebarCollapsed ? 'Show' : 'Hide'} sidebar (⌘\\)`}
-            aria-label={`${sidebarCollapsed ? 'Show' : 'Hide'} sidebar`}
-            aria-pressed={!sidebarCollapsed}
-            className="shrink-0 inline-flex items-center justify-center w-8 h-8 -ml-1.5 rounded-md text-ink-faint hover:text-ink hover:bg-surface-hover transition"
-          >
-            <PanelLeft size={16} strokeWidth={1.9} />
-          </button>
+          {/* Sidebar toggle — macOS sidebar.left idiom (one button, both ways). While
+              the desktop icon rail is up it owns the toggle, so hide this one to avoid
+              a duplicate; web/expanded keeps it here. */}
+          {!(DESKTOP_CHROME && sidebarCollapsed) && (
+            <button
+              onClick={() => setSidebarCollapsed((c) => !c)}
+              title={`${sidebarCollapsed ? 'Show' : 'Hide'} sidebar (⌘\\)`}
+              aria-label={`${sidebarCollapsed ? 'Show' : 'Hide'} sidebar`}
+              aria-pressed={!sidebarCollapsed}
+              className="shrink-0 inline-flex items-center justify-center w-8 h-8 -ml-1.5 rounded-md text-ink-faint hover:text-ink hover:bg-surface-hover transition"
+            >
+              <PanelLeft size={16} strokeWidth={1.9} />
+            </button>
+          )}
           <div className="flex items-center gap-2.5 text-sm min-w-0">
             {selKind === 'collection' && currentCollection ? (
               <CollectionBarIdentity collection={currentCollection} />

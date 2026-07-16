@@ -1,7 +1,7 @@
 # Desktop app (Tauri 2, macOS)
 
 **Status:** Implemented
-**Last updated:** 2026-07-10 (universal build — Intel restored, single DMG runs Intel + Apple Silicon)
+**Last updated:** 2026-07-16 (collapsed sidebar → icon rail replaces the capsule marginLeft shove)
 **Code:** `app/src-tauri/` (shell), `app/vite.config.ts`, `app/src/VersionFooter.tsx`, `.github/workflows/release.yml`
 
 ## Purpose
@@ -30,10 +30,29 @@ macOS only for now; Windows would be a CI-only addition later.
     (`data-tauri-drag-region` — the attribute only catches mousedown on the element
     itself, so children stay clickable).
   - The header toolbar capsule is also a drag region (its empty background).
-  - **Collapsed-sidebar edge case:** with the sidebar at width 0 the lights would sit
-    on the capsule's left buttons → the capsule takes `marginLeft: 74px` (inline style,
-    beats `mx-3`) with the same 300ms `cubic-bezier(.32,.72,0,1)` transition as the
-    sidebar collapse.
+  - **Collapsed-sidebar → icon rail (2026-07-16, demo `demo/topbar-align-fix.html` variant A-rail):**
+    with the sidebar at width 0 the lights sat over the capsule's left buttons, so the
+    capsule used to take `marginLeft: 74px` — but the content card below stayed at its
+    `mx-6` edge, so the breadcrumb (~126px) and the page title (~44px) landed on two
+    different rails (the reported misalignment). Fix: collapsing on desktop no longer
+    goes to a bare 0-width gap. It leaves a **74px vibrancy icon rail** (`w-[74px]`,
+    same width as the traffic-light safe zone) holding, top-down: the 34px drag strip
+    (lights float over it), the `PanelLeft` **show-sidebar** toggle, the current
+    **project tile** (click = re-open the sidebar), **search** (⌘K, sprint only), and a
+    **dark-mode** toggle pinned at the bottom (`mt-auto`). Because the rail is a real
+    flex sibling before the main column, the toolbar + content flow naturally to its
+    right — the old `marginLeft` shove is **removed**, and the capsule's own toggle is
+    hidden while the rail is up (the rail owns it). Breadcrumb and title now share the
+    rail edge (topbar `mx-3`, card `mx-6` — the same 12px stagger as when the sidebar is
+    open). Web build (no lights) keeps the plain 0-width collapse + capsule toggle.
+  - **Browser preview of the desktop chrome (2026-07-16):** the rail + drag regions are
+    gated on `DESKTOP_CHROME = IS_TAURI || FORCE_DESKTOP_CHROME`, where
+    `FORCE_DESKTOP_CHROME` is on when the URL has `?desktop=1` **or**
+    `localStorage['plan-up:forceDesktopChrome'] === '1'`. In that forced-preview mode
+    (browser only, `!IS_TAURI`) the app also paints three **fake traffic lights**
+    (`position: fixed` top-left) so `npm run dev` at `localhost:5173/?desktop=1` shows
+    the exact desktop layout against real IndexedDB data. Auto-backup and other true
+    Tauri features stay gated on `IS_TAURI` (never faked).
 - Distributed as a **universal** `.dmg` from GitHub Releases — one build runs on
   both Intel and Apple Silicon Macs (`universal-apple-darwin`; Intel restored
   2026-07-10 after being dropped 2026-07-08), built on every `v*` tag.

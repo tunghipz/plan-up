@@ -1,7 +1,7 @@
 # App shell & navigation
 
 **Status:** Implemented
-**Last updated:** 2026-07-08
+**Last updated:** 2026-07-16 (v4.3 · desktop collapse = 74px icon rail)
 **Code:** `app/src/App.tsx` (`SprintPageHeader`, `SprintNoteBanner`, `LegendDot`)
 
 > **v3 · Project switcher + compact sprint rows (2026-07-06)** — the always-on
@@ -66,6 +66,21 @@
 > `inert` so its controls drop out of the tab order, and the width transition is
 > suppressed mid drag-resize (`sidebarResizing`) so dragging still tracks the cursor
 > 1:1. Approved via demo `demo/sidebar-collapse.html` (variant A).
+>
+> **v4.3 · Desktop collapse = icon rail (2026-07-16)** — on the **desktop build only**
+> (`DESKTOP_CHROME`; web is unchanged at width 0) collapsing does not leave a bare gap.
+> The macOS traffic lights live in the top-left 74px, so the collapsed state keeps a
+> **74px vibrancy icon rail** there instead of an empty lane: drag strip (lights) →
+> `PanelLeft` show-sidebar toggle → project tile (click re-opens the sidebar) → search
+> (⌘K) → dark-mode toggle (`mt-auto`). This both fills the otherwise-orphaned gutter
+> **and** puts the toolbar + page card on one shared left rail, fixing the old
+> misalignment where the breadcrumb sat ~80px right of the sprint title (the capsule's
+> `marginLeft: 74px` shove is removed; the rail's flex width does the same job). The
+> capsule's own toggle is hidden while the rail is up. Web (no lights) is untouched:
+> plain width-0 collapse + capsule toggle. Full rationale + the 3 gutter treatments
+> considered (rail / peek / center) in [desktop-app-tauri.md](./desktop-app-tauri.md);
+> approved via demo `demo/topbar-align-fix.html` (variant **A-rail**). Preview in a
+> browser with `localhost:5173/?desktop=1`.
 
 > **v4.3 · Copy-for-Telegram button (2026-07-08)** — the `SprintPageHeader` title
 > row gains a right-aligned **Copy** button (paper-plane icon, calm `--fill`

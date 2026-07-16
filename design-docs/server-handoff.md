@@ -1,8 +1,8 @@
 # Server handoff
 
 **Status:** Implemented
-**Last updated:** 2026-06-30
-**Code:** `app/server/openai-gateway.mjs`, `app/server/planup-mcp.mjs`, `app/src/server-sync.ts`, `app/src/App.tsx`
+**Last updated:** 2026-07-16 (project-local Codex skill added)
+**Code:** `app/server/openai-gateway.mjs`, `app/server/planup-mcp.mjs`, `app/src/server-sync.ts`, `app/src/App.tsx`, `.codex/skills/plan-up-mcp/SKILL.md`
 
 ## Purpose
 
@@ -32,6 +32,10 @@ client cache for the existing UI and syncs that cache with the server.
   - `planup_list_projects`
   - `planup_get_project_context`
   - `planup_apply_actions`
+- This repo includes a project-local Codex skill at
+  `.codex/skills/plan-up-mcp/SKILL.md`. The skill tells Codex how to use the
+  MCP tools, when to dry-run actions, and how to fall back to direct HTTP/stdin
+  diagnostics when the Desktop tool registry has not exposed the MCP namespace.
 
 ## Data
 
@@ -58,6 +62,10 @@ These files are runtime/cache data and are gitignored.
 - `app/server/planup-mcp.mjs` is a dependency-free MCP stdio wrapper around the
   HTTP gateway. It reads `PLAN_UP_GATEWAY_URL` and defaults to
   `http://127.0.0.1:5173`.
+- `.codex/skills/plan-up-mcp/SKILL.md` is an agent-facing guide for operating
+  plan-up through this MCP. It is intentionally separate from
+  `app/public/skills/project-management/SKILL.md`, which is loaded by the
+  in-app AI Chat drawer.
 - `app/src/server-sync.ts` owns browser-side sync:
   - `loadServerSnapshot()` fetches `/api/db/snapshot`.
   - `saveServerSnapshot()` uploads a full payload with `PUT /api/db/snapshot`.
@@ -99,6 +107,9 @@ MCP config example:
 - The MCP write path is intentionally typed actions, not arbitrary JSON editing.
   Destructive actions such as `delete_task`, `delete_sprint`, `delete_collection`,
   and `delete_member` are available only through explicit action objects.
+- Agent operators should call `planup_apply_actions` with `dryRun: true` first
+  unless the user explicitly asked to apply immediately or the action is
+  harmless/read-only.
 - The first MCP action endpoint mutates server snapshot fields and preserves the
   same entity invariants as the app action contract. The full browser scheduling
   engine still remains richer than the server helper; future row APIs should

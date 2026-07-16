@@ -94,12 +94,26 @@ function normMember(m: Member, i: number): Member {
   return { id: `m${i}`, projectId: '', name: m.name, color: m.color, daysOff: [], avatarEmoji: m.avatarEmoji, title: m.title }
 }
 
-/** A task reduced to display fields, ids remapped to indices, dates trimmed to yyyy-mm-dd. */
+/** Derived status of a group head from its children — MIRRORS `derivedGroupStatus`
+ * in `sprint-logic.ts` (kept in sync; not imported because that module pulls in
+ * Dexie via `./db`, and this module must stay pure). Empty children → the task's
+ * own status (caller only passes children for real parents). */
+function rollupStatus(t: Task, children: Task[]): Status {
+  if (children.length === 0) return t.status
+  if (children.every((c) => c.status === 'done')) return 'done'
+  if (children.some((c) => c.status === 'in_progress' || c.status === 'done')) return 'in_progress'
+  return 'todo'
+}
+
+/** A task reduced to display fields, ids remapped to indices, dates trimmed to yyyy-mm-dd.
+ * `status` is the RESOLVED display status (a parent gets its rolled-up status; a leaf its
+ * own) — frozen at build so the recipient shows what the sender saw, even for trimmed shares. */
 function normTask(
   t: Task,
   i: number,
   memberIdx: Map<string, number>,
-  taskIdx: Map<string, number>
+  taskIdx: Map<string, number>,
+  status: Status
 ): Task {
   const assignee = t.assigneeId != null && memberIdx.has(t.assigneeId) ? `m${memberIdx.get(t.assigneeId)}` : null
   const parent = t.parentId && taskIdx.has(t.parentId) ? `t${taskIdx.get(t.parentId)}` : null
@@ -111,7 +125,7 @@ function normTask(
     dependsOn: [],
     sequence: i,
     title: t.title,
-    status: t.status,
+    status,
     priority: t.priority,
     estimate: t.estimate,
     startDate: t.startDate ? t.startDate.slice(0, 10) : null,
@@ -154,13 +168,25 @@ export function buildSnapshot(
   const memberIdx = new Map(usedMembers.map((m, i) => [m.id, i]))
   const taskIdx = new Map(scoped.map((t, i) => [t.id, i]))
 
+  // Group children keyed by parent, from the FULL sprint (pre-scope) so a parent's
+  // rolled-up status reflects ALL its children even when a share is trimmed by member
+  // (a dropped child still counts toward the frozen status the sender saw).
+  const kidsByParent = new Map<string, Task[]>()
+  for (const t of sprintTasks) {
+    if (t.parentId) {
+      const arr = kidsByParent.get(t.parentId) ?? []
+      arr.push(t)
+      kidsByParent.set(t.parentId, arr)
+    }
+  }
+
   return {
     exportedAt: new Date().toISOString(),
     project: { name: project.name },
     sprint: { name: sprint.name, startDate: sprint.startDate, endDate: sprint.endDate ?? null, note: sprint.note },
     members: usedMembers.map((m, i) => normMember(m, i)),
     membersOff: usedMembers.map((m) => offDaysInSprint(m, sprint.startDate, sprint.endDate ?? sprint.startDate)),
-    tasks: scoped.map((t, i) => normTask(t, i, memberIdx, taskIdx)),
+    tasks: scoped.map((t, i) => normTask(t, i, memberIdx, taskIdx, rollupStatus(t, kidsByParent.get(t.id) ?? []))),
   }
 }
 
@@ -224,10 +250,15 @@ function packSnapshot(d: SnapshotData): PackedSnapshot {
     d0: base,
     d1: d.sprint.endDate,
     mb: d.members.map((m) => [m.name, m.color, m.avatarEmoji ?? '', m.title ?? '']),
-    mo: d.membersOff.map((list) =>
-      list.map(
-        (o) => [toOffset(base, o.date) ?? 0, o.half === 'am' ? 1 : o.half === 'pm' ? 2 : 0] as [number, number]
-      )
+    mo: (d.membersOff ?? []).map((list) =>
+      list
+        // drop entries with an unparseable date (matches decode, which drops null offsets)
+        // and encode half via the shared HALF_CODE table so both directions share one source.
+        .map((o): [number, number] | null => {
+          const off = toOffset(base, o.date)
+          return off == null ? null : [off, Math.max(0, HALF_CODE.indexOf(o.half))]
+        })
+        .filter((e): e is [number, number] => e !== null)
     ),
     ti: d.tasks.map((t) => t.title),
     ss: d.tasks.map((t) => Math.max(0, STATUS_CODE.indexOf(t.status))),

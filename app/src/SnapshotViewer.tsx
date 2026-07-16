@@ -5,7 +5,7 @@ import type { WorkingPlan } from './scheduling'
 import { decodeSnapshot, laneRows } from './share-snapshot'
 import { groupTasksByMember } from './png-export'
 import { StatusPill } from './StatusPill'
-import { STATUS_META, derivedGroupStatus } from './sprint-logic'
+import { STATUS_META } from './sprint-logic'
 import { effectiveDaysOff, formatShortDate, formatSprintRange, fmtDays, PRIORITY_TAG, useDarkMode } from './lib'
 import { colorForName } from './schema'
 import { ExportImageModal } from './ExportImageModal'
@@ -127,21 +127,33 @@ export function SnapshotViewer({ raw }: { raw: string }) {
   const [exportOpen, setExportOpen] = useState(false)
   const [dark, setDark] = useDarkMode()
 
-  // Sprint-goal note: clamp to 5 lines in the sticky rail, reveal "Xem thêm" only
+  // Sprint-goal note: clamp to 5 lines in the sticky rail, reveal "Show more" only
   // when the note actually overflows that clamp (measured after render).
   const noteRef = useRef<HTMLParagraphElement>(null)
   const [noteExpanded, setNoteExpanded] = useState(false)
   const [noteOverflows, setNoteOverflows] = useState(false)
   const noteText = data?.sprint.note
+  // A new note (different snapshot) starts collapsed so the overflow measure below runs clamped.
+  useEffect(() => {
+    setNoteExpanded(false)
+  }, [noteText])
+  // Re-measure overflow on note change AND on any resize (the rail is 300px on lg but full-width
+  // when stacked below lg — the clamp threshold differs). Only update while clamped so expanding
+  // (clientHeight === scrollHeight) can't wrongly hide the toggle.
   useEffect(() => {
     const el = noteRef.current
     if (!el) {
       setNoteOverflows(false)
       return
     }
-    // Measured while clamped (noteExpanded starts false) → true iff it overflows 5 lines.
-    setNoteOverflows(el.scrollHeight - el.clientHeight > 2)
-  }, [noteText])
+    const measure = () => {
+      if (!noteExpanded) setNoteOverflows(el.scrollHeight - el.clientHeight > 2)
+    }
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [noteText, noteExpanded])
 
   const openApp = () => {
     window.location.hash = ''
@@ -172,21 +184,11 @@ export function SnapshotViewer({ raw }: { raw: string }) {
   // Off days per member (dates + half), keyed by member id.
   const offById = new Map(data.members.map((m, i) => [m.id, data.membersOff[i] ?? []]))
 
-  // A parent task's DISPLAYED status is rolled up from its children (mirrors the app's
-  // List/Board/Gantt via derivedGroupStatus) — the snapshot carries each task's RAW status,
-  // so without this a parent whose kids are in progress would wrongly read "To do".
-  const kidsByParent = new Map<string, Task[]>()
-  for (const t of data.tasks) {
-    if (t.parentId) {
-      const arr = kidsByParent.get(t.parentId) ?? []
-      arr.push(t)
-      kidsByParent.set(t.parentId, arr)
-    }
-  }
-  const displayStatus = (t: Task): Status => {
-    const kids = kidsByParent.get(t.id)
-    return kids && kids.length ? derivedGroupStatus(kids) : t.status
-  }
+  // Parent (group-head) task ids — a task referenced as some task's parent. Their status is
+  // already rolled up + frozen at build (buildSnapshot), so the board just renders `t.status`;
+  // the donut excludes them (leaf-only, mirroring the app + this file's own memberStats) so a
+  // container isn't double-counted with its children.
+  const parentIds = new Set(data.tasks.map((t) => t.parentId).filter(Boolean) as string[])
   const stamp = shortDate(data.exportedAt)
   const range = sprint.endDate
     ? formatSprintRange(sprint.startDate, sprint.endDate)
@@ -196,11 +198,12 @@ export function SnapshotViewer({ raw }: { raw: string }) {
     ? data.exportedAt.slice(0, 10)
     : sprint.startDate
 
-  // Pulse — whole-sprint status breakdown (all tasks, children included). Parents use their
-  // derived (rolled-up) status so the donut agrees with the status pills in the board.
+  // Pulse — whole-sprint status breakdown over LEAF tasks only (parents excluded so a
+  // group container isn't double-counted with its children; matches memberStats + the app).
+  const leafTasks = data.tasks.filter((t) => !parentIds.has(t.id))
   const counts: Record<Status, number> = { todo: 0, in_progress: 0, done: 0 }
-  for (const t of data.tasks) counts[displayStatus(t)]++
-  const totalTasks = data.tasks.length
+  for (const t of leafTasks) counts[t.status]++
+  const totalTasks = leafTasks.length
 
   let seq = 0
 
@@ -273,6 +276,7 @@ export function SnapshotViewer({ raw }: { raw: string }) {
                   {noteOverflows && (
                     <button
                       onClick={() => setNoteExpanded((v) => !v)}
+                      aria-expanded={noteExpanded}
                       className="mt-1.5 text-[12px] font-semibold text-accent hover:underline"
                     >
                       {noteExpanded ? 'Show less' : 'Show more'}
@@ -339,7 +343,7 @@ export function SnapshotViewer({ raw }: { raw: string }) {
                 return rows.map(({ task: t, child }, ri) => {
                   seq++
                   const isMilestone = t.estimate === 0
-                  const isDone = displayStatus(t) === 'done'
+                  const isDone = t.status === 'done'
                   const rowTop = ri === 0 ? groupTop : '1px solid var(--color-border-hair)'
                   const cell: React.CSSProperties = { borderTop: rowTop, padding: '8px 9px', verticalAlign: 'top' }
                   return (
@@ -421,7 +425,7 @@ export function SnapshotViewer({ raw }: { raw: string }) {
                       </td>
                       <td style={{ ...cell }} className="text-center text-[12.5px] text-ink-muted tab-data">{effortLabel(t.estimate)}</td>
                       <td style={{ ...cell }}>
-                        <StatusPill status={displayStatus(t)} />
+                        <StatusPill status={t.status} />
                       </td>
                     </tr>
                   )

@@ -7,7 +7,17 @@
 > verbatim by the hosted mode.
 
 **Status:** Implemented
-**Last updated:** 2026-07-16 (**days-off detail — dates + half-days (Fix A)** — the days-off
+**Last updated:** 2026-07-16 (**review fixes** — a tech-lead pass on the meta work found two
+correctness bugs, both fixed: (1) a parent task's status is now the **rolled-up** status
+(`derivedGroupStatus` rule, inlined in `buildSnapshot` since `sprint-logic` pulls in Dexie),
+**frozen at build from the FULL child set** — so a trimmed share [where a child is dropped]
+still shows the status the sender saw, and the viewer just renders `t.status` [no viewer-side
+derive]; (2) the Progress donut now counts **leaf tasks only** [parents excluded], matching the
+app's leaf-based pulse + this file's own per-member `done/total` — before, group containers were
+double-counted, inflating the denominator. Also: `mo` encode drops unparseable dates + derives
+half via `HALF_CODE` [one source both ways]; note-overflow re-measures via `ResizeObserver` +
+resets on note change [rail is 300px on lg, full-width stacked below]; added backward-compat +
+malformed-`mo` + pm-half-day + parent-rollup tests. Earlier same-day: **days-off detail — dates + half-days (Fix A)** — the days-off
 info went from a bare count to the **actual off dates**. The snapshot now carries, per member,
 the list of `{date, half?}` entries falling within the sprint range [not just the effective
 count]; the recipient renders them as **date chips** grouped under a `"Nghỉ <N> ngày"` label

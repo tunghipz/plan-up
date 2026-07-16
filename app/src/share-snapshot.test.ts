@@ -108,6 +108,35 @@ describe('buildSnapshot', () => {
     expect(decoded.membersOff[bi]).toEqual([])
   })
 
+  it('round-trips a pm half-day off (exercises HALF_CODE[2])', () => {
+    const withPm = [member('a', 'An', { daysOff: [{ date: '2026-07-14', half: 'pm' }] }), member('b', 'Bình')]
+    const d = buildSnapshot(project, sprint, withPm, tasks)
+    const ai = d.members.findIndex((m) => m.name === 'An')
+    expect(decodeSnapshot(encodeSnapshot(d))!.membersOff[ai]).toEqual([{ date: '2026-07-14', half: 'pm' }])
+  })
+
+  it('bakes a parent task status as the rollup of its children (not its raw status)', () => {
+    const parent = task('p', 'a', 1, { title: 'Parent' }) // raw status 'todo'
+    const child = task('c', 'a', 2, { title: 'Child', parentId: 'p', status: 'in_progress' })
+    const d = buildSnapshot(project, sprint, members, [parent, child])
+    const p = d.tasks.find((t) => t.title === 'Parent')!
+    const c = d.tasks.find((t) => t.title === 'Child')!
+    expect(p.status).toBe('in_progress') // derived from child, not raw 'todo'
+    expect(c.status).toBe('in_progress') // leaf keeps its own status
+  })
+
+  it('rolls a parent up from ALL children even when a child is trimmed out of the share', () => {
+    // Parent p (unassigned → always kept). Children: one for An, one for Bình.
+    const parent = task('p', null, 1, { title: 'P' })
+    const cA = task('ca', 'a', 2, { title: 'CA', parentId: 'p', status: 'in_progress' })
+    const cB = task('cb', 'b', 3, { title: 'CB', parentId: 'p', status: 'todo' })
+    // Share scoped to Bình only → CA (An's child) is dropped from the payload.
+    const d = buildSnapshot(project, sprint, members, [parent, cA, cB], { memberIds: ['b'] })
+    expect(d.tasks.some((t) => t.title === 'CA')).toBe(false) // trimmed away
+    // Parent status still reflects CA's in_progress (frozen from the full child set).
+    expect(d.tasks.find((t) => t.title === 'P')!.status).toBe('in_progress')
+  })
+
   it('narrows tasks + members to one assignee when scoped', () => {
     const d = buildSnapshot(project, sprint, members, tasks, { memberId: 'a' })
     expect(d.tasks).toHaveLength(1)
@@ -179,6 +208,37 @@ describe('encode / decode round-trip', () => {
     expect(
       decodeSnapshot(encodeRaw(JSON.stringify({ v: 2, pj: 'x', sn: 'y', d0: '2026-07-05', mb: [], ti: ['a'], ss: [], pp: [], am: [], pa: [], ef: [], s0: [], s1: [] })))
     ).toBeNull()
+  })
+
+  it('decodes a PRE-title/note/off blob (3-cell mb, no nt, no mo) — backward compatible', () => {
+    // Exactly the shape the app wrote before title/note/days-off travelled.
+    const old = {
+      v: 2, ts: '2026-07-01T00:00:00.000Z', pj: 'Old proj', sn: 'Old sprint',
+      d0: '2026-07-05', d1: '2026-07-22',
+      mb: [['An', '#111', ''], ['Bình', '#222', '🦊']], // 3 cells, no title
+      ti: ['Task X'], ss: [1], pp: [2], am: [0], pa: [-1], ef: [null], s0: [null], s1: [3],
+    }
+    const d = decodeSnapshot(encodeRaw(JSON.stringify(old)))!
+    expect(d).not.toBeNull()
+    expect(d.sprint.note).toBeUndefined() // no nt
+    expect(d.members[0].title).toBeUndefined() // no 4th mb cell
+    expect(d.members[1].avatarEmoji).toBe('🦊')
+    expect(d.membersOff).toEqual([[], []]) // no mo → empty per member
+  })
+
+  it('tolerates a malformed / short `mo` without crashing', () => {
+    const bad = {
+      v: 2, ts: '', pj: 'p', sn: 's', d0: '2026-07-05', d1: null,
+      mb: [['An', '#111', '', 'Eng'], ['Bình', '#222', '', '']],
+      // mo: junk pairs, non-array entry, and shorter than mb (only 1 of 2 members)
+      mo: [[[3, 1], ['x', 2], [5, 99], 7, null]],
+      ti: ['T'], ss: [1], pp: [2], am: [0], pa: [-1], ef: [null], s0: [null], s1: [3],
+    }
+    const d = decodeSnapshot(encodeRaw(JSON.stringify(bad)))!
+    expect(d).not.toBeNull()
+    // valid pairs survive ([3,1]→am, [5,99]→bad halfcode→full day); junk dropped
+    expect(d.membersOff[0]).toEqual([{ date: '2026-07-08', half: 'am' }, { date: '2026-07-10' }])
+    expect(d.membersOff[1]).toEqual([]) // short mo → empty for the missing member
   })
 })
 

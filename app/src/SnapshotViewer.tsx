@@ -370,7 +370,11 @@ export function SnapshotViewer({ raw }: { raw: string }) {
                             )}
                           </div>
                           </div>
-                          <div className="text-[11px] text-ink-faint mt-1.5 pl-8 tab-data">
+                          {/* Meta line: done + days-off folded onto ONE dot-separated,
+                              wrapping line — so the off info reads even for a member with a
+                              single short row (no stacked block that needs gutter height).
+                              See design-docs/share-link-snapshot.md. */}
+                          <div className="mt-1.5 pl-8 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-ink-faint tab-data">
                             <span
                               style={
                                 total > 0 && done === total
@@ -380,30 +384,28 @@ export function SnapshotViewer({ raw }: { raw: string }) {
                             >
                               {done}/{total} done
                             </span>
-                          </div>
-                          {offList.length > 0 && (
-                            <div className="mt-1.5 pl-8">
-                              <div className="text-[10px] font-bold tracking-[0.04em] uppercase text-ink-faint mb-1">
-                                <span className="text-ink-muted tab-data">{fmtDays(offCount)}</span>{' '}
-                                {offCount === 1 ? 'day' : 'days'} off
-                              </div>
-                              <div className="flex flex-wrap gap-1">
+                            {offList.length > 0 && (
+                              <>
+                                <span aria-hidden className="text-ink-faint">·</span>
+                                <span className="inline-flex items-center gap-1 text-[10.5px] font-bold text-warn-ink bg-priority-high/15 rounded-full px-2 py-0.5 whitespace-nowrap">
+                                  {fmtDays(offCount)}d off
+                                </span>
                                 {offList.map((o, i) => (
                                   <span
                                     key={`${o.date}-${i}`}
-                                    className="inline-flex items-center gap-1 text-[10.5px] font-semibold text-ink-muted bg-fill rounded-[6px] px-[7px] py-0.5 whitespace-nowrap tab-data"
+                                    className="inline-flex items-center gap-1 text-[10px] font-semibold text-ink-muted bg-fill rounded-[6px] px-[6px] py-px whitespace-nowrap"
                                   >
                                     {shortDate(o.date)}
                                     {o.half && (
-                                      <span className="text-[9.5px] font-bold text-accent bg-accent-soft rounded-[4px] px-1">
-                                        ½ {o.half === 'am' ? 'AM' : 'PM'}
+                                      <span className="text-[9px] font-bold text-accent bg-accent-soft rounded-[3px] px-1">
+                                        ½{o.half === 'am' ? 'AM' : 'PM'}
                                       </span>
                                     )}
                                   </span>
                                 ))}
-                              </div>
-                            </div>
-                          )}
+                              </>
+                            )}
+                          </div>
                         </td>
                       )}
                       <td style={{ ...cell }} className="text-[12px] text-ink-faint tab-data">{seq}</td>

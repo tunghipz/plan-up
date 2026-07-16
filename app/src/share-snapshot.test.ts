@@ -108,6 +108,28 @@ describe('buildSnapshot', () => {
     expect(decoded.membersOff[bi]).toEqual([])
   })
 
+  it('widens the off-day range to cover a task that sits past the sprint end', () => {
+    // A rolled-over-style task dated AFTER the sprint end (sprint ends 2026-07-22);
+    // an off-day overlapping that task must survive even though it's outside the
+    // sprint window — the "few tasks / off dropped" bug. See share-link-snapshot.md.
+    const lateTask = task('late', 'a', 30, {
+      startDate: '2026-07-25',
+      dueDate: '2026-07-26',
+      status: 'in_progress',
+    })
+    const withOff = [
+      member('a', 'An', {
+        daysOff: [
+          { date: '2026-07-25', half: 'am' }, // outside sprint, inside the task span → kept
+          { date: '2026-08-10' }, // outside sprint AND task span → dropped
+        ],
+      }),
+    ]
+    const d = buildSnapshot(project, sprint, withOff, [lateTask])
+    const ai = d.members.findIndex((m) => m.name === 'An')
+    expect(d.membersOff[ai]).toEqual([{ date: '2026-07-25', half: 'am' }])
+  })
+
   it('round-trips a pm half-day off (exercises HALF_CODE[2])', () => {
     const withPm = [member('a', 'An', { daysOff: [{ date: '2026-07-14', half: 'pm' }] }), member('b', 'Bình')]
     const d = buildSnapshot(project, sprint, withPm, tasks)

@@ -168,6 +168,31 @@ export function buildSnapshot(
   const memberIdx = new Map(usedMembers.map((m, i) => [m.id, i]))
   const taskIdx = new Map(scoped.map((t, i) => [t.id, i]))
 
+  // Scoped tasks grouped by owner — used to widen each member's off-day capture
+  // range so an off-day overlapping real work is kept even when the task sits
+  // OUTSIDE the sprint window (e.g. a rolled-over task dated past sprint end).
+  // Without this, `offDaysInSprint` clamps to [sprintStart, sprintEnd] and drops
+  // such days entirely. See design-docs/share-link-snapshot.md.
+  const tasksByOwner = new Map<string, Task[]>()
+  for (const t of scoped) {
+    if (!t.assigneeId) continue
+    const arr = tasksByOwner.get(t.assigneeId) ?? []
+    arr.push(t)
+    tasksByOwner.set(t.assigneeId, arr)
+  }
+  const sprintStart = sprint.startDate
+  const sprintEnd = sprint.endDate ?? sprint.startDate
+  const offRangeFor = (m: Member): DayOff[] => {
+    let start = sprintStart
+    let end = sprintEnd
+    for (const t of tasksByOwner.get(m.id) ?? []) {
+      if (t.startDate && t.startDate < start) start = t.startDate
+      const e = t.dueDate ?? t.startDate
+      if (e && e > end) end = e
+    }
+    return offDaysInSprint(m, start, end)
+  }
+
   // Group children keyed by parent, from the FULL sprint (pre-scope) so a parent's
   // rolled-up status reflects ALL its children even when a share is trimmed by member
   // (a dropped child still counts toward the frozen status the sender saw).
@@ -185,7 +210,7 @@ export function buildSnapshot(
     project: { name: project.name },
     sprint: { name: sprint.name, startDate: sprint.startDate, endDate: sprint.endDate ?? null, note: sprint.note },
     members: usedMembers.map((m, i) => normMember(m, i)),
-    membersOff: usedMembers.map((m) => offDaysInSprint(m, sprint.startDate, sprint.endDate ?? sprint.startDate)),
+    membersOff: usedMembers.map((m) => offRangeFor(m)),
     tasks: scoped.map((t, i) => normTask(t, i, memberIdx, taskIdx, rollupStatus(t, kidsByParent.get(t.id) ?? []))),
   }
 }

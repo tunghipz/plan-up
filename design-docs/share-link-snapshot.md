@@ -7,7 +7,16 @@
 > verbatim by the hosted mode.
 
 **Status:** Implemented
-**Last updated:** 2026-07-16 (**review fixes** — a tech-lead pass on the meta work found two
+**Last updated:** 2026-07-16 (**days-off range covers task spans + inline meta** — off-days
+were clamped to the sprint window, so a task dated past the sprint end [e.g. a rolled-over
+`Jul 16 → Jul 17` task] dropped its overlapping off-day and the gutter showed nothing at all
+[not a "too few tasks" layout issue — the day was never in the data]. `buildSnapshot` now
+captures each member's off-days within `[min(sprintStart, that member's earliest scoped task
+start) … max(sprintEnd, latest task end/due)]`, so any off-day overlapping shown work is carried.
+And the recipient gutter folds the off summary onto the **same faint line as `done`** —
+`0/1 done · 0.5d off [Jul 16 ½AM]` — so it reads even for a member with a single short row
+[no stacked block that depends on gutter height]. Demo: `demo/share-dayoff-fewtasks.html`.
+Earlier same-day: **review fixes** — a tech-lead pass on the meta work found two
 correctness bugs, both fixed: (1) a parent task's status is now the **rolled-up** status
 (`derivedGroupStatus` rule, inlined in `buildSnapshot` since `sprint-logic` pulls in Dexie),
 **frozen at build from the FULL child set** — so a trimmed share [where a child is dropped]

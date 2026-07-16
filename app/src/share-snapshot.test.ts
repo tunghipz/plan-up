@@ -163,6 +163,18 @@ describe('buildSnapshot', () => {
     expect(d.tasks.find((t) => t.title === 'Parent')!.estimate).toBeNull()
   })
 
+  it('bakes a parent date span from its children (not the parent\'s own/null dates)', () => {
+    // Parent's OWN dates are ignored in-app (scheduler spans the children); a
+    // container often has null dates, so the share page would show "—" without this.
+    const parent = task('p', 'a', 1, { title: 'Parent', startDate: null, dueDate: null })
+    const c1 = task('c1', 'a', 2, { title: 'C1', parentId: 'p', startDate: '2026-07-09', dueDate: '2026-07-11' })
+    const c2 = task('c2', 'a', 3, { title: 'C2', parentId: 'p', startDate: '2026-07-14', dueDate: '2026-07-20' })
+    const d = buildSnapshot(project, sprint, members, [parent, c1, c2])
+    const p = d.tasks.find((t) => t.title === 'Parent')!
+    expect(p.startDate).toBe('2026-07-09') // earliest child start
+    expect(p.dueDate).toBe('2026-07-20') // latest child due
+  })
+
   it('rolls a parent up from ALL children even when a child is trimmed out of the share', () => {
     // Parent p (unassigned → always kept). Children: one for An, one for Bình.
     const parent = task('p', null, 1, { title: 'P' })

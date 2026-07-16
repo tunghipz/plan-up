@@ -116,17 +116,36 @@ function rollupEffort(t: Task, children: Task[]): number | null {
   return hasEffort ? children.reduce((s, c) => s + (c.estimate ?? 0), 0) : null
 }
 
+/** Derived date span of a group head — MIRRORS the scheduler's parent roll-up
+ * (`planFor`: earliest child start … latest child due; a parent's OWN dates are
+ * ignored in-app). The snapshot is frozen (no scheduler), so we span the children's
+ * STORED dates — the same dates the viewer shows for those leaves. Without this a
+ * group shows "—" (or stale dates) on the share page while the sprint shows the span.
+ * Empty children → the task's own dates (caller only passes children for real parents). */
+function rollupDates(t: Task, children: Task[]): { startDate: string | null; dueDate: string | null } {
+  if (children.length === 0) return { startDate: t.startDate ?? null, dueDate: t.dueDate ?? null }
+  let startDate: string | null = null
+  let dueDate: string | null = null
+  for (const c of children) {
+    if (c.startDate && (startDate === null || c.startDate < startDate)) startDate = c.startDate
+    if (c.dueDate && (dueDate === null || c.dueDate > dueDate)) dueDate = c.dueDate
+  }
+  return { startDate, dueDate }
+}
+
 /** A task reduced to display fields, ids remapped to indices, dates trimmed to yyyy-mm-dd.
- * `status`/`estimate` are the RESOLVED display values (a parent gets its rolled-up status +
- * summed effort; a leaf its own) — frozen at build so the recipient shows what the sender
- * saw, even for trimmed shares. */
+ * `status`/`estimate`/`startDate`/`dueDate` are the RESOLVED display values (a parent gets its
+ * rolled-up status + summed effort + child date span; a leaf its own) — frozen at build so the
+ * recipient shows what the sender saw, even for trimmed shares. */
 function normTask(
   t: Task,
   i: number,
   memberIdx: Map<string, number>,
   taskIdx: Map<string, number>,
   status: Status,
-  estimate: number | null
+  estimate: number | null,
+  startDate: string | null,
+  dueDate: string | null
 ): Task {
   const assignee = t.assigneeId != null && memberIdx.has(t.assigneeId) ? `m${memberIdx.get(t.assigneeId)}` : null
   const parent = t.parentId && taskIdx.has(t.parentId) ? `t${taskIdx.get(t.parentId)}` : null
@@ -141,8 +160,8 @@ function normTask(
     status,
     priority: t.priority,
     estimate,
-    startDate: t.startDate ? t.startDate.slice(0, 10) : null,
-    dueDate: t.dueDate ? t.dueDate.slice(0, 10) : null,
+    startDate: startDate ? startDate.slice(0, 10) : null,
+    dueDate: dueDate ? dueDate.slice(0, 10) : null,
     assigneeId: assignee,
     parentId: parent,
   }
@@ -226,7 +245,8 @@ export function buildSnapshot(
     membersOff: usedMembers.map((m) => offRangeFor(m)),
     tasks: scoped.map((t, i) => {
       const kids = kidsByParent.get(t.id) ?? []
-      return normTask(t, i, memberIdx, taskIdx, rollupStatus(t, kids), rollupEffort(t, kids))
+      const rd = rollupDates(t, kids)
+      return normTask(t, i, memberIdx, taskIdx, rollupStatus(t, kids), rollupEffort(t, kids), rd.startDate, rd.dueDate)
     }),
   }
 }

@@ -7,7 +7,13 @@
 > verbatim by the hosted mode.
 
 **Status:** Implemented
-**Last updated:** 2026-07-16 (**parent effort is rolled up at build** — a group head is a
+**Last updated:** 2026-07-16 (**parent date span is rolled up at build** — a group head's OWN
+dates are ignored in-app (the scheduler spans the children: earliest child start … latest child
+due), so a container's raw stored dates [often null] made the share page show "—" while the
+sprint shows the span. `buildSnapshot` now bakes `startDate = min(child.startDate)`,
+`dueDate = max(child.dueDate)` for a parent [`rollupDates`, mirrors `planFor`], frozen from the
+FULL child set. Completes the parent-rollup trio (status + effort + dates), all baked the same
+way. Earlier same-day: **parent effort is rolled up at build** — a group head is a
 container with no own `estimate`, so the share page showed "—" for effort while the sprint
 shows the **sum of children's effort**. `buildSnapshot` now bakes `estimate = hasEffort ?
 sum(child.estimate ?? 0) : null` for a parent [`rollupEffort`, mirrors SprintView `GroupRow`],

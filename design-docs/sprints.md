@@ -40,6 +40,10 @@ context lives in an **optional note** instead.
     **`--color-priority-high` amber** when the sprint lapsed still holding open work
     (`total > 0 && done < total`) — the "needs attention" tone that pairs with the header expiry
     banner. See [sprint-expiry-signal.md](./sprint-expiry-signal.md). (An empty past sprint stays grey.)
+    The sidebar per-sprint counts (`sprintTaskCounts`) are **leaf-based** — container parents (a
+    task's derived-status rollup is never stored as `done`) are excluded from `total`/`done`, so a
+    fully-done group never falsely reads as `done < total` (amber). Matches the app's leaf-based
+    counting everywhere else — see [task-groups.md](./task-groups.md).
   - On the **selected** row (accent bg) the same shapes render in white/translucent-white, so
     state stays legible while the row is highlighted. The glyph is `aria-hidden` (state is
     conveyed by the date range text too). The "live" halo has a calm 2s pulse.

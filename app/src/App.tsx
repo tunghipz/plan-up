@@ -643,13 +643,24 @@ function App() {
             .toArray()
             .then((rows) => {
               const counts: Record<string, { total: number; done: number }> = {}
+              // Leaf-based counting: a parent (a task with children) is a
+              // CONTAINER whose status is a derived rollup, never stored as
+              // 'done' — counting it would make a fully-done group read as
+              // done<total (false "attention" dot + inflated count). Exclude
+              // containers, matching the app's leaf-based counting everywhere
+              // else (rollover, memberStats, share donut). See task-groups.md.
+              const parentIds = new Set<string>()
+              for (const t of rows) if (t.parentId) parentIds.add(t.parentId)
+              let all = 0
               for (const t of rows) {
+                if (parentIds.has(t.id)) continue // container, not a work item
+                all++
                 if (!t.sprintId) continue
                 const c = (counts[t.sprintId] ??= { total: 0, done: 0 })
                 c.total++
                 if (t.status === 'done') c.done++
               }
-              return JSON.stringify({ all: rows.length, counts })
+              return JSON.stringify({ all, counts })
             })
         : Promise.resolve(''),
     [seeded, currentProjectId]

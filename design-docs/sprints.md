@@ -1,9 +1,11 @@
 # Sprints
 
 **Status:** Implemented
-**Last updated:** 2026-07-08 (note is now an inline **description** in the merged
-Notion-style sprint page header — see app-shell-and-navigation.md v4; prior 2026-07-02:
-sprint creation is a canonical `createSprint()` — row + `sprint_started` event in one transaction)
+**Last updated:** 2026-07-16 (**past state dot gains an amber "attention" tone** when a
+lapsed sprint still holds open work — see [sprint-expiry-signal.md](./sprint-expiry-signal.md);
+prior 2026-07-08: note is now an inline **description** in the merged Notion-style sprint page
+header — see app-shell-and-navigation.md v4; prior 2026-07-02: sprint creation is a canonical
+`createSprint()` — row + `sprint_started` event in one transaction)
 **Code:** `app/src/App.tsx` (`NewSprintDialog`, `SprintNoteBanner`, sprint panel,
 `SprintStateDot`, `renderSprintRow`), `app/src/db.ts` (`createSprint`, `nextSequence`,
 `setSprintNote`), `app/src/lib.ts` (`sprintTemporalState`; tests in `sprint-cadence.test.ts`)
@@ -34,7 +36,10 @@ context lives in an **optional note** instead.
   - **In progress / đang diễn ra** (`startDate ≤ today ≤ endDate`) — a **filled accent dot
     inside a soft accent halo** (the one "live" sprint), `--color-accent`.
   - **Past / đã qua** (`today > endDate`) — a **solid muted dot**, `--color-status-todo` grey;
-    flips to **`--color-status-done` green** when every task is done (`done === total > 0`).
+    flips to **`--color-status-done` green** when every task is done (`done === total > 0`), or to
+    **`--color-priority-high` amber** when the sprint lapsed still holding open work
+    (`total > 0 && done < total`) — the "needs attention" tone that pairs with the header expiry
+    banner. See [sprint-expiry-signal.md](./sprint-expiry-signal.md). (An empty past sprint stays grey.)
   - On the **selected** row (accent bg) the same shapes render in white/translucent-white, so
     state stays legible while the row is highlighted. The glyph is `aria-hidden` (state is
     conveyed by the date range text too). The "live" halo has a calm 2s pulse.

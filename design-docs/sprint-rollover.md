@@ -1,12 +1,14 @@
 # Sprint rollover
 
 **Status:** Implemented
-**Last updated:** 2026-07-14 (**left-behind prereqs are unlinked on rollover** — a
-moved task's `dependsOn` entries that point to tasks staying in the source sprint
-[done prereqs, ungrouped children] are dropped, so the moved task's start stops
-being prereq-locked and becomes editable again in the new sprint while keeping its
-dates. Links where both ends roll over are untouched. Partially reverses the
-2026-07-06 "dependsOn always survives" note.)
+**Last updated:** 2026-07-16 (**a second entry point**: the sprint-expiry banner on a
+lapsed sprint opens this same `RolloverPopover` + move — see
+[sprint-expiry-signal.md](./sprint-expiry-signal.md); prior 2026-07-14:
+**left-behind prereqs are unlinked on rollover** — a moved task's `dependsOn` entries
+that point to tasks staying in the source sprint [done prereqs, ungrouped children] are
+dropped, so the moved task's start stops being prereq-locked and becomes editable again
+in the new sprint while keeping its dates. Links where both ends roll over are untouched.
+Partially reverses the 2026-07-06 "dependsOn always survives" note.)
 **Code:** `app/src/App.tsx` (`RolloverPopover`, Roll over button), `app/src/db.ts`
 (`planSprintRollover`, `moveUnfinishedToNextSprint`, `dedupeSprints`)
 
@@ -17,6 +19,12 @@ without manual re-entry.
 ## User-facing behavior
 - The **Roll over** button (header) appears only when: a current sprint exists, a next
   sprint exists, and there are unfinished tasks. It shows the unfinished count.
+- **Second entry point (2026-07-16):** on a *lapsed* sprint the header **expiry banner**
+  (state `ended-open`) shows a **Roll over N → {next}** button that opens this **same**
+  `RolloverPopover` (same tasks, same move) — no divergence. When *no* next sprint exists
+  the banner instead offers **Start {next} · carry N**, which creates the next sprint then
+  runs `moveUnfinishedToNextSprint` into it. See
+  [sprint-expiry-signal.md](./sprint-expiry-signal.md).
 - Click → **anchored popover** (`RolloverPopover`, not a center modal) that **previews the
   exact tasks that will move** — a read-only scrollable list (status dot · `#seq` ·
   priority tag · title · assignee avatar · due date, overdue dates in red). Header

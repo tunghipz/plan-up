@@ -1,28 +1,15 @@
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { ConfirmCtx, type ConfirmOpts } from './confirm-context'
 
 /**
  * In-DNA replacement for window.confirm() (design-system §6.4 / §8 — no grey OS
- * dialog). A provider wraps <App>; `useConfirm()` returns an async function that
- * resolves true/false, so call sites read almost identically to the old
- * `confirm()`:  `if (!(await confirm({ title, message }))) return`.
+ * dialog). A provider wraps <App>; `useConfirm()` (see confirm-context.ts)
+ * returns an async function that resolves true/false, so call sites read
+ * almost identically to the old `confirm()`:
+ * `if (!(await confirm({ title, message }))) return`.
  */
 
-export type ConfirmOpts = {
-  title: string
-  message?: string
-  confirmLabel?: string
-  cancelLabel?: string
-  /** Red action button + emphasis (delete/replace). Defaults to true. */
-  destructive?: boolean
-}
-
 type Pending = { opts: ConfirmOpts; resolve: (ok: boolean) => void }
-
-const ConfirmCtx = createContext<(opts: ConfirmOpts) => Promise<boolean>>(
-  async () => false
-)
-
-export const useConfirm = () => useContext(ConfirmCtx)
 
 export function ConfirmProvider({ children }: { children: React.ReactNode }) {
   const [pending, setPending] = useState<Pending | null>(null)
@@ -76,13 +63,24 @@ function ConfirmSheet({
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
+        // Topmost layer (z-60) owns Escape — don't let a drawer/modal/App
+        // handler underneath also close on the same keypress.
+        e.stopImmediatePropagation()
+        e.stopPropagation()
         onCancel()
         return
       }
       if (e.key === 'Enter') {
-        // preventDefault stops the autoFocus'd confirm button's own native
-        // Enter-activation from ALSO firing — without it onConfirm runs twice
-        // (idempotent today, but a latent footgun).
+        // If focus sits on one of the dialog's buttons (autoFocus'd Confirm, or
+        // Cancel after a Tab), let the button's own native Enter-activation
+        // fire — a focused Cancel must cancel, never confirm. Only when focus
+        // is elsewhere does a bare Enter mean "confirm".
+        const active = document.activeElement
+        if (
+          active instanceof HTMLButtonElement &&
+          sheetRef.current?.contains(active)
+        )
+          return
         e.preventDefault()
         onConfirm()
         return
@@ -118,7 +116,7 @@ function ConfirmSheet({
     >
       <div
         ref={sheetRef}
-        className="dlg-sheet bg-surface text-ink rounded-[16px] shadow-[0_20px_60px_rgba(0,0,0,0.28)] w-full max-w-md p-6 space-y-3 border border-border-hair"
+        className="dlg-sheet glass-modal text-ink rounded-[16px] w-full max-w-md p-6 space-y-3"
         onClick={(e) => e.stopPropagation()}
         role="alertdialog"
         aria-modal="true"
@@ -129,18 +127,21 @@ function ConfirmSheet({
         )}
         <div className="flex justify-end gap-2 pt-2">
           <button
+            // Destructive alerts focus the SAFE action (Apple idiom) so a
+            // reflexive Enter/Space can never delete.
+            autoFocus={destructive}
             onClick={onCancel}
             className="px-3.5 py-1.5 text-sm font-medium text-ink-muted hover:bg-surface-hover rounded-[8px] transition"
           >
             {cancelLabel}
           </button>
           <button
-            autoFocus
+            autoFocus={!destructive}
             onClick={onConfirm}
             className={`px-4 py-1.5 text-sm font-medium text-white rounded-[8px] transition ${
               destructive
-                ? 'bg-red-500 hover:bg-red-600'
-                : 'bg-accent hover:bg-accent-hover'
+                ? 'bg-overdue hover:bg-overdue/90'
+                : 'brand-btn'
             }`}
           >
             {confirmLabel}

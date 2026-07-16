@@ -1,17 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
-import {
-  CalendarPlus,
-  ChevronDown,
-  X,
-  Plus,
-  GripVertical,
-  Layers,
-  Pencil,
-  Search,
-  Trash2,
-} from 'lucide-react'
+import { ChevronDown, X, Plus, Trash2, Layers, Pencil } from 'lucide-react'
 import {
   db,
   addSection,
@@ -19,24 +9,28 @@ import {
   deleteSection,
   addCollectionItem,
   renameCollection,
-  moveTaskToSprint,
-  moveTaskToSection,
+  moveCollectionItem,
+  deleteTask,
+  renormalizeListOrder,
   addStatus,
   renameStatus,
   recolorStatus,
   deleteStatus,
-  deleteTask,
   COLLECTION_PALETTE,
-  updateTask,
   type Collection,
   type CollectionStatus,
-  type Member,
-  type Sprint,
   type Task,
 } from './db'
 import { CollectionCalendar } from './CollectionCalendar'
+import { DateRangePickCell } from './DatePicker'
 import { AddGroupButton } from './AddGroupButton'
-import { EffortCell } from './SprintView'
+import { useDragHandle, useDragHover, type RowDrag } from './DragHandle'
+import { computeDropSlot, computeAppendSlot, resolveDropOrder, type DropSlot } from './reorder'
+import { usePinnedPopover } from './usePinnedPopover'
+import { ModalSheet } from './ModalSheet'
+
+/** Effective manual order for a collection item — mirrors the sprint list. */
+const effOrder = (t: Task) => t.listOrder ?? t.sequence
 
 const COLLAPSE_KEY = (collectionId: string) =>
   `plan-up:collCollapsed:${collectionId}`
@@ -47,49 +41,97 @@ const EMPTY_ITEMS: Task[] = []
 
 /**
  * Column widths shared by the column-header row and each item row — mirrors the
- * sprint list view's `COL` (SprintView.tsx) so Collections feel identical, with
- * only member + editable duration surfaced. Flex, not grid: the title absorbs
- * the slack via flex-1; the rest are fixed and shrink-0.
+ * sprint list view's `COL` (SprintView.tsx) so Collections feel identical, minus
+ * the scheduling columns (no seq/assignee/effort/prereq). Flex, not grid: the
+ * title absorbs the slack via flex-1; the rest are fixed and shrink-0.
  */
 const COL = {
   lead: 'w-5 shrink-0 flex justify-center items-center',
+  dot: 'w-4 shrink-0 flex justify-center',
   title: 'flex-1 min-w-[150px]',
-  member: 'w-32 flex justify-start shrink-0',
-  duration: 'w-24 flex justify-center shrink-0',
-  sprint: 'w-36 flex justify-end shrink-0',
-  actions: 'w-8 flex justify-end shrink-0',
+  start: 'w-28 flex justify-end shrink-0',
+  due: 'w-28 flex justify-end shrink-0',
+  status: 'w-28 flex justify-start shrink-0 pl-2',
+}
+
+// Click-to-sort columns — mirrors the sprint list (SprintView.tsx), minus the
+// scheduling fields. `null` sort = natural (insertion/DB) order. See
+// design-docs/collections.md + list-view.md.
+type CollSortField = 'title' | 'startDate' | 'dueDate' | 'status'
+type CollSort = { field: CollSortField; dir: 'asc' | 'desc' } | null
+// One global sort preference shared across every section card (like the sprint
+// list's global SORT_KEY), so it survives switching collection/view + reload.
+const EMPTY_TASKS: Task[] = []
+
+const COLL_SORT_KEY = 'plan-up:collSort'
+const COLL_SORT_FIELDS: CollSortField[] = ['title', 'startDate', 'dueDate', 'status']
+
+function loadCollSort(): CollSort {
+  try {
+    const raw = localStorage.getItem(COLL_SORT_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as Partial<NonNullable<CollSort>>
+    if (
+      parsed &&
+      COLL_SORT_FIELDS.includes(parsed.field as CollSortField) &&
+      (parsed.dir === 'asc' || parsed.dir === 'desc')
+    ) {
+      return { field: parsed.field as CollSortField, dir: parsed.dir }
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
+function saveCollSort(sort: CollSort) {
+  try {
+    if (sort) localStorage.setItem(COLL_SORT_KEY, JSON.stringify(sort))
+    else localStorage.removeItem(COLL_SORT_KEY)
+  } catch {
+    // localStorage unavailable, swallow
+  }
+}
+
+/**
+ * Compare two items for the active sort. Empty dates sort last; status sorts by
+ * the user-defined status order (no status sorts last). JS sort is stable, so
+ * equal items keep their natural order. `statusRank` maps statusId → index.
+ */
+function compareItems(
+  a: Task,
+  b: Task,
+  sort: NonNullable<CollSort>,
+  statusRank: Map<string, number>
+): number {
+  const mul = sort.dir === 'asc' ? 1 : -1
+  const val = (t: Task): string | number =>
+    sort.field === 'title'
+      ? (t.title || '').toLowerCase()
+      : sort.field === 'status'
+        ? t.collectionStatusId
+          ? (statusRank.get(t.collectionStatusId) ?? Number.POSITIVE_INFINITY)
+          : Number.POSITIVE_INFINITY
+        : (t[sort.field] ?? '￿') // startDate / dueDate — empty sorts last
+  const va = val(a)
+  const vb = val(b)
+  if (va < vb) return -1 * mul
+  if (va > vb) return 1 * mul
+  return 0
 }
 
 /** Floating-shadow surface for popovers/menus (design-system §4.2). */
 const FLOAT_SHADOW =
   'shadow-[0_8px_30px_rgba(0,0,0,0.18),0_0_0_0.5px_rgba(0,0,0,0.06)]'
 
-/** Close `ref` element when a click lands outside it. */
-function useOutsideClose(
-  ref: React.RefObject<HTMLElement | null>,
-  open: boolean,
-  close: () => void
-) {
-  useEffect(() => {
-    if (!open) return
-    const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) close()
-    }
-    document.addEventListener('mousedown', onDown)
-    return () => document.removeEventListener('mousedown', onDown)
-  }, [ref, open, close])
-}
-
 export function CollectionView({
   collectionId,
   view,
-  currentSprintId,
   onViewInList,
 }: {
   collectionId: string
   /** Controlled view — driven by the single adaptive toggle in App's top bar. */
   view: 'list' | 'calendar'
-  currentSprintId?: string | null
   /** Calendar's "View in list →" callback (App flips the top-bar toggle). */
   onViewInList: () => void
 }) {
@@ -97,44 +139,58 @@ export function CollectionView({
     () => db.collections.get(collectionId),
     [collectionId]
   )
-  const liveItems = useLiveQuery<Task[]>(
+  const itemsRaw = useLiveQuery<Task[]>(
     () => db.tasks.where('collectionId').equals(collectionId).toArray(),
     [collectionId]
   )
-  const items = useMemo(() => liveItems ?? [], [liveItems])
-  const projectMembers =
-    useLiveQuery<Member[]>(
-      () =>
-        collection
-          ? db.members.where('projectId').equals(collection.projectId).toArray()
-          : Promise.resolve([]),
-      [collection?.projectId]
-    ) ?? []
-  const memberById = useMemo(
-    () => new Map(projectMembers.map((m) => [m.id, m])),
-    [projectMembers]
-  )
-  const projectSprints =
-    useLiveQuery<Sprint[]>(
-      () =>
-        collection
-          ? db.sprints.where('projectId').equals(collection.projectId).sortBy('startDate')
-          : Promise.resolve([]),
-      [collection?.projectId]
-    ) ?? []
-  const activeSprints = useMemo(
-    () =>
-      projectSprints
-        .filter((s) => s.archivedAt == null)
-        .slice()
-        .sort((a, b) => a.startDate.localeCompare(b.startDate)),
-    [projectSprints]
-  )
+  // Stable [] while the query loads — a fresh `?? []` per render would defeat
+  // every downstream useMemo keyed on `items`.
+  const items = itemsRaw ?? EMPTY_TASKS
+
   const [addingTable, setAddingTable] = useState(false)
 
+  // Delete-item undo toast (collections.md 2026-07-07): the trash button sits in
+  // the status dot's hover slot, so a stray click is easy — deletion stays
+  // 1-click/no-confirm, but the item is restorable for ~6s.
+  const [deletedToast, setDeletedToast] = useState<Task | null>(null)
+  const deletedTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => () => {
+    if (deletedTimer.current) clearTimeout(deletedTimer.current)
+  }, [])
+  const handleDeleteItem = async (task: Task) => {
+    await deleteTask(task.id)
+    if (deletedTimer.current) clearTimeout(deletedTimer.current)
+    setDeletedToast(task)
+    deletedTimer.current = setTimeout(() => setDeletedToast(null), 6000)
+  }
+  const undoDelete = async () => {
+    if (!deletedToast) return
+    setDeletedToast(null)
+    // Collection items carry no children/deps — re-adding the row verbatim
+    // (same id/section/status/dates/order) is a full restore.
+    await db.tasks.add(deletedToast)
+  }
+
+  // Global sort preference, shared across all section cards (mirrors sprint list).
+  const [sort, setSort] = useState<CollSort>(loadCollSort)
+  useEffect(() => {
+    saveCollSort(sort)
+  }, [sort])
+
+  const statusById = useMemo(
+    () => new Map((collection?.statuses ?? []).map((s) => [s.id, s])),
+    [collection]
+  )
+  // Rank statuses by their user-defined order so `status` sort follows it.
+  const statusRank = useMemo(
+    () => new Map((collection?.statuses ?? []).map((s, i) => [s.id, i])),
+    [collection]
+  )
   // Group items by section ONCE per data change instead of re-filtering the full
   // item list for every section on every render — that was O(sections × items)
-  // per keystroke, since item titles persist on every keystroke.
+  // per keystroke, since item titles persist on every keystroke. Each section's
+  // array is natural-sorted by effOrder (listOrder ?? sequence) — the order the
+  // pointer-drag reorders within, and the display order when no column sort is on.
   const itemsBySectionMap = useMemo(() => {
     const m = new Map<string, Task[]>()
     for (const t of items) {
@@ -143,8 +199,116 @@ export function CollectionView({
       if (arr) arr.push(t)
       else m.set(k, [t])
     }
+    for (const arr of m.values()) arr.sort((a, b) => effOrder(a) - effOrder(b))
     return m
   }, [items])
+  const itemsById = useMemo(() => new Map(items.map((t) => [t.id, t])), [items])
+
+  // ── Pointer-based drag-to-reorder (shared useDragHandle with the sprint list) ─
+  // The owner lives HERE (not per-card) so hit-testing spans every SectionCard:
+  // reordering within a table and moving an item to another table are the same
+  // gesture. Only offered in the natural order (sort === null), like the sprint
+  // list's `canReorder`. See design-docs/collections.md.
+  const canReorder = sort === null
+  const [dragId, setDragId] = useState<string | null>(null)
+  // Section under the cursor — highlights an empty table (which has no row to show
+  // a drop-slot line on) as a valid drop target.
+  const [overSectionId, setOverSectionId] = useState<string | null>(null)
+  // Slot math (own-gap no-op, float collision) is the shared, unit-tested
+  // reorder.ts; this owner keeps the cross-table semantics + persistence.
+  const { over, hover, clear, cancel } = useDragHover()
+
+  const endDrag = () => {
+    setDragId(null)
+    setOverSectionId(null)
+    cancel()
+  }
+
+  // Hover: resolve the item + section under the cursor (elementFromPoint), show a
+  // before/after slot line on the hovered row (rAF-throttled like the sprint list).
+  const hoverItem = (x: number, y: number) => {
+    if (!dragId) return
+    const el = document.elementFromPoint(x, y)
+    const secEl = el?.closest('[data-section-id]') as HTMLElement | null
+    setOverSectionId(secEl?.dataset.sectionId ?? null)
+    const itemEl = el?.closest('[data-item-id]') as HTMLElement | null
+    const targetId = itemEl?.dataset.itemId
+    if (!targetId || targetId === dragId) {
+      clear()
+      return
+    }
+    // Only light the insertion line where a drop would actually move the item —
+    // mirror dropOnItem's guard (own-gap is a no-op only within the same section).
+    const targetSectionId = itemsById.get(targetId)?.sectionId
+    const arr = targetSectionId ? itemsBySectionMap.get(targetSectionId) ?? [] : []
+    const r = itemEl!.getBoundingClientRect()
+    const pos: 'before' | 'after' = y - r.top > r.height / 2 ? 'after' : 'before'
+    const slot = computeDropSlot(arr, (t) => t.id, dragId, targetId, pos)
+    const draggedSectionId = itemsById.get(dragId)?.sectionId
+    if (!slot || (slot.ownGap && draggedSectionId === targetSectionId)) {
+      clear()
+      return
+    }
+    hover(targetId, itemEl!, y)
+  }
+
+  // Drop: place the dragged item into the target section at the resolved slot,
+  // writing sectionId + listOrder together (moveCollectionItem). Dropping on a
+  // section's empty area appends to its end. Renormalizes on float-precision
+  // collision, mirroring the sprint list's drop.
+  const dropOnItem = (x: number, y: number) => {
+    const id = dragId
+    const dragged = id ? itemsById.get(id) : null
+    if (!id || !dragged) return
+    const el = document.elementFromPoint(x, y)
+    const itemEl = el?.closest('[data-item-id]') as HTMLElement | null
+    const secEl = el?.closest('[data-section-id]') as HTMLElement | null
+    const targetId = itemEl?.dataset.itemId
+    // Released over the dragged row itself (a plain grip click, or a drag that
+    // came back home) — a no-op, NOT "append to the section's end": the append
+    // slot below is only for the empty area under a table's rows.
+    if (targetId === id) return
+    const targetSectionId =
+      (targetId ? itemsById.get(targetId)?.sectionId : undefined) ??
+      secEl?.dataset.sectionId
+    if (!targetSectionId) return
+    const arr = itemsBySectionMap.get(targetSectionId) ?? []
+    let slot: DropSlot<Task> | null
+    if (targetId) {
+      const r = itemEl!.getBoundingClientRect()
+      const pos: 'before' | 'after' = y - r.top > r.height / 2 ? 'after' : 'before'
+      slot = computeDropSlot(arr, (t) => t.id, id, targetId, pos)
+    } else {
+      // Dropped on the section's empty/below-rows area → append to its end.
+      slot = computeAppendSlot(arr, (t) => t.id, id)
+    }
+    // Own gap only counts within the same table — a cross-table move always writes.
+    if (!slot || (slot.ownGap && dragged.sectionId === targetSectionId)) return
+    const { order, collides } = resolveDropOrder(slot, effOrder)
+    if (collides) {
+      const orderedIds = arr.filter((t) => t.id !== id).map((t) => t.id)
+      orderedIds.splice(slot.insertAt, 0, id)
+      if (dragged.sectionId !== targetSectionId)
+        void db.tasks.update(id, { sectionId: targetSectionId })
+      void renormalizeListOrder(orderedIds)
+    } else {
+      void moveCollectionItem(id, targetSectionId, order)
+    }
+  }
+
+  const dragFor = (t: Task): RowDrag | undefined =>
+    canReorder
+      ? {
+          id: t.id,
+          enabled: true,
+          dragging: dragId === t.id,
+          over: over?.id === t.id ? over.pos : null,
+          onStart: () => setDragId(t.id),
+          onMove: hoverItem,
+          onDrop: dropOnItem,
+          onEnd: endDrag,
+        }
+      : undefined
 
   if (!collection) {
     return <div className="p-6 text-ink-muted">Loading…</div>
@@ -165,10 +329,14 @@ export function CollectionView({
               canDelete={collection.sections.length > 1}
               section={sec}
               items={itemsBySectionMap.get(sec.id) ?? EMPTY_ITEMS}
-              members={projectMembers}
-              memberById={memberById}
-              sprints={activeSprints}
-              currentSprintId={currentSprintId ?? null}
+              statusById={statusById}
+              statuses={collection.statuses}
+              sort={sort}
+              setSort={setSort}
+              statusRank={statusRank}
+              dragFor={dragFor}
+              dropHint={dragId !== null && overSectionId === sec.id}
+              onDeleteItem={handleDeleteItem}
             />
           ))}
           <AddGroupButton
@@ -198,6 +366,32 @@ export function CollectionView({
           }}
         />
       )}
+
+      {/* Delete-item undo toast — same slide-up idiom as App's import toast. */}
+      {deletedToast &&
+        createPortal(
+          <div
+            className="fixed inset-x-0 bottom-6 z-[60] flex justify-center px-4 pointer-events-none"
+            role="status"
+            aria-live="polite"
+          >
+            <div className="pointer-events-auto flex items-center gap-3 min-w-[300px] max-w-[460px] px-4 py-3 rounded-[14px] bg-surface border border-border-hair animate-toast-in shadow-[0_12px_32px_rgba(0,0,0,0.16),0_0_0_0.5px_rgba(0,0,0,0.06)] dark:shadow-[0_12px_32px_rgba(0,0,0,0.55),0_0_0_0.5px_rgba(255,255,255,0.08)]">
+              <span className="shrink-0 w-[34px] h-[34px] rounded-full flex items-center justify-center bg-overdue/15 text-overdue">
+                <Trash2 size={16} strokeWidth={2} />
+              </span>
+              <div className="min-w-0 flex-1 text-[13.5px] font-semibold text-ink truncate">
+                Deleted “{deletedToast.title.trim() || 'Untitled item'}”
+              </div>
+              <button
+                onClick={undoDelete}
+                className="shrink-0 self-center text-[13px] font-medium text-accent hover:bg-accent-soft rounded-md px-2.5 py-1.5 transition"
+              >
+                Undo
+              </button>
+            </div>
+          </div>,
+          document.body
+        )}
     </div>
   )
 }
@@ -256,14 +450,15 @@ function CollectionSummary({
 
 /** Inline-rename collection name (mirrors SprintNameEditor in App.tsx). */
 function CollectionTitle({ collection }: { collection: Collection }) {
-  return <EditableCollectionTitle collection={collection} />
-}
-
-function EditableCollectionTitle({ collection }: { collection: Collection }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(collection.name)
   const inputRef = useRef<HTMLInputElement>(null)
 
+  // Draft resets in beginEdit (the open trigger); the effect only owns focus.
+  const beginEdit = () => {
+    setDraft(collection.name)
+    setEditing(true)
+  }
   useEffect(() => {
     if (editing) {
       requestAnimationFrame(() => {
@@ -271,7 +466,7 @@ function EditableCollectionTitle({ collection }: { collection: Collection }) {
         inputRef.current?.select()
       })
     }
-  }, [editing, collection.name])
+  }, [editing])
 
   const commit = async () => {
     const n = draft.trim()
@@ -307,10 +502,7 @@ function EditableCollectionTitle({ collection }: { collection: Collection }) {
   return (
     <h2
       className="group/title inline-flex items-center gap-1.5 min-w-0 font-semibold text-ink display-tight cursor-text"
-      onClick={() => {
-        setDraft(collection.name)
-        setEditing(true)
-      }}
+      onClick={beginEdit}
       title="Click to rename"
     >
       <span className="truncate">{collection.name}</span>
@@ -324,8 +516,8 @@ function EditableCollectionTitle({ collection }: { collection: Collection }) {
 }
 
 /**
- * Name-only Cupertino modal — same sheet as App's New Sprint / New Collection
- * dialogs. Used for "Add table". Enter submits; scrim/Cancel closes.
+ * Name-only Cupertino modal (shared ModalSheet shell). Used for "Add
+ * table". Enter submits; scrim/Cancel closes.
  */
 function NameModal({
   title,
@@ -349,15 +541,7 @@ function NameModal({
     void onSubmit(t)
   }
   return (
-    <div
-      className="fixed inset-0 bg-black/25 backdrop-blur-md flex items-center justify-center p-4 z-50"
-      onClick={onClose}
-    >
-      <div
-        className="bg-surface text-ink rounded-[16px] shadow-[0_20px_60px_rgba(0,0,0,0.28)] w-full max-w-md p-6 space-y-4 border border-border-hair"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h2 className="text-[19px] font-bold tracking-[-0.014em]">{title}</h2>
+    <ModalSheet title={title} onClose={onClose}>
         <label className="block">
           <span className="text-xs text-ink-muted">Name</span>
           <input
@@ -365,7 +549,9 @@ function NameModal({
             value={name}
             onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') submit()
+              // isComposing: Enter inside an IME composition (Vietnamese telex,
+              // CJK) confirms the composition, not the form.
+              if (e.key === 'Enter' && !e.nativeEvent.isComposing) submit()
               else if (e.key === 'Escape') onClose()
             }}
             placeholder={placeholder}
@@ -383,13 +569,12 @@ function NameModal({
           <button
             onClick={submit}
             disabled={!name.trim()}
-            className="px-4 py-1.5 text-sm font-medium bg-accent hover:bg-accent-hover text-white rounded-[8px] disabled:opacity-50 transition"
+            className="px-4 py-1.5 text-sm font-medium brand-btn text-white rounded-[8px] disabled:opacity-50 transition"
           >
             {submitLabel}
           </button>
         </div>
-      </div>
-    </div>
+    </ModalSheet>
   )
 }
 
@@ -421,21 +606,47 @@ function SectionCard({
   collectionId,
   section,
   items,
+  statusById,
+  statuses,
   canDelete,
-  members,
-  memberById,
-  sprints,
-  currentSprintId,
+  sort,
+  setSort,
+  statusRank,
+  dragFor,
+  dropHint,
+  onDeleteItem,
 }: {
   collectionId: string
   section: { id: string; name: string; color?: string }
   items: Task[]
+  statusById: Map<string, CollectionStatus>
+  statuses: CollectionStatus[]
   canDelete: boolean
-  members: Member[]
-  memberById: Map<string, Member>
-  sprints: Sprint[]
-  currentSprintId: string | null
+  sort: CollSort
+  setSort: React.Dispatch<React.SetStateAction<CollSort>>
+  statusRank: Map<string, number>
+  /** Pointer-drag wiring from CollectionView (undefined row → not draggable). */
+  dragFor: (t: Task) => RowDrag | undefined
+  /** True while a drag hovers this card — highlights it as a drop target. */
+  dropHint: boolean
+  /** Delete + arm the undo toast (owned by CollectionView). */
+  onDeleteItem: (t: Task) => void
 }) {
+  // Apply the active sort; `null` keeps natural (insertion) order. JS sort is
+  // stable, so a copy preserves order for equal rows. See list-view.md.
+  const sortedItems = useMemo(
+    () =>
+      sort ? [...items].sort((a, b) => compareItems(a, b, sort, statusRank)) : items,
+    [items, sort, statusRank]
+  )
+  // Three-state cycle per column: asc → desc → off (natural order).
+  const onSort = (field: CollSortField) => {
+    setSort((prev) => {
+      if (!prev || prev.field !== field) return { field, dir: 'asc' }
+      if (prev.dir === 'asc') return { field, dir: 'desc' }
+      return null
+    })
+  }
   const [collapsed, setCollapsed] = useState(
     () =>
       localStorage.getItem(`${COLLAPSE_KEY(collectionId)}:${section.id}`) === '1'
@@ -451,40 +662,18 @@ function SectionCard({
     })
   }
 
-  // Drop target for items dragged in from another section.
-  const [dropActive, setDropActive] = useState(false)
   // Inline (in-DNA) delete confirm — replaces window.confirm (§8).
   const [confirmingDelete, setConfirmingDelete] = useState(false)
 
   return (
     <div
       data-section-card
-      data-section-drop
-      onDragOver={(e) => {
-        // Allow drops carrying a collection item id.
-        if (e.dataTransfer.types.includes('text/plain')) {
-          e.preventDefault()
-          e.dataTransfer.dropEffect = 'move'
-          if (!dropActive) setDropActive(true)
-        }
-      }}
-      onDragLeave={(e) => {
-        // Only clear when the pointer actually leaves the card (not a child).
-        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
-          setDropActive(false)
-        }
-      }}
-      onDrop={(e) => {
-        e.preventDefault()
-        setDropActive(false)
-        const id = e.dataTransfer.getData('text/plain')
-        // No-op if dropped onto the section it already belongs to.
-        if (id && !items.some((t) => t.id === id)) {
-          void moveTaskToSection(id, section.id)
-        }
-      }}
-      className={`bg-surface rounded-[14px] shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_22px_rgba(0,0,0,0.05)] overflow-hidden transition-shadow ${
-        dropActive ? 'ring-2 ring-accent/40' : ''
+      // Hit-test anchor for the pointer-drag owner (CollectionView): identifies
+      // this table so an item can be dropped into it — including onto its empty
+      // area, which has no row to land on.
+      data-section-id={section.id}
+      className={`glass-card rounded-[18px] overflow-hidden transition-shadow ${
+        dropHint ? 'ring-2 ring-accent/40' : ''
       }`}
     >
       {/* Whole header toggles collapse (mirrors the sprint group card). The
@@ -524,7 +713,7 @@ function SectionCard({
       </div>
 
       {confirmingDelete && (
-        <div className="flex items-center gap-3 px-[18px] py-2.5 bg-red-500/[0.06] border-b border-border text-[13px]">
+        <div className="flex items-center gap-3 px-[18px] py-2.5 bg-overdue/[0.06] border-b border-border text-[13px]">
           <span className="flex-1 text-ink font-medium">
             Delete this table? Its items move to the first table.
           </span>
@@ -532,7 +721,7 @@ function SectionCard({
             onClick={async () => {
               await deleteSection(collectionId, section.id)
             }}
-            className="text-red-500 font-semibold hover:underline"
+            className="text-overdue font-semibold hover:underline"
           >
             Delete
           </button>
@@ -553,19 +742,37 @@ function SectionCard({
           {items.length > 0 && (
             <div className="flex items-center gap-3 px-4 py-1.5 border-b border-border-hair bg-canvas-sunk/40">
               <div className={COL.lead} />
-              <div className={`${COL.title} text-[11px] tracking-normal text-ink-faint font-medium`}>
-                Name
-              </div>
-              <div className={`${COL.member} text-[11px] tracking-normal text-ink-faint font-medium`}>
-                Member
-              </div>
-              <div className={`${COL.duration} text-[11px] tracking-normal text-ink-faint font-medium text-center`}>
-                Duration
-              </div>
-              <div className={`${COL.sprint} text-[11px] tracking-normal text-ink-faint font-medium text-right`}>
-                Sprint
-              </div>
-              <div className={COL.actions} />
+              <div className={COL.dot} />
+              <SortHeader
+                className={COL.title}
+                field="title"
+                label="Name"
+                sort={sort}
+                onSort={onSort}
+              />
+              <SortHeader
+                className={COL.start}
+                field="startDate"
+                label="Start"
+                sort={sort}
+                onSort={onSort}
+                align="end"
+              />
+              <SortHeader
+                className={COL.due}
+                field="dueDate"
+                label="End"
+                sort={sort}
+                onSort={onSort}
+                align="end"
+              />
+              <SortHeader
+                className={COL.status}
+                field="status"
+                label="Status"
+                sort={sort}
+                onSort={onSort}
+              />
             </div>
           )}
 
@@ -576,24 +783,72 @@ function SectionCard({
           )}
 
           <div className="divide-y divide-border">
-            {items.map((t) => (
+            {sortedItems.map((t) => (
               <ItemRow
                 key={t.id}
                 task={t}
-                members={members}
-                assignee={t.assigneeId ? memberById.get(t.assigneeId) ?? null : null}
-                sprints={sprints}
-                currentSprintId={currentSprintId}
+                statusById={statusById}
+                statuses={statuses}
+                drag={dragFor(t)}
+                onDelete={onDeleteItem}
               />
             ))}
-            <AddItemRow
-              collectionId={collectionId}
-              sectionId={section.id}
-            />
+            <AddItemRow collectionId={collectionId} sectionId={section.id} />
           </div>
         </div>
       )}
     </div>
+  )
+}
+
+/**
+ * Clickable column header — same look/cycle as the sprint list's SortHeader, but
+ * over the collection's smaller field set and a nullable sort (off = natural).
+ */
+function SortHeader({
+  className,
+  field,
+  label,
+  sort,
+  onSort,
+  align,
+}: {
+  className: string
+  field: CollSortField
+  label: string
+  sort: CollSort
+  onSort: (f: CollSortField) => void
+  align?: 'start' | 'center' | 'end'
+}) {
+  const isActive = sort?.field === field
+  // Hint the NEXT click in the asc → desc → off cycle.
+  const nextHint = !isActive
+    ? `Sort by ${label}`
+    : sort!.dir === 'asc'
+      ? `Sort by ${label}, descending`
+      : 'Clear sort'
+  return (
+    <button
+      type="button"
+      onClick={() => onSort(field)}
+      className={`${className} group flex items-center gap-1 text-[11px] tracking-normal font-semibold select-none py-0.5 hover:bg-surface-hover rounded transition ${
+        align === 'end'
+          ? 'justify-end'
+          : align === 'center'
+            ? 'justify-center'
+            : ''
+      } ${isActive ? 'text-accent' : 'text-ink-faint hover:text-ink'}`}
+      aria-label={nextHint}
+      title={nextHint}
+    >
+      <span>{label}</span>
+      <span
+        className={`text-[9px] leading-none ${isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-40'}`}
+        aria-hidden
+      >
+        {isActive ? (sort!.dir === 'asc' ? '▲' : '▼') : '▲'}
+      </span>
+    </button>
   )
 }
 
@@ -609,6 +864,11 @@ function SectionName({
   const [draft, setDraft] = useState(section.name)
   const inputRef = useRef<HTMLInputElement>(null)
 
+  // Draft resets in beginEdit (the open trigger); the effect only owns focus.
+  const beginEdit = () => {
+    setDraft(section.name)
+    setEditing(true)
+  }
   useEffect(() => {
     if (editing) {
       requestAnimationFrame(() => {
@@ -616,7 +876,7 @@ function SectionName({
         inputRef.current?.select()
       })
     }
-  }, [editing, section.name])
+  }, [editing])
 
   const commit = async () => {
     const n = draft.trim()
@@ -655,8 +915,7 @@ function SectionName({
       className="group/sname inline-flex items-center gap-1.5 min-w-0 text-[15.5px] font-semibold text-ink tracking-[-0.01em] cursor-text"
       onClick={(e) => {
         e.stopPropagation()
-        setDraft(section.name)
-        setEditing(true)
+        beginEdit()
       }}
       title="Click to rename"
     >
@@ -672,296 +931,91 @@ function SectionName({
 
 function ItemRow({
   task,
-  members,
-  assignee,
-  sprints,
-  currentSprintId,
+  statusById,
+  statuses,
+  drag,
+  onDelete,
 }: {
   task: Task
-  members: Member[]
-  assignee: Member | null
-  sprints: Sprint[]
-  currentSprintId: string | null
+  statusById: Map<string, CollectionStatus>
+  statuses: CollectionStatus[]
+  /** Pointer-drag wiring (undefined → not draggable, e.g. a column sort is on). */
+  drag?: RowDrag
+  onDelete: (t: Task) => void
 }) {
-  // Grip-armed native drag: a drag only starts if it was begun from the grip,
-  // so inline title editing and duration controls are never hijacked.
-  const armedRef = useRef(false)
-  const [dragging, setDragging] = useState(false)
-  const [confirmingDelete, setConfirmingDelete] = useState(false)
+  const status = task.collectionStatusId
+    ? statusById.get(task.collectionStatusId)
+    : undefined
+  const dotColor = status?.color ?? 'var(--color-status-none)'
+
+  // Pointer-based drag (shared with the sprint list). The grip is rendered
+  // absolutely at the row's left edge and only *it* starts a drag, so the title
+  // textarea + date/status controls keep receiving normal clicks. `data-item-id`
+  // is how the owner's elementFromPoint hit-test finds this row.
+  const { grip, indicator, dragging } = useDragHandle(drag)
 
   return (
     <div
-      data-item-row
-      draggable
-      onDragStart={(e) => {
-        if (!armedRef.current) {
-          e.preventDefault()
-          return
-        }
-        e.dataTransfer.effectAllowed = 'move'
-        e.dataTransfer.setData('text/plain', task.id)
-        setDragging(true)
-      }}
-      onDragEnd={() => {
-        armedRef.current = false
-        setDragging(false)
-      }}
+      data-item-id={task.id}
       className={`task-row group/row relative flex items-center gap-3 px-4 py-2 text-sm transition hover:bg-surface-hover ${
         dragging ? 'opacity-40' : ''
       }`}
     >
-      {confirmingDelete && (
-        <div className="absolute inset-y-0 right-0 z-20 flex items-center gap-2 bg-red-50/95 border-l border-red-200 px-3 text-[12.5px] shadow-[-8px_0_18px_rgba(255,255,255,0.92)]">
-          <span className="font-medium text-red-600 whitespace-nowrap">Delete item?</span>
-          <button
-            type="button"
-            onClick={() => void deleteTask(task.id)}
-            className="px-2 py-1 rounded-md bg-red-500 text-white font-semibold hover:bg-red-600 transition"
-          >
-            Delete
-          </button>
-          <button
-            type="button"
-            onClick={() => setConfirmingDelete(false)}
-            className="px-2 py-1 rounded-md text-ink-muted hover:bg-surface-hover hover:text-ink transition"
-          >
-            Cancel
-          </button>
-        </div>
-      )}
-      {/* Lead gutter — hover-revealed grip; arming a drag here keeps the title
-          textarea and date/status controls free to receive normal clicks. */}
-      <div className={`${COL.lead} relative self-stretch`}>
+      {grip}
+      {indicator}
+      <div className={COL.lead} />
+      {/* Status dot at rest ↔ delete at hover, in the same slot — keeps the
+          control "up front" without a trailing cell that would offset the column
+          grid, and clear of the drag grip (which lives in the lead gutter). One
+          click, no confirm: a collection item is lightweight (§ speed > breadth). */}
+      <div className={`${COL.dot} relative`}>
+        <span
+          className="w-3 h-3 rounded-full group-hover/row:opacity-0 transition-opacity"
+          style={{ background: dotColor }}
+          aria-hidden
+        />
         <button
           type="button"
-          aria-label="Drag to another table"
-          onPointerDown={(e) => {
+          aria-label="Delete item"
+          title="Delete item"
+          onClick={(e) => {
             e.stopPropagation()
-            armedRef.current = true
-            const off = () => {
-              armedRef.current = false
-              window.removeEventListener('pointerup', off)
-            }
-            window.addEventListener('pointerup', off)
+            onDelete(task)
           }}
-          onClick={(e) => e.stopPropagation()}
-          className="absolute inset-0 grid place-items-center text-ink-faint/70 hover:text-ink-muted opacity-0 group-hover/row:opacity-100 transition-opacity cursor-grab active:cursor-grabbing touch-none"
+          className="absolute inset-0 grid place-items-center rounded text-ink-faint/70 opacity-0 group-hover/row:opacity-100 hover:text-overdue transition"
         >
-          <GripVertical size={14} />
+          <Trash2 size={13} />
         </button>
       </div>
       <ItemTitle task={task} />
-      <div className={COL.member}>
-        <CollectionMemberPicker task={task} members={members} assignee={assignee} />
-      </div>
-      <div className={COL.duration}>
-        <EffortCell
-          value={task.estimate}
-          onChange={(estimate) => void updateTask(task.id, { estimate })}
+      <div className={COL.start}>
+        <DateRangePickCell
+          which="start"
+          start={task.startDate}
+          end={task.dueDate}
+          onChange={({ start, end }) =>
+            db.tasks.update(task.id, { startDate: start, dueDate: end })
+          }
+          ariaLabel="Start date"
+          emptyHint="Start"
         />
       </div>
-      <div className={COL.sprint}>
-        <AddToSprintMenu
-          task={task}
-          sprints={sprints}
-          currentSprintId={currentSprintId}
+      <div className={COL.due}>
+        <DateRangePickCell
+          which="end"
+          start={task.startDate}
+          end={task.dueDate}
+          onChange={({ start, end }) =>
+            db.tasks.update(task.id, { startDate: start, dueDate: end })
+          }
+          ariaLabel="End date"
+          emptyHint="End"
         />
       </div>
-      <div className={COL.actions}>
-        <button
-          type="button"
-          onClick={() => setConfirmingDelete(true)}
-          title="Delete item"
-          aria-label={`Delete ${task.title}`}
-          className="grid place-items-center w-7 h-7 rounded-md text-ink-faint opacity-0 group-hover/row:opacity-100 hover:text-red-500 hover:bg-red-500/10 transition"
-        >
-          <Trash2 size={14} strokeWidth={2} />
-        </button>
+      <div className={COL.status}>
+        <StatusPill task={task} status={status} statuses={statuses} />
       </div>
     </div>
-  )
-}
-
-function CollectionMemberPicker({
-  task,
-  members,
-  assignee,
-}: {
-  task: Task
-  members: Member[]
-  assignee: Member | null
-}) {
-  const label = assignee?.name ?? 'Unassigned'
-  return (
-    <label
-      className={`relative inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-md px-1 -ml-1 text-[12.5px] font-medium transition hover:bg-surface-hover ${
-        assignee ? 'text-ink-muted' : 'text-ink-faint'
-      }`}
-      title={label}
-    >
-      {assignee && (
-        <span
-          className="w-5 h-5 rounded-full grid place-items-center text-[10px] font-bold text-white shrink-0"
-          style={{ background: assignee.color }}
-          aria-hidden
-        >
-          {assignee.name.slice(0, 1).toUpperCase()}
-        </span>
-      )}
-      <span className="truncate">{label}</span>
-      <select
-        value={task.assigneeId ?? ''}
-        onChange={(e) => void updateTask(task.id, { assigneeId: e.target.value || null })}
-        className="absolute inset-0 opacity-0 cursor-pointer"
-        aria-label={`Assign ${task.title}`}
-      >
-        <option value="">Unassigned</option>
-        {members.map((member) => (
-          <option key={member.id} value={member.id}>
-            {member.name}
-          </option>
-        ))}
-      </select>
-    </label>
-  )
-}
-
-function AddToSprintMenu({
-  task,
-  sprints,
-  currentSprintId,
-}: {
-  task: Task
-  sprints: Sprint[]
-  currentSprintId: string | null
-}) {
-  const [open, setOpen] = useState(false)
-  const [query, setQuery] = useState('')
-  const anchorRef = useRef<HTMLButtonElement>(null)
-  const popRef = useRef<HTMLDivElement>(null)
-  const [pos, setPos] = useState({ top: -9999, left: -9999 })
-  const MENU_W = 260
-
-  const suggestions = useMemo(() => {
-    if (sprints.length === 0) return []
-    const currentIdx = currentSprintId
-      ? sprints.findIndex((s) => s.id === currentSprintId)
-      : -1
-    const startIdx = currentIdx >= 0 ? currentIdx : 0
-    return sprints.slice(startIdx, startIdx + 3)
-  }, [currentSprintId, sprints])
-
-  const visible = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    if (!q) return suggestions
-    return sprints.filter(
-      (s) =>
-        s.name.toLowerCase().includes(q) ||
-        s.startDate.includes(q) ||
-        s.endDate.includes(q)
-    )
-  }, [query, sprints, suggestions])
-
-  useLayoutEffect(() => {
-    if (!open) return
-    const pin = () => {
-      const r = anchorRef.current?.getBoundingClientRect()
-      if (!r) return
-      let left = r.right - MENU_W
-      left = Math.min(left, window.innerWidth - MENU_W - 8)
-      left = Math.max(8, left)
-      const top = Math.min(r.bottom + 6, window.innerHeight - 320)
-      setPos({ top: Math.max(8, top), left })
-    }
-    pin()
-    window.addEventListener('scroll', pin, true)
-    window.addEventListener('resize', pin)
-    return () => {
-      window.removeEventListener('scroll', pin, true)
-      window.removeEventListener('resize', pin)
-    }
-  }, [open])
-
-  useEffect(() => {
-    if (!open) return
-    const onDown = (e: MouseEvent) => {
-      const t = e.target as Node
-      if (popRef.current?.contains(t) || anchorRef.current?.contains(t)) return
-      setOpen(false)
-    }
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false)
-    }
-    document.addEventListener('mousedown', onDown)
-    document.addEventListener('keydown', onKey)
-    return () => {
-      document.removeEventListener('mousedown', onDown)
-      document.removeEventListener('keydown', onKey)
-    }
-  }, [open])
-
-  const move = async (sprint: Sprint) => {
-    setOpen(false)
-    setQuery('')
-    await moveTaskToSprint(task.id, sprint.id)
-  }
-
-  return (
-    <>
-      <button
-        ref={anchorRef}
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        disabled={sprints.length === 0}
-        className="inline-flex items-center gap-1.5 rounded-[7px] border border-border bg-surface px-2.5 py-1 text-[12px] font-semibold text-ink-muted hover:text-accent hover:border-accent/40 disabled:opacity-40 disabled:hover:text-ink-muted disabled:hover:border-border transition"
-      >
-        <CalendarPlus size={13} />
-        Add
-      </button>
-      {open &&
-        createPortal(
-          <div
-            ref={popRef}
-            style={{ position: 'fixed', top: pos.top, left: pos.left, width: MENU_W }}
-            className={`z-50 bg-surface rounded-[12px] p-2 ${FLOAT_SHADOW}`}
-          >
-            <label className="flex items-center gap-2 rounded-[8px] border border-border bg-canvas-sunk/40 px-2.5 py-1.5">
-              <Search size={14} className="text-ink-faint shrink-0" aria-hidden />
-              <input
-                autoFocus
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search sprint"
-                className="min-w-0 flex-1 bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-faint"
-              />
-            </label>
-            <div className="mt-2 max-h-[230px] overflow-y-auto py-1">
-              {visible.length === 0 ? (
-                <div className="px-2.5 py-3 text-[13px] text-ink-faint">
-                  No matching sprint
-                </div>
-              ) : (
-                visible.map((sprint) => (
-                  <button
-                    key={sprint.id}
-                    type="button"
-                    onClick={() => void move(sprint)}
-                    className="w-full rounded-[8px] px-2.5 py-2 text-left hover:bg-surface-hover transition"
-                  >
-                    <span className="block text-[13px] font-semibold text-ink truncate">
-                      {sprint.name}
-                    </span>
-                    <span className="block text-[11.5px] text-ink-faint tabular-nums">
-                      {sprint.startDate} → {sprint.endDate}
-                    </span>
-                  </button>
-                ))
-              )}
-            </div>
-          </div>,
-          document.body
-        )}
-    </>
   )
 }
 
@@ -973,21 +1027,39 @@ function AddToSprintMenu({
  */
 function ItemTitle({ task }: { task: Task }) {
   const ref = useRef<HTMLTextAreaElement>(null)
+  // Draft-while-focused: binding value={task.title} straight to the liveQuery
+  // row makes every keystroke round-trip through Dexie's ASYNC echo — a slow
+  // echo re-renders the textarea to an older value mid-burst (dropped chars,
+  // caret jump). The row stays the source of truth whenever not editing.
+  const [draft, setDraft] = useState(task.title)
+  const focusedRef = useRef(false)
+  useEffect(() => {
+    if (!focusedRef.current) setDraft(task.title)
+  }, [task.title])
   const resize = () => {
     const el = ref.current
     if (!el) return
     el.style.height = 'auto'
     el.style.height = el.scrollHeight + 'px'
   }
-  useLayoutEffect(resize, [task.title])
+  useLayoutEffect(resize, [draft])
 
   return (
     <div className={`${COL.title} flex items-start`}>
       <textarea
         ref={ref}
-        value={task.title}
+        value={draft}
         rows={1}
-        onChange={(e) => void db.tasks.update(task.id, { title: e.target.value })}
+        onFocus={() => {
+          focusedRef.current = true
+        }}
+        onBlur={() => {
+          focusedRef.current = false
+        }}
+        onChange={(e) => {
+          setDraft(e.target.value)
+          void db.tasks.update(task.id, { title: e.target.value })
+        }}
         onKeyDown={(e) => {
           if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault()
@@ -1018,7 +1090,8 @@ function AddItemRow({
   }
   return (
     <div className="flex items-center gap-3 px-4 py-2 text-sm">
-      <div className={COL.lead}>
+      <div className={COL.lead} />
+      <div className={COL.dot}>
         <Plus size={14} className="text-ink-faint" />
       </div>
       <input
@@ -1029,11 +1102,124 @@ function AddItemRow({
         className={`${COL.title} editable placeholder:text-ink-faint bg-transparent`}
         aria-label="Add item"
       />
-      <div className={COL.member} />
-      <div className={COL.duration} />
-      <div className={COL.sprint} />
-      <div className={COL.actions} />
+      <div className={COL.start} />
+      <div className={COL.due} />
+      <div className={COL.status} />
     </div>
+  )
+}
+
+/** Click-to-assign status pill. */
+function StatusPill({
+  task,
+  status,
+  statuses,
+}: {
+  task: Task
+  status?: CollectionStatus
+  statuses: CollectionStatus[]
+}) {
+  const [open, setOpen] = useState(false)
+  const anchorRef = useRef<HTMLButtonElement>(null)
+  const popRef = useRef<HTMLDivElement>(null)
+  const MENU_W = 160
+
+  // Pin a fixed-position menu to the pill — portalled to <body> so the card's
+  // `overflow-hidden` (rounded corners) can't clip it. Mirrors DatePicker.
+  const pos = usePinnedPopover({
+    open,
+    onClose: () => setOpen(false),
+    anchorRef,
+    popRef,
+    place: () => {
+      const r = anchorRef.current?.getBoundingClientRect()
+      if (!r) return null
+      let left = Math.min(r.left, window.innerWidth - 8 - MENU_W)
+      left = Math.max(8, left)
+      const menuH = (statuses.length + 1) * 34 + 16
+      let top = r.bottom + 4
+      if (top + menuH > window.innerHeight - 8)
+        top = Math.max(8, r.top - menuH - 4)
+      return { top, left }
+    },
+  }) ?? { top: -9999, left: -9999 }
+
+  const assign = async (id: string | null) => {
+    setOpen(false)
+    await db.tasks.update(task.id, { collectionStatusId: id })
+  }
+
+  return (
+    <>
+      <button
+        ref={anchorRef}
+        onClick={() => setOpen((p) => !p)}
+        className="cursor-pointer hover:opacity-80 transition"
+        aria-label="Assign status"
+      >
+        {status ? (
+          <span
+            className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11.5px] font-semibold leading-none w-fit"
+            style={{
+              background: `color-mix(in srgb, ${status.color} 16%, transparent)`,
+              color: `color-mix(in srgb, ${status.color} 78%, var(--color-ink))`,
+            }}
+          >
+            <span
+              className="w-1.5 h-1.5 rounded-full"
+              style={{ background: status.color }}
+              aria-hidden
+            />
+            {status.name}
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1 rounded-full border border-dashed border-border px-2.5 py-1 text-[11.5px] font-medium leading-none text-ink-faint hover:border-accent hover:text-accent transition">
+            ＋ Status
+          </span>
+        )}
+      </button>
+      {open &&
+        createPortal(
+          <div
+            ref={popRef}
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              position: 'fixed',
+              top: pos.top,
+              left: pos.left,
+              width: MENU_W,
+            }}
+            className={`z-50 bg-surface rounded-[10px] py-1 ${FLOAT_SHADOW}`}
+          >
+            {statuses.map((s) => (
+              <button
+                key={s.id}
+                onClick={() => void assign(s.id)}
+                className="w-full flex items-center gap-2 px-3 py-1.5 text-[13px] text-ink hover:bg-surface-hover transition"
+              >
+                <span
+                  className="w-2.5 h-2.5 rounded-full shrink-0"
+                  style={{ background: s.color }}
+                  aria-hidden
+                />
+                {s.name}
+              </button>
+            ))}
+            <div className="border-t border-border-hair my-1" />
+            <button
+              onClick={() => void assign(null)}
+              className="w-full flex items-center gap-2 px-3 py-1.5 text-[13px] text-ink-muted hover:bg-surface-hover transition"
+            >
+              <span
+                className="w-2.5 h-2.5 rounded-full border border-border shrink-0"
+                aria-hidden
+              />
+              No status
+            </button>
+          </div>,
+          document.body
+        )}
+    </>
   )
 }
 
@@ -1043,10 +1229,18 @@ export function StatusEditor({ collection }: { collection: Collection }) {
   const [paletteFor, setPaletteFor] = useState<string | null>(null)
   const [confirmId, setConfirmId] = useState<string | null>(null)
   const ref = useRef<HTMLDivElement>(null)
-  useOutsideClose(ref, open, () => {
-    setOpen(false)
-    setPaletteFor(null)
-    setConfirmId(null)
+  // Outside-close only (ref wraps trigger + menu; absolute-positioned so it
+  // scrolls with the header — no pin). Escape deliberately doesn't close: the
+  // inline rename/palette strips inside own their Escape.
+  usePinnedPopover({
+    open,
+    onClose: () => {
+      setOpen(false)
+      setPaletteFor(null)
+      setConfirmId(null)
+    },
+    popRef: ref,
+    onEscape: null,
   })
 
   return (
@@ -1072,8 +1266,8 @@ export function StatusEditor({ collection }: { collection: Collection }) {
         <div
           className={`absolute right-0 top-full mt-1.5 z-40 bg-surface rounded-[12px] w-[260px] py-2 ${FLOAT_SHADOW}`}
         >
-          <div className="px-4 pb-1.5 pt-0.5 text-[11px] font-semibold text-ink-faint tracking-wider">
-            STATUSES
+          <div className="px-4 pb-1.5 pt-0.5 text-[11px] font-semibold text-ink-faint">
+            Statuses
           </div>
 
           {collection.statuses.map((s) =>
@@ -1081,7 +1275,7 @@ export function StatusEditor({ collection }: { collection: Collection }) {
               <div
                 key={s.id}
                 data-status-row
-                className="flex items-center gap-2 px-3 py-1.5 bg-red-500/[0.06] text-[13px]"
+                className="flex items-center gap-2 px-3 py-1.5 bg-overdue/[0.06] text-[13px]"
               >
                 <span className="flex-1 min-w-0 truncate text-ink">
                   Delete “{s.name}”?
@@ -1091,7 +1285,7 @@ export function StatusEditor({ collection }: { collection: Collection }) {
                     await deleteStatus(collection.id, s.id)
                     setConfirmId(null)
                   }}
-                  className="text-red-500 font-semibold shrink-0"
+                  className="text-overdue font-semibold shrink-0"
                 >
                   Delete
                 </button>
@@ -1161,7 +1355,7 @@ export function StatusEditor({ collection }: { collection: Collection }) {
                   setPaletteFor(null)
                   setConfirmId(s.id)
                 }}
-                className="opacity-0 group-hover:opacity-60 hover:!opacity-100 text-ink-faint hover:text-red-500 transition p-0.5 rounded"
+                className="opacity-0 group-hover:opacity-60 hover:!opacity-100 text-ink-faint hover:text-overdue transition p-0.5 rounded"
                 aria-label={`Delete ${s.name}`}
               >
                 <X size={13} />

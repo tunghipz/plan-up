@@ -8,7 +8,53 @@ import {
   formatShortDate,
   formatSprintRange,
   firstGrapheme,
+  flattenDisplayOrder,
 } from './lib'
+import type { Task } from './db'
+
+// Build a minimal Task for ordering tests — only id/parentId matter here.
+const mkTask = (id: string, parentId?: string): Task =>
+  ({ id, parentId: parentId ?? null }) as Task
+
+// flattenDisplayOrder turns the on-screen member lanes (each already sorted in
+// display order, group children nested under their head) into one flat
+// top-to-bottom list, so "Chain prereqs" links tasks in the order the user
+// actually sees. See design-docs/dependencies.md (Bulk actions).
+describe('flattenDisplayOrder', () => {
+  it('preserves each card sorted order (no groups)', () => {
+    const card = [mkTask('a'), mkTask('b'), mkTask('c')]
+    expect(flattenDisplayOrder([card]).map((t) => t.id)).toEqual(['a', 'b', 'c'])
+  })
+
+  it('nests group children under their head in card order', () => {
+    // Card order is [head, sibling, child-of-head]; the child renders under its
+    // head, so the flat order is head, child, sibling.
+    const card = [mkTask('head'), mkTask('sib'), mkTask('kid', 'head')]
+    expect(flattenDisplayOrder([card]).map((t) => t.id)).toEqual([
+      'head',
+      'kid',
+      'sib',
+    ])
+  })
+
+  it('concatenates lanes top-to-bottom, unassigned last', () => {
+    const lane1 = [mkTask('a1'), mkTask('a2')]
+    const lane2 = [mkTask('b1')]
+    const unassigned = [mkTask('u1')]
+    expect(
+      flattenDisplayOrder([lane1, lane2, unassigned]).map((t) => t.id)
+    ).toEqual(['a1', 'a2', 'b1', 'u1'])
+  })
+
+  it('treats a child whose parent is in another card as top-level', () => {
+    const lane1 = [mkTask('head')]
+    const lane2 = [mkTask('orphanKid', 'head')]
+    expect(flattenDisplayOrder([lane1, lane2]).map((t) => t.id)).toEqual([
+      'head',
+      'orphanKid',
+    ])
+  })
+})
 
 // firstGrapheme returns the first user-perceived character, so a member's emoji
 // avatar keeps ZWJ sequences / flags / skin-tone modifiers intact instead of

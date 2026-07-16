@@ -1,7 +1,7 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { Users, MoreHorizontal, AlertTriangle, CalendarOff } from 'lucide-react'
+import { Users, MoreHorizontal, AlertTriangle, CalendarOff, Plus, Moon, Sun } from 'lucide-react'
 import {
   db,
   colorForName,
@@ -12,13 +12,27 @@ import {
   type Task,
   type Person,
 } from './db'
-import { Avatar, ColorSwatchRow } from './members'
-import { useConfirm } from './ConfirmDialog'
-import { latestActiveSprint, formatSprintRange, formatShortDate, todayLocalISO } from './lib'
+import { Avatar, ColorSwatchRow, ProjectTile } from './members'
+import { useConfirm } from './confirm-context'
+import { usePinnedPopover } from './usePinnedPopover'
+import {
+  latestActiveSprint,
+  formatSprintRange,
+  formatShortDate,
+  todayLocalISO,
+  firstGrapheme,
+} from './lib'
 import { personLoad, personProjectCount, nextDayOff, taskOverdue } from './people'
 
 // Read-first portfolio overview: every project's active-sprint status + a
 // cross-project People roster. See design-docs/home-dashboard.md.
+
+// Loading-state fallbacks for the live queries — module-level so their identity
+// never changes (a fresh `[]` per render would defeat the memos below).
+const EMPTY_SPRINTS: never[] = []
+const EMPTY_TASKS: never[] = []
+const EMPTY_MEMBERS: never[] = []
+const EMPTY_PEOPLE: never[] = []
 
 interface RosterEntry {
   person: Person
@@ -31,71 +45,92 @@ interface RosterEntry {
 export function HomeDashboard({
   projects,
   onOpenProject,
+  onNewProject,
+  dark,
+  onToggleDark,
 }: {
   projects: Project[]
   onOpenProject: (id: string) => void
+  // The old icon rail (New project / dark toggle) is gone; on Home there's no
+  // sidebar/switcher, so these controls live in this header. See
+  // design-docs/app-shell-and-navigation.md.
+  onNewProject: () => void
+  dark: boolean
+  onToggleDark: () => void
 }) {
-  const sprints = useLiveQuery(() => db.sprints.toArray(), []) ?? []
-  const tasks = useLiveQuery(() => db.tasks.toArray(), []) ?? []
-  const members = useLiveQuery(() => db.members.toArray(), []) ?? []
-  const people = useLiveQuery(() => db.people.toArray(), []) ?? []
+  // Stable `?? EMPTY` fallbacks (not fresh `[]`) so the memos below don't see a
+  // new array identity on every render while the live queries are still loading.
+  const sprints = useLiveQuery(() => db.sprints.toArray(), []) ?? EMPTY_SPRINTS
+  const tasks = useLiveQuery(() => db.tasks.toArray(), []) ?? EMPTY_TASKS
+  const members = useLiveQuery(() => db.members.toArray(), []) ?? EMPTY_MEMBERS
+  const people = useLiveQuery(() => db.people.toArray(), []) ?? EMPTY_PEOPLE
   const today = todayLocalISO()
 
-  // A task is a leaf unless some other task names it as parent (parents are
-  // excluded from progress/overdue so a group isn't double-counted).
-  const parentIds = new Set<string>()
-  for (const t of tasks) if (t.parentId) parentIds.add(t.parentId)
-  const isLeaf = (t: Task) => !parentIds.has(t.id)
+  const projectsById = useMemo(
+    () => new Map(projects.map((p) => [p.id, p])),
+    [projects]
+  )
 
-  const projColor = (pid: string) => {
-    const pr = projects.find((x) => x.id === pid)
-    return pr ? pr.color ?? colorForName(pr.name) : 'var(--color-status-todo)'
-  }
+  // Both scans below are O(projects × tasks) and the dashboard re-renders on
+  // every live-query tick, so they're memoized on the tables they read.
+  const cards = useMemo(() => {
+    // A task is a leaf unless some other task names it as parent (parents are
+    // excluded from progress/overdue so a group isn't double-counted).
+    const parentIds = new Set<string>()
+    for (const t of tasks) if (t.parentId) parentIds.add(t.parentId)
+    const isLeaf = (t: Task) => !parentIds.has(t.id)
 
-  const cards = projects.map((p) => {
-    const pSprints = sprints
-      .filter((s) => s.projectId === p.id)
-      .sort((a, b) => (a.startDate < b.startDate ? -1 : a.startDate > b.startDate ? 1 : 0))
-    const active = latestActiveSprint(pSprints)
-    let total = 0
-    let done = 0
-    if (active) {
-      for (const t of tasks) {
-        if (t.sprintId === active.id && isLeaf(t)) {
-          total++
-          if (t.status === 'done') done++
+    return projects.map((p) => {
+      const pSprints = sprints
+        .filter((s) => s.projectId === p.id)
+        .sort((a, b) => (a.startDate < b.startDate ? -1 : a.startDate > b.startDate ? 1 : 0))
+      const active = latestActiveSprint(pSprints)
+      let total = 0
+      let done = 0
+      if (active) {
+        for (const t of tasks) {
+          if (t.sprintId === active.id && isLeaf(t)) {
+            total++
+            if (t.status === 'done') done++
+          }
         }
       }
-    }
-    const pct = total ? Math.round((done / total) * 100) : 0
-    const overdue = tasks.filter(
-      (t) => t.projectId === p.id && isLeaf(t) && taskOverdue(t, today)
-    ).length
-    const pMembers = members
-      .filter((m) => m.projectId === p.id)
-      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
-    return { p, active, total, pct, remaining: total - done, overdue, pMembers }
-  })
-
-  const roster: RosterEntry[] = people
-    .map((person) => ({ person, pm: members.filter((m) => m.personId === person.id) }))
-    .filter((r) => r.pm.length > 0) // zero-member people are kept in db but hidden
-    .map(({ person, pm }) => {
-      const memberIds = new Set(pm.map((m) => m.id))
-      return {
-        person,
-        load: personLoad(memberIds, tasks),
-        projectCount: personProjectCount(pm),
-        off: nextDayOff(pm, today),
-        projColors: [...new Set(pm.map((m) => m.projectId))].map(projColor),
-      }
+      const pct = total ? Math.round((done / total) * 100) : 0
+      const overdue = tasks.filter(
+        (t) => t.projectId === p.id && isLeaf(t) && taskOverdue(t, today)
+      ).length
+      const pMembers = members
+        .filter((m) => m.projectId === p.id)
+        .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+      return { p, active, total, pct, remaining: total - done, overdue, pMembers }
     })
-    .sort(
-      (a, b) =>
-        b.load.taskCount - a.load.taskCount ||
-        b.load.effort - a.load.effort ||
-        a.person.name.localeCompare(b.person.name)
-    )
+  }, [projects, sprints, tasks, members, today])
+
+  const roster: RosterEntry[] = useMemo(() => {
+    const projColor = (pid: string) => {
+      const pr = projectsById.get(pid)
+      return pr ? pr.color ?? colorForName(pr.name) : 'var(--color-status-todo)'
+    }
+    return people
+      .map((person) => ({ person, pm: members.filter((m) => m.personId === person.id) }))
+      .filter((r) => r.pm.length > 0) // zero-member people are kept in db but hidden
+      .map(({ person, pm }) => {
+        const memberIds = new Set(pm.map((m) => m.id))
+        return {
+          person,
+          load: personLoad(memberIds, tasks),
+          projectCount: personProjectCount(pm),
+          off: nextDayOff(pm, today),
+          projColors: [...new Set(pm.map((m) => m.projectId))].map(projColor),
+        }
+      })
+      .sort(
+        (a, b) =>
+          b.load.taskCount - a.load.taskCount ||
+          b.load.effort - a.load.effort ||
+          a.person.name.localeCompare(b.person.name)
+      )
+  }, [people, members, tasks, projectsById, today])
 
   if (projects.length === 0) {
     return (
@@ -114,11 +149,30 @@ export function HomeDashboard({
   return (
     <div className="flex-1 min-w-0 overflow-auto bg-canvas">
       <div className="px-7 pt-6 pb-12 max-w-[1400px]">
-        <header className="mb-5">
-          <h1 className="text-[26px] font-bold text-ink tracking-[-0.022em]">Overview</h1>
-          <div className="text-[13px] text-ink-muted mt-0.5 tabular-nums">
-            {projects.length} {projects.length === 1 ? 'project' : 'projects'} ·{' '}
-            {roster.length} {roster.length === 1 ? 'person' : 'people'}
+        <header className="mb-5 flex items-start gap-3">
+          <div className="flex-1 min-w-0">
+            <h1 className="text-[26px] font-bold text-ink tracking-[-0.022em]">Overview</h1>
+            <div className="text-[13px] text-ink-muted mt-0.5 tabular-nums">
+              {projects.length} {projects.length === 1 ? 'project' : 'projects'} ·{' '}
+              {roster.length} {roster.length === 1 ? 'person' : 'people'}
+            </div>
+          </div>
+          <div className="shrink-0 flex items-center gap-2">
+            <button
+              onClick={onNewProject}
+              className="inline-flex items-center gap-1.5 rounded-full brand-btn text-white text-[13px] font-semibold px-3.5 py-2 transition-colors"
+            >
+              <Plus size={16} strokeWidth={2} />
+              New project
+            </button>
+            <button
+              onClick={onToggleDark}
+              title={dark ? 'Switch to light' : 'Switch to dark'}
+              aria-label={dark ? 'Switch to light mode' : 'Switch to dark mode'}
+              className="w-9 h-9 grid place-items-center rounded-full bg-surface text-ink-faint hover:text-ink shadow-[0_1px_3px_rgba(0,0,0,0.12),0_0_0_0.5px_rgba(0,0,0,0.04)] transition"
+            >
+              {dark ? <Sun size={16} /> : <Moon size={16} />}
+            </button>
           </div>
         </header>
 
@@ -126,23 +180,14 @@ export function HomeDashboard({
           {/* Projects grid — the hero */}
           <section className="grid gap-3.5 [grid-template-columns:repeat(auto-fill,minmax(248px,1fr))]">
             {cards.map(({ p, active, total, pct, remaining, overdue, pMembers }) => {
-              const isEmoji = !!p.icon
-              const label = p.icon || p.name.trim().charAt(0).toUpperCase() || '·'
               return (
                 <button
                   key={p.id}
                   onClick={() => onOpenProject(p.id)}
-                  className="group text-left bg-surface rounded-[14px] p-4 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_22px_rgba(0,0,0,0.05)] transition hover:-translate-y-0.5 hover:shadow-[0_2px_4px_rgba(0,0,0,0.06),0_14px_32px_rgba(0,0,0,0.09)] focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                  className="group text-left glass-card rounded-[18px] p-4 transition hover:-translate-y-0.5 motion-reduce:transform-none focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
                 >
                   <div className="flex items-center gap-2.5 mb-3">
-                    <span
-                      className={`shrink-0 w-[30px] h-[30px] rounded-[8px] flex items-center justify-center text-white font-semibold ${
-                        isEmoji ? 'text-[16px]' : 'text-[14px]'
-                      }`}
-                      style={{ background: p.color ?? colorForName(p.name) }}
-                    >
-                      {label}
-                    </span>
+                    <ProjectTile project={p} size={30} />
                     <span className="flex-1 min-w-0 text-[15.5px] font-semibold tracking-[-0.01em] text-ink truncate">
                       {p.name}
                     </span>
@@ -205,7 +250,7 @@ export function HomeDashboard({
           </section>
 
           {/* People roster — the support panel (right rail; stacks below < lg) */}
-          <aside className="bg-surface rounded-[14px] shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_22px_rgba(0,0,0,0.05)] overflow-hidden">
+          <aside className="glass-card rounded-[18px] overflow-hidden">
             <div className="flex items-center justify-between px-4 py-3 border-b border-border">
               <h2 className="flex items-center gap-2 text-[15.5px] font-semibold tracking-[-0.01em] text-ink">
                 <Users size={16} className="text-ink-faint" />
@@ -240,13 +285,14 @@ function PersonRow({ entry, allPeople }: { entry: RosterEntry; allPeople: Person
   // The People panel has `overflow-hidden` (rounded corners), so an absolutely
   // positioned popover inside it gets CLIPPED. Portal it to <body> and pin it to
   // the trigger's screen rect — same idiom as MemberDaysOffButton/CalendarPopover.
-  const [pos, setPos] = useState<{ top: number; left: number }>({ top: -9999, left: -9999 })
-
-  useEffect(() => {
-    if (!menu) return
-    const pin = () => {
+  const pos = usePinnedPopover({
+    open: menu,
+    onClose: () => setMenu(false),
+    anchorRef: btnRef,
+    popRef,
+    place: () => {
       const r = btnRef.current?.getBoundingClientRect()
-      if (!r) return
+      if (!r) return null
       // Right-align to the trigger, clamped into the viewport.
       let left = Math.min(r.right - MENU_W, window.innerWidth - 8 - MENU_W)
       left = Math.max(8, left)
@@ -254,32 +300,9 @@ function PersonRow({ entry, allPeople }: { entry: RosterEntry; allPeople: Person
       const h = popRef.current?.offsetHeight ?? 280
       let top = r.bottom + 6
       if (top + h > window.innerHeight - 8) top = Math.max(8, r.top - 6 - h)
-      setPos({ top, left })
-    }
-    pin()
-    const onDown = (e: MouseEvent) => {
-      const t = e.target as Node
-      if (
-        popRef.current && !popRef.current.contains(t) &&
-        btnRef.current && !btnRef.current.contains(t)
-      ) {
-        setMenu(false)
-      }
-    }
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setMenu(false)
-    }
-    window.addEventListener('scroll', pin, true)
-    window.addEventListener('resize', pin)
-    document.addEventListener('mousedown', onDown)
-    document.addEventListener('keydown', onKey)
-    return () => {
-      window.removeEventListener('scroll', pin, true)
-      window.removeEventListener('resize', pin)
-      document.removeEventListener('mousedown', onDown)
-      document.removeEventListener('keydown', onKey)
-    }
-  }, [menu])
+      return { top, left }
+    },
+  }) ?? { top: -9999, left: -9999 }
 
   return (
     <div className="group/row flex items-center gap-3 px-4 py-3 border-b border-border-hair last:border-b-0">
@@ -287,7 +310,7 @@ function PersonRow({ entry, allPeople }: { entry: RosterEntry; allPeople: Person
         className="shrink-0 w-[34px] h-[34px] rounded-full inline-flex items-center justify-center text-white text-[14px] font-semibold select-none"
         style={{ background: person.color || colorForName(person.name) }}
       >
-        {person.name.trim().charAt(0).toUpperCase() || '·'}
+        {firstGrapheme(person.name).toUpperCase() || '·'}
       </span>
       <div className="flex-1 min-w-0">
         <div className="text-[14px] font-medium text-ink truncate">{person.name}</div>
@@ -341,7 +364,7 @@ function PersonRow({ entry, allPeople }: { entry: RosterEntry; allPeople: Person
           <div
             ref={popRef}
             style={{ position: 'fixed', top: pos.top, left: pos.left, width: MENU_W }}
-            className="z-50 bg-surface rounded-[12px] border border-border-hair shadow-[0_12px_40px_rgba(0,0,0,0.18)] p-3"
+            className="z-50 glass-popover rounded-[12px] p-3"
           >
             <label className="block text-[11px] font-semibold text-ink-faint mb-1">Name</label>
             <input
@@ -388,7 +411,7 @@ function PersonRow({ entry, allPeople }: { entry: RosterEntry; allPeople: Person
                         className="shrink-0 w-5 h-5 rounded-full inline-flex items-center justify-center text-white text-[10px] font-semibold"
                         style={{ background: o.color || colorForName(o.name) }}
                       >
-                        {o.name.trim().charAt(0).toUpperCase() || '·'}
+                        {firstGrapheme(o.name).toUpperCase() || '·'}
                       </span>
                       <span className="text-[13px] text-ink truncate">{o.name}</span>
                     </button>

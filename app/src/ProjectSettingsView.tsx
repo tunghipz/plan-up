@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { X, Trash2, UserPlus, Share2 } from 'lucide-react'
+import { X, Trash2, UserPlus, Upload } from 'lucide-react'
 import {
   db,
   colorForName,
@@ -8,20 +8,20 @@ import {
   deleteProject,
   updateProject,
   deleteMember,
-  exportProject,
   memberNameExists,
+  resizeImageToDataURL,
   type Project,
   type Member,
 } from './db'
-import { downloadJson, slugify } from './lib'
 import {
   AvatarPicker,
   ColorSwatchRow,
   EmojiPickerRow,
   MemberColorDot,
   MemberDaysOffButton,
+  ProjectTile,
 } from './members'
-import { useConfirm } from './ConfirmDialog'
+import { useConfirm } from './confirm-context'
 
 /**
  * Settings for the current project: edit the project's own info (name /
@@ -30,6 +30,63 @@ import { useConfirm } from './ConfirmDialog'
  * + slide); this component is just the header + scrollable body, sized for a
  * narrow single column. See design-docs/project-member-settings.md.
  */
+/**
+ * Photo option for the project icon (project-icon-emoji.md §photo upload):
+ * current tile preview + "Upload photo…" (same 128px client-side pipeline as
+ * member avatars) + "Remove photo" once an image is set. The photo lives in
+ * the SAME `Project.icon` field — a `data:` prefix marks it as an image; the
+ * emoji grid below stays usable and simply replaces it (last pick wins).
+ */
+function ProjectPhotoRow({ project }: { project: Project }) {
+  const fileRef = useRef<HTMLInputElement>(null)
+  const [error, setError] = useState<string | null>(null)
+  const isImage = !!project.icon?.startsWith('data:')
+
+  const onFile = async (f: File | undefined) => {
+    if (!f) return
+    setError(null)
+    try {
+      const data = await resizeImageToDataURL(f, 128)
+      await updateProject(project.id, { icon: data })
+    } catch {
+      setError('Could not read that image — try a JPG or PNG.')
+    }
+  }
+
+  return (
+    <div className="mt-1.5 flex items-center gap-2.5">
+      <ProjectTile project={project} size={30} />
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(e) => {
+          void onFile(e.target.files?.[0])
+          e.target.value = ''
+        }}
+      />
+      <button
+        type="button"
+        onClick={() => fileRef.current?.click()}
+        className="inline-flex items-center gap-1.5 text-[13px] font-medium text-accent hover:bg-accent-soft rounded-[8px] px-2.5 py-1.5 transition"
+      >
+        <Upload size={13} /> Upload photo…
+      </button>
+      {isImage && (
+        <button
+          type="button"
+          onClick={() => void updateProject(project.id, { icon: undefined })}
+          className="text-[13px] text-ink-muted hover:text-ink hover:bg-surface-hover rounded-[8px] px-2.5 py-1.5 transition"
+        >
+          Remove photo
+        </button>
+      )}
+      {error && <span className="text-[12px] text-overdue">{error}</span>}
+    </div>
+  )
+}
+
 export function ProjectSettingsView({
   project,
   onClose,
@@ -50,6 +107,7 @@ export function ProjectSettingsView({
   // truth — depending on project.name/description here would let one field's
   // commit (which updates the live row) wipe the other field's in-progress draft.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- re-sync drafts only when SWITCHING project (see comment above)
     setName(project.name)
     setDesc(project.description ?? '')
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -69,16 +127,6 @@ export function ProjectSettingsView({
     const d = desc.trim()
     if (d === (project.description ?? '')) return
     void updateProject(project.id, { description: d })
-  }
-
-  // Export this project to a portable file (additive on import — see the header
-  // Import button). Mirrors the header menu's "Export this project".
-  const exportThisProject = async () => {
-    const bundle = await exportProject(project.id)
-    downloadJson(
-      `plan-up-${slugify(project.name)}-${bundle.exportedAt.slice(0, 10)}.json`,
-      bundle
-    )
   }
 
   const removeProject = async () => {
@@ -113,7 +161,7 @@ export function ProjectSettingsView({
       <div className="flex-1 overflow-auto bg-canvas px-5 py-5">
         <div className="space-y-4">
           {/* Project card */}
-          <section className="bg-surface rounded-[14px] p-5 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_6px_16px_rgba(0,0,0,0.04)] space-y-4">
+          <section className="glass-card rounded-[18px] p-5 space-y-4">
             <h2 className="text-[12px] font-semibold text-ink-faint uppercase tracking-wide">
               Project
             </h2>
@@ -128,6 +176,9 @@ export function ProjectSettingsView({
                     e.preventDefault()
                     ;(e.target as HTMLInputElement).blur()
                   } else if (e.key === 'Escape') {
+                    // Esc here reverts the edit only — don't let the global
+                    // handler also slam the drawer shut on the same keypress.
+                    e.stopPropagation()
                     setName(project.name)
                     ;(e.target as HTMLInputElement).blur()
                   }
@@ -150,7 +201,8 @@ export function ProjectSettingsView({
             </label>
             <div>
               <span className="text-xs text-ink-muted">Icon</span>
-              <div className="mt-1.5">
+              <ProjectPhotoRow project={project} />
+              <div className="mt-2">
                 <EmojiPickerRow
                   value={project.icon}
                   onPick={(icon) => void updateProject(project.id, { icon })}
@@ -166,30 +218,10 @@ export function ProjectSettingsView({
                 />
               </div>
             </div>
-            {/* Share = export this one project to a portable file (additive on
-                import). Footer action of the Project card. */}
-            <div className="-mx-5 border-t border-border-hair" />
-            <div className="flex items-center gap-4">
-              <div className="min-w-0 flex-1">
-                <div className="text-sm font-medium text-ink">
-                  Share this project
-                </div>
-                <div className="text-[12.5px] text-ink-muted mt-0.5">
-                  Export a file a teammate can import — adds a new project, never
-                  overwrites their data.
-                </div>
-              </div>
-              <button
-                onClick={exportThisProject}
-                className="shrink-0 inline-flex items-center gap-1.5 text-sm font-medium text-accent hover:bg-accent-soft rounded-[8px] px-3 py-1.5 transition"
-              >
-                <Share2 size={14} /> Export
-              </button>
-            </div>
           </section>
 
           {/* Members card */}
-          <section className="bg-surface rounded-[14px] p-5 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_6px_16px_rgba(0,0,0,0.04)]">
+          <section className="glass-card rounded-[18px] p-5">
             <h2 className="text-[12px] font-semibold text-ink-faint uppercase tracking-wide mb-2">
               Members{' '}
               <span className="text-ink-faint/70 normal-case font-normal">
@@ -210,8 +242,8 @@ export function ProjectSettingsView({
           </section>
 
           {/* Danger zone */}
-          <section className="rounded-[14px] p-5 border border-red-500/25 bg-red-500/[0.03]">
-            <h2 className="text-[12px] font-semibold uppercase tracking-wide text-red-500/90">
+          <section className="rounded-[14px] p-5 border border-overdue/25 bg-overdue/[0.03]">
+            <h2 className="text-[12px] font-semibold uppercase tracking-wide text-overdue/90">
               Danger zone
             </h2>
             <div className="flex items-center justify-between gap-4 mt-2">
@@ -221,7 +253,7 @@ export function ProjectSettingsView({
               </p>
               <button
                 onClick={removeProject}
-                className="shrink-0 inline-flex items-center gap-1.5 text-sm font-medium text-red-600 dark:text-red-400 border border-red-500/40 hover:bg-red-500/10 rounded-[8px] px-3 py-1.5 transition"
+                className="shrink-0 inline-flex items-center gap-1.5 text-sm font-medium text-overdue border border-overdue/40 hover:bg-overdue/10 rounded-[8px] px-3 py-1.5 transition"
               >
                 <Trash2 size={14} /> Delete project
               </button>
@@ -237,9 +269,11 @@ export function ProjectSettingsView({
 function MemberRow({ member }: { member: Member }) {
   const confirm = useConfirm()
   const [name, setName] = useState(member.name)
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- draft mirrors the live row between edits
   useEffect(() => setName(member.name), [member.id, member.name])
 
   const [title, setTitle] = useState(member.title ?? '')
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- draft mirrors the live row between edits
   useEffect(() => setTitle(member.title ?? ''), [member.id, member.title])
 
   const commit = async () => {
@@ -288,6 +322,7 @@ function MemberRow({ member }: { member: Member }) {
               e.preventDefault()
               ;(e.target as HTMLInputElement).blur()
             } else if (e.key === 'Escape') {
+              e.stopPropagation()
               setName(member.name)
               ;(e.target as HTMLInputElement).blur()
             }
@@ -304,6 +339,7 @@ function MemberRow({ member }: { member: Member }) {
               e.preventDefault()
               ;(e.target as HTMLInputElement).blur()
             } else if (e.key === 'Escape') {
+              e.stopPropagation()
               setTitle(member.title ?? '')
               ;(e.target as HTMLInputElement).blur()
             }
@@ -319,7 +355,7 @@ function MemberRow({ member }: { member: Member }) {
       <MemberColorDot member={member} />
       <button
         onClick={remove}
-        className="text-ink-faint hover:text-red-500 opacity-0 group-hover/card:opacity-100 transition shrink-0"
+        className="text-ink-faint hover:text-overdue opacity-0 group-hover/card:opacity-100 transition shrink-0"
         aria-label="Remove member"
         title="Remove member"
       >
@@ -368,7 +404,7 @@ function AddMember({ projectId }: { projectId: string }) {
           aria-label="Add member"
         />
       </div>
-      {err && <p className="mt-1 px-3 text-[12px] text-red-500">{err}</p>}
+      {err && <p className="mt-1 px-3 text-[12px] text-overdue">{err}</p>}
     </div>
   )
 }

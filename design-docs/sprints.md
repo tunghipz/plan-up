@@ -1,11 +1,14 @@
 # Sprints
 
 **Status:** Implemented
-**Last updated:** 2026-06-23 (sprint notes render safe markdown in the header
-banner)
+**Last updated:** 2026-07-16 (**past state dot gains an amber "attention" tone** when a
+lapsed sprint still holds open work — see [sprint-expiry-signal.md](./sprint-expiry-signal.md);
+prior 2026-07-08: note is now an inline **description** in the merged Notion-style sprint page
+header — see app-shell-and-navigation.md v4; prior 2026-07-02: sprint creation is a canonical
+`createSprint()` — row + `sprint_started` event in one transaction)
 **Code:** `app/src/App.tsx` (`NewSprintDialog`, `SprintNoteBanner`, sprint panel,
-`SprintStateDot`, `renderSprintRow`), `app/src/db.ts` (`nextSequence`, `setSprintNote`),
-`app/src/lib.ts` (`sprintTemporalState`; tests in `sprint-cadence.test.ts`)
+`SprintStateDot`, `renderSprintRow`), `app/src/db.ts` (`createSprint`, `nextSequence`,
+`setSprintNote`), `app/src/lib.ts` (`sprintTemporalState`; tests in `sprint-cadence.test.ts`)
 
 ## Purpose
 A sprint is the time-boxed folder tasks live in. Biweekly by default, with a clean
@@ -16,17 +19,11 @@ context lives in an **optional note** instead.
 - **Create:** `+` next to "Sprints" or the `n` shortcut → `NewSprintDialog`. The **name is
   shown locked** (`Sprint N`, read-only with a lock glyph — not an input); the editable
   fields are **Start**, **End**, and an optional **note**. Enter or **Create** to save; it
-  becomes the current sprint.
-- **Edit:** hover a sprint row → open the compact row action menu → **Edit sprint**.
-  Editing keeps the name locked and lets the user change the Monday start plus the
-  optional note. End remains derived as `start + 13`; the dialog uses the same
-  Monday-strip control as create. Editing the sprint window does **not** rewrite existing
-  task dates — tasks may intentionally run outside the sprint window and the existing
-  list/board/timeline affordances already show those cases.
-- **Delete:** the same row menu includes **Delete sprint**. This is a real destructive
-  delete, not archive: the sprint, all tasks in it, and sprint-level history for that
-  sprint are removed after an in-app confirmation. Other tasks have dependencies on
-  deleted tasks cleaned up. Prefer Archive for reversible decluttering.
+  becomes the current sprint. Creation goes through the canonical **`createSprint()`**
+  (`db.ts`): the sprint row and its `sprint_started` activity event commit in **one
+  transaction**, so a crash between them can't leave a sprint with no birth entry
+  (seeding logs no event by design). See
+  [sprint-activity-log.md](./sprint-activity-log.md).
 - **Select:** click a row in the sprint panel (active row = accent bg, shows date range +
   task count; a small note glyph appears **trailing at the row's right edge** when the sprint
   has a note — kept off the title so the name stays clean; faint at rest, white/80 on the
@@ -39,19 +36,25 @@ context lives in an **optional note** instead.
   - **In progress / đang diễn ra** (`startDate ≤ today ≤ endDate`) — a **filled accent dot
     inside a soft accent halo** (the one "live" sprint), `--color-accent`.
   - **Past / đã qua** (`today > endDate`) — a **solid muted dot**, `--color-status-todo` grey;
-    flips to **`--color-status-done` green** when every task is done (`done === total > 0`).
+    flips to **`--color-status-done` green** when every task is done (`done === total > 0`), or to
+    **`--color-priority-high` amber** when the sprint lapsed still holding open work
+    (`total > 0 && done < total`) — the "needs attention" tone that pairs with the header expiry
+    banner. See [sprint-expiry-signal.md](./sprint-expiry-signal.md). (An empty past sprint stays grey.)
+    The sidebar per-sprint counts (`sprintTaskCounts`) are **leaf-based** — container parents (a
+    task's derived-status rollup is never stored as `done`) are excluded from `total`/`done`, so a
+    fully-done group never falsely reads as `done < total` (amber). Matches the app's leaf-based
+    counting everywhere else — see [task-groups.md](./task-groups.md).
   - On the **selected** row (accent bg) the same shapes render in white/translucent-white, so
     state stays legible while the row is highlighted. The glyph is `aria-hidden` (state is
     conveyed by the date range text too). The "live" halo has a calm 2s pulse.
 - **Name is not editable.** There is no rename affordance anywhere — the header title is
   plain locked text. (Removed the old `SprintNameEditor` inline rename.)
-- **Note (optional):** a sprint-goal line shown in a thin **goal banner** beneath the
-  header (Solution B). Click the banner text to edit inline (multi-line; `⌘`+Enter or blur
-  commits, Escape cancels). When empty, the banner collapses to a calm dashed
-  **`+ Add sprint note`** slot (`AddGroupButton` idiom, §5.11) so it stays quiet until used.
-  Saved notes render safe markdown while viewing: paragraphs, lists, emphasis,
-  inline code, links, fenced code, and simple pipe tables. Editing always shows
-  the raw markdown text in the textarea.
+- **Note (optional):** a sprint-goal line shown as an inline **description** directly
+  beneath the sprint title in the **page header** (`SprintPageHeader`, see
+  [app-shell-and-navigation.md](./app-shell-and-navigation.md) v4). Click the text to edit
+  inline (multi-line; `⌘`+Enter or blur commits, Escape cancels). When empty it collapses
+  to a quiet **"Add sprint focus…"** placeholder so it stays calm until used. (Was a thin
+  full-width goal banner beneath the header; merged into the page header 2026-07-08.)
 
 ## Why lock the name
 Custom sprint names drift (`Sprint 12`, `Payments`, `wk of Jun 2`…) and break the clean
@@ -72,17 +75,12 @@ Start is **locked to a Monday** and length is a **fixed 2 weeks** (ClickUp-style
   `Sprint <count+1>`. Shown locked (not editable).
 
 ## Data
-`Sprint { id, projectId, name, startDate, endDate, note?, archivedAt? }`.
+`Sprint { id, projectId, name, startDate, endDate, note? }`.
 - `note?` is an **optional, non-indexed** string → **no Dexie version bump** (same pattern
   as `Project.description`; rows without it read as empty). Written only through
-  `setSprintNote()`; trimmed empty → field cleared. Markdown support is render-only; the
-  stored value remains the raw note string.
+  `setSprintNote()`; trimmed empty → field cleared.
 - Date range rendered with `formatSprintRange` → `MMM d → MMM d` (arrow, month on both
   sides, e.g. `May 18 → May 31`).
-- Date edits write `startDate` and derived `endDate` only. Because these fields already
-  exist and there is no new index, editing needs no Dexie schema bump.
-- Deleting a sprint deletes its `tasks` and `events` rows in the same transaction, then
-  removes deleted task IDs from remaining tasks' `dependsOn`.
 
 ## Migration of legacy custom names
 Existing sprints that were manually renamed **keep their stored name** (displayed as-is) —
@@ -105,6 +103,3 @@ target, auto-select, `Sprint N` numbering). Spec: [sprint-archive.md](./sprint-a
 - Current sprint isn't persisted across sessions (defaults to the latest by `startDate`).
 - `dedupeSprints()` merges accidental same-name duplicates within a project (legacy
   cleanup) — also renumbers on merge.
-- Deleting the currently selected sprint auto-selects the latest remaining sprint, falling
-  back through archived sprints; if none remain, the task surface shows the existing empty
-  state.

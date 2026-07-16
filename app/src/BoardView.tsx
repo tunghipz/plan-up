@@ -15,14 +15,8 @@ import {
 import { formatShortDate, dayDiff } from './lib'
 import { Avatar } from './members'
 import { SprintRangeContext } from './DatePicker'
-import {
-  STATUS_META,
-  STATUS_ORDER,
-  StatusIcon,
-  derivedGroupStatus,
-  DatePickCell,
-  EffortCell,
-} from './SprintView'
+import { StatusIcon, DatePickCell, EffortCell } from './SprintView'
+import { STATUS_META, STATUS_ORDER, derivedGroupStatus } from './sprint-logic'
 
 // Per-column sort (see design-docs/board-view.md). Each column carries its own
 // {mode, dir}; `manual` is the default drag order. Sort is a NON-DESTRUCTIVE view
@@ -107,7 +101,8 @@ export function BoardView({
     for (const t of tasks) {
       if (!t.parentId) continue
       const arr = m.get(t.parentId)
-      arr ? arr.push(t) : m.set(t.parentId, [t])
+      if (arr) arr.push(t)
+      else m.set(t.parentId, [t])
     }
     return m
   }, [tasks])
@@ -138,11 +133,17 @@ export function BoardView({
       if (!p) continue
       if (p.startDate) {
         const k = `${p.startDate}T${p.startTime}`
-        if (!sKey || k < sKey) (sKey = k), (sd = p.startDate)
+        if (!sKey || k < sKey) {
+          sKey = k
+          sd = p.startDate
+        }
       }
       if (p.dueDate) {
         const k = `${p.dueDate}T${p.endTime}`
-        if (!eKey || k > eKey) (eKey = k), (dd = p.dueDate)
+        if (!eKey || k > eKey) {
+          eKey = k
+          dd = p.dueDate
+        }
       }
     }
     if (!sd && !dd) return null
@@ -285,17 +286,25 @@ export function BoardView({
     setOver(null)
   }, [])
   // Fractional index between the slot's display neighbours (skipping the dragged
-  // card). null → column has no other tasks, leave order untouched.
-  const orderForDrop = (status: Status, index: number, id: string): number | null => {
+  // card). null → column has no other tasks, leave order untouched. `collides`
+  // flags a midpoint that can't separate from a neighbour — repeated drops into
+  // the same gap exhaust float precision (`(a+b)/2 === a`) and the cheap
+  // one-card write would make two cards silently share an order.
+  const orderForDrop = (
+    status: Status,
+    index: number,
+    id: string
+  ): { order: number; collides: boolean } | null => {
     const L = byStatus[status]
     let before: Task | undefined
     let after: Task | undefined
     for (let i = index - 1; i >= 0; i--) if (L[i].id !== id) { before = L[i]; break }
     for (let i = index; i < L.length; i++) if (L[i].id !== id) { after = L[i]; break }
     if (!before && !after) return null
-    if (!before) return orderOf(after!) - 1
-    if (!after) return orderOf(before!) + 1
-    return (orderOf(before!) + orderOf(after!)) / 2
+    if (!before) return { order: orderOf(after!) - 1, collides: false }
+    if (!after) return { order: orderOf(before!) + 1, collides: false }
+    const order = (orderOf(before) + orderOf(after)) / 2
+    return { order, collides: order <= orderOf(before) || order >= orderOf(after) }
   }
   const handleDrop = (status: Status, id: string, index: number) => {
     const t = tasksById.get(id)
@@ -305,11 +314,33 @@ export function BoardView({
       // plus a logged status change if it crossed columns. boardOrder is written
       // raw (not loggable); status goes through logStatusChange so the move shows
       // in the card's change log (parity with the List status control).
-      const order = orderForDrop(status, index, id)
+      const drop = orderForDrop(status, index, id)
       const crossed = t.status !== status
+      if (drop?.collides) {
+        // Midpoint exhausted — same guard as the List row drag / member-lane
+        // drag, but renormalizeListOrder writes `listOrder`, not `boardOrder`,
+        // so reindex inline: clean integer boardOrder over the column's display
+        // order with the card spliced in at the slot, in one transaction (same
+        // shape as the sorted-column reindex below).
+        const cur = byStatus[status]
+        const rest = cur.filter((x) => x.id !== id)
+        let pos = 0
+        for (let i = 0; i < index && i < cur.length; i++) if (cur[i].id !== id) pos++
+        rest.splice(Math.min(pos, rest.length), 0, t)
+        void db
+          .transaction('rw', db.tasks, async () => {
+            for (let i = 0; i < rest.length; i++) {
+              if (rest[i].boardOrder !== i) await db.tasks.update(rest[i].id, { boardOrder: i })
+            }
+          })
+          .then(() => {
+            if (crossed) void logStatusChange(id, t.status, status)
+          })
+        return
+      }
       void (async () => {
-        if (order != null && order !== t.boardOrder)
-          await db.tasks.update(id, { boardOrder: order })
+        if (drop != null && drop.order !== t.boardOrder)
+          await db.tasks.update(id, { boardOrder: drop.order })
         if (crossed) await logStatusChange(id, t.status, status)
       })()
       return
@@ -779,7 +810,7 @@ const DragGhost = memo(function DragGhost({ task, innerRef }: { task: Task; inne
       style={{ transform: 'translate(-1000px,-1000px)' }}
       aria-hidden
     >
-      <div className="bg-surface rounded-[12px] p-3 rotate-[3deg] shadow-[0_14px_34px_rgba(0,0,0,0.24)] ring-1 ring-black/[0.04]">
+      <div className="bg-surface rounded-[12px] p-3 rotate-[3deg] shadow-[0_14px_34px_rgba(0,0,0,0.24),inset_0_1px_0_var(--glass-edge),inset_0_0_0_0.5px_var(--glass-ring)] ring-1 ring-black/[0.04]">
         <div className="flex items-start gap-2.5">
           <span className="w-[18px] h-[18px] shrink-0 mt-0.5" style={{ color: meta.varName }}>
             <StatusIcon status={task.status} />
@@ -861,8 +892,8 @@ function DatePopover({
   const endLocked = task.dependsOn.length > 0 || (task.estimate !== null && task.estimate > 0)
   const assigneeDaysOff = task.assigneeId ? membersById.get(task.assigneeId)?.daysOff : undefined
   return (
-    <div className="absolute top-[42px] right-2 z-30 w-[232px] rounded-[13px] border border-border-hair bg-surface p-2 shadow-[0_8px_30px_rgba(0,0,0,0.18)]">
-      <div className="text-[11px] font-bold uppercase tracking-[0.04em] text-ink-faint px-1.5 pt-0.5 pb-1.5">
+    <div className="absolute top-[42px] right-2 z-30 w-[232px] rounded-[13px] glass-popover p-2">
+      <div className="text-[11px] font-semibold text-ink-faint px-1.5 pt-0.5 pb-1.5">
         Schedule
       </div>
       <div className="flex items-center gap-2 px-1 mb-1">
@@ -919,8 +950,8 @@ function DatePopover({
 }
 
 const PRIO_TAG: Record<string, { label: string; bg: string; fg: string }> = {
-  urgent: { label: 'Urgent', bg: 'rgba(255,59,48,0.12)', fg: 'color-mix(in srgb, var(--color-priority-urgent) 100%, #000 22%)' },
-  high: { label: 'High', bg: 'rgba(255,149,0,0.15)', fg: 'color-mix(in srgb, var(--color-priority-high) 100%, #000 22%)' },
+  urgent: { label: 'Urgent', bg: 'color-mix(in srgb, var(--color-priority-urgent) 12%, transparent)', fg: 'color-mix(in srgb, var(--color-priority-urgent) 78%, var(--color-ink))' },
+  high: { label: 'High', bg: 'color-mix(in srgb, var(--color-priority-high) 15%, transparent)', fg: 'color-mix(in srgb, var(--color-priority-high) 78%, var(--color-ink))' },
 }
 
 // Wrapped in memo so the per-dragover re-renders of BoardView don't re-render every
@@ -983,7 +1014,7 @@ const BoardCard = memo(function BoardCard({
           })()
     return {
       bg: `color-mix(in srgb, ${c} 13%, transparent)`,
-      fg: `color-mix(in srgb, ${c} 100%, #000 25%)`,
+      fg: `color-mix(in srgb, ${c} 75%, var(--color-ink))`,
       label: plan.endTime ? `${formatShortDate(dd)}, ${plan.endTime}` : formatShortDate(dd),
       title: `Due ${dd}${plan.endTime ? ' ' + plan.endTime : ''}`,
     }
@@ -999,9 +1030,11 @@ const BoardCard = memo(function BoardCard({
     const c = od ? 'var(--color-priority-urgent)' : 'var(--color-accent)'
     return {
       bg: `color-mix(in srgb, ${c} 13%, transparent)`,
-      fg: `color-mix(in srgb, ${c} 100%, #000 25%)`,
-      label: plan.startTime ? `${formatShortDate(sd)}, ${plan.startTime}` : formatShortDate(sd),
-      title: `Milestone ${sd}${plan.startTime ? ' ' + plan.startTime : ''}`,
+      fg: `color-mix(in srgb, ${c} 75%, var(--color-ink))`,
+      // A milestone shows its END time (completion instant, e.g. 17:00), not the
+      // work-start slot — see SprintView milestone cell / milestones.md.
+      label: plan.endTime ? `${formatShortDate(sd)}, ${plan.endTime}` : formatShortDate(sd),
+      title: `Milestone ${sd}${plan.endTime ? ' ' + plan.endTime : ''}`,
     }
   })()
 
@@ -1014,7 +1047,7 @@ const BoardCard = memo(function BoardCard({
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
       onDragOver={onDragOver}
-      className={`group relative bg-surface rounded-[12px] p-3 shadow-[0_1px_2px_rgba(0,0,0,0.05),0_3px_10px_rgba(0,0,0,0.05)] hover:shadow-[0_2px_4px_rgba(0,0,0,0.06),0_10px_24px_rgba(0,0,0,0.08)] transition ${
+      className={`group relative bg-surface rounded-[12px] p-3 shadow-[0_1px_2px_rgba(0,0,0,0.05),0_3px_10px_rgba(0,0,0,0.05),inset_0_1px_0_var(--glass-edge),inset_0_0_0_0.5px_var(--glass-ring)] hover:shadow-[0_2px_4px_rgba(0,0,0,0.06),0_10px_24px_rgba(0,0,0,0.08),inset_0_1px_0_var(--glass-edge),inset_0_0_0_0.5px_var(--glass-ring)] transition ${
         draggable ? 'cursor-grab active:cursor-grabbing' : ''
       } ${dragging ? 'hidden' : ''}`}
     >
@@ -1068,7 +1101,7 @@ const BoardCard = memo(function BoardCard({
         ) : (
           <button
             onClick={() => onCycleStatus(task.id)}
-            className="w-[18px] h-[18px] shrink-0 mt-0.5 transition hover:scale-110 flex items-center justify-center"
+            className="w-[18px] h-[18px] shrink-0 mt-0.5 transition hover:scale-110 motion-reduce:transform-none flex items-center justify-center"
             style={{ color: meta.varName }}
             title={`${meta.label} — click to cycle`}
             aria-label={`Status: ${meta.label}`}

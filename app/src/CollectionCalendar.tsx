@@ -1,14 +1,16 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { CalendarPlus } from 'lucide-react'
 import {
   buildMonthGrid,
   assignLanes,
   computeBarSegments,
+  todayLocalISO,
   type CalItem,
 } from './lib'
 import { db, type Collection, type CollectionStatus, type Task } from './db'
-import { DatePickCell } from './DatePicker'
+import { usePinnedPopover } from './usePinnedPopover'
+import { DatePickCell, DateRangePickCell } from './DatePicker'
 
 const MONTHS_LONG = [
   'January',
@@ -41,7 +43,7 @@ const MONTHS_SHORT = [
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
 /** Neutral fallback when an item has no (or a deleted) status. */
-const NEUTRAL = '#C7C7CC'
+const NEUTRAL = 'var(--color-status-none)'
 
 /** Human-readable "Mon D" from a yyyy-mm-dd string (UTC, no TZ drift). */
 function shortDate(dateStr: string): string {
@@ -64,11 +66,13 @@ export function CollectionCalendar({
   /** Jump back to the List tab (used by the bar popover's "View in list"). */
   onViewInList?: () => void
 }) {
-  const nowY = new Date().getUTCFullYear()
-  const nowM = new Date().getUTCMonth()
+  // Local time everywhere (matches GanttView / DatePicker / lib.todayLocalISO) —
+  // the UTC slice renders the wrong day near midnight in non-UTC zones.
+  const nowY = new Date().getFullYear()
+  const nowM = new Date().getMonth()
   // Computed per render (NOT frozen at module load) so the "today" highlight
   // stays correct if the tab is left open across midnight.
-  const today = new Date().toISOString().slice(0, 10)
+  const today = todayLocalISO()
   const [view, setView] = useState(() => ({ y: nowY, m: nowM }))
   // Open bar editor — { item id, anchor rect } captured on click.
   const [openItem, setOpenItem] = useState<{ id: string; rect: DOMRect } | null>(
@@ -83,9 +87,10 @@ export function CollectionCalendar({
   }
   const onCurrentMonth = view.y === nowY && view.m === nowM
 
-  const taskById = new Map(items.map((t) => [t.id, t]))
-  const statusColorById = new Map(
-    collection.statuses.map((s) => [s.id, s.color])
+  const taskById = useMemo(() => new Map(items.map((t) => [t.id, t])), [items])
+  const statusColorById = useMemo(
+    () => new Map(collection.statuses.map((s) => [s.id, s.color])),
+    [collection.statuses]
   )
   const colorForTask = (t: Task | undefined): string =>
     (t?.collectionStatusId
@@ -97,24 +102,36 @@ export function CollectionCalendar({
     return collection.statuses.find((s) => s.id === id)?.name ?? 'No status'
   }
 
-  const cal: CalItem[] = items
-    .filter((t) => t.startDate)
-    .map((t) => {
-      const start = t.startDate as string
-      // Clamp end to never precede start: the popover lets start/due be edited
-      // independently, so a user can set due < start. Without this, the segment
-      // span goes negative and lane-packing breaks (zero/negative-width bars).
-      const rawEnd = t.dueDate ?? start
-      return { id: t.id, start, end: rawEnd < start ? start : rawEnd }
-    })
+  const cal: CalItem[] = useMemo(
+    () =>
+      items
+        .filter((t) => t.startDate)
+        .map((t) => {
+          const start = t.startDate as string
+          // Clamp end to never precede start: the popover lets start/due be edited
+          // independently, so a user can set due < start. Without this, the segment
+          // span goes negative and lane-packing breaks (zero/negative-width bars).
+          const rawEnd = t.dueDate ?? start
+          return { id: t.id, start, end: rawEnd < start ? start : rawEnd }
+        }),
+    [items]
+  )
   // Items with no start date never appear on the grid — surface them in an
   // "Unscheduled" tray instead of silently dropping them (a trust bug).
-  const unscheduled = items.filter((t) => !t.startDate)
+  const unscheduled = useMemo(() => items.filter((t) => !t.startDate), [items])
 
-  const grid = buildMonthGrid(view.y, view.m, today)
-  const lanes = assignLanes(cal)
-  const segs = computeBarSegments(cal, grid, lanes)
-  const maxLane = cal.reduce((m, c) => Math.max(m, lanes.get(c.id) ?? 0), 0)
+  const grid = useMemo(
+    () => buildMonthGrid(view.y, view.m, today),
+    [view.y, view.m, today]
+  )
+  const lanes = useMemo(() => assignLanes(cal), [cal])
+  const segs = useMemo(
+    () => computeBarSegments(cal, grid, lanes),
+    [cal, grid, lanes]
+  )
+  // Lane count for the *displayed* month only (from its segments) — sizing off
+  // ALL items would let one crowded week in another month inflate every row here.
+  const maxLane = segs.reduce((m, s) => Math.max(m, s.lane), 0)
 
   const gridTemplateRows = `30px repeat(${maxLane + 1}, 23px) 1fr`
   const minWeekHeight = 30 + (maxLane + 1) * 23 + 14
@@ -153,7 +170,7 @@ export function CollectionCalendar({
           )}
           <button
             onClick={() => step(-1)}
-            className="w-[26px] h-[26px] rounded-[7px] bg-black/[0.05] hover:bg-black/[0.09] text-ink-muted transition grid place-items-center"
+            className="w-[26px] h-[26px] rounded-[7px] bg-ink/[0.05] hover:bg-ink/[0.09] text-ink-muted transition grid place-items-center"
             aria-label="Previous month"
           >
             ‹
@@ -163,7 +180,7 @@ export function CollectionCalendar({
           </span>
           <button
             onClick={() => step(1)}
-            className="w-[26px] h-[26px] rounded-[7px] bg-black/[0.05] hover:bg-black/[0.09] text-ink-muted transition grid place-items-center"
+            className="w-[26px] h-[26px] rounded-[7px] bg-ink/[0.05] hover:bg-ink/[0.09] text-ink-muted transition grid place-items-center"
             aria-label="Next month"
           >
             ›
@@ -171,7 +188,7 @@ export function CollectionCalendar({
         </div>
       </div>
 
-      <div className="bg-surface rounded-[14px] shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_22px_rgba(0,0,0,0.05)] overflow-hidden">
+      <div className="glass-card rounded-[18px] overflow-hidden">
         <div className="grid grid-cols-7 border-b border-border-hair">
           {WEEKDAYS.map((w) => (
             <div
@@ -196,7 +213,7 @@ export function CollectionCalendar({
                 key={`bg-${cell.date}`}
                 className={`row-[1/-1] z-0 ${
                   c === 6 ? '' : 'border-r border-border-hair'
-                } ${cell.inMonth ? '' : 'bg-black/[0.018]'}`}
+                } ${cell.inMonth ? '' : 'bg-ink/[0.02]'}`}
                 style={{ gridColumn: c + 1 }}
                 aria-hidden
               />
@@ -255,7 +272,7 @@ export function CollectionCalendar({
                       marginRight: seg.roundR ? '4px' : '0',
                       paddingLeft: seg.roundL ? '13px' : '9px',
                       background: `color-mix(in srgb, ${color} 16%, transparent)`,
-                      color,
+                      color: `color-mix(in srgb, ${color} 78%, var(--color-ink))`,
                     }}
                   >
                     {seg.roundL && (
@@ -292,10 +309,10 @@ export function CollectionCalendar({
       )}
 
       {unscheduled.length > 0 && (
-        <div className="mt-3 bg-surface rounded-[14px] shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_22px_rgba(0,0,0,0.05)] px-4 py-3">
+        <div className="mt-3 glass-card rounded-[18px] px-4 py-3">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-[11px] font-semibold text-ink-faint tracking-wider mr-0.5">
-              UNSCHEDULED · {unscheduled.length}
+            <span className="text-[11px] font-semibold text-ink-faint mr-0.5">
+              Unscheduled · {unscheduled.length}
             </span>
             {unscheduled.map((t) => (
               <UnscheduledChip
@@ -358,6 +375,37 @@ function UnscheduledChip({ task, color }: { task: Task; color: string }) {
  * `overflow-hidden`), mirrors the StatusPill / DatePicker popover pattern. Edit
  * title · status · start/end, or jump to the List tab.
  */
+/**
+ * Draft-while-focused title input. Binding value={task.title} straight to the
+ * liveQuery row round-trips every keystroke through Dexie's ASYNC echo — a
+ * slow echo re-renders the input to an older value mid-burst (dropped chars,
+ * caret jump). The row stays the source of truth whenever not editing.
+ */
+function TitleInput({ task }: { task: Task }) {
+  const [draft, setDraft] = useState(task.title)
+  const focusedRef = useRef(false)
+  useEffect(() => {
+    if (!focusedRef.current) setDraft(task.title)
+  }, [task.title])
+  return (
+    <input
+      value={draft}
+      onFocus={() => {
+        focusedRef.current = true
+      }}
+      onBlur={() => {
+        focusedRef.current = false
+      }}
+      onChange={(e) => {
+        setDraft(e.target.value)
+        void db.tasks.update(task.id, { title: e.target.value })
+      }}
+      className="w-full text-[14px] font-semibold text-ink bg-transparent border-b border-transparent focus:border-accent focus:outline-none pb-0.5"
+      aria-label="Item title"
+    />
+  )
+}
+
 function BarPopover({
   task,
   statuses,
@@ -373,58 +421,36 @@ function BarPopover({
 }) {
   const popRef = useRef<HTMLDivElement>(null)
   const W = 244
-  const [pos, setPos] = useState<{ top: number; left: number }>({
-    top: -9999,
-    left: -9999,
-  })
-
-  useLayoutEffect(() => {
+  // Position is pure math on the anchor rect + viewport (the popover has a fixed
+  // footprint), so derive it during render — no layout-effect setState pass.
+  const pos = (() => {
     let left = Math.min(anchorRect.left, window.innerWidth - 8 - W)
     left = Math.max(8, left)
     const H = 240
     let top = anchorRect.bottom + 6
     if (top + H > window.innerHeight - 8) top = Math.max(8, anchorRect.top - H - 6)
-    setPos({ top, left })
-  }, [anchorRect])
+    return { top, left }
+  })()
 
-  useEffect(() => {
-    const onDown = (e: MouseEvent) => {
-      if (popRef.current && !popRef.current.contains(e.target as Node)) onClose()
-    }
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-    }
-    // The popover anchors to a snapshot rect, so it can't follow a scrolling
-    // anchor — close it on scroll rather than leave it floating detached.
-    // capture=true so it fires for any scroll container, not just window.
-    const onScroll = () => onClose()
-    // Defer so the opening click doesn't immediately close it.
-    const id = window.setTimeout(() => {
-      document.addEventListener('mousedown', onDown)
-      document.addEventListener('keydown', onKey)
-      window.addEventListener('scroll', onScroll, true)
-    }, 0)
-    return () => {
-      window.clearTimeout(id)
-      document.removeEventListener('mousedown', onDown)
-      document.removeEventListener('keydown', onKey)
-      window.removeEventListener('scroll', onScroll, true)
-    }
-  }, [onClose])
+  // Anchored to a snapshot rect → close on scroll (can't follow the anchor);
+  // deferred listeners so the opening bar-click can't self-close; the date
+  // picker's <body>-portaled calendar counts as "inside" via outsideIgnore.
+  usePinnedPopover({
+    onClose,
+    popRef,
+    onScroll: 'close',
+    deferListeners: true,
+    outsideIgnore: '[data-calendar-popover]',
+  })
 
   return createPortal(
     <div
       ref={popRef}
       onClick={(e) => e.stopPropagation()}
       style={{ position: 'fixed', top: pos.top, left: pos.left, width: W }}
-      className="z-50 bg-surface border border-border-hair rounded-[14px] shadow-[0_12px_40px_rgba(0,0,0,0.18),0_0_0_0.5px_rgba(0,0,0,0.04)] p-3 space-y-2.5"
+      className="z-50 glass-popover rounded-[14px] p-3 space-y-2.5"
     >
-      <input
-        value={task.title}
-        onChange={(e) => db.tasks.update(task.id, { title: e.target.value })}
-        className="w-full text-[14px] font-semibold text-ink bg-transparent border-b border-transparent focus:border-accent focus:outline-none pb-0.5"
-        aria-label="Item title"
-      />
+      <TitleInput task={task} />
       <div className="flex flex-wrap gap-1.5">
         {statuses.map((s) => {
           const active = task.collectionStatusId === s.id
@@ -441,7 +467,9 @@ function BarPopover({
                 background: active
                   ? `color-mix(in srgb, ${s.color} 16%, transparent)`
                   : 'transparent',
-                color: active ? s.color : 'var(--color-ink-muted)',
+                color: active
+                  ? `color-mix(in srgb, ${s.color} 78%, var(--color-ink))`
+                  : 'var(--color-ink-muted)',
                 boxShadow: active ? 'none' : 'inset 0 0 0 1px var(--color-border)',
               }}
             >
@@ -458,9 +486,13 @@ function BarPopover({
       <div className="flex items-center justify-between gap-2 text-[12.5px]">
         <span className="text-ink-faint">Start</span>
         <span className="w-[96px]">
-          <DatePickCell
-            value={task.startDate}
-            onChange={(v) => db.tasks.update(task.id, { startDate: v })}
+          <DateRangePickCell
+            which="start"
+            start={task.startDate}
+            end={task.dueDate}
+            onChange={({ start, end }) =>
+              db.tasks.update(task.id, { startDate: start, dueDate: end })
+            }
             ariaLabel="Start date"
             emptyHint="Start"
           />
@@ -469,10 +501,14 @@ function BarPopover({
       <div className="flex items-center justify-between gap-2 text-[12.5px]">
         <span className="text-ink-faint">End</span>
         <span className="w-[96px]">
-          <DatePickCell
-            value={task.dueDate}
-            onChange={(v) => db.tasks.update(task.id, { dueDate: v })}
-            ariaLabel="Due date"
+          <DateRangePickCell
+            which="end"
+            start={task.startDate}
+            end={task.dueDate}
+            onChange={({ start, end }) =>
+              db.tasks.update(task.id, { startDate: start, dueDate: end })
+            }
+            ariaLabel="End date"
             emptyHint="End"
           />
         </span>

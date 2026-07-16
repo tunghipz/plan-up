@@ -1,7 +1,7 @@
 # Task groups (parent task with nested children)
 
 **Status:** Implemented
-**Last updated:** 2026-06-29
+**Last updated:** 2026-07-02 (`setTaskParent` enforces parent + child share the same sprint)
 **Code:** `app/src/db.ts` (`Task.parentId`, `createGroupFromSelection`, `setTaskParent`),
 `app/src/SprintView.tsx` (`MemberCard` task tree render, `TaskGroupRow` parent roll-up,
 `SelectionBar` group/ungroup/delete), collapse persisted in `localStorage`
@@ -18,7 +18,7 @@ separate epic/tag system. Approach **B** chosen 2026-06-04 (see
 - **Create a group (multi-select):** hover a task row → a **checkbox** appears in the
   left gutter; check several tasks **of the same member**. A **floating action bar**
   slides up at the bottom (English labels): *"N selected · [Ungroup] · [Chain prereqs] ·
-  [Clear prereqs] · [Move to sprint] · [Group] · [Delete] · [Cancel]"*.
+  [Clear prereqs] · [Group] · [Delete] · [Cancel]"*.
   - **Group** creates a **new parent task** titled `New group` (rename inline) and
     nests the selected tasks under it. Enabled only when ≥2 are selected, all share the
     same assignee, and none is already a group head (one level).
@@ -26,10 +26,6 @@ separate epic/tag system. Approach **B** chosen 2026-06-04 (see
     selection contains ≥1 grouped task.
   - **Chain prereqs** / **Clear prereqs** set or clear prerequisites across the selection —
     see [dependencies.md](./dependencies.md#bulk-actions-multi-select).
-  - **Move to sprint** opens a searchable sprint menu with every active sprint in the
-    project, including earlier sprints. Choosing a target moves all selected tasks that are
-    not already in that sprint through `moveTaskToSprint`, which renumbers them in the
-    target sprint, logs the move, and recomputes dates. Selection clears after the move.
   - **Delete** deletes the selected tasks (confirm first; works on a multi-select).
     Deleting a group head ungroups its children rather than cascade-deleting them; the
     confirm copy says so when the selection contains a group head. Deletes run
@@ -90,14 +86,38 @@ computes `total`, `done`, overdue, and capacity, it must skip tasks that have ch
 ## Scheduling
 - **Children schedule independently** — each keeps its own `estimate` / `dependsOn` /
   dates and flows through `computeWorkingPlan` exactly as today.
-- `parentId` is **organizational only** — it is **not** a scheduling constraint
-  (distinct from `dependsOn`). Grouping never reorders or blocks the scheduler.
-- The parent's displayed dates are a read-only **span** of its children.
+- `parentId` is **organizational only** for the children — grouping never reorders the
+  children or makes a child wait on a sibling.
+- The parent's dates are a read-only **span** of its children — but that span is now
+  computed inside `planFor` itself (min child start → latest child end+fraction), not just
+  in the row render, so it has ONE source and can be **used as a prereq anchor** (below).
+
+### Group as a prerequisite (2026-06-25)
+A normal task can depend on a **group (parent) task** — `dependsOn` may reference a parent's
+sequence number. The dependent then starts after the group's rolled-up **end** (the latest
+child finish), exactly as if it depended on the latest child. Mechanics:
+- `planFor(parent)` returns the rolled-up span (it recurses into children), so a dependent
+  reads a real `dueDate` to anchor on. If **no** child has a date yet, the span end is null →
+  the dependent has no anchor and its start clears (same rule as any unscheduled prereq).
+- **Blocked state**: a task whose prereq is a group is *blocked* until **every child** of that
+  group is done (not the parent's stale stored status). See [dependencies.md](./dependencies.md).
+- **Cascade**: editing a child re-flows tasks that depend on the child's parent (the group's
+  end shifted) — `recomputeDates` enqueues dependents of the changed task's `parentId` too.
+- **Cycle safety**: depending on a group means depending on all its children, so the cycle
+  check treats `parent → children` as edges. A child that tries to depend back on a task which
+  waits on its own group is rejected inline like any other cycle.
+- **Out of scope**: you still cannot set a prereq *on* a group (the parent row's prereq cell
+  stays empty) — a group is a container, not a schedulable unit with its own dependency.
 
 ## Implementation notes
 1. **`db.ts`** — add `parentId?: string | null` to `Task`. No `.stores()` change.
    - Helper: `setTaskParent(childId, parentId | null)` with the one-level guard
-     (reject if target has a parent, or if child already has children).
+     (reject if target has a parent, or if child already has children) **and a
+     same-sprint guard** (reject if `child.sprintId !== parent.sprintId` — a
+     cross-sprint parent link would break rollover cohesion; `planSprintRollover`
+     assumes a group moves as one unit within its sprint). The guards run inside a
+     transaction so they can't go stale between the reads and the write (two
+     overlapping group edits would otherwise TOCTOU past them).
    - On **delete** of a parent: promote children to top-level (`parentId = null`),
      **do not** cascade-delete. Confirm dialog notes "its grouped tasks become
      ungrouped, not deleted."
@@ -116,7 +136,7 @@ computes `total`, `done`, overdue, and capacity, it must skip tasks that have ch
 3. **Collapse** — local state keyed by parentId, persisted to
    `localStorage['plan-up:taskgroup-collapsed:'+parentId]`; reset semantics like the
    member-group collapse.
-4. **Selection bar** — group/ungroup/move/delete all live on `SelectionBar` (the floating
+4. **Selection bar** — group/ungroup/delete all live on `SelectionBar` (the floating
    bar). There is no per-row kebab/`RowActionsMenu` and no actions column on the row.
 
 ## Rules & edge cases
@@ -125,7 +145,7 @@ computes `total`, `done`, overdue, and capacity, it must skip tasks that have ch
 - **Empty group**: a parent whose children are all removed/ungrouped silently reverts
   to a normal leaf task (no special "empty group" state).
 - **Cross-member / cross-sprint**: groups never span members or sprints; moving a task
-  out clears `parentId`.
+  out clears `parentId`, and `setTaskParent` refuses a parent in a different sprint.
 - **Board view**: out of scope this round — `parentId` is ignored in BoardView (tasks
   show flat). Flag if grouping is wanted there later.
 - **Dark mode**: all via tokens (derived status dot via `STATUS_META` varName).
@@ -149,8 +169,10 @@ is now the only group/delete affordance). Verified with `npx tsc --noEmit && npm
 `done/total` + capacity exclude parents.
 
 ## Future / open questions
-- **Roll-up of parent dates/effort**: shipped as display-only span/sum — revisit if a
-  stored, schedulable parent is ever wanted.
+- **Roll-up of parent dates/effort**: span/sum. The date span is now also a **prereq anchor**
+  (a task can depend on a group; see "Group as a prerequisite") — computed on the fly in
+  `planFor`, still **not persisted** on the parent. Setting a prereq *on* a group, or a
+  stored/schedulable parent, remains out of scope.
 - **Multi-level nesting** (groups within groups): deliberately cut for calm; revisit
   only on real need.
 - **Board view grouping**: deferred.

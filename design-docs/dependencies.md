@@ -1,11 +1,12 @@
 # Dependencies (prerequisites)
 
 **Status:** Implemented
-**Last updated:** 2026-06-05
+**Last updated:** 2026-07-02 (dependency edits are now transactional — deps write +
+recompute + activity log commit atomically)
 **Code:** `app/src/db.ts` (`addDependency`, `removeDependency`, `setDependencies`,
 `wouldCreateCycle`, `findCyclePath`, `isTaskBlocked`), `app/src/SprintView.tsx`
-(`PrereqInput`, `SelectionBar`), `app/src/lib.ts` (`parsePrereqSeqs`, `formatSeqRanges`),
-`app/src/index.css` (`.prereq-chip*` path-trace animation)
+(`PrereqInput`, `SelectionBar`), `app/src/lib.ts` (`parsePrereqSeqs`, `formatSeqRanges`,
+`flattenDisplayOrder`), `app/src/index.css` (`.prereq-chip*` path-trace animation)
 
 ## Purpose
 Express "this can't start until those are done" so the scheduler can chain dates and the
@@ -31,7 +32,13 @@ UI can flag blocked work.
   The valid entries still save; only the rejected ones are dropped, and the field snaps to
   the saved (range-collapsed) set.
 - A task waiting on an unfinished prereq is **blocked** (row tooltip: "Blocked — waiting on
-  a prerequisite task").
+  a prerequisite task"). A prereq that is a **group (parent) task** counts as done only when
+  **every child** of that group is done.
+- **A group can be a prerequisite** — `dependsOn` may reference a parent task's sequence; the
+  dependent starts after the group's rolled-up end. Because depending on a group means
+  depending on all its children, the cycle check treats `parent → children` as edges (a child
+  can't depend back on a task that waits on its own group). You still cannot set a prereq *on*
+  a group. See [task-groups.md](./task-groups.md) "Group as a prerequisite".
 
 ### Why a cycle gets rejected (the common confusion)
 Dependencies form a DAG. If task 6 already depends on 7, you cannot also make 7 depend on
@@ -45,12 +52,18 @@ chain them, remove the back-edge first (here: clear 6's dependency on 7).
 ## Implementation
 - `wouldCreateCycle(taskId, newDepId)` (`db.ts:711`) — DFS from the new dep; rejects if it
   can reach `taskId`. Self-links rejected.
-- `setDependencies(taskId, ids)` (`db.ts:766`) — replaces the set; filters self-links,
+- `setDependencies(taskId, ids)` (`db.ts`) — replaces the set; filters self-links,
   duplicates, unknown IDs, and cycles with a **cumulative** check (so a batch can't sneak a
   cycle past via ordering). Returns the cleaned set; triggers `recomputeDates`.
 - `addDependency` / `removeDependency` — single-edge helpers, each recomputes.
-- `isTaskBlocked(task, tasksById)` (`db.ts:796`) — `true` if not done AND any prereq isn't
-  done. Done tasks never report blocked.
+- **All three run inside ONE transaction** (`db.transaction('rw', …)`): the cycle check,
+  the `dependsOn` read-modify-write and the recompute can't interleave with another
+  dependency edit (a stale-array overwrite would silently drop an edge) or split on a
+  mid-write crash. `setDependencies`' scope also includes `db.events`, so the deps write,
+  the recompute **and** the activity-log entry commit atomically — there is no
+  deps-changed-without-log window.
+- `isTaskBlocked(task, tasksById)` — `true` if not done AND any prereq isn't done. A prereq
+  that is a **parent** is "done" only when all its children are done. Done tasks never report blocked.
 - `PrereqInput` parses input via `parsePrereqSeqs` (list + ranges), resolves sequence→ID
   **within the same sprint only** (sequences are per-sprint; cross-sprint deps survive but
   can't be typed by number), then diffs the requested set against what `setDependencies`
@@ -65,7 +78,11 @@ for free. Single click, **no confirmation** (the sprint activity log records old
 
 - **Chain prereqs** — enabled only with **≥2** selected (else disabled, tooltip "Select ≥2
   tasks to chain"). Orders the selected tasks **top-to-bottom by their displayed order** and,
-  for each adjacent pair (A above B), makes **B depend on A**. Existing prereqs are **kept**
+  for each adjacent pair (A above B), makes **B depend on A**. "Displayed order" is the exact
+  on-screen row order — member lanes in lane order, each lane sorted by the active sort column,
+  group children nested under their head, Unassigned last — computed by `flattenDisplayOrder`
+  (`lib.ts`). It is **not** the raw IndexedDB array order; chaining the raw order would scramble
+  the links versus what the user sees. Existing prereqs are **kept**
   (additive): `setDependencies(B.id, unique([...B.dependsOn, A.id]))`. Only the chain's head
   is left untouched → **N-1** calls, run **sequentially top-to-bottom** so each task's
   recomputed dates are in place before the next link is computed (dates cascade correctly).

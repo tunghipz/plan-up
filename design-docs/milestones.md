@@ -1,7 +1,8 @@
 # Milestones
 
 **Status:** Implemented
-**Last updated:** 2026-06-19
+**Last updated:** 2026-07-15 (milestone hover time = its own instant `startOffset`
+[08:00/12:00/17:00], not the hardcoded end-of-day — fixes every milestone reading 17:00)
 **Code:** `app/src/SprintView.tsx` (`TaskRow`, `MilestoneTag`, member overdue count),
 `app/src/BoardView.tsx` (`BoardCard` milestone chip), `app/src/GanttView.tsx` (diamond marker),
 `app/src/db.ts` (`Task.estimate`)
@@ -18,8 +19,15 @@ In the List view, a leaf task whose **Effort = 0** is shown as a milestone:
 - A small **`◆ Milestone`** pill sits after the task title (accent-tinted, like the
   priority chip), so it's labelled in plain words — discoverable without prior knowledge.
 - The **Start and End columns collapse into a single milestone date** (a milestone is
-  one point in time, so a `Start → End` span is meaningless). The date (with its
-  time) is shown in **accent color + bold** to read as a key marker.
+  one point in time, so a `Start → End` span is meaningless). The date is shown in
+  **accent color + bold** to read as a key marker. Its hover **time is the milestone's
+  own instant** — the moment its prereqs are met (`plan.startOffset`), mapped as a
+  completion moment: `08:00` (day start / a manual milestone), `12:00` (a prereq
+  finishing at midday), or `17:00` (end of day). `startTime` and `endTime` are the
+  **same** value (an instant has no span), so views can read either. A milestone
+  whose prereq finishes at 17:00 reads `17:00`; one finishing at noon reads `12:00`
+  (2026-07-15 fix — earlier it read the hardcoded `dueFraction` and so showed `17:00`
+  for *every* milestone, contradicting the `startOffset` it actually anchors dependents on).
 - The **Effort cell still shows `0` and stays editable** — changing it to a non-zero
   value turns the row back into a normal task (and the two date columns return).
 

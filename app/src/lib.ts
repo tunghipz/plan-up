@@ -1,7 +1,38 @@
 import { useEffect, useState } from 'react'
-import type { Status, Priority, LoggableField, Sprint } from './db'
+import type { Status, Priority, LoggableField, Sprint, Task } from './db'
 
 const MS = 86400_000
+
+/**
+ * Flatten the on-screen member lanes into one top-to-bottom task list, matching
+ * exactly what the user sees row-by-row. Each `card` is a lane's tasks already
+ * sorted in display order (member lanes in lane order, then the Unassigned
+ * lane); within a card a group head is immediately followed by its children
+ * (same nesting `TaskTable` renders). A child whose parent isn't in its own card
+ * is treated as top-level. Used so bulk "Chain prereqs" links tasks in the order
+ * displayed, not the raw DB array order. See design-docs/dependencies.md.
+ */
+export function flattenDisplayOrder(cards: Task[][]): Task[] {
+  const flat: Task[] = []
+  for (const cardTasks of cards) {
+    const idSet = new Set(cardTasks.map((t) => t.id))
+    const childrenByParent = new Map<string, Task[]>()
+    for (const t of cardTasks) {
+      if (t.parentId && idSet.has(t.parentId)) {
+        const arr = childrenByParent.get(t.parentId) ?? []
+        arr.push(t)
+        childrenByParent.set(t.parentId, arr)
+      }
+    }
+    const isChild = (t: Task) => !!(t.parentId && idSet.has(t.parentId))
+    for (const t of cardTasks.filter((x) => !isChild(x))) {
+      flat.push(t)
+      const kids = childrenByParent.get(t.id)
+      if (kids) flat.push(...kids)
+    }
+  }
+  return flat
+}
 
 /**
  * localStorage that never throws. `setItem` raises QuotaExceededError in Safari
@@ -183,6 +214,61 @@ export function sprintTemporalState(
   if (today < startDate) return 'upcoming'
   if (today > endDate) return 'past'
   return 'progress'
+}
+
+/** Whole days from `fromISO` to `toISO` (both `yyyy-mm-dd`), UTC-anchored so DST
+ * never shifts the count. Positive when `toISO` is later. Pure (unlike `dayDiff`,
+ * which reads the live clock) so the expiry signal is testable with a fixed today. */
+export function daysBetween(fromISO: string, toISO: string): number {
+  const a = Date.parse(fromISO + 'T00:00:00Z')
+  const b = Date.parse(toISO + 'T00:00:00Z')
+  return Math.round((b - a) / MS)
+}
+
+/** The four "sprint is lapsing / has lapsed" signals surfaced in the sprint header
+ * banner + sidebar dot (see design-docs/sprint-expiry-signal.md):
+ *   ended-open        past, still-open work, a next sprint exists → offer rollover
+ *   ended-open-nonext past, still-open work, NO next sprint yet   → offer create+carry
+ *   ended-done        past, everything done                       → offer go-to/create next
+ *   ending-soon       in progress, ends today or tomorrow         → gentle heads-up
+ * `openCount` = unfinished LEAF tasks (containers excluded, matches rollover counting). */
+export type SprintExpiryKind =
+  | 'ended-open'
+  | 'ended-open-nonext'
+  | 'ended-done'
+  | 'ending-soon'
+
+export interface SprintExpiry {
+  kind: SprintExpiryKind
+  /** today − endDate, ≥1 for a lapsed sprint (0 otherwise). */
+  endedDays: number
+  /** endDate − today, 0 (ends today) or 1 (tomorrow) for `ending-soon` (0 otherwise). */
+  endsInDays: number
+}
+
+/** Classify a sprint's expiry signal, or `null` when there's nothing to surface
+ * (mid-sprint with time left, or an upcoming sprint). Pure — pass `today` +
+ * `openCount` + `hasNext` so it's unit-testable and never reads the clock. */
+export function sprintExpirySignal(
+  startDate: string,
+  endDate: string,
+  today: string,
+  openCount: number,
+  hasNext: boolean,
+): SprintExpiry | null {
+  const state = sprintTemporalState(startDate, endDate, today)
+  if (state === 'past') {
+    const endedDays = daysBetween(endDate, today)
+    if (openCount > 0) {
+      return { kind: hasNext ? 'ended-open' : 'ended-open-nonext', endedDays, endsInDays: 0 }
+    }
+    return { kind: 'ended-done', endedDays, endsInDays: 0 }
+  }
+  if (state === 'progress') {
+    const endsInDays = daysBetween(today, endDate)
+    if (endsInDays <= 1) return { kind: 'ending-soon', endedDays: 0, endsInDays }
+  }
+  return null
 }
 
 /** Snap a `yyyy-mm-dd` back to the Monday of its ISO week (Monday unchanged). */
@@ -487,18 +573,61 @@ export function computeBarSegments(
 }
 
 export function useDarkMode() {
+  // safeStorage, not raw localStorage: getItem throws in locked-down
+  // embeddings and this initializer runs on the very first render.
   const [dark, setDark] = useState<boolean>(() => {
-    const stored = localStorage.getItem('plan-up:dark')
+    const stored = safeStorage.get('plan-up:dark')
     if (stored !== null) return stored === '1'
     return window.matchMedia('(prefers-color-scheme: dark)').matches
   })
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', dark)
-    localStorage.setItem('plan-up:dark', dark ? '1' : '0')
+    safeStorage.set('plan-up:dark', dark ? '1' : '0')
   }, [dark])
 
   return [dark, setDark] as const
+}
+
+/**
+ * Brand theme — ZingPlay Fire (default) vs Cupertino Blue. Pure token swap:
+ * the effect stamps `data-brand` on <html> and index.css does the rest
+ * (design-docs/brand-theme.md). Mirrors useDarkMode (safeStorage + effect).
+ */
+export type BrandTheme = 'fire' | 'blue'
+
+export function useBrandTheme() {
+  const [brand, setBrand] = useState<BrandTheme>(() =>
+    safeStorage.get('plan-up:brand') === 'blue' ? 'blue' : 'fire',
+  )
+
+  useEffect(() => {
+    document.documentElement.dataset.brand = brand
+    safeStorage.set('plan-up:brand', brand)
+  }, [brand])
+
+  return [brand, setBrand] as const
+}
+
+/**
+ * Priority-tag colors — soft-tint pill, only for urgent/high (Normal/Low are
+ * the silent default: no tag). ONE source for every view that renders the
+ * pill (sprint list title row, rollover preview) so the tints can't drift.
+ */
+export const PRIORITY_TAG: Record<
+  string,
+  { label: string; bg: string; fg: string }
+> = {
+  urgent: {
+    label: 'Urgent',
+    bg: 'rgba(255,59,48,0.12)',
+    fg: 'color-mix(in srgb, var(--color-priority-urgent) 100%, #000 22%)',
+  },
+  high: {
+    label: 'High',
+    bg: 'rgba(255,149,0,0.15)',
+    fg: 'color-mix(in srgb, var(--color-priority-high) 100%, #000 22%)',
+  },
 }
 
 /** Download any JSON-serialisable payload as a file (Blob + transient anchor). */
@@ -523,3 +652,36 @@ export function slugify(name: string): string {
     .replace(/^-+|-+$/g, '')
   return s || 'project'
 }
+
+/** Days off as effective days — a half-day counts 0.5 (matches scheduler). */
+export function effectiveDaysOff(days: { half?: 'am' | 'pm' }[]): number {
+  return days.reduce((s, d) => s + (d.half ? 0.5 : 1), 0)
+}
+
+/**
+ * Off-days falling within an inclusive [start, end] date range (yyyy-mm-dd
+ * lexical compare). Used to scope the sprint-view days-off control to the
+ * sprint being viewed; settings passes no range and sees the full list.
+ * See design-docs/members-and-days-off.md.
+ */
+export function daysOffInRange<T extends { date: string }>(
+  days: T[],
+  start: string,
+  end: string
+): T[] {
+  return days.filter((d) => d.date >= start && d.date <= end)
+}
+
+/** Trim a day count for display: 2 → "2", 1.5 → "1.5". */
+export function fmtDays(n: number): string {
+  return Number.isInteger(n) ? String(n) : n.toFixed(1)
+}
+
+/** Curated emoji for a project icon (see project-icon-emoji.md) — the 15 most
+ *  project-relevant glyphs, sized to exactly two rows alongside the leading "Aa"
+ *  chip (8 cols × 2). Everything else is reached through the search box, which
+ *  filters the shared `EMOJI` keyword set (and surfaces any pasted emoji). */
+export const PROJECT_ICON_EMOJIS = [
+  '🚀', '🎯', '✅', '📌', '📋', '💡', '🔥', '⭐',
+  '📈', '🐛', '🔧', '🎨', '🧩', '📦', '🗂️',
+]

@@ -1,7 +1,7 @@
 {
   "name": "plan-up",
   "private": true,
-  "version": "0.0.13",
+  "version": "0.0.54",
   "type": "module",
   "scripts": {
     "dev": "node server/openai-gateway.mjs",
@@ -11,21 +11,31 @@
     "lint": "eslint .",
     "preview": "NODE_ENV=production node server/openai-gateway.mjs",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "tauri": "tauri"
   },
   "dependencies": {
     "@tanstack/react-table": "^8.21.3",
+    "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/plugin-dialog": "^2.7.1",
+    "@tauri-apps/plugin-opener": "^2.5.4",
+    "@tauri-apps/plugin-process": "^2.3.1",
+    "@tauri-apps/plugin-updater": "^2.10.1",
     "dexie": "^4.4.3",
     "dexie-react-hooks": "^4.4.0",
     "lucide-react": "^1.17.0",
+    "lz-string": "^1.5.0",
+    "modern-screenshot": "^4.7.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@tailwindcss/vite": "^4.3.0",
+    "@tauri-apps/cli": "^2.11.4",
     "@types/node": "^24.12.3",
     "@types/react": "^19.2.14",
+    "@vercel/node": "^5.3.0",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.1",
     "eslint": "^10.3.0",

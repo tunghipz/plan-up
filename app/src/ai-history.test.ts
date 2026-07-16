@@ -37,7 +37,7 @@ describe('AI chat history persistence', () => {
     })
 
     const payload = await exportAll()
-    expect(payload.version).toBe(5)
+    expect(payload.version).toBe(7)
     expect(payload.aiThreads).toHaveLength(1)
     expect(payload.aiMessages).toHaveLength(1)
 

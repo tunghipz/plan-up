@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { computeMemberConflicts } from './SprintView'
+import { computeMemberConflicts } from './sprint-logic'
 import type { Member, Task } from './db'
 
 const P = 'proj'

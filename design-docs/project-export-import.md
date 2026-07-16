@@ -1,11 +1,11 @@
 # Project export / import (shareable project files)
 
 **Status:** Implemented
-**Last updated:** 2026-06-19 (corrupt project-file branch)
+**Last updated:** 2026-07-08 (drawer's inline "Share this project" row removed — header Export menu is the single entry point)
 **Code:** `app/src/project-io.ts` (`ProjectBundle`, `isProjectBundle`, `remapBundle`),
-`app/src/db.ts` (`exportProject`, `importProject`), `app/src/App.tsx` (header split-menu,
+`app/src/io.ts` (`exportProject`, `importProject`; re-exported by the `db.ts` facade), `app/src/App.tsx` (header split-menu,
 `handleImportFile`, import toast, `downloadJson`), `app/src/ProjectSettingsView.tsx`
-(inline "Share this project" export).
+(header Export menu).
 
 ## Purpose
 Turn a single project into a portable file that can be emailed / dropped in chat / committed
@@ -24,7 +24,7 @@ Two entry points, complementary by role (see the demo `demo/export-per-project.h
 - **Header split-menu** — the `Export` toolbar button opens a small menu:
   - *Export this project* — current project only → downloads `plan-up-<slug>-YYYY-MM-DD.json`.
   - *Export all (full backup)* — the existing whole-DB backup (`plan-up-YYYY-MM-DD.json`).
-- **Project settings → inline** — a "Share this project" row at the foot of the Project card
+- ~~Project settings → inline "Share this project" row~~ — **removed 2026-07-08** (duplicate affordance; the header Export ▾ → *Export this project* is the single entry point)
   (after a hairline) with an `Export` action, scoped to the project being edited.
 
 ### Import (one button, auto-detect)
@@ -40,7 +40,7 @@ full-backup path. Branches:
   *"Imported '<name>' as a new project · N sprints · N tasks · N members"* with an **Undo**
   action (deletes the just-imported project — safe because add-as-new is reversible). The new
   project is selected.
-- **legacy full backup (v1–4) → replace-all.** Unchanged: the Cupertino "Replace all data?"
+- **full backup (v1–5) → replace-all.** Unchanged: the Cupertino "Replace all data?"
   confirm sheet, destructive, then wipes & restores.
 
 ## Data
@@ -62,8 +62,11 @@ A project export is a `ProjectBundle` (`version: 5`, `kind: 'project'`) — **no
 }
 ```
 
-`importAll`'s version allow-list stays `[1, 2, 3, 4]` — a `version: 5` / non-project file is
-**rejected** by the replace-all path, never routed to a wipe.
+`importAll`'s version allow-list is now `[1, 2, 3, 4, 5]` — the full-DB `ExportPayload`
+itself reached **v5** (it carries `people`; see
+[persistence-and-backup.md](./persistence-and-backup.md)). The two file kinds are therefore
+told apart by the **`kind: 'project'` marker, not the version number**: a project bundle is
+committed to the additive path (and rejected there if malformed), never routed to a wipe.
 
 ## Implementation
 
@@ -102,7 +105,7 @@ Rules:
   `max+1`), so the next task created in the imported project self-corrects from the imported
   rows. No seeding, no collision.
 
-### `db.ts` (thin wrappers)
+### `io.ts` (thin wrappers)
 - **`exportProject(projectId): Promise<ProjectBundle>`** — reads the 6 tables filtered by
   `projectId`, returns a `ProjectBundle` (`version: 5`).
 - **`importProject(bundle): Promise<{projectId; projectName; taskCount}>`** —
@@ -114,7 +117,7 @@ Rules:
 - `App.tsx`: `downloadJson(name, data)` helper (extracted from the old inline Blob+anchor).
   Header `Export` becomes a split-menu; `handleImportFile` parses, then `isProjectBundle(data)`
   → `importProject` + toast (no confirm) + select new project; else → `importAll` (confirm).
-- `ProjectSettingsView.tsx`: inline "Share this project" export row in the Project card.
+- `ProjectSettingsView.tsx`: no longer hosts an export row (removed 2026-07-08).
 - A lightweight transient **toast** (slide-up from bottom, optional action button) for the
   non-destructive import. Auto-dismisses; Undo deletes the imported project (`deleteProject`).
 

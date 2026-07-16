@@ -17,12 +17,9 @@ import {
   recomputeDates,
   recomputeAllDates,
   addDays,
-  addBusinessDays,
-  nextBusinessDay,
   isWeekend,
   setMemberDaysOff,
   setMemberAvatar,
-  computeWorkingTimes,
   moveUnfinishedToNextSprint,
   createProject,
   deleteProject,
@@ -43,8 +40,12 @@ import {
   nextMemberOrder,
   setMemberOrder,
   renormalizeMemberOrder,
+  getProjectShare,
+  getShareForRef,
+  saveShareRecord,
   type Task,
   type Member,
+  type ShareRecord,
 } from './db'
 
 // All tests run inside this synthetic project. Saves having to thread a
@@ -86,11 +87,17 @@ describe('colorForName', () => {
 })
 
 describe('seedIfEmpty', () => {
-  it('seeds 3 members + 1 sprint + 1 task on empty db', async () => {
-    await seedIfEmpty()
+  it('seeds 3 members + 1 sprint + 1 task on empty db and resolves true', async () => {
+    expect(await seedIfEmpty()).toBe(true)
     expect(await db.members.count()).toBe(3)
     expect(await db.sprints.count()).toBe(1)
     expect(await db.tasks.count()).toBe(1)
+  })
+
+  it('resolves false when data already exists (no fresh-start notice)', async () => {
+    await seedIfEmpty()
+    __resetSeedLockForTests()
+    expect(await seedIfEmpty()).toBe(false)
   })
 
   it('is idempotent — does not re-seed when members exist', async () => {
@@ -311,21 +318,6 @@ describe('date computation', () => {
     expect(isWeekend('2026-06-08')).toBe(false) // Mon
   })
 
-  it('nextBusinessDay: weekday unchanged, weekend → next Monday', () => {
-    expect(nextBusinessDay('2026-06-05')).toBe('2026-06-05') // Fri
-    expect(nextBusinessDay('2026-06-06')).toBe('2026-06-08') // Sat → Mon
-    expect(nextBusinessDay('2026-06-07')).toBe('2026-06-08') // Sun → Mon
-  })
-
-  it('addBusinessDays skips weekends', () => {
-    // Mon 06-01 + 4 business days = Fri 06-05
-    expect(addBusinessDays('2026-06-01', 4)).toBe('2026-06-05')
-    // Fri 06-05 + 1 business day = Mon 06-08 (skips Sat/Sun)
-    expect(addBusinessDays('2026-06-05', 1)).toBe('2026-06-08')
-    // Mon 06-01 + 5 business days = Mon 06-08 (full week)
-    expect(addBusinessDays('2026-06-01', 5)).toBe('2026-06-08')
-  })
-
   it('computeStartEnd: prereq ends Friday → dependent starts Monday', () => {
     const p: Task = {
       id: 'p', projectId: P, sequence: 1, title: 'p', assigneeId: null, sprintId: 's',
@@ -339,21 +331,6 @@ describe('date computation', () => {
     expect(computeStartEnd(a, byId)).toEqual({
       startDate: '2026-06-08', dueDate: '2026-06-10',
     })
-  })
-
-  it('addBusinessDays skips member-specific off-days', () => {
-    // Mon 06-01 + 4 with Wed 06-03 off → Mon, Tue, [skip Wed], Thu, Fri, Mon
-    // Wait: counting business days FORWARD from Mon. addBusinessDays(start, n)
-    // advances n working days, returning the n-th. With 06-03 off, the days
-    // counted are Tue, Thu, Fri, Mon → end = Mon 06-08.
-    const off = new Set(['2026-06-03'])
-    expect(addBusinessDays('2026-06-01', 4, off)).toBe('2026-06-08')
-  })
-
-  it('nextBusinessDay skips member-specific off-days', () => {
-    const off = new Set(['2026-06-08']) // Monday off
-    // 06-06 Sat → skip Sat, Sun, Mon (off) → Tue 06-09
-    expect(nextBusinessDay('2026-06-06', off)).toBe('2026-06-09')
   })
 
   it('computeStartEnd uses assignee daysOff', () => {
@@ -483,7 +460,7 @@ describe('date computation', () => {
     expect(computeStartEnd(t, byId, memberById)).toEqual({
       startDate: '2026-06-04', dueDate: '2026-06-08',
     })
-    expect(computeWorkingTimes(t, byId, memberById).endTime).toBe('17:00')
+    expect(computeWorkingPlan(t, byId, memberById).endTime).toBe('17:00')
   })
 
   it('computeWorkingPlan ignores a STALE stored dueDate — date + time come from one live plan', () => {
@@ -674,7 +651,7 @@ describe('date computation', () => {
       startDate: '2026-06-04', dueDate: '2026-06-05',
     })
     // Times: B starts PM, ends mid-day Fri.
-    expect(computeWorkingTimes(b, byId)).toEqual({
+    expect(computeWorkingPlan(b, byId)).toMatchObject({
       startTime: '13:00', endTime: '12:00',
     })
   })
@@ -698,7 +675,7 @@ describe('date computation', () => {
     expect(computeStartEnd(b, byId)).toEqual({
       startDate: '2026-06-04', dueDate: '2026-06-04',
     })
-    expect(computeWorkingTimes(b, byId)).toEqual({
+    expect(computeWorkingPlan(b, byId)).toMatchObject({
       startTime: '08:00', endTime: '17:00',
     })
   })
@@ -760,6 +737,40 @@ describe('date computation', () => {
     expect(c?.dueDate).toBe('2026-06-04')
   })
 
+  it('re-linking to an unscheduled prereq clears the stale derived start', async () => {
+    // Regression: the start is purely prereq-derived when prereqs exist (the
+    // cell is locked). Re-linking from a scheduled prereq to one with no due
+    // date must NOT leave the old derived start lingering.
+    await db.tasks.bulkAdd([
+      {
+        id: 'a', projectId: P, sequence: 1, title: 'a', assigneeId: null, sprintId: 's',
+        status: 'todo', priority: 'normal',
+        startDate: '2026-06-05', dueDate: '2026-06-05', // Fri, scheduled
+        estimate: 1, createdAt: 0, dependsOn: [],
+      },
+      {
+        id: 'b', projectId: P, sequence: 2, title: 'b', assigneeId: null, sprintId: 's',
+        status: 'todo', priority: 'normal',
+        startDate: null, dueDate: null, // unscheduled → no anchor
+        estimate: null, createdAt: 1, dependsOn: [],
+      },
+      {
+        id: 't', projectId: P, sequence: 3, title: 't', assigneeId: null, sprintId: 's',
+        status: 'todo', priority: 'normal',
+        startDate: null, dueDate: null,
+        estimate: 2, createdAt: 2, dependsOn: [],
+      },
+    ])
+    await setDependencies('t', ['a'])
+    expect((await db.tasks.get('t'))?.startDate).toBe('2026-06-08') // Mon after Fri
+    await setDependencies('t', ['b'])
+    expect((await db.tasks.get('t'))?.startDate).toBeNull()
+    // And once b gets scheduled, t's start follows the new prereq.
+    await db.tasks.update('b', { startDate: '2026-06-15', dueDate: '2026-06-15', estimate: 1 })
+    await recomputeDates('b')
+    expect((await db.tasks.get('t'))?.startDate).toBe('2026-06-16')
+  })
+
   it('setDependencies drops cycles silently', async () => {
     await db.tasks.bulkAdd([
       {
@@ -777,6 +788,67 @@ describe('date computation', () => {
     ])
     // Cycle attempt: b depends on a, but a already depends on b.
     const saved = await setDependencies('b', ['a'])
+    expect(saved).toEqual([])
+  })
+})
+
+describe('group (parent) task as a prerequisite', () => {
+  // Parent G with two children; C2 ends latest (Wed 06-03). A dependent T anchors
+  // on the group's rolled-up end. See design-docs/task-groups.md.
+  const base = {
+    projectId: P, assigneeId: null, sprintId: 's',
+    status: 'todo' as const, priority: 'normal' as const,
+    startDate: null as string | null, dueDate: null as string | null,
+    estimate: null as number | null, createdAt: 0, dependsOn: [] as string[],
+  }
+  async function seedGroup() {
+    await db.tasks.bulkAdd([
+      { ...base, id: 'G', sequence: 1, title: 'Group' }, // parent (has children)
+      { ...base, id: 'C1', sequence: 2, title: 'c1', parentId: 'G', startDate: '2026-06-01', estimate: 1 }, // Mon → 06-01
+      { ...base, id: 'C2', sequence: 3, title: 'c2', parentId: 'G', startDate: '2026-06-01', estimate: 3 }, // Mon..Wed → 06-03
+      { ...base, id: 'T', sequence: 4, title: 't', estimate: 1, createdAt: 1 },
+    ])
+  }
+
+  it('a task depending on a group starts after the group’s latest child end', async () => {
+    await seedGroup()
+    await setDependencies('T', ['G'])
+    const t = await db.tasks.get('T')
+    expect(t?.startDate).toBe('2026-06-04') // Thu, after C2 ends Wed 06-03
+    expect(t?.dueDate).toBe('2026-06-04')
+  })
+
+  it('editing a child re-flows the dependent (cascade through the parent)', async () => {
+    await seedGroup()
+    await setDependencies('T', ['G'])
+    expect((await db.tasks.get('T'))?.startDate).toBe('2026-06-04')
+    // Extend C2 to 4 days → ends Thu 06-04 → T must move to Fri 06-05.
+    await db.tasks.update('C2', { estimate: 4 })
+    await recomputeDates('C2')
+    expect((await db.tasks.get('T'))?.startDate).toBe('2026-06-05')
+  })
+
+  it('a task is blocked until every child of its group-prereq is done', async () => {
+    await seedGroup()
+    await setDependencies('T', ['G'])
+    const blocked = async () => {
+      const byId = new Map((await db.tasks.toArray()).map((x) => [x.id, x]))
+      return isTaskBlocked(byId.get('T')!, byId)
+    }
+    expect(await blocked()).toBe(true)
+    await db.tasks.update('C1', { status: 'done' })
+    expect(await blocked()).toBe(true) // C2 still open
+    await db.tasks.update('C2', { status: 'done' })
+    expect(await blocked()).toBe(false) // whole group done
+  })
+
+  it('rejects a cycle formed through group membership', async () => {
+    await seedGroup()
+    await setDependencies('T', ['G']) // T waits for the group (incl. C1)
+    // C1 trying to depend on T closes the loop T → G → C1 → T.
+    const tasks = await db.tasks.toArray()
+    expect(wouldCreateCycle('C1', 'T', tasks)).toBe(true)
+    const saved = await setDependencies('C1', ['T'])
     expect(saved).toEqual([])
   })
 })
@@ -866,7 +938,9 @@ describe('moveUnfinishedToNextSprint', () => {
     expect((await db.tasks.get('c'))?.sprintId).toBe(s1.id) // done stays
   })
 
-  it('bumps stale start dates up to the target sprint start', async () => {
+  it('preserves the task start date on rollover (no pull-forward to target start)', async () => {
+    // A rollover must keep ALL task info — including a start that predates the
+    // target sprint. See design-docs/sprint-rollover.md (decision 2026-07-06).
     const s1 = { id: 's1', projectId: P, name: 'A', startDate: '2026-06-01', endDate: '2026-06-14' }
     const s2 = { id: 's2', projectId: P, name: 'B', startDate: '2026-06-15', endDate: '2026-06-28' }
     await db.sprints.bulkAdd([s1, s2])
@@ -878,7 +952,110 @@ describe('moveUnfinishedToNextSprint', () => {
     })
     await moveUnfinishedToNextSprint(s1.id)
     const t = await db.tasks.get('t')
-    expect(t?.startDate).toBe('2026-06-15') // bumped to s2.startDate
+    expect(t?.sprintId).toBe('s2') // moved
+    expect(t?.startDate).toBe('2026-06-02') // KEPT — not bumped to s2.startDate
+  })
+
+  it('preserves a user-set start + effort-driven due across a rollover', async () => {
+    // Mirrors the real UI flow: task created with an auto start, user edits it,
+    // then rolls it over — the edited start survives and the effort end follows it.
+    const s1 = { id: 's1', projectId: P, name: 'A', startDate: '2026-06-01', endDate: '2026-06-14' }
+    const s2 = { id: 's2', projectId: P, name: 'B', startDate: '2026-06-22', endDate: '2026-07-05' }
+    await db.sprints.bulkAdd([s1, s2])
+    await db.tasks.add({
+      id: 't', projectId: P, sequence: 1, title: 't', assigneeId: null, sprintId: s1.id,
+      status: 'todo', priority: 'normal',
+      startDate: '2026-06-03', dueDate: '2026-06-05', estimate: 3, createdAt: 0, // Wed..Fri
+      dependsOn: [],
+    })
+    await moveUnfinishedToNextSprint(s1.id)
+    const t = await db.tasks.get('t')
+    expect(t?.sprintId).toBe('s2')
+    expect(t?.startDate).toBe('2026-06-03') // user's start preserved
+    expect(t?.dueDate).toBe('2026-06-05') // 3-day effort from Wed → Fri, unchanged
+  })
+
+  it('unlinks a prereq left behind, keeping the moved task editable + dated', async () => {
+    // A done prereq stays in the source sprint while its dependent rolls over.
+    // The dangling cross-sprint link would keep the dependent's start locked, so
+    // rollover drops it — the task keeps its date but becomes editable again.
+    // See design-docs/sprint-rollover.md (2026-07-14).
+    const s1 = { id: 's1', projectId: P, name: 'A', startDate: '2026-06-01', endDate: '2026-06-14' }
+    const s2 = { id: 's2', projectId: P, name: 'B', startDate: '2026-06-15', endDate: '2026-06-28' }
+    await db.sprints.bulkAdd([s1, s2])
+    await db.tasks.bulkAdd([
+      {
+        id: 'dep', projectId: P, sequence: 1, title: 'dep', assigneeId: null, sprintId: s1.id,
+        status: 'done', priority: 'normal',
+        startDate: '2026-06-02', dueDate: '2026-06-03', estimate: 1, createdAt: 0, dependsOn: [],
+      },
+      {
+        id: 't', projectId: P, sequence: 2, title: 't', assigneeId: null, sprintId: s1.id,
+        status: 'todo', priority: 'normal',
+        startDate: '2026-06-04', dueDate: null, estimate: null, createdAt: 0, dependsOn: ['dep'],
+      },
+    ])
+    await moveUnfinishedToNextSprint(s1.id)
+    const dep = await db.tasks.get('dep')
+    const t = await db.tasks.get('t')
+    expect(dep?.sprintId).toBe('s1') // done prereq stays behind
+    expect(t?.sprintId).toBe('s2') // dependent rolls over
+    expect(t?.dependsOn).toEqual([]) // stale link dropped → start unlocked
+    expect(t?.startDate).toBe('2026-06-04') // date preserved (now a manual value)
+  })
+
+  it('keeps a prereq link when both ends roll over together', async () => {
+    const s1 = { id: 's1', projectId: P, name: 'A', startDate: '2026-06-01', endDate: '2026-06-14' }
+    const s2 = { id: 's2', projectId: P, name: 'B', startDate: '2026-06-15', endDate: '2026-06-28' }
+    await db.sprints.bulkAdd([s1, s2])
+    await db.tasks.bulkAdd([
+      {
+        id: 'dep', projectId: P, sequence: 1, title: 'dep', assigneeId: null, sprintId: s1.id,
+        status: 'in_progress', priority: 'normal',
+        startDate: '2026-06-02', dueDate: null, estimate: 1, createdAt: 0, dependsOn: [],
+      },
+      {
+        id: 't', projectId: P, sequence: 2, title: 't', assigneeId: null, sprintId: s1.id,
+        status: 'todo', priority: 'normal',
+        startDate: '2026-06-04', dueDate: null, estimate: null, createdAt: 0, dependsOn: ['dep'],
+      },
+    ])
+    await moveUnfinishedToNextSprint(s1.id)
+    const dep = await db.tasks.get('dep')
+    const t = await db.tasks.get('t')
+    expect(dep?.sprintId).toBe('s2') // both roll over
+    expect(t?.sprintId).toBe('s2')
+    expect(t?.dependsOn).toEqual(['dep']) // in-sprint chain stays intact
+  })
+
+  it('drops only left-behind SOURCE-sprint prereqs, keeping moved + cross-sprint links', async () => {
+    // The safety-critical property: unlink ONLY prereqs that stayed behind in the
+    // rolled sprint. A prereq in another sprint (never touched) and a prereq that
+    // rolls over WITH the dependent must both survive. See sprint-rollover.md.
+    const s0 = { id: 's0', projectId: P, name: 'Old', startDate: '2026-05-18', endDate: '2026-05-31' }
+    const s1 = { id: 's1', projectId: P, name: 'A', startDate: '2026-06-01', endDate: '2026-06-14' }
+    const s2 = { id: 's2', projectId: P, name: 'B', startDate: '2026-06-15', endDate: '2026-06-28' }
+    await db.sprints.bulkAdd([s0, s1, s2])
+    await db.tasks.bulkAdd([
+      // done prereq in an EARLIER sprint — not part of the rolled sprint → must survive
+      { id: 'ext', projectId: P, sequence: 1, title: 'ext', assigneeId: null, sprintId: s0.id,
+        status: 'done', priority: 'normal', startDate: '2026-05-20', dueDate: '2026-05-21', estimate: 1, createdAt: 0, dependsOn: [] },
+      // done prereq in the SOURCE sprint — stays behind → its link must be dropped
+      { id: 'stay', projectId: P, sequence: 2, title: 'stay', assigneeId: null, sprintId: s1.id,
+        status: 'done', priority: 'normal', startDate: '2026-06-02', dueDate: '2026-06-03', estimate: 1, createdAt: 0, dependsOn: [] },
+      // in-progress prereq in the source sprint — rolls over WITH the dependent → link kept
+      { id: 'moved', projectId: P, sequence: 3, title: 'moved', assigneeId: null, sprintId: s1.id,
+        status: 'in_progress', priority: 'normal', startDate: '2026-06-04', dueDate: null, estimate: 1, createdAt: 0, dependsOn: [] },
+      { id: 't', projectId: P, sequence: 4, title: 't', assigneeId: null, sprintId: s1.id,
+        status: 'todo', priority: 'normal', startDate: '2026-06-06', dueDate: null, estimate: null, createdAt: 0, dependsOn: ['ext', 'stay', 'moved'] },
+    ])
+    await moveUnfinishedToNextSprint(s1.id)
+    const t = await db.tasks.get('t')
+    expect(t?.sprintId).toBe('s2')
+    // 'stay' (left behind in source) dropped; 'ext' (other sprint) + 'moved' (rolled) kept, order preserved
+    expect(t?.dependsOn).toEqual(['ext', 'moved'])
+    expect((await db.tasks.get('ext'))?.sprintId).toBe('s0') // untouched
+    expect((await db.tasks.get('moved'))?.sprintId).toBe('s2') // rolled with t
   })
 
   it('returns null target when there is no next sprint', async () => {
@@ -912,6 +1089,78 @@ describe('moveUnfinishedToNextSprint', () => {
     expect(inS2).toHaveLength(4)
     expect(new Set(seqs).size).toBe(4) // all unique — no collision
     expect(seqs).toEqual([1, 2, 3, 4]) // moved tasks appended after existing max
+  })
+
+  // ── Groups must never split across sprints (see sprint-rollover.md) ──────
+  const sg1 = { id: 's1', projectId: P, name: 'A', startDate: '2026-06-01', endDate: '2026-06-14' }
+  const sg2 = { id: 's2', projectId: P, name: 'B', startDate: '2026-06-15', endDate: '2026-06-28' }
+  const grp = (o: Partial<Task> & { id: string }): Task => ({
+    projectId: P, sequence: o.id.charCodeAt(0), title: o.id, assigneeId: null, sprintId: 's1',
+    status: 'todo', priority: 'normal', startDate: '2026-06-01', dueDate: null,
+    estimate: null, createdAt: 0, dependsOn: [], parentId: null, ...o,
+  })
+
+  it('moves the parent + unfinished children together; done child stays and is ungrouped', async () => {
+    await db.sprints.bulkAdd([sg1, sg2])
+    await db.tasks.bulkAdd([
+      grp({ id: 'P' }),                              // group head (container)
+      grp({ id: 'A', parentId: 'P', status: 'todo' }),
+      grp({ id: 'B', parentId: 'P', status: 'done' }), // done → stays, ungrouped
+    ])
+    const r = await moveUnfinishedToNextSprint('s1')
+    expect(r.targetSprintId).toBe('s2')
+    expect(r.movedCount).toBe(1) // leaf work items moved (A); container P not counted
+    const [pT, aT, bT] = await Promise.all(['P', 'A', 'B'].map((id) => db.tasks.get(id)))
+    expect(pT?.sprintId).toBe('s2') // parent followed its unfinished child
+    expect(aT?.sprintId).toBe('s2')
+    expect(aT?.parentId).toBe('P') // still grouped under P in the new sprint
+    expect(bT?.sprintId).toBe('s1') // done child left behind
+    expect(bT?.parentId).toBeNull() // …and ungrouped — no cross-sprint parent link
+  })
+
+  it('leaves a fully-done group put — parent never rolls over on its own stored status', async () => {
+    await db.sprints.bulkAdd([sg1, sg2])
+    await db.tasks.bulkAdd([
+      grp({ id: 'P', status: 'todo' }),               // stored todo, but it's a container
+      grp({ id: 'A', parentId: 'P', status: 'done' }),
+      grp({ id: 'B', parentId: 'P', status: 'done' }),
+    ])
+    const r = await moveUnfinishedToNextSprint('s1')
+    expect(r.movedCount).toBe(0) // whole group is done → nothing moves
+    const [pT, aT, bT] = await Promise.all(['P', 'A', 'B'].map((id) => db.tasks.get(id)))
+    expect(pT?.sprintId).toBe('s1')
+    expect(aT?.sprintId).toBe('s1')
+    expect(bT?.sprintId).toBe('s1')
+    expect(aT?.parentId).toBe('P') // stays grouped, untouched
+  })
+
+  it('targets the SOURCE project only — never another project sharing a start date', async () => {
+    // porting-game sprints
+    await db.sprints.bulkAdd([sg1, sg2])
+    // a SECOND project whose sprint starts the SAME day as the real target (s2):
+    // the old unscoped orderBy('startDate') could pick THIS as the next sprint
+    // and silently roll tasks into the wrong project.
+    await db.projects.add({ id: 'P2', name: 'Other', createdAt: 0 })
+    await db.sprints.add({ id: 'foreign', projectId: 'P2', name: 'Foreign', startDate: '2026-06-15', endDate: '2026-06-28' })
+    await db.tasks.add(grp({ id: 'a', sprintId: 's1', status: 'todo' }))
+
+    const r = await moveUnfinishedToNextSprint('s1')
+    expect(r.targetSprintId).toBe('s2') // the same-project next sprint, NOT 'foreign'
+    expect((await db.tasks.get('a'))?.sprintId).toBe('s2')
+    expect((await db.tasks.where('sprintId').equals('foreign').count())).toBe(0)
+  })
+
+  it('drags a done parent along when a child is still unfinished (no orphans)', async () => {
+    await db.sprints.bulkAdd([sg1, sg2])
+    await db.tasks.bulkAdd([
+      grp({ id: 'P', status: 'done' }),               // parent marked done…
+      grp({ id: 'A', parentId: 'P', status: 'todo' }), // …but child isn't
+    ])
+    await moveUnfinishedToNextSprint('s1')
+    const [pT, aT] = await Promise.all(['P', 'A'].map((id) => db.tasks.get(id)))
+    expect(pT?.sprintId).toBe('s2') // group cohesion wins over parent's stored status
+    expect(aT?.sprintId).toBe('s2')
+    expect(aT?.parentId).toBe('P')
   })
 })
 
@@ -1288,5 +1537,56 @@ describe('setMemberAvatar', () => {
     await setMemberAvatar(M, { avatarEmoji: '' })
     const m = await db.members.get(M)
     expect(m!.avatarEmoji ?? null).toBe(null)
+  })
+})
+
+describe('getProjectShare (project-scope sprint link, Hướng A)', () => {
+  const share = (over: Partial<ShareRecord>): ShareRecord => ({
+    id: uid(),
+    refId: 'x',
+    kind: 'sprint',
+    slug: 'plan',
+    writeToken: 'wt',
+    url: 'http://x/view/plan-abc',
+    createdAt: 0,
+    updatedAt: 0,
+    projectId: P,
+    ...over,
+  })
+
+  beforeEach(async () => {
+    await db.shares.clear()
+  })
+
+  it('finds the project-scope sprint link by project+kind, not a per-ref one', async () => {
+    // project-scope sprint link: refId = projectId, scope = 'project', points at sprint s1
+    await saveShareRecord(
+      share({ id: 'proj-sprint', refId: P, scope: 'project', currentRefId: 's1', currentLabel: 'Sprint 1' }),
+    )
+    // a legacy per-ref sprint link for some sprint (scope absent) must be ignored
+    await saveShareRecord(share({ id: 'legacy', refId: 's9' }))
+    // a per-ref collection link in the same project must not match kind 'sprint'
+    await saveShareRecord(share({ id: 'coll', refId: 'c1', kind: 'collection' }))
+
+    const rec = await getProjectShare(P, 'sprint')
+    expect(rec?.id).toBe('proj-sprint')
+    expect(rec?.currentRefId).toBe('s1')
+  })
+
+  it('returns undefined when only legacy per-ref sprint links exist', async () => {
+    await saveShareRecord(share({ id: 'legacy', refId: 's9' })) // scope absent
+    expect(await getProjectShare(P, 'sprint')).toBeUndefined()
+  })
+
+  it('scopes by project — a project-scope link in another project is not returned', async () => {
+    await saveShareRecord(
+      share({ id: 'other', refId: 'other-proj', projectId: 'other-proj', scope: 'project', currentRefId: 's1' }),
+    )
+    expect(await getProjectShare(P, 'sprint')).toBeUndefined()
+  })
+
+  it('getShareForRef still finds a per-ref link by its refId', async () => {
+    await saveShareRecord(share({ id: 'coll', refId: 'c1', kind: 'collection' }))
+    expect((await getShareForRef('c1'))?.id).toBe('coll')
   })
 })

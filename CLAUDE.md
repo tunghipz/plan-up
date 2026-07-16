@@ -75,8 +75,8 @@ Khi user nói **"push git"** / "push" / "đẩy lên", chạy lần lượt:
 
 ## Data model
 
-6 IndexedDB tables in `app/src/db.ts`: `projects`, `members`, `sprints`, `tasks`, `collections`, `events`.
-Chi tiết đầy đủ (fields, schema versioning v1..v11, indexes) ở
+7 IndexedDB tables (schema in `app/src/schema.ts`; `app/src/db.ts` is the facade every importer uses): `projects`, `members`, `people`, `sprints`, `tasks`, `collections`, `events`.
+Chi tiết đầy đủ (fields, schema versioning v1..v13, indexes) ở
 [`design-docs/data-model.md`](design-docs/data-model.md).
 
 Schema versioning qua Dexie's `version().stores()` — bump version + thêm upgrade callback khi đổi schema.

@@ -1,8 +1,8 @@
 # Data model
 
 **Status:** Implemented
-**Last updated:** 2026-06-23 (legacy `Collection.kind` is ignored by active Backlog behavior)
-**Code:** `app/src/db.ts`
+**Last updated:** 2026-07-16
+**Code:** `app/src/types.ts` (entity types) + `app/src/schema.ts` (Dexie schema & migrations); `app/src/db.ts` is the facade re-exporting both
 
 ## Purpose
 Define the four entities the whole app revolves around, and the migration
@@ -10,10 +10,11 @@ discipline that lets the schema evolve without losing local data.
 
 ## Entities
 
-Nine IndexedDB tables (Dexie database name **`plan-up`**): `projects`, `members`,
-`sprints`, `tasks`, `collections`, `events`, `people`, `aiThreads`, `aiMessages`.
+Ten IndexedDB tables (Dexie database name **`plan-up`**): `projects`, `members`,
+`sprints`, `tasks`, `collections`, `events`, `people`, `shares`, `aiThreads`,
+`aiMessages`.
 
-### `Project` (`db.ts:19`)
+### `Project` (`types.ts`)
 `id` · `name` · `createdAt` (number) · `description?` (string) · `color?` (hex) · `icon?` (emoji)
 - `description`, `color`, and `icon` are **optional, non-indexed** fields edited from the
   settings page (see [project-member-settings.md](./project-member-settings.md),
@@ -21,7 +22,7 @@ Nine IndexedDB tables (Dexie database name **`plan-up`**): `projects`, `members`
   not indexed, adding them needed **no Dexie version bump**; rows without them fall back to
   `colorForName(name)`, an empty description, and the name's first letter respectively.
 
-### `Member` (`db.ts:25`)
+### `Member` (`types.ts`)
 `id` · `projectId` · `name` · `color` (hex) · `daysOff: DayOff[]` · `title?` (string)
 · `avatarImage?` (string) · `avatarEmoji?` (string) · `order` (number) · `personId?` (string)
 - A member is just a **label** — no auth, no login. The user creates them.
@@ -39,7 +40,7 @@ Nine IndexedDB tables (Dexie database name **`plan-up`**): `projects`, `members`
   (setting one clears the other). Render falls back image → emoji → colored initial. See
   [member-avatars.md](./member-avatars.md).
 
-### `Sprint` (`db.ts:37`)
+### `Sprint` (`types.ts`)
 `id` · `projectId` · `name` · `startDate` · `endDate` (both `yyyy-mm-dd`) · `note?` (string)
 · `archivedAt?` (number)
 - `name` is **automatic and locked** (`Sprint N`) — no rename UI; see [sprints.md](./sprints.md).
@@ -49,12 +50,8 @@ Nine IndexedDB tables (Dexie database name **`plan-up`**): `projects`, `members`
 - `archivedAt?` is an **optional, non-indexed** epoch-ms timestamp (absent = active) —
   again **no Dexie version bump**. Set/cleared via `setSprintArchived`; archived sprints
   leave the active flow. See [sprint-archive.md](./sprint-archive.md).
-- Sprint edit/delete adds no schema fields. `updateSprint` changes `startDate`,
-  derived `endDate`, and/or `note`; `deleteSprint` removes the sprint, its tasks, and
-  its events, then strips deleted task IDs from remaining tasks' dependencies. See
-  [sprints.md](./sprints.md).
 
-### `Task` (`db.ts:45`)
+### `Task` (`types.ts`)
 `id` · `projectId` · `sequence` (number, per-sprint) · `title` · `assigneeId` (`string|null`) ·
 `sprintId` (`string | null`) · `status` · `priority` · `startDate` (`string|null`) · `dueDate` (`string|null`) ·
 `estimate` (`number|null`, effort in days) · `createdAt` · `dependsOn: string[]` (task IDs) ·
@@ -65,26 +62,22 @@ Nine IndexedDB tables (Dexie database name **`plan-up`**): `projects`, `members`
   now lives sprint-wide in the `events` table (`ActivityEvent`, below).
 - `boardOrder` / `listOrder` are **optional, non-indexed** fractional ordering fields —
   manual drag position on the **Board** (per status column) and in the **List** (default
-  order, within a member card) respectively. Both fall back to `sequence` when unset, are
-  **never logged** (arrangement, not data), and need **no Dexie version bump**. `sequence`
-  itself is immutable (task-number + prereq reference) and reordering never touches it.
-  See [board-view.md](./board-view.md) and [list-view.md](./list-view.md).
+  order, within a member card). `listOrder` is **also** the manual order for **collection
+  items within a section** (the pointer-drag reorder in [collections.md](./collections.md);
+  moving an item across tables writes `sectionId` + `listOrder` together). Both fall back to
+  `sequence` when unset, are **never logged** (arrangement, not data), and need **no Dexie
+  version bump**. `sequence` itself is immutable (task-number + prereq reference) and
+  reordering never touches it. See [board-view.md](./board-view.md) and
+  [list-view.md](./list-view.md).
 - `sprintId` is now `string | null` — `null` when the task belongs to a collection.
 - `collectionId?` (`string | null`) — **indexed**. The collection this task belongs to; `null` for sprint tasks. **Invariant: exactly one of `sprintId` / `collectionId` is non-null.**
 - `sectionId?` (`string | null`) — non-indexed. The `Section.id` within the collection (arrangement only, never logged).
 - `collectionStatusId?` (`string | null`) — non-indexed. Points to a `CollectionStatus.id` in the collection's `statuses` array (the user-defined status for this item).
 
-### `Collection` (`db.ts:115`)
+### `Collection` (`types.ts`)
 `id` · `projectId` · `name` · `order` (number, fractional sidebar position) ·
-`sections: Section[]` · `statuses: CollectionStatus[]` · `createdAt` (number) ·
-`kind?` (`'backlog'`, legacy)
+`sections: Section[]` · `statuses: CollectionStatus[]` · `createdAt` (number)
 - `sections` and `statuses` are **embedded arrays** (not separate tables) — ordered, not indexed. A new collection is seeded with 1 section "All" and a default status set the user can edit.
-- `kind?` is optional, non-indexed legacy metadata. Older local data may still
-  contain `kind: 'backlog'`, but active UI/AI behavior ignores it and treats the
-  record as a normal collection.
-- Collection tasks may retain `assigneeId`, `startDate`, `dueDate`, and
-  `estimate` so the user can triage owner/date information before assigning the
-  work to a sprint. Any user-created collection can use the same fields.
 
 ### `Section` (embedded in Collection)
 `id` · `name` · `color?` (optional hex from COLLECTION_PALETTE)
@@ -94,24 +87,22 @@ Nine IndexedDB tables (Dexie database name **`plan-up`**): `projects`, `members`
 `id` · `name` · `color` (hex from COLLECTION_PALETTE)
 - User-defined status per collection (not shared across collections). Embedded in `Collection.statuses`.
 
-### `ActivityEvent` (`db.ts`, table `events`)
+### `ActivityEvent` (`types.ts`, table `events`)
 `id` · `projectId` · `sprintId` · `taskId` (`string|null`) · `taskSeq` (`number|null`) ·
 `taskTitle` (`string|null`) · `kind` · `field?` (`LoggableField`) · `from` (`string|null`) ·
 `to` (`string|null`) · `ts` (number)
-- **Append-only, capped** sprint activity log (see
+- **Append-only, uncapped** sprint activity log (see
   [sprint-activity-log.md](./sprint-activity-log.md)) — the **sole** edit-history surface
   (the per-task `Task.changeLog` it once complemented was removed in v11). Lives in its
   **own table**, so events survive task deletion and aggregate sprint-wide. Collection tasks
   (no sprint) are never logged.
-- `kind`: `'created' | 'edit' | 'rolled_over' | 'sprint_started' | 'sprint_archived' |
-  'sprint_unarchived'`. `field`/`from`/`to` are only meaningful for `'edit'` and reuse the
-  `ChangeLogEntry` grammar (assignee freezes the member NAME; `dependsOn` freezes a
-  seq-range label). `taskSeq`/`taskTitle` are **frozen at write time** so the log stays
-  readable after renumbering or task deletion; deleting a whole sprint removes that sprint's
-  events with it.
+- `kind`: `'created' | 'edit' | 'rolled_over' | 'sprint_started'`. `field`/`from`/`to` are
+  only meaningful for `'edit'` and reuse the `ChangeLogEntry` grammar (assignee freezes the
+  member NAME; `dependsOn` freezes a seq-range label). `taskSeq`/`taskTitle` are **frozen at
+  write time** so the log stays readable after renumbering or deletion.
 - Indexes: `id, sprintId, ts, projectId`.
 
-### `Person` (`db.ts`, table `people`)
+### `Person` (`types.ts`, table `people`)
 `id` · `name` · `color` (hex) · `createdAt` (number)
 - A **real human shared across projects**. A `Member` is one project's membership for a
   person (`Member.personId` → `Person.id`); the same human in N projects is N members but
@@ -122,22 +113,36 @@ Nine IndexedDB tables (Dexie database name **`plan-up`**): `projects`, `members`
   zero remaining members is kept (hidden from the roster), not deleted. Rename/recolor/merge
   via the People roster. See [home-dashboard.md](./home-dashboard.md).
 
-### `AiThread` (`db.ts`, table `aiThreads`)
-`id` · `projectId` · `title` · `createdAt` · `updatedAt` · `skillId?`
-- One persisted AI Chat conversation for one project. The drawer lists recent
-  threads for the current project and opens the latest one by default.
-- `skillId` is a display/debug marker for the bundled skill loaded when the
-  thread was created (`project-management` for the current MVP).
-- Indexes: `id, projectId, updatedAt`.
+### `ShareRecord` (`types.ts`, table `shares`)
+`id` (= the `/view` URL suffix — the store key) · `refId` (per-ref link: the shared
+`sprintId` or `collectionId`; **project-scope sprint link** [`scope: 'project'`]: the
+`projectId` — record isn't bound to one sprint; **indexed**) · `kind`
+(`'sprint' | 'collection'`) · `scope?` (`'ref'` [absent = default: collections + legacy
+sprint links] or `'project'` [one sprint link shared across the whole project, points at
+the last-pushed sprint — Hướng A]) · `currentRefId?` (project-scope: the sprintId whose
+snapshot is currently live) · `currentLabel?` (project-scope: display name of the live
+sprint, shown in the modal) · `slug` (cosmetic URL prefix) · `writeToken` (**secret**,
+local only — authorizes PUT/DELETE on the store) · `url` (full shareable link) · `lastSig`
+(content signature of the snapshot last pushed — the bundle JSON minus the volatile
+`exportedAt`; compared to the current board to know if the link is stale, driving the
+**Update** button) · `createdAt` · `updatedAt` · `projectId`.
+Table added in **v14**. `scope`/`currentRefId`/`currentLabel` are non-indexed optional
+fields (no store-shape change), but **v15** runs a data migration adopting legacy per-ref
+sprint rows into project-scope (see the version table below). Project-scope lookup:
+`getProjectShare(projectId, kind)`. See [hosted-share-link.md](./hosted-share-link.md).
+- Local map of a plan → its **hosted share link** (short, updatable `/view/<slug>-<id>`,
+  data on a Vercel KV / Upstash store). Lets the Share button know a plan is already shared
+  and drives Update/Revoke. Travels in the full backup (v6) so a restore keeps the token.
+- **Not cascade-deleted** on project/plan delete — the store entry's TTL (90 days) cleans it
+  up. See [hosted-share-link.md](./hosted-share-link.md).
 
-### `AiMessage` (`db.ts`, table `aiMessages`)
-`id` · `projectId` · `threadId` · `role` (`user | assistant | system`) ·
-`content` · `ts`
-- Persisted chat messages for one AI thread. `projectId` is duplicated for cheap
-  project-scoped export/delete.
-- The action preview is intentionally not persisted. Only committed chat turns
-  are stored.
-- Indexes: `id, threadId, projectId, ts`.
+### `AiThread` / `AiMessage` (`types.ts`, tables `aiThreads`, `aiMessages`)
+`AiThread`: `id` · `projectId` · `title` · `createdAt` · `updatedAt` · `skillId?`.
+`AiMessage`: `id` · `projectId` · `threadId` · `role` (`'user' | 'assistant' | 'system'`)
+· `content` · `ts`.
+- Per-project AI Chat history, restored by full backup v7 and project import/export.
+- Added in **v16**. `aiThreads` is indexed by `projectId` and `updatedAt`; `aiMessages`
+  by `threadId`, `projectId`, and `ts`. See [ai-chat.md](./ai-chat.md).
 
 ### Value types
 - `ChangeLogEntry`: `{ field: LoggableField; from: string|null; to: string|null;
@@ -149,16 +154,16 @@ Nine IndexedDB tables (Dexie database name **`plan-up`**): `projects`, `members`
   store the **raw** value for stable fields (formatted at render); `assigneeId` freezes the
   resolved member **name** and `dependsOn` freezes a **sequence-range** label at write time
   (the former survives member deletion, the latter survives sequence renumbering).
-- `DayOff` (`db.ts:14`): `{ date: string; half?: 'am' | 'pm' }`. No `half` → whole day off
+- `DayOff` (`types.ts`): `{ date: string; half?: 'am' | 'pm' }`. No `half` → whole day off
   (0 working days); `half` → 0.5 day. AM vs PM is human-readable only; both contribute 0.5.
-- `Status` (`db.ts:3`): `'todo' | 'in_progress' | 'done'`.
-- `Priority` (`db.ts:4`): `'urgent' | 'high' | 'normal' | 'low' | 'none'`.
+- `Status` (`types.ts`): `'todo' | 'in_progress' | 'done'`.
+- `Priority` (`types.ts`): `'urgent' | 'high' | 'normal' | 'low' | 'none'`.
 
 All dates are stored as `yyyy-mm-dd` strings.
 
 ## Schema versioning
 
-Dexie `version().stores()` + an upgrade callback per bump. Current version: **14**.
+Dexie `version().stores()` + an upgrade callback per bump. Current version: **16**.
 
 | Ver | Change |
 | --- | --- |
@@ -175,7 +180,9 @@ Dexie `version().stores()` + an upgrade callback per bump. Current version: **14
 | 11 | Remove the per-task `Task.changeLog` field (per-task change log removed). Upgrade strips the dead property from existing task rows; no index change. |
 | 12 | Add `Member.order` (non-indexed manual lane order); backfill per project to `0..N-1` in current `toArray()` order. See [member-lane-order.md](./member-lane-order.md). |
 | 13 | Add `people` table + indexed `Member.personId` (re-declare full `members` store). Backfill groups existing members by normalized name across all projects → one person each, linked. Scheduler untouched. See [home-dashboard.md](./home-dashboard.md). |
-| 14 | Add `aiThreads` + `aiMessages` for per-project AI Chat history. No backfill. |
+| 14 | Add `shares` table (hosted share links). No backfill — nobody has a share yet. See [hosted-share-link.md](./hosted-share-link.md). |
+| 15 | Adopt legacy per-ref **sprint** shares into the project-scope model (Hướng A): each `shares` row with `kind='sprint'` and no `scope` is rewritten `scope='project'`, `currentRefId=<old sprintId>`, `refId=projectId`. Collections untouched. No index change. See [hosted-share-link.md](./hosted-share-link.md). |
+| 16 | Add `aiThreads` and `aiMessages` tables for per-project AI Chat history. No backfill. Full backup export version becomes v7. See [ai-chat.md](./ai-chat.md). |
 
 Current indexes:
 - `projects`: `id, name, createdAt`
@@ -185,6 +192,7 @@ Current indexes:
 - `tasks`: `id, sprintId, assigneeId, status, createdAt, projectId, collectionId`
 - `collections`: `id, projectId, order`
 - `events`: `id, sprintId, ts, projectId`
+- `shares`: `id, refId, projectId`
 - `aiThreads`: `id, projectId, updatedAt`
 - `aiMessages`: `id, threadId, projectId, ts`
 
@@ -193,3 +201,6 @@ Current indexes:
   mutate an existing version block.
 - `dependsOn` stores task **IDs** (stable), never sequence numbers — so renumbering a
   sprint's sequences never breaks dependency links.
+- `deleteProject` wipes **every project-owned row** in one transaction: the project's
+  `tasks`, `sprints`, `members`, `collections` **and** `events` (the `projectId` index on
+  events exists for exactly this wipe) — nothing is left orphaned.

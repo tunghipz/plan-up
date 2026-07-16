@@ -33,3 +33,6 @@ coverage/
 # Local design demo HTMLs (not for repo)
 demo/
 .gstack/
+
+# Built installers copied out for sharing (binaries — not for git)
+*.dmg

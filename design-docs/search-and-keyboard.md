@@ -1,7 +1,7 @@
 # Search & keyboard
 
 **Status:** Implemented
-**Last updated:** 2026-06-16
+**Last updated:** 2026-07-02 (⌘K gets the same guards as `/`; `n` inert while viewing a collection)
 **Code:** `app/src/App.tsx` (`SearchPalette`, key handler, scroll-to-task), `SprintView.tsx`
 (`data-task-id`, flash highlight)
 
@@ -34,7 +34,10 @@ idiom, matching the Cupertino DNA (calm chrome, depth).
 | `⌘/Ctrl + Shift + D` | Toggle dark mode |
 
 Single-key shortcuts (`/`, `n`) are ignored while typing in an `input`/`textarea`/contentEditable;
-`⌘K` works anywhere.
+`⌘K` works even while typing — but it carries the **same context guards as `/`**: no palette
+over settings, with no sprint selected, or on the **Home overview** (previously ⌘K could open
+there and mutate hidden view state / scroll nowhere). `n` is likewise **inert while viewing a
+collection** — sprint shortcuts fire only where sprints are on screen.
 
 ### While the settings page is open
 See [project-member-settings.md](./project-member-settings.md):

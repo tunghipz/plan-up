@@ -1,0 +1,115 @@
+# Desktop app (Tauri 2, macOS)
+
+**Status:** Implemented
+**Last updated:** 2026-07-16 (collapsed sidebar → icon rail replaces the capsule marginLeft shove)
+**Code:** `app/src-tauri/` (shell), `app/vite.config.ts`, `app/src/VersionFooter.tsx`, `.github/workflows/release.yml`
+
+## Purpose
+Run plan-up as a native macOS desktop app instead of a browser tab. Same React code,
+same local-first IndexedDB — Tauri 2 just wraps the Vite build in a WKWebView window.
+Chosen over Electron/PWA for weight (a few MB) and fit with the calm/local-first DNA.
+macOS only for now; Windows would be a CI-only addition later.
+
+## User-facing behavior
+- Standalone app window, 1280×800 (min 900×600).
+- **Overlay title bar (2026-07-09, Finder-style — demo `demo/desktop-overlay-titlebar.html`):**
+  no separate title-bar strip; content runs to the top edge and the traffic lights
+  float over the sidebar. `tauri.conf.json` window: `titleBarStyle: "Overlay"` +
+  `hiddenTitle: true` + `trafficLightPosition {x:14,y:24}`. React side (all gated on
+  `IS_TAURI`, web unchanged):
+  - **tao inset gotcha (2026-07-09):** tao's `inset_traffic_lights` sets the titlebar
+    container height to `buttonHeight + y` but the buttons stay anchored to the
+    container *bottom* (~8pt offset), so the real top gap ≈ `y − 8`, not `y`.
+    `y: 24` lands the lights ~16pt from the top — optically centered in the 44pt
+    zone (34px drag strip + 10px sidebar padding) above the project cover.
+  - **Drag permission (2026-07-09):** `core:window:default` does NOT include
+    `allow-start-dragging` — without adding `core:window:allow-start-dragging` to
+    `capabilities/default.json`, every `data-tauri-drag-region` mousedown is
+    permission-denied and the window can't be moved.
+  - Sidebar gets a 34px top spacer that is a **window drag region**
+    (`data-tauri-drag-region` — the attribute only catches mousedown on the element
+    itself, so children stay clickable).
+  - The header toolbar capsule is also a drag region (its empty background).
+  - **Collapsed-sidebar → icon rail (2026-07-16, demo `demo/topbar-align-fix.html` variant A-rail):**
+    with the sidebar at width 0 the lights sat over the capsule's left buttons, so the
+    capsule used to take `marginLeft: 74px` — but the content card below stayed at its
+    `mx-6` edge, so the breadcrumb (~126px) and the page title (~44px) landed on two
+    different rails (the reported misalignment). Fix: collapsing on desktop no longer
+    goes to a bare 0-width gap. It leaves a **74px vibrancy icon rail** (`w-[74px]`,
+    same width as the traffic-light safe zone) holding, top-down: the 34px drag strip
+    (lights float over it), the `PanelLeft` **show-sidebar** toggle, the current
+    **project tile** (click = re-open the sidebar), **search** (⌘K, sprint only), and a
+    **dark-mode** toggle pinned at the bottom (`mt-auto`). Because the rail is a real
+    flex sibling before the main column, the toolbar + content flow naturally to its
+    right — the old `marginLeft` shove is **removed**, and the capsule's own toggle is
+    hidden while the rail is up (the rail owns it). Breadcrumb and title now share the
+    rail edge (topbar `mx-3`, card `mx-6` — the same 12px stagger as when the sidebar is
+    open). Web build (no lights) keeps the plain 0-width collapse + capsule toggle.
+  - **Browser preview of the desktop chrome (2026-07-16):** the rail + drag regions are
+    gated on `DESKTOP_CHROME = IS_TAURI || FORCE_DESKTOP_CHROME`, where
+    `FORCE_DESKTOP_CHROME` is on when the URL has `?desktop=1` **or**
+    `localStorage['plan-up:forceDesktopChrome'] === '1'`. In that forced-preview mode
+    (browser only, `!IS_TAURI`) the app also paints three **fake traffic lights**
+    (`position: fixed` top-left) so `npm run dev` at `localhost:5173/?desktop=1` shows
+    the exact desktop layout against real IndexedDB data. Auto-backup and other true
+    Tauri features stay gated on `IS_TAURI` (never faked).
+- Distributed as a **universal** `.dmg` from GitHub Releases — one build runs on
+  both Intel and Apple Silicon Macs (`universal-apple-darwin`; Intel restored
+  2026-07-10 after being dropped 2026-07-08), built on every `v*` tag.
+- **Unsigned** — first launch needs right-click → Open (or
+  `xattr -dr com.apple.quarantine /Applications/plan-up.app`) to pass Gatekeeper.
+- **Auto update (2026-07-08):** the desktop build now has its own update pill via
+  the Tauri updater — see [desktop-auto-update.md](./desktop-auto-update.md).
+- Desktop-only extra: **Auto backup** to a folder — see [auto-backup.md](./auto-backup.md).
+
+## Data
+None of its own. IndexedDB runs intact inside WKWebView, **but it is a separate store
+from any browser's** — first desktop launch starts empty (seeds the demo project);
+carry data over with Export all → Import. The store lives in the app's WebKit
+container (`~/Library/WebKit/com.planup.desktop/`), which macOS can in principle
+reset — the auto-backup feature is the durability mitigation.
+
+## Implementation
+- Shell in `app/src-tauri/` (project rule: all code under `app/`): `tauri.conf.json`,
+  `Cargo.toml`, `src/lib.rs` (plugins + the two backup commands), `src/main.rs`,
+  `build.rs`, `capabilities/default.json`, `icons/`.
+- `tauri.conf.json`: `"version": "../package.json"` — Tauri reads the version straight
+  from `app/package.json`, so the existing `npm version patch` push flow covers the
+  desktop app too. `devUrl` :5173 with `beforeDevCommand: npm run dev`;
+  `frontendDist: ../dist` with `beforeBuildCommand: npm run build`.
+- Capabilities: only `core:default` + `dialog:allow-open`. **No fs plugin** — file
+  writes go through two custom Rust commands (see auto-backup.md security model).
+- Icon: generated by `app/scripts/make-tauri-icon.mjs` (Playwright renders the web
+  favicon's ring-on-squircle in the same System Blue `#0071E3` at 1024px) →
+  `npx tauri icon src-tauri/icon-source.png` produces `icons/` (icns + png set).
+- PWA/service worker is **disabled in Tauri builds**: `VitePWA({ disable: !!process.env.TAURI_ENV_PLATFORM })`
+  in `vite.config.ts` (Tauri sets that env var for both `dev` and `build`), and
+  `VersionFooter.tsx` renders a static footer when `IS_TAURI` (the `useRegisterSW`
+  hook lives in a web-only inner component). Web behavior is unchanged.
+- Tauri detection: `IS_TAURI` from `app/src/backup.ts` (`'__TAURI_INTERNALS__' in window`);
+  all `@tauri-apps/*` imports are dynamic so the web bundle doesn't grow.
+
+## Build & release
+- Local dev: `rustup` + both targets
+  `rustup target add aarch64-apple-darwin x86_64-apple-darwin`,
+  then from `app/`: `npm run tauri dev`.
+- Local bundle (universal): `npm run tauri build -- --target universal-apple-darwin` →
+  `app/src-tauri/target/universal-apple-darwin/release/bundle/dmg/`. The universal
+  target compiles both arches and `lipo`s them into one binary — slower than a
+  single-arch build but the resulting DMG runs on Intel + Apple Silicon.
+- CI: `.github/workflows/release.yml` — push a `v*` tag → macos runner builds the
+  universal DMG via `tauri-apps/tauri-action` and attaches it to a **draft** GitHub
+  Release. No signing secrets configured (unsigned by choice).
+- Auto-update stays intact for both arches: for a universal build `tauri-action`
+  writes both `darwin-aarch64` and `darwin-x86_64` keys into `latest.json`, each
+  pointing at the same universal `.app.tar.gz` (see desktop-auto-update.md).
+
+## Rules & edge cases
+- `app/src-tauri/target/` and `gen/` are gitignored (Rust build artifacts).
+- Version has a single source of truth (`app/package.json`); never hardcode a version
+  in `tauri.conf.json`.
+- The web app keeps its PWA/update-pill behavior exactly as before — desktop changes
+  are strictly additive/conditional.
+
+## Future / open questions
+- Windows build (CI matrix addition), Apple code signing/notarization.

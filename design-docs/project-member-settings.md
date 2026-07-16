@@ -1,7 +1,7 @@
 # Project & member settings
 
 **Status:** Implemented
-**Last updated:** 2026-06-16
+**Last updated:** 2026-07-08 (Project card: "Share this project" row removed — export lives only in the header Export menu; Icon row gains photo upload, see project-icon-emoji.md)
 **Code:** `app/src/ProjectSettingsView.tsx`, `app/src/members.tsx` (shared member
 components), `app/src/App.tsx` (gear button + `settingsOpen` state), `app/src/SprintView.tsx`
 (imports the shared components), `app/src/db.ts` (`updateProject`, `PALETTE`)

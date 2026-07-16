@@ -186,7 +186,7 @@ function dayLabel(key: string): string {
 }
 
 const CARD =
-  'bg-surface rounded-[14px] overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_22px_rgba(0,0,0,0.05)]'
+  'glass-card rounded-[18px] overflow-hidden'
 
 function EventRow({ e }: { e: ActivityEvent }) {
   return (
@@ -326,6 +326,7 @@ export function ActivityLog({
   const [entering, setEntering] = useState(false)
   useEffect(() => {
     if (!open) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- deliberate one-shot animation restart keyed to the open transition
     setEntering(true)
     const id = setTimeout(() => setEntering(false), 650)
     return () => clearTimeout(id)
@@ -370,7 +371,7 @@ export function ActivityLog({
           {ind && (
             <span
               aria-hidden
-              className="absolute top-0.5 bottom-0.5 rounded-[7px] bg-surface shadow-[0_1px_3px_rgba(0,0,0,0.12),0_0_0_0.5px_rgba(0,0,0,0.04)] transition-[left,width] duration-[280ms] ease-[cubic-bezier(.32,.72,0,1)]"
+              className="absolute top-0.5 bottom-0.5 rounded-[7px] bg-surface shadow-[0_1px_3px_rgba(0,0,0,0.12),0_0_0_0.5px_rgba(0,0,0,0.04)] transition-[left,width] duration-[280ms] ease-[cubic-bezier(.32,.72,0,1)] motion-reduce:transition-none"
               style={{ left: ind.left, width: ind.width }}
             />
           )}

@@ -1,4 +1,12 @@
-import Dexie, { type Table } from 'dexie'
+// Facade over the split DB modules: everything that was ever importable from
+// './db' stays importable from './db', so no other file's imports change.
+export * from './types'
+export * from './schema'
+export * from './scheduling'
+export { MAX_EVENTS_PER_SPRINT, logEvent, sprintEvents } from './activity-log'
+export * from './io'
+export { resizeImageToDataURL } from './image-utils'
+
 import {
   defaultSprintDates,
   formatSeqRanges,
@@ -8,553 +16,27 @@ import {
   sprintEndForStart,
   todayLocalISO,
 } from './lib'
-import { remapBundle, type ProjectBundle } from './project-io'
-import { buildPersonBackfill, normalizePersonName } from './people'
-
-export type Status = 'todo' | 'in_progress' | 'done'
-export type Priority = 'urgent' | 'high' | 'normal' | 'low' | 'none'
-
-/**
- * Fields whose user-initiated edits are recorded in the sprint activity log.
- * `dependsOn` is part of the union but NOT in LOGGABLE_FIELDS: it never arrives
- * via an updateTask patch — it flows through setDependencies, which logs it
- * itself (with sequence-range labels). See design-docs/sprint-activity-log.md.
- */
-export type LoggableField =
-  | 'title'
-  | 'status'
-  | 'priority'
-  | 'assigneeId'
-  | 'startDate'
-  | 'dueDate'
-  | 'estimate'
-  | 'dependsOn'
-
-export const LOGGABLE_FIELDS: readonly LoggableField[] = [
-  'title',
-  'status',
-  'priority',
-  'assigneeId',
-  'startDate',
-  'dueDate',
-  'estimate',
-]
-
-/**
- * One recorded edit — the activity log's internal entry shape (built by
- * updateTask/logStatusChange/setDependencies, then mirrored into an
- * `ActivityEvent` of kind 'edit' via logTaskEdits). `from`/`to` store the RAW
- * value for stable fields (formatted at render); only `assigneeId` freezes the
- * resolved member NAME at write time so history survives the member being
- * deleted. See design-docs/sprint-activity-log.md.
- */
-export interface ChangeLogEntry {
-  field: LoggableField
-  from: string | null
-  to: string | null
-  /** epoch ms, captured at write time */
-  ts: number
-}
-
-/**
- * Kind of a sprint activity event (design-docs/sprint-activity-log.md, storage A).
- * - `created` — a task was added to the sprint
- * - `edit` — one field changed (reuses the changeLog `field`/`from`/`to` grammar)
- * - `rolled_over` — a task carried over from a previous sprint (`from` = its name)
- * - `sprint_started` — the sprint was created (task-less, sprint-level)
- */
-export type ActivityKind =
-  | 'created'
-  | 'edit'
-  | 'rolled_over'
-  | 'sprint_started'
-  | 'sprint_archived'
-  | 'sprint_unarchived'
-
-/**
- * One row in the append-only sprint activity store (capped per sprint at
- * MAX_EVENTS_PER_SPRINT — older rows pruned on write) — the app's sole
- * edit-history surface (the per-task `Task.changeLog` it once complemented was
- * removed in v11). Events live in their own table, so they survive task deletion
- * and aggregate sprint-wide. Display fields (`taskSeq`/`taskTitle`) are FROZEN at
- * write time so the log stays readable after renumbering or deletion.
- */
-export interface ActivityEvent {
-  id: string
-  projectId: string
-  /** The sprint this event belongs to. Collection tasks (no sprint) are never logged. */
-  sprintId: string
-  /** null for sprint-level events (`sprint_started`). */
-  taskId: string | null
-  taskSeq: number | null
-  taskTitle: string | null
-  kind: ActivityKind
-  /** present iff `kind === 'edit'`. */
-  field?: LoggableField
-  from: string | null
-  to: string | null
-  /** epoch ms, captured at write time. */
-  ts: number
-}
-
-export interface AiThread {
-  id: string
-  projectId: string
-  title: string
-  createdAt: number
-  updatedAt: number
-  /** Bundled skill loaded when the chat was created. */
-  skillId?: string
-}
-
-export interface AiMessage {
-  id: string
-  projectId: string
-  threadId: string
-  role: 'user' | 'assistant' | 'system'
-  content: string
-  ts: number
-}
-
-/**
- * A day off for a member.
- * - `half` omitted → entire day off (contributes 0 to effort)
- * - `half: 'am'` → morning off, afternoon worked (contributes 0.5)
- * - `half: 'pm'` → afternoon off, morning worked (contributes 0.5)
- * AM vs PM is for human reference only; both half kinds contribute equally
- * (0.5 working day) since we don't model intra-day scheduling.
- */
-export interface DayOff {
-  date: string
-  half?: 'am' | 'pm'
-}
-
-export interface Project {
-  id: string
-  name: string
-  createdAt: number
-  /** Optional free-text description, edited from the settings page. */
-  description?: string
-  /**
-   * Optional hand-picked tile color (a hex from PALETTE). When unset, the UI
-   * falls back to `colorForName(name)`. Non-indexed → no Dexie version bump.
-   */
-  color?: string
-  /**
-   * Optional emoji shown on the icon-rail tile instead of the name's first
-   * letter. When unset, the UI falls back to the first letter. One grapheme,
-   * non-indexed → no Dexie version bump (see project-icon-emoji.md).
-   */
-  icon?: string
-}
-
-/**
- * A real person, shared across projects. A `Member` is one project's membership
- * for a person (`Member.personId` → `Person.id`); the same human appearing in
- * several projects is several members but ONE person. Identity only — days-off
- * and assignment stay on `Member`, so the scheduler is untouched.
- * See design-docs/home-dashboard.md.
- */
-export interface Person {
-  id: string
-  name: string
-  color: string
-  createdAt: number
-}
-
-export interface Member {
-  id: string
-  projectId: string
-  name: string
-  color: string
-  /**
-   * Links this membership to a global {@link Person}. Backfilled in v13 (group
-   * members by normalized name across all projects → one person each); set on
-   * every new member via `addMember` / import. Indexed so a person's members
-   * are queryable. See design-docs/home-dashboard.md.
-   */
-  personId?: string
-  /**
-   * Additional non-working days for this member, on top of weekends.
-   * Pushes tasks forward when their start/end is computed from prereqs.
-   */
-  daysOff: DayOff[]
-  /**
-   * Optional free-text role label ("Backend Engineer", "Designer", "PM").
-   * Pure display metadata — never affects scheduling/capacity/assignment.
-   * Non-indexed, so it needs no Dexie version bump (same as Project.description).
-   * See design-docs/member-title.md.
-   */
-  title?: string
-  /**
-   * Optional custom avatar. `avatarImage` is a resized (≤128px square) image
-   * data-URL; `avatarEmoji` is a single emoji grapheme. Mutually exclusive
-   * (`setMemberAvatar` clears the other). Both optional + non-indexed → no Dexie
-   * version bump (same as `title`). Render falls back image → emoji → colored
-   * initial. See design-docs/member-avatars.md.
-   */
-  avatarImage?: string
-  avatarEmoji?: string
-  /**
-   * Manual lane order (per project): sorts member cards in the List view
-   * (drag-to-reorder) and the Board view's `member` sort. Fractional, like
-   * `Task.listOrder`. Optional + non-indexed (no Dexie index change); backfilled
-   * to `0..N-1` per project in v12. Absent rows sort as 0 (tiebreak name → id).
-   * See design-docs/member-lane-order.md.
-   */
-  order?: number
-}
-
-export interface Sprint {
-  id: string
-  projectId: string
-  name: string
-  startDate: string
-  endDate: string
-  /** Optional, non-indexed sprint-goal note (edited via header goal banner).
-   * Needs no Dexie version bump — rows without it read as empty. */
-  note?: string
-  /** Epoch ms when archived; absent = active. Optional, non-indexed → no Dexie
-   * version bump (same pattern as `note`). See design-docs/sprint-archive.md. */
-  archivedAt?: number
-}
-
-export interface Section {
-  id: string
-  name: string
-  /** Optional hex tô chấm header (từ COLLECTION_PALETTE). */
-  color?: string
-}
-
-/** Một status do người dùng tạo trong một collection. */
-export interface CollectionStatus {
-  id: string
-  name: string
-  /** Hex từ COLLECTION_PALETTE. */
-  color: string
-}
-
-export interface Collection {
-  id: string
-  projectId: string
-  /** Legacy optional marker from the removed system Backlog feature. */
-  kind?: 'backlog'
-  name: string
-  /** Thứ tự hiển thị trong sidebar (fractional/integer). */
-  order: number
-  /** Bảng (tables) trong collection, có thứ tự. Luôn ≥ 1 phần tử. */
-  sections: Section[]
-  /** Bộ status do user tự tạo. Có thể rỗng. */
-  statuses: CollectionStatus[]
-  createdAt: number
-}
-
-export interface Task {
-  id: string
-  projectId: string
-  /** Stable, never-reused sequence number (per-project). UI prereq input. */
-  sequence: number
-  title: string
-  assigneeId: string | null
-  sprintId: string | null
-  status: Status
-  priority: Priority
-  startDate: string | null
-  dueDate: string | null
-  /** Effort in days. Drives end-date computation when prereqs exist. */
-  estimate: number | null
-  createdAt: number
-  /** IDs of tasks that must be `done` before this one can start. */
-  dependsOn: string[]
-  /**
-   * Optional parent task this task is grouped under (one level only — a child
-   * cannot itself be a parent). Organizational display only; NOT a scheduling
-   * constraint (unlike dependsOn). Non-indexed → no Dexie version bump; children
-   * are grouped in memory. See design-docs/task-groups.md.
-   */
-  parentId?: string | null
-  /**
-   * Manual board ordering within a status column (fractional index). Set when a
-   * card is dropped at a position on the Board; absent tasks fall back to
-   * `sequence`. Board-only, non-indexed → no Dexie bump, no effect on List order.
-   * See design-docs/board-view.md.
-   */
-  boardOrder?: number
-  /**
-   * Manual List ordering within a member card, in the default (seq) sort order
-   * (fractional index). Set when a row is dragged to a new position in the List;
-   * absent tasks fall back to `sequence`. Non-indexed → no Dexie bump; never logged
-   * and never touches `sequence`. See design-docs/list-view.md.
-   */
-  listOrder?: number
-  /**
-   * Collection chứa task này (khi task nằm ngoài sprint). Bất biến: đúng MỘT
-   * trong {sprintId, collectionId} khác null. Indexed để query theo collection.
-   */
-  collectionId?: string | null
-  /** Bảng (Section.id) trong collection. Non-indexed. */
-  sectionId?: string | null
-  /** Trỏ tới CollectionStatus.id trong collection. Non-indexed. */
-  collectionStatusId?: string | null
-}
-
-class PlanDB extends Dexie {
-  projects!: Table<Project, string>
-  members!: Table<Member, string>
-  sprints!: Table<Sprint, string>
-  tasks!: Table<Task, string>
-  collections!: Table<Collection, string>
-  events!: Table<ActivityEvent, string>
-  people!: Table<Person, string>
-  aiThreads!: Table<AiThread, string>
-  aiMessages!: Table<AiMessage, string>
-
-  constructor() {
-    super('plan-up')
-    this.version(1).stores({
-      members: 'id, name',
-      sprints: 'id, startDate',
-      tasks: 'id, sprintId, assigneeId, status, createdAt',
-    })
-    // v2 (2026-06-03): add Task.startDate. Indexes unchanged; just backfill data.
-    this.version(2).upgrade((tx) =>
-      tx
-        .table('tasks')
-        .toCollection()
-        .modify((t: Task) => {
-          if (t.startDate === undefined) t.startDate = null
-        })
-    )
-    // v3 (2026-06-03): add Task.dependsOn (array of task IDs). Backfill [].
-    this.version(3).upgrade((tx) =>
-      tx
-        .table('tasks')
-        .toCollection()
-        .modify((t: Task) => {
-          if (!Array.isArray(t.dependsOn)) t.dependsOn = []
-        })
-    )
-    // v4 (2026-06-03): add Task.sequence. Backfill in createdAt order so
-    // existing rows get stable 1, 2, 3, ... numbers.
-    this.version(4).upgrade(async (tx) => {
-      const rows = await tx.table('tasks').toArray()
-      rows.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0))
-      let n = 1
-      for (const r of rows) {
-        await tx.table('tasks').update(r.id, { sequence: n++ })
-      }
-    })
-    // v5 (2026-06-03): add Member.daysOff (array of yyyy-mm-dd). Backfill [].
-    this.version(5).upgrade((tx) =>
-      tx
-        .table('members')
-        .toCollection()
-        .modify((m: Member) => {
-          if (!Array.isArray(m.daysOff)) m.daysOff = []
-        })
-    )
-    // v6 (2026-06-03): daysOff shape changes from string[] to DayOff[]
-    // (object with optional `half`). Convert old strings → {date: s}.
-    this.version(6).upgrade((tx) =>
-      tx
-        .table('members')
-        .toCollection()
-        .modify((m: Member) => {
-          const raw = m.daysOff as unknown as Array<string | DayOff>
-          if (!Array.isArray(raw)) {
-            m.daysOff = []
-            return
-          }
-          m.daysOff = raw.map((d) =>
-            typeof d === 'string' ? { date: d } : d
-          )
-        })
-    )
-    // v7 (2026-06-03): multi-project. Add projects table + projectId on
-    // members/sprints/tasks. Backfill existing data to a default project.
-    this.version(7)
-      .stores({
-        projects: 'id, name, createdAt',
-        members: 'id, name, projectId',
-        sprints: 'id, startDate, projectId',
-        tasks: 'id, sprintId, assigneeId, status, createdAt, projectId',
-      })
-      .upgrade(async (tx) => {
-        const projects = tx.table<Project>('projects')
-        const existing = await projects.toArray()
-        let defaultId: string
-        if (existing.length > 0) {
-          defaultId = existing[0].id
-        } else {
-          defaultId =
-            typeof crypto !== 'undefined' && crypto.randomUUID
-              ? crypto.randomUUID()
-              : Math.random().toString(36).slice(2, 10)
-          await projects.add({
-            id: defaultId,
-            name: 'My Project',
-            createdAt: Date.now(),
-          })
-        }
-        for (const table of ['members', 'sprints', 'tasks']) {
-          await tx
-            .table(table)
-            .toCollection()
-            .modify((row: { projectId?: string }) => {
-              if (!row.projectId) row.projectId = defaultId
-            })
-        }
-      })
-    // v8 (2026-06-03): sequence becomes per-SPRINT (was per-project). Each
-    // sprint resets at 1 so users see a clean 1..N column per sprint view.
-    // Existing dependsOn references point to task IDs — unaffected.
-    this.version(8).upgrade(async (tx) => {
-      const tasks = await tx.table('tasks').toArray()
-      const bySprint = new Map<string, typeof tasks>()
-      for (const t of tasks) {
-        const arr = bySprint.get(t.sprintId) ?? []
-        arr.push(t)
-        bySprint.set(t.sprintId, arr)
-      }
-      for (const arr of bySprint.values()) {
-        arr.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0))
-        let n = 1
-        for (const t of arr) {
-          await tx.table('tasks').update(t.id, { sequence: n++ })
-        }
-      }
-    })
-    // v9 (2026-06-05): collections (task ngoài sprint). New `collections` table;
-    // tasks gain collectionId (indexed) + sectionId/collectionStatusId (non-indexed);
-    // sprintId becomes nullable. Existing tasks stay sprint tasks (collectionId=null).
-    this.version(9)
-      .stores({
-        projects: 'id, name, createdAt',
-        members: 'id, name, projectId',
-        sprints: 'id, startDate, projectId',
-        collections: 'id, projectId, order',
-        tasks: 'id, sprintId, assigneeId, status, createdAt, projectId, collectionId',
-      })
-      .upgrade(async (tx) => {
-        await tx
-          .table('tasks')
-          .toCollection()
-          .modify((t: Task) => {
-            if (t.collectionId === undefined) t.collectionId = null
-          })
-      })
-    // v10 (2026-06-12): sprint activity log (design-docs/sprint-activity-log.md).
-    // New append-only `events` table, indexed by sprintId (+ ts for ordering,
-    // projectId for project-scoped wipes). No data backfill — history starts now;
-    // pre-existing tasks have no recorded events.
-    this.version(10).stores({
-      projects: 'id, name, createdAt',
-      members: 'id, name, projectId',
-      sprints: 'id, startDate, projectId',
-      collections: 'id, projectId, order',
-      tasks: 'id, sprintId, assigneeId, status, createdAt, projectId, collectionId',
-      events: 'id, sprintId, ts, projectId',
-    })
-
-    // v11 — per-task change log removed (design-docs/task-change-log.md). Strip
-    // the dead, non-indexed `changeLog` field from existing task rows. No index
-    // change, so this is an upgrade-only bump (the v10 stores carry forward).
-    this.version(11).upgrade((tx) =>
-      tx
-        .table('tasks')
-        .toCollection()
-        .modify((t: Record<string, unknown>) => {
-          delete t.changeLog
-        })
-    )
-    // v12 (2026-06-19): manual member-lane order (design-docs/member-lane-order.md).
-    // Add non-indexed `Member.order`; backfill per project to 0..N-1 in the current
-    // `toArray()` order so the first render is identical to today's implicit order.
-    // No index change → upgrade-only bump (v10 stores carry forward).
-    this.version(12).upgrade(async (tx) => {
-      const members = await tx.table<Member>('members').toArray()
-      const byProject = new Map<string, Member[]>()
-      for (const m of members) {
-        const arr = byProject.get(m.projectId) ?? []
-        arr.push(m)
-        byProject.set(m.projectId, arr)
-      }
-      for (const arr of byProject.values()) {
-        let i = 0
-        for (const m of arr) {
-          await tx.table('members').update(m.id, { order: i++ })
-        }
-      }
-    })
-    // v13 (2026-06-20): cross-project People (design-docs/home-dashboard.md).
-    // New `people` table; members gain indexed `personId`. Re-declare the full
-    // members index (append personId — keep projectId/name) and carry forward
-    // every other table from v10. Backfill groups existing members by normalized
-    // name across ALL projects into one person each (buildPersonBackfill, the
-    // unit-tested pure fn) and links them — all within this version's upgrade tx
-    // (the people store is created before the upgrade runs).
-    this.version(13)
-      .stores({
-        projects: 'id, name, createdAt',
-        members: 'id, name, projectId, personId',
-        sprints: 'id, startDate, projectId',
-        collections: 'id, projectId, order',
-        tasks: 'id, sprintId, assigneeId, status, createdAt, projectId, collectionId',
-        events: 'id, sprintId, ts, projectId',
-        people: 'id, name',
-      })
-      .upgrade(async (tx) => {
-        const members = await tx.table<Member>('members').toArray()
-        const { people, links } = buildPersonBackfill(
-          members,
-          uid,
-          colorForName,
-          Date.now()
-        )
-        if (people.length) await tx.table<Person>('people').bulkAdd(people)
-        for (const { memberId, personId } of links) {
-          await tx.table('members').update(memberId, { personId })
-        }
-      })
-    // v14 (2026-06-23): per-project AI Chat history. New tables only; no
-    // backfill. Threads are project-scoped, messages duplicate projectId for
-    // cheap export/delete without joining through the thread.
-    this.version(14).stores({
-      projects: 'id, name, createdAt',
-      members: 'id, name, projectId, personId',
-      sprints: 'id, startDate, projectId',
-      collections: 'id, projectId, order',
-      tasks: 'id, sprintId, assigneeId, status, createdAt, projectId, collectionId',
-      events: 'id, sprintId, ts, projectId',
-      people: 'id, name',
-      aiThreads: 'id, projectId, updatedAt',
-      aiMessages: 'id, threadId, projectId, ts',
-    })
-  }
-}
-
-export const db = new PlanDB()
-
-export const uid = () =>
-  typeof crypto !== 'undefined' && crypto.randomUUID
-    ? crypto.randomUUID()
-    : Math.random().toString(36).slice(2, 10)
-
-export const PALETTE = [
-  '#a855f7', '#f97316', '#3b82f6', '#10b981',
-  '#ef4444', '#eab308', '#ec4899', '#14b8a6',
-]
-export function colorForName(name: string): string {
-  let h = 0
-  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) | 0
-  return PALETTE[Math.abs(h) % PALETTE.length]
-}
-
-/** Palette hệ Apple cho status/section màu (design-system §2.4 + đỏ/xám). */
-export const COLLECTION_PALETTE = [
-  '#0071E3', '#34C759', '#FF9500', '#FF3B30', '#AF52DE',
-  '#FF2D55', '#5AC8FA', '#5856D6', '#FF6482', '#8E8E93',
-] as const
+import { normalizePersonName } from './people'
+import {
+  LOGGABLE_FIELDS,
+  type ChangeLogEntry,
+  type Collection,
+  type CollectionStatus,
+  type DayOff,
+  type LoggableField,
+  type Member,
+  type Person,
+  type Priority,
+  type Project,
+  type ShareRecord,
+  type Sprint,
+  type Status,
+  type Task,
+} from './types'
+import { db, uid, colorForName, nextSequence } from './schema'
+import { recomputeDates, wouldCreateCycle } from './scheduling'
+import { createSprint as createSprintRow, logEvent, logTaskEdits } from './activity-log'
+import { revokeShare } from './share-hosted'
 
 /** Status mặc định khi tạo collection (user sửa được sau). */
 function defaultStatuses(): CollectionStatus[] {
@@ -591,12 +73,18 @@ export async function renameCollection(id: string, name: string): Promise<void> 
   await db.collections.update(id, { name: n })
 }
 
-/** Xoá collection + toàn bộ item của nó (destructive — caller confirm trước). */
+/** Xoá collection + toàn bộ item của nó (destructive — caller confirm trước).
+ * Cũng dọn + thu hồi hosted share link của collection (nếu có) — không để link
+ * công khai sống tiếp sau khi plan đã xoá. */
 export async function deleteCollection(id: string): Promise<void> {
-  await db.transaction('rw', db.collections, db.tasks, async () => {
+  const shares = await db.shares.where('refId').equals(id).toArray()
+  await db.transaction('rw', db.collections, db.tasks, db.shares, async () => {
     await db.tasks.where('collectionId').equals(id).delete()
     await db.collections.delete(id)
+    await db.shares.where('refId').equals(id).delete()
   })
+  // Best-effort: revoke the store entry (network; a failure just leaves it to TTL).
+  for (const s of shares) revokeShare(s.id, s.writeToken).catch(() => {})
 }
 
 export async function addSection(collectionId: string, name: string): Promise<void> {
@@ -641,6 +129,23 @@ export async function deleteSection(
 
 export async function moveTaskToSection(taskId: string, sectionId: string): Promise<void> {
   await db.tasks.update(taskId, { sectionId })
+}
+
+/**
+ * Move a collection item to `sectionId` AND set its manual `listOrder` in one
+ * update — the drop half of the pointer-based drag in CollectionView. Reordering
+ * within the same table and moving across tables are the same gesture, so both
+ * fields are written together (target section may equal the current one). Order
+ * comes from `orderBetween` over the target table's neighbours; collisions fall
+ * back to `renormalizeListOrder`. Arrangement only — not logged. See
+ * design-docs/collections.md.
+ */
+export async function moveCollectionItem(
+  taskId: string,
+  sectionId: string,
+  listOrder: number
+): Promise<void> {
+  await db.tasks.update(taskId, { sectionId, listOrder })
 }
 
 export async function addStatus(
@@ -706,13 +211,17 @@ export async function addCollectionItem(
   sectionId: string,
   patch: Partial<Task> & { title: string }
 ): Promise<Task> {
-  const today = new Date().toISOString().slice(0, 10)
+  // Local-calendar today, NOT the UTC slice — see todayLocalISO's docstring.
+  const today = todayLocalISO()
   // One transaction so the maxSeq read + add can't interleave with another add:
   // two rapid "add item" clicks would otherwise read the same maxSeq and produce
   // duplicate per-project sequences.
   return db.transaction('rw', db.collections, db.tasks, async () => {
     const c = await db.collections.get(collectionId)
-    const projectId = c?.projectId ?? ''
+    // A deleted/unknown collection must fail loudly — falling back to
+    // projectId '' would insert an invisible orphan row no view ever loads.
+    if (!c) throw new Error(`Collection ${collectionId} not found`)
+    const projectId = c.projectId
     const maxSeq = (
       await db.tasks.where('projectId').equals(projectId).toArray()
     ).reduce((m, t) => Math.max(m, t.sequence ?? 0), 0)
@@ -733,7 +242,7 @@ export async function addCollectionItem(
       estimate: null,
       createdAt: Date.now(),
       dependsOn: [],
-      collectionStatusId: c?.statuses[0]?.id ?? null,
+      collectionStatusId: c.statuses[0]?.id ?? null,
       collectionId,
       sectionId,
       ...patch,
@@ -760,70 +269,184 @@ export async function setSprintNote(
   await db.sprints.update(sprintId, { note: trimmed || undefined })
 }
 
+export async function createSprint(
+  input: Sprint | {
+    projectId: string
+    startDate?: string | null
+    note?: string | null
+    today?: string
+  }
+): Promise<Sprint> {
+  if ('id' in input) return createSprintRow(input)
+
+  const sprints = await db.sprints
+    .where('projectId')
+    .equals(input.projectId)
+    .sortBy('startDate')
+  const fallback = defaultSprintDates(
+    latestActiveSprint(sprints)?.endDate ?? null,
+    input.today ?? todayLocalISO()
+  )
+  const startDate = input.startDate ?? fallback.startDate
+  if (startDate !== snapToMonday(startDate)) {
+    throw new Error('Sprint start must be a Monday')
+  }
+  const note = input.note?.trim()
+  const sprint: Sprint = {
+    id: uid(),
+    projectId: input.projectId,
+    name: `Sprint ${nextSprintNumber(sprints)}`,
+    startDate,
+    endDate: sprintEndForStart(startDate),
+    ...(note ? { note } : {}),
+  }
+  return createSprintRow(sprint)
+}
+
 export async function updateSprint(input: {
   sprintId: string
   startDate: string
   note?: string | null
 }): Promise<Sprint | null> {
-  return db.transaction('rw', db.sprints, async () => {
-    const sprint = await db.sprints.get(input.sprintId)
-    if (!sprint) return null
-    if (input.startDate !== snapToMonday(input.startDate)) {
-      throw new Error('Sprint start must be a Monday.')
-    }
-    const note = input.note?.trim()
-    const patch: Partial<Sprint> = {
-      startDate: input.startDate,
-      endDate: sprintEndForStart(input.startDate),
-      note: note || undefined,
-    }
-    await db.sprints.update(input.sprintId, patch)
-    return { ...sprint, ...patch }
-  })
+  if (input.startDate !== snapToMonday(input.startDate)) {
+    throw new Error('Sprint start must be a Monday')
+  }
+  const note = input.note?.trim()
+  const patch: Partial<Sprint> = {
+    startDate: input.startDate,
+    endDate: sprintEndForStart(input.startDate),
+    note: note || undefined,
+  }
+  await db.sprints.update(input.sprintId, patch)
+  return (await db.sprints.get(input.sprintId)) ?? null
 }
 
-export async function createSprint(input: {
-  projectId: string
-  startDate?: string | null
-  note?: string | null
-  today?: string
-}): Promise<Sprint> {
-  return db.transaction('rw', db.sprints, db.events, async () => {
-    const sprints = await db.sprints
-      .where('projectId')
-      .equals(input.projectId)
-      .sortBy('startDate')
-    const defaults = defaultSprintDates(
-      latestActiveSprint(sprints)?.endDate ?? null,
-      input.today ?? todayLocalISO()
+export async function deleteSprint(sprintId: string): Promise<void> {
+  const touched = new Set<string>()
+  await db.transaction('rw', db.sprints, db.tasks, db.events, async () => {
+    const deletedTaskIds = new Set(
+      (await db.tasks.where('sprintId').equals(sprintId).toArray()).map((t) => t.id)
     )
-    const startDate = input.startDate ?? defaults.startDate
-    if (startDate !== snapToMonday(startDate)) {
-      throw new Error('Sprint start must be a Monday.')
+    await db.tasks.where('sprintId').equals(sprintId).delete()
+    await db.events.where('sprintId').equals(sprintId).delete()
+    await db.sprints.delete(sprintId)
+    if (deletedTaskIds.size === 0) return
+    const dependents = await db.tasks
+      .filter((t) => t.dependsOn?.some((id) => deletedTaskIds.has(id)))
+      .toArray()
+    for (const task of dependents) {
+      await db.tasks.update(task.id, {
+        dependsOn: task.dependsOn.filter((id) => !deletedTaskIds.has(id)),
+      })
+      touched.add(task.id)
     }
-    const note = input.note?.trim()
-    const sprint: Sprint = {
-      id: uid(),
-      projectId: input.projectId,
-      name: `Sprint ${nextSprintNumber(sprints)}`,
-      startDate,
-      endDate: sprintEndForStart(startDate),
-      ...(note ? { note } : {}),
-    }
-    await db.sprints.add(sprint)
+  })
+  for (const id of touched) await recomputeDates(id)
+}
+
+export async function moveTaskToNextSprint(
+  taskId: string,
+  sourceSprintId?: string | null
+): Promise<{ moved: boolean; targetSprintId: string | null; targetSprintName?: string }> {
+  const task = await db.tasks.get(taskId)
+  const sourceId = task?.sprintId ?? sourceSprintId ?? null
+  if (!task || !sourceId) return { moved: false, targetSprintId: null }
+  const source = await db.sprints.get(sourceId)
+  if (!source) return { moved: false, targetSprintId: null }
+  const sprints = await db.sprints.where('projectId').equals(source.projectId).sortBy('startDate')
+  const sourceIdx = sprints.findIndex((s) => s.id === source.id)
+  const target = sprints.slice(sourceIdx + 1).find((s) => s.archivedAt == null)
+  if (!target) return { moved: false, targetSprintId: null }
+  return moveTaskToSprint(taskId, target.id, source.name)
+}
+
+export async function moveTaskToSprint(
+  taskId: string,
+  sprintId: string,
+  sourceLabel?: string
+): Promise<{ moved: boolean; targetSprintId: string | null; targetSprintName?: string }> {
+  const task = await db.tasks.get(taskId)
+  const target = await db.sprints.get(sprintId)
+  if (!task || !target || task.projectId !== target.projectId || target.archivedAt != null) {
+    return { moved: false, targetSprintId: null }
+  }
+  const source =
+    sourceLabel ??
+    (task.sprintId ? (await db.sprints.get(task.sprintId))?.name : undefined) ??
+    (task.collectionId ? (await db.collections.get(task.collectionId))?.name : undefined) ??
+    null
+
+  const sequence = await nextSequence(target.id)
+  const patch: Partial<Task> = {
+    sprintId: target.id,
+    collectionId: null,
+    sectionId: null,
+    collectionStatusId: null,
+    sequence,
+    boardOrder: undefined,
+    listOrder: undefined,
+    parentId: null,
+  }
+  if (!task.startDate || task.startDate < target.startDate) patch.startDate = target.startDate
+
+  await db.transaction('rw', db.tasks, db.members, db.events, async () => {
+    await db.tasks.update(task.id, patch)
     await logEvent({
-      projectId: input.projectId,
-      sprintId: sprint.id,
-      taskId: null,
-      taskSeq: null,
-      taskTitle: null,
-      kind: 'sprint_started',
-      from: null,
-      to: null,
+      projectId: task.projectId,
+      sprintId: target.id,
+      taskId: task.id,
+      taskSeq: sequence,
+      taskTitle: task.title,
+      kind: 'rolled_over',
+      from: source,
+      to: target.name,
       ts: Date.now(),
     })
-    return sprint
+    await recomputeDates(task.id)
   })
+  return { moved: true, targetSprintId: target.id, targetSprintName: target.name }
+}
+
+export async function moveTaskToCollection(
+  taskId: string,
+  collectionId: string
+): Promise<{ moved: boolean; targetCollectionId: string | null; targetCollectionName?: string }> {
+  const task = await db.tasks.get(taskId)
+  const collection = await db.collections.get(collectionId)
+  if (!task || !collection || task.projectId !== collection.projectId) {
+    return { moved: false, targetCollectionId: null }
+  }
+  const section = collection.sections[0]
+  const status = collection.statuses[0]
+  if (!section) return { moved: false, targetCollectionId: null }
+  const touched = new Set<string>()
+  await db.transaction('rw', db.tasks, db.members, async () => {
+    await db.tasks.update(task.id, {
+      sprintId: null,
+      collectionId: collection.id,
+      sectionId: section.id,
+      collectionStatusId: status?.id ?? null,
+      parentId: null,
+      boardOrder: undefined,
+      listOrder: undefined,
+      dependsOn: [],
+    })
+    const dependents = await db.tasks
+      .filter((t) => t.dependsOn?.includes(task.id))
+      .toArray()
+    for (const dependent of dependents) {
+      await db.tasks.update(dependent.id, {
+        dependsOn: dependent.dependsOn.filter((id) => id !== task.id),
+      })
+      touched.add(dependent.id)
+    }
+  })
+  for (const id of touched) await recomputeDates(id)
+  return {
+    moved: true,
+    targetCollectionId: collection.id,
+    targetCollectionName: collection.name,
+  }
 }
 
 /**
@@ -854,38 +477,6 @@ export async function setSprintArchived(
       ts: Date.now(),
     })
   })
-}
-
-export async function deleteSprint(sprintId: string): Promise<void> {
-  const touched: string[] = []
-  await db.transaction('rw', db.sprints, db.tasks, db.events, async () => {
-    const tasks = await db.tasks.where('sprintId').equals(sprintId).toArray()
-    const deletedTaskIds = new Set(tasks.map((t) => t.id))
-
-    await db.tasks.where('sprintId').equals(sprintId).delete()
-    await db.events.where('sprintId').equals(sprintId).delete()
-    await db.sprints.delete(sprintId)
-
-    if (deletedTaskIds.size === 0) return
-    const dependents = await db.tasks
-      .filter((t) => t.dependsOn?.some((id) => deletedTaskIds.has(id)))
-      .toArray()
-    for (const d of dependents) {
-      await db.tasks.update(d.id, {
-        dependsOn: d.dependsOn.filter((id) => !deletedTaskIds.has(id)),
-      })
-      touched.push(d.id)
-    }
-  })
-  for (const id of touched) await recomputeDates(id)
-}
-
-/** Next sequence number within a sprint. Sequences are never reused. */
-export async function nextSequence(sprintId: string): Promise<number> {
-  const all = await db.tasks.where('sprintId').equals(sprintId).toArray()
-  let max = 0
-  for (const t of all) if ((t.sequence ?? 0) > max) max = t.sequence ?? 0
-  return max + 1
 }
 
 /**
@@ -1036,23 +627,21 @@ export async function updateProject(
 }
 
 /**
- * Delete a project and everything it owns: members, sprints, tasks. Tasks
- * in this project that are referenced as dependsOn by tasks in OTHER
- * projects (rare) are stripped from those references.
+ * Delete a project and everything it owns: members, sprints, tasks,
+ * collections and activity events (the projectId index on events exists for
+ * exactly this wipe). Tasks in this project that are referenced as dependsOn
+ * by tasks in OTHER projects (rare) are stripped from those references.
  */
 export async function deleteProject(projectId: string): Promise<void> {
+  // Gather this project's hosted shares first, so we can revoke them after the
+  // local wipe (best-effort; network) — a deleted project must not leave public
+  // links serving its old board until TTL.
+  const shares = await db.shares.where('projectId').equals(projectId).toArray()
+  // Table-array form: Dexie's variadic transaction() overloads stop at 5
+  // tables and this wipe spans 7.
   await db.transaction(
     'rw',
-    [
-      db.projects,
-      db.members,
-      db.sprints,
-      db.collections,
-      db.tasks,
-      db.events,
-      db.aiThreads,
-      db.aiMessages,
-    ],
+    [db.projects, db.members, db.sprints, db.tasks, db.collections, db.events, db.shares],
     async () => {
       const taskIds = (
         await db.tasks.where('projectId').equals(projectId).toArray()
@@ -1069,301 +658,16 @@ export async function deleteProject(projectId: string): Promise<void> {
         })
       }
       await db.tasks.where('projectId').equals(projectId).delete()
-      await db.events.where('projectId').equals(projectId).delete()
-      await db.collections.where('projectId').equals(projectId).delete()
-      await db.aiMessages.where('projectId').equals(projectId).delete()
-      await db.aiThreads.where('projectId').equals(projectId).delete()
       await db.sprints.where('projectId').equals(projectId).delete()
       await db.members.where('projectId').equals(projectId).delete()
+      await db.collections.where('projectId').equals(projectId).delete()
+      await db.events.where('projectId').equals(projectId).delete()
+      await db.shares.where('projectId').equals(projectId).delete()
       await db.projects.delete(projectId)
     }
   )
-}
-
-/**
- * Add `days` calendar days to a yyyy-mm-dd string. Returns yyyy-mm-dd.
- * Anchored in UTC so the result is timezone-independent.
- */
-export function addDays(dateStr: string, days: number): string {
-  const d = new Date(dateStr + 'T00:00:00Z')
-  d.setUTCDate(d.getUTCDate() + days)
-  return d.toISOString().slice(0, 10)
-}
-
-/** True if the date falls on Saturday or Sunday. */
-export function isWeekend(dateStr: string): boolean {
-  const day = new Date(dateStr + 'T00:00:00Z').getUTCDay()
-  return day === 0 || day === 6
-}
-
-/**
- * Returns dateStr if it's a working day, else the next working day.
- * `extraOff` is an optional set of additional yyyy-mm-dd days that count
- * as non-working (member-specific vacation).
- */
-export function nextBusinessDay(
-  dateStr: string,
-  extraOff?: ReadonlySet<string>
-): string {
-  let d = dateStr
-  while (isWeekend(d) || extraOff?.has(d)) d = addDays(d, 1)
-  return d
-}
-
-/**
- * Add `n` working days to `dateStr`. Assumes dateStr is already a working
- * day. Sat/Sun and any day in `extraOff` do not consume `n`.
- */
-export function addBusinessDays(
-  dateStr: string,
-  n: number,
-  extraOff?: ReadonlySet<string>
-): string {
-  let d = dateStr
-  let remaining = n
-  while (remaining > 0) {
-    d = addDays(d, 1)
-    if (!isWeekend(d) && !extraOff?.has(d)) remaining--
-  }
-  return d
-}
-
-/**
- * Compute (start, end) for a task based on its prereqs and effort.
- * - If task has no prereqs: returns (task.startDate, task.dueDate) — manual.
- * - If prereqs exist: start = max(prereq.dueDate) + 1 day.
- * - end = start + (estimate - 1) days; if no estimate, end = start.
- * Returns null fields if the calculation can't run (e.g. no prereq has an end).
- */
-/**
- * Working fraction contributed by a single day for the given off-map.
- * - Sat/Sun: 0
- * - In off-map with full off (no `half`): 0
- * - In off-map with `half`: 0.5
- * - Otherwise: 1
- */
-export function workingFraction(
-  date: string,
-  contribByDate?: ReadonlyMap<string, 0 | 0.5>
-): number {
-  if (isWeekend(date)) return 0
-  if (contribByDate?.has(date)) return contribByDate.get(date) as number
-  return 1
-}
-
-const EPS = 1e-9
-
-/**
- * Internal plan for a task — dates, plus the wall-clock fractions of the
- * start and end days needed to render times and chain to dependents.
- *
- * Wall-clock fraction model: 0 = 08:00, 0.5 = 12:00 (lunch / 13:00 resume),
- * 1 = 17:00. Lunch is treated as a non-counting break; work either fills
- * (0..0.5] AM or (0.5..1] PM.
- */
-interface TaskPlan {
-  startDate: string | null
-  dueDate: string | null
-  /** Wall fraction at which work begins on startDate (0=08:00, 0.5=13:00). */
-  startOffset: number
-  /** Wall fraction at which work ends on dueDate (0.5=12:00, 1=17:00). */
-  dueFraction: number
-}
-
-function planFor(
-  task: Task,
-  byId: Map<string, Task>,
-  memberById: Map<string, Member> | undefined,
-  cache: Map<string, TaskPlan>
-): TaskPlan {
-  const hit = cache.get(task.id)
-  if (hit) return hit
-
-  const member = task.assigneeId ? memberById?.get(task.assigneeId) : undefined
-  const halfByDate = new Map<string, 'am' | 'pm'>()
-  const contribByDate = new Map<string, 0 | 0.5>()
-  if (member?.daysOff) {
-    for (const d of member.daysOff) {
-      contribByDate.set(d.date, d.half ? 0.5 : 0)
-      if (d.half) halfByDate.set(d.date, d.half)
-    }
-  }
-  const dayContrib = (date: string): number => {
-    if (isWeekend(date)) return 0
-    if (contribByDate.has(date)) return contribByDate.get(date) as number
-    return 1
-  }
-  // Wall position where work naturally begins on `date`. AM-off → 0.5.
-  const naturalWallStart = (date: string): number =>
-    dayContrib(date) === 0.5 && halfByDate.get(date) === 'am' ? 0.5 : 0
-  // Wall position where work naturally ends on `date`. PM-off → 0.5.
-  const naturalWallEnd = (date: string): number => {
-    const c = dayContrib(date)
-    if (c === 0) return 0
-    if (c === 0.5 && halfByDate.get(date) === 'pm') return 0.5
-    return 1
-  }
-  // Available work fraction on `date` given a wall-clock start offset.
-  const availOnDay = (date: string, offset: number): number => {
-    const ws = naturalWallStart(date)
-    const we = naturalWallEnd(date)
-    return Math.max(0, we - Math.max(offset, ws))
-  }
-
-  // Step 1: pick start. With prereqs, find the latest prereq end moment.
-  let start: string | null = task.startDate
-  let startOffset = 0
-  if (task.dependsOn?.length > 0) {
-    let bestDate: string | null = null
-    let bestFrac = 0
-    for (const id of task.dependsOn) {
-      const p = byId.get(id)
-      if (!p) continue
-      const pPlan = planFor(p, byId, memberById, cache)
-      if (!pPlan.dueDate) continue
-      if (
-        bestDate === null ||
-        pPlan.dueDate > bestDate ||
-        (pPlan.dueDate === bestDate && pPlan.dueFraction > bestFrac)
-      ) {
-        bestDate = pPlan.dueDate
-        bestFrac = pPlan.dueFraction
-      }
-    }
-    if (bestDate) {
-      // Can the dependent start the same day with leftover capacity?
-      // "Leftover" exists if this task's natural-end on bestDate extends
-      // beyond the wall position where the prereq stopped working.
-      if (naturalWallEnd(bestDate) > bestFrac + EPS) {
-        start = bestDate
-        startOffset = Math.max(naturalWallStart(bestDate), bestFrac)
-      } else {
-        let d = addDays(bestDate, 1)
-        while (dayContrib(d) <= 0) d = addDays(d, 1)
-        start = d
-        startOffset = 0
-      }
-    }
-  }
-
-  if (!start) {
-    const plan: TaskPlan = {
-      startDate: null,
-      dueDate: task.dueDate,
-      startOffset: 0,
-      dueFraction: 1,
-    }
-    cache.set(task.id, plan)
-    return plan
-  }
-
-  // Step 2: normalize start past off days when caller set it on one.
-  while (dayContrib(start) <= 0) {
-    start = addDays(start, 1)
-    startOffset = 0
-  }
-  // If the day naturally starts later (AM-off), lift offset to match.
-  startOffset = Math.max(startOffset, naturalWallStart(start))
-
-  // No effort → end stays manual.
-  if (!task.estimate || task.estimate <= 0) {
-    const plan: TaskPlan = {
-      startDate: start,
-      dueDate: task.dueDate,
-      startOffset,
-      dueFraction: 1,
-    }
-    cache.set(task.id, plan)
-    return plan
-  }
-
-  // Step 3: walk forward consuming effort.
-  let d = start
-  let remaining = task.estimate
-  let end = start
-  let isFirst = true
-  let lastUse = 0
-  let lastWallStart = startOffset
-  while (remaining > EPS) {
-    const avail = isFirst ? availOnDay(d, startOffset) : availOnDay(d, 0)
-    if (avail > 0) {
-      const use = Math.min(remaining, avail)
-      remaining -= use
-      end = d
-      lastUse = use
-      lastWallStart = isFirst
-        ? Math.max(naturalWallStart(d), startOffset)
-        : naturalWallStart(d)
-    }
-    isFirst = false
-    if (remaining > EPS) d = addDays(d, 1)
-  }
-  const dueFraction = Math.min(1, lastWallStart + lastUse)
-  const plan: TaskPlan = { startDate: start, dueDate: end, startOffset, dueFraction }
-  cache.set(task.id, plan)
-  return plan
-}
-
-/**
- * The live display plan for a task: start/due DATES plus their wall-clock
- * TIMES, all from a single `planFor` pass. Use this for rendering so the
- * date and time always share one source and can never drift apart (e.g. a
- * stored `dueDate` going stale against a freshly-computed time). For tasks
- * with no effort/prereqs this returns the manual stored dates unchanged.
- *
- * Time mapping: fractions → {08:00, 12:00, 13:00, 17:00}. Sub-half-day usage
- * rounds to lunch (12:00) or 17:00.
- */
-export function computeWorkingPlan(
-  task: Task,
-  byId: Map<string, Task>,
-  memberById?: Map<string, Member>
-): { startDate: string | null; dueDate: string | null; startTime: string; endTime: string } {
-  const plan = planFor(task, byId, memberById, new Map())
-  return {
-    startDate: plan.startDate,
-    dueDate: plan.dueDate,
-    startTime: plan.startOffset >= 0.5 - EPS ? '13:00' : '08:00',
-    endTime: plan.dueFraction > 0.5 + EPS ? '17:00' : '12:00',
-  }
-}
-
-/**
- * Wall-clock display times. Maps the plan's fractions to {08:00, 12:00,
- * 13:00, 17:00}. Sub-half-day usage is rounded to lunch (12:00) or 17:00.
- */
-export function computeWorkingTimes(
-  task: Task,
-  byId: Map<string, Task>,
-  memberById?: Map<string, Member>
-): { startTime: string; endTime: string } {
-  const { startTime, endTime } = computeWorkingPlan(task, byId, memberById)
-  return { startTime, endTime }
-}
-
-/**
- * Recompute a task's start/end from its prereqs, effort, and the assignee's
- * off-days.
- *
- * Rules:
- *   - If task has prereqs with end dates → start = next working day after
- *     latest prereq end. Otherwise start = task.startDate (manual).
- *   - If effort > 0 → end = start + effort working days, consuming
- *     half-off days as 0.5 and skipping weekends + full-off days.
- *     Otherwise end = task.dueDate (manual).
- *   - If start lands on a non-working day (weekend or full-off), it's
- *     pushed forward to the next working day.
- *
- * Returns task.startDate / task.dueDate unchanged when there's nothing to
- * compute (no prereqs AND no effort).
- */
-export function computeStartEnd(
-  task: Task,
-  byId: Map<string, Task>,
-  memberById?: Map<string, Member>
-): { startDate: string | null; dueDate: string | null } {
-  const plan = planFor(task, byId, memberById, new Map())
-  return { startDate: plan.startDate, dueDate: plan.dueDate }
+  // Best-effort revoke of each hosted link (network; TTL cleans up on failure).
+  for (const s of shares) revokeShare(s.id, s.writeToken).catch(() => {})
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -1374,9 +678,6 @@ export function computeStartEnd(
 //   scheduler  ──▶ raw db.tasks.update ─────────────────────────▶ NO log
 //                 (recomputeDates, rollover, …)   — premise #2
 // ──────────────────────────────────────────────────────────────────────────
-
-/** Window in which consecutive TITLE keystrokes collapse into one event. */
-const TITLE_COALESCE_MS = 2 * 60 * 1000
 
 /** Value-based equality for a loggable field (all 7 are scalars or null). */
 function loggableValuesEqual(a: unknown, b: unknown): boolean {
@@ -1395,80 +696,6 @@ function changeLogValue(
     return members?.find((m) => m.id === raw)?.name ?? null
   }
   return String(raw)
-}
-
-// ──────────────────────────────────────────────────────────────────────────
-// Sprint activity log (design-docs/sprint-activity-log.md, storage model A).
-// Append-only `events` store written from user-edit write sites. Scheduler
-// recomputes (raw db.tasks.update) are never logged — premise #2. Collection
-// tasks (no sprintId) are never logged.
-// ──────────────────────────────────────────────────────────────────────────
-
-/**
- * Per-sprint cap on the activity store: only the newest N events of each sprint
- * are kept; older ones are pruned on write. Bounds unbounded growth (the log is
- * a recent-history surface, not permanent audit). See sprint-activity-log.md.
- */
-export const MAX_EVENTS_PER_SPRINT = 500
-
-/**
- * Trim a sprint's events to the newest MAX_EVENTS_PER_SPRINT rows. No-op when
- * under the cap. Must run inside an rw transaction whose scope includes
- * db.events (every caller already holds one).
- */
-async function pruneSprintEvents(sprintId: string): Promise<void> {
-  const rows = await db.events.where('sprintId').equals(sprintId).toArray()
-  if (rows.length <= MAX_EVENTS_PER_SPRINT) return
-  // newest-first, then drop everything past the cap (the oldest).
-  rows.sort((a, b) => b.ts - a.ts)
-  await db.events.bulkDelete(rows.slice(MAX_EVENTS_PER_SPRINT).map((e) => e.id))
-}
-
-/** Append one activity event (id auto-assigned), then prune the sprint to the cap. */
-export async function logEvent(e: Omit<ActivityEvent, 'id'>): Promise<void> {
-  await db.events.add({ id: uid(), ...e })
-  await pruneSprintEvents(e.sprintId)
-}
-
-/** A sprint's activity, newest-first (ts desc). */
-export async function sprintEvents(sprintId: string): Promise<ActivityEvent[]> {
-  const rows = await db.events.where('sprintId').equals(sprintId).toArray()
-  return rows.sort((a, b) => b.ts - a.ts)
-}
-
-/**
- * Mirror the just-built changeLog `entries` into the activity store. Sprint-only.
- * `title` coalesces within TITLE_COALESCE_MS (like the changeLog) so a keystroke
- * burst is one event, not one per character. MUST run inside a transaction whose
- * scope includes db.events. Display fields are frozen at write time.
- */
-async function logTaskEdits(task: Task, entries: ChangeLogEntry[]): Promise<void> {
-  if (!task.sprintId) return
-  for (const e of entries) {
-    if (e.field === 'title') {
-      const prior = (await db.events.where('sprintId').equals(task.sprintId).toArray())
-        .filter((ev) => ev.taskId === task.id && ev.kind === 'edit' && ev.field === 'title')
-        .sort((a, b) => b.ts - a.ts)[0]
-      if (prior && e.ts - prior.ts <= TITLE_COALESCE_MS) {
-        await db.events.update(prior.id, { to: e.to, ts: e.ts })
-        continue
-      }
-    }
-    await db.events.add({
-      id: uid(),
-      projectId: task.projectId,
-      sprintId: task.sprintId,
-      taskId: task.id,
-      taskSeq: task.sequence ?? null,
-      taskTitle: task.title,
-      kind: 'edit',
-      field: e.field,
-      from: e.from,
-      to: e.to,
-      ts: e.ts,
-    })
-  }
-  await pruneSprintEvents(task.sprintId)
 }
 
 /**
@@ -1537,80 +764,6 @@ export async function logStatusChange(
 }
 
 /**
- * Recompute dates for `taskId` and walk forward to any tasks that depend on
- * it. Idempotent — stops when a task's computed dates equal current ones.
- */
-export async function recomputeDates(taskId: string): Promise<void> {
-  await db.transaction('rw', db.tasks, db.members, async () => {
-    const members = await db.members.toArray()
-    const memberById = new Map(members.map((m) => [m.id, m]))
-    // Read the table ONCE. The dependency graph (`dependsOn`) never changes
-    // during a recompute — only dates do — so we keep `byId` fresh in-memory
-    // after each write instead of re-materialising the whole table every queue
-    // step (which was O(chain × N) full-table reads inside one transaction).
-    const all = await db.tasks.toArray()
-    const byId = new Map(all.map((t) => [t.id, t]))
-    const visited = new Set<string>()
-    const queue: string[] = [taskId]
-    while (queue.length) {
-      const id = queue.shift()!
-      if (visited.has(id)) continue
-      visited.add(id)
-      const task = byId.get(id)
-      if (!task) continue
-      const next = computeStartEnd(task, byId, memberById)
-      if (
-        next.startDate !== task.startDate ||
-        next.dueDate !== task.dueDate
-      ) {
-        // Keep the in-memory snapshot current so dependents downstream in this
-        // same walk compute against the freshly-written dates.
-        byId.set(id, { ...task, startDate: next.startDate, dueDate: next.dueDate })
-        await db.tasks.update(id, {
-          startDate: next.startDate,
-          dueDate: next.dueDate,
-        })
-      }
-      for (const t of all) {
-        if (t.dependsOn?.includes(id) && !visited.has(t.id)) {
-          queue.push(t.id)
-        }
-      }
-    }
-  })
-}
-
-/**
- * Recompute and persist start/due for EVERY task in the DB, healing stored
- * dates that drifted out of sync — e.g. a dueDate computed under an older
- * off-day state whose recompute was never re-triggered. `planFor` derives
- * computed tasks from scratch (it never trusts the stored dueDate), so the
- * pass is order-independent and only writes rows whose result actually
- * changed. Idempotent and cheap; safe to run once on app load. Returns the
- * number of tasks updated.
- */
-export async function recomputeAllDates(): Promise<number> {
-  return db.transaction('rw', db.tasks, db.members, async () => {
-    const members = await db.members.toArray()
-    const memberById = new Map(members.map((m) => [m.id, m]))
-    const all = await db.tasks.toArray()
-    const byId = new Map(all.map((t) => [t.id, t]))
-    let changed = 0
-    for (const task of all) {
-      const next = computeStartEnd(task, byId, memberById)
-      if (next.startDate !== task.startDate || next.dueDate !== task.dueDate) {
-        await db.tasks.update(task.id, {
-          startDate: next.startDate,
-          dueDate: next.dueDate,
-        })
-        changed++
-      }
-    }
-    return changed
-  })
-}
-
-/**
  * Replace a member's vacation days. Sorts + dedupes + filters invalid dates,
  * then recomputes every task assigned to that member (forward through their
  * dependents too).
@@ -1624,11 +777,67 @@ export async function recomputeAllDates(): Promise<number> {
  *
  * Behavior:
  * - Done tasks stay put.
- * - Moved tasks get the new sprintId. If their startDate is now before
- *   the target sprint's start, it's bumped to the target start. Dates
- *   are then recomputed (effort + off-days + prereq chain still apply).
+ * - Moved tasks get the new sprintId (+ a fresh per-sprint sequence). Their
+ *   startDate/dueDate are KEPT AS-IS — a rollover preserves all task info, so
+ *   a start the user set is never rewritten to the target sprint's start
+ *   (design-docs/sprint-rollover.md, decision 2026-07-06). Dates are still
+ *   recomputed afterwards (effort + off-days + prereq chain apply as always),
+ *   which re-derives computed dates but never clobbers a manual start.
  * - dependsOn links survive across sprints — prereq IDs stay valid.
  */
+/**
+ * Pure planner for a sprint rollover: given every task currently in the source
+ * sprint, decide what moves to the next sprint while keeping task GROUPS
+ * cohesive (a group must never be split across sprints — see
+ * design-docs/sprint-rollover.md). A group is judged by its leaf children's
+ * done-ness, NOT the parent's own stored `status` (a derived/container field):
+ *   - ≥1 unfinished child → parent + unfinished children move; each done child
+ *     stays behind and is UNGROUPED (`parentId → null`).
+ *   - all children done → whole group stays put (parent never moves alone).
+ *   - standalone task (no parent, no children) → moves iff not done.
+ *
+ * Returns id sets so the DB move and the preview popover share one source of
+ * truth. `parentIds` are the container parents inside `moveIds` — excluded from
+ * the user-facing "N tasks" count (leaf work items only).
+ */
+export function planSprintRollover(sprintTasks: Task[]): {
+  moveIds: Set<string>
+  ungroupIds: Set<string>
+  parentIds: Set<string>
+} {
+  const idSet = new Set(sprintTasks.map((t) => t.id))
+  const childrenByParent = new Map<string, Task[]>()
+  for (const t of sprintTasks) {
+    if (t.parentId && idSet.has(t.parentId)) {
+      const a = childrenByParent.get(t.parentId)
+      if (a) a.push(t)
+      else childrenByParent.set(t.parentId, [t])
+    }
+  }
+  const moveIds = new Set<string>()
+  const ungroupIds = new Set<string>()
+  const parentIds = new Set<string>()
+  for (const t of sprintTasks) {
+    const kids = childrenByParent.get(t.id)
+    if (kids && kids.length) {
+      // Container parent: roll the group over iff any child is still unfinished.
+      if (kids.some((k) => k.status !== 'done')) {
+        moveIds.add(t.id)
+        parentIds.add(t.id)
+        for (const k of kids) {
+          if (k.status !== 'done') moveIds.add(k.id)
+          else ungroupIds.add(k.id) // done child left behind → cut its parent link
+        }
+      }
+      // else: fully-done group → nothing moves, stays grouped as-is.
+    } else if (!(t.parentId && idSet.has(t.parentId))) {
+      // Standalone leaf (children are handled by their parent branch above).
+      if (t.status !== 'done') moveIds.add(t.id)
+    }
+  }
+  return { moveIds, ungroupIds, parentIds }
+}
+
 export async function moveUnfinishedToNextSprint(
   sourceSprintId: string
 ): Promise<{ movedCount: number; targetSprintId: string | null }> {
@@ -1636,7 +845,18 @@ export async function moveUnfinishedToNextSprint(
   // close) midway must NOT leave the source sprint half-emptied with inconsistent
   // sequences. recomputeDates nests safely — its scope (tasks+members) is a subset.
   return db.transaction('rw', db.tasks, db.members, db.sprints, db.events, async () => {
-    const sprints = await db.sprints.orderBy('startDate').toArray()
+    // Scope to the SOURCE sprint's project. orderBy('startDate') across the whole
+    // table mixes in other projects' sprints — a foreign sprint sharing (or
+    // sorting near) the start date would be picked as the "next" sprint, so the
+    // roll-over silently lands tasks in a DIFFERENT project (and the current
+    // project's real next sprint stays empty). Must match App.tsx `nextSprint`,
+    // which is already per-project. See design-docs/sprint-rollover.md.
+    const sourceSprint = await db.sprints.get(sourceSprintId)
+    if (!sourceSprint) return { movedCount: 0, targetSprintId: null }
+    const sprints = await db.sprints
+      .where('projectId')
+      .equals(sourceSprint.projectId)
+      .sortBy('startDate')
     const sourceIdx = sprints.findIndex((s) => s.id === sourceSprintId)
     if (sourceIdx === -1) return { movedCount: 0, targetSprintId: null }
     const source = sprints[sourceIdx]
@@ -1645,27 +865,44 @@ export async function moveUnfinishedToNextSprint(
     const target = sprints.slice(sourceIdx + 1).find((s) => s.archivedAt == null)
     if (!target) return { movedCount: 0, targetSprintId: null }
 
-    const unfinished = await db.tasks
-      .where('sprintId')
-      .equals(sourceSprintId)
-      .filter((t) => t.status !== 'done')
-      .toArray()
+    const sprintTasks = await db.tasks.where('sprintId').equals(sourceSprintId).toArray()
+    const { moveIds, ungroupIds, parentIds } = planSprintRollover(sprintTasks)
 
+    // Done children that stay behind lose their (now cross-sprint) parent link
+    // so they don't render as orphans nested under an absent group head.
+    for (const id of ungroupIds) await db.tasks.update(id, { parentId: null })
+
+    // Tasks that stay in the SOURCE sprint (done prereqs, ungrouped done
+    // children, anything not moving). A moved task's dependsOn pointing here is
+    // no longer live in the target and would keep the dependent's start
+    // prereq-LOCKED (uneditable, anchored to a past-sprint date) — so we drop
+    // those links on the move. Links where both ends roll over stay intact.
+    // See design-docs/sprint-rollover.md.
+    const stayedBehind = new Set(
+      sprintTasks.filter((t) => !moveIds.has(t.id)).map((t) => t.id)
+    )
+
+    const toMove = sprintTasks.filter((t) => moveIds.has(t.id))
     const rolledAt = Date.now()
-    for (const t of unfinished) {
+    for (const t of toMove) {
       // Sequence is per-sprint, so a moved task must be renumbered into the
       // target — otherwise it keeps its source number and collides with an
       // existing task there. Awaited in-loop so each call sees the prior insert.
+      // Keep ALL task info on the move — only sprintId + sequence change.
+      // startDate/dueDate are deliberately preserved (no pull-forward to the
+      // target start): the user's dates are theirs. A task whose start predates
+      // the new sprint keeps that earlier start. See sprint-rollover.md.
       const patch: Partial<Task> = {
         sprintId: target.id,
         sequence: await nextSequence(target.id),
       }
-      // Pull stale starts forward so the task lands inside the new sprint.
-      if (!t.startDate || t.startDate < target.startDate) {
-        patch.startDate = target.startDate
-      }
+      // Unlink prereqs left behind (see stayedBehind above); write only on change.
+      const keptDeps = t.dependsOn.filter((id) => !stayedBehind.has(id))
+      if (keptDeps.length !== t.dependsOn.length) patch.dependsOn = keptDeps
       await db.tasks.update(t.id, patch)
-      // Record the carry-over on the TARGET sprint's activity log.
+      // Record the carry-over on the TARGET sprint's activity log — leaf work
+      // items only (container parents tag along silently; leaf-based counting).
+      if (parentIds.has(t.id)) continue
       await logEvent({
         projectId: t.projectId,
         sprintId: target.id,
@@ -1680,164 +917,11 @@ export async function moveUnfinishedToNextSprint(
     }
     // Recompute after the bulk move so prereq chains settle in their new
     // home (and assignee off-days reapply).
-    for (const t of unfinished) await recomputeDates(t.id)
+    for (const t of toMove) await recomputeDates(t.id)
 
-    return { movedCount: unfinished.length, targetSprintId: target.id }
+    const movedCount = toMove.filter((t) => !parentIds.has(t.id)).length
+    return { movedCount, targetSprintId: target.id }
   })
-}
-
-export async function moveTaskToNextSprint(
-  taskId: string,
-  sourceSprintId?: string | null
-): Promise<{ moved: boolean; targetSprintId: string | null; targetSprintName?: string }> {
-  return db.transaction('rw', db.tasks, db.members, db.sprints, db.events, async () => {
-    const task = await db.tasks.get(taskId)
-    if (!task) return { moved: false, targetSprintId: null }
-    const sourceId = task.sprintId ?? sourceSprintId ?? null
-    if (!sourceId) return { moved: false, targetSprintId: null }
-
-    const sprints = await db.sprints
-      .where('projectId')
-      .equals(task.projectId)
-      .sortBy('startDate')
-    const sourceIdx = sprints.findIndex((s) => s.id === sourceId)
-    if (sourceIdx === -1) return { moved: false, targetSprintId: null }
-    const source = sprints[sourceIdx]
-    const target = sprints.slice(sourceIdx + 1).find((s) => s.archivedAt == null)
-    if (!target) return { moved: false, targetSprintId: null }
-
-    const sequence = await nextSequence(target.id)
-    const patch: Partial<Task> = {
-      sprintId: target.id,
-      collectionId: null,
-      sectionId: null,
-      collectionStatusId: null,
-      sequence,
-      boardOrder: undefined,
-      listOrder: undefined,
-    }
-    if (!task.startDate || task.startDate < target.startDate) {
-      patch.startDate = target.startDate
-    }
-    await db.tasks.update(task.id, patch)
-    await logEvent({
-      projectId: task.projectId,
-      sprintId: target.id,
-      taskId: task.id,
-      taskSeq: sequence,
-      taskTitle: task.title,
-      kind: 'rolled_over',
-      from: source.name,
-      to: target.name,
-      ts: Date.now(),
-    })
-    await recomputeDates(task.id)
-
-    return { moved: true, targetSprintId: target.id, targetSprintName: target.name }
-  })
-}
-
-export async function moveTaskToCollection(
-  taskId: string,
-  collectionId: string
-): Promise<{ moved: boolean; targetCollectionId: string | null; targetCollectionName?: string }> {
-  const touched: string[] = []
-  const result = await db.transaction('rw', db.collections, db.tasks, async () => {
-    const [task, collection] = await Promise.all([
-      db.tasks.get(taskId),
-      db.collections.get(collectionId),
-    ])
-    if (!task || !collection) return { moved: false, targetCollectionId: null }
-    if (collection.projectId !== task.projectId) {
-      return { moved: false, targetCollectionId: null }
-    }
-    const sectionId = collection.sections[0]?.id ?? null
-
-    await db.tasks.update(task.id, {
-      sprintId: null,
-      collectionId: collection.id,
-      sectionId,
-      collectionStatusId: collection.statuses[0]?.id ?? null,
-      dependsOn: [],
-      parentId: null,
-      boardOrder: undefined,
-      listOrder: undefined,
-    })
-
-    const dependents = await db.tasks
-      .filter((t) => t.id !== task.id && t.dependsOn?.includes(task.id))
-      .toArray()
-    for (const dependent of dependents) {
-      await db.tasks.update(dependent.id, {
-        dependsOn: dependent.dependsOn.filter((id) => id !== task.id),
-      })
-      if (dependent.sprintId) touched.push(dependent.id)
-    }
-
-    return {
-      moved: true,
-      targetCollectionId: collection.id,
-      targetCollectionName: collection.name,
-    }
-  })
-  for (const id of touched) await recomputeDates(id)
-  return result
-}
-
-export async function moveTaskToSprint(
-  taskId: string,
-  sprintId: string
-): Promise<{ moved: boolean; targetSprintId: string | null; targetSprintName?: string }> {
-  return db.transaction(
-    'rw',
-    db.collections,
-    db.tasks,
-    db.members,
-    db.sprints,
-    db.events,
-    async () => {
-      const [task, target] = await Promise.all([
-        db.tasks.get(taskId),
-        db.sprints.get(sprintId),
-      ])
-      if (!task || !target) return { moved: false, targetSprintId: null }
-      if (target.projectId !== task.projectId || target.archivedAt != null) {
-        return { moved: false, targetSprintId: null }
-      }
-
-      const [sourceSprint, sourceCollection] = await Promise.all([
-        task.sprintId ? db.sprints.get(task.sprintId) : Promise.resolve(undefined),
-        task.collectionId ? db.collections.get(task.collectionId) : Promise.resolve(undefined),
-      ])
-      const sequence = await nextSequence(target.id)
-      const patch: Partial<Task> = {
-        sprintId: target.id,
-        collectionId: null,
-        sectionId: null,
-        collectionStatusId: null,
-        sequence,
-        boardOrder: undefined,
-        listOrder: undefined,
-      }
-      if (!task.startDate) patch.startDate = target.startDate
-
-      await db.tasks.update(task.id, patch)
-      await logEvent({
-        projectId: task.projectId,
-        sprintId: target.id,
-        taskId: task.id,
-        taskSeq: sequence,
-        taskTitle: task.title,
-        kind: 'rolled_over',
-        from: sourceSprint?.name ?? sourceCollection?.name ?? 'Collection',
-        to: target.name,
-        ts: Date.now(),
-      })
-      await recomputeDates(task.id)
-
-      return { moved: true, targetSprintId: target.id, targetSprintName: target.name }
-    }
-  )
 }
 
 export async function setMemberDaysOff(
@@ -1891,53 +975,6 @@ export async function setMemberAvatar(
 }
 
 /**
- * Resize an image file to a centered square data-URL for use as an avatar.
- * Client-side (canvas) so the DB and per-project export file stay small — a
- * multi-MB photo becomes a few KB. Decodes via `createImageBitmap` with
- * `imageOrientation: 'from-image'` so EXIF orientation is honored — phone photos
- * (which carry an orientation tag) aren't drawn sideways. Prefers webp; webp
- * encoding silently returns a PNG on browsers that can't encode it (it does not
- * throw), so we check the result prefix and re-encode to JPEG. Rejects
- * non-raster/oversized/undecodable input. GIF decodes to its first frame.
- * See design-docs/member-avatars.md.
- */
-export async function resizeImageToDataURL(
-  file: File,
-  size = 128
-): Promise<string> {
-  if (!/^image\/(png|jpeg|webp|gif)$/.test(file.type)) {
-    throw new Error('Unsupported format — use PNG, JPEG, WebP or GIF.')
-  }
-  if (file.size > 10 * 1024 * 1024) {
-    throw new Error('Image too large (max 10MB).')
-  }
-  let bitmap: ImageBitmap
-  try {
-    bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' })
-  } catch {
-    throw new Error('Could not decode image.')
-  }
-  try {
-    const canvas = document.createElement('canvas')
-    canvas.width = canvas.height = size
-    const ctx = canvas.getContext('2d')
-    if (!ctx) throw new Error('Canvas not available.')
-    // Center-crop the (orientation-corrected) bitmap to a square.
-    const s = Math.min(bitmap.width, bitmap.height)
-    const sx = (bitmap.width - s) / 2
-    const sy = (bitmap.height - s) / 2
-    ctx.drawImage(bitmap, sx, sy, s, s, 0, 0, size, size)
-    let out = canvas.toDataURL('image/webp', 0.85)
-    if (!out.startsWith('data:image/webp')) {
-      out = canvas.toDataURL('image/jpeg', 0.85) // silent-PNG fallback
-    }
-    return out
-  } finally {
-    bitmap.close()
-  }
-}
-
-/**
  * Cascade-safe task delete: also strips the task ID from any other task's
  * `dependsOn` array so we don't leave dangling references.
  */
@@ -1955,14 +992,23 @@ export async function setTaskParent(
     return
   }
   if (parentId === childId) return
-  const [parent, hasChildren] = await Promise.all([
-    db.tasks.get(parentId),
-    // parentId is non-indexed → filter, not where()
-    db.tasks.filter((t) => t.parentId === childId).count(),
-  ])
-  // Guard: target must exist & be top-level; child must not be a parent itself.
-  if (!parent || parent.parentId || hasChildren > 0) return
-  await db.tasks.update(childId, { parentId })
+  // Transactional so the guards below can't go stale between the reads and
+  // the write (two overlapping group edits would otherwise TOCTOU past them).
+  await db.transaction('rw', db.tasks, async () => {
+    const [child, parent, hasChildren] = await Promise.all([
+      db.tasks.get(childId),
+      db.tasks.get(parentId),
+      // parentId is non-indexed → filter, not where()
+      db.tasks.filter((t) => t.parentId === childId).count(),
+    ])
+    // Guard: target must exist & be top-level; child must not be a parent
+    // itself; both must live in the SAME sprint — a cross-sprint parent link
+    // would break rollover cohesion (planSprintRollover assumes a group moves
+    // as one unit within its sprint).
+    if (!child || !parent || parent.parentId || hasChildren > 0) return
+    if (child.sprintId !== parent.sprintId) return
+    await db.tasks.update(childId, { parentId })
+  })
 }
 
 /**
@@ -2037,70 +1083,6 @@ export async function deleteTask(taskId: string) {
 }
 
 /**
- * Returns true if adding `newDepId` to `taskId`'s dependsOn would form a cycle.
- * A cycle exists if `taskId` is reachable from `newDepId` via existing edges.
- */
-export function wouldCreateCycle(
-  taskId: string,
-  newDepId: string,
-  tasks: Task[]
-): boolean {
-  if (taskId === newDepId) return true
-  const byId = new Map(tasks.map((t) => [t.id, t]))
-  const stack = [newDepId]
-  const seen = new Set<string>()
-  while (stack.length) {
-    const cur = stack.pop()!
-    if (cur === taskId) return true
-    if (seen.has(cur)) continue
-    seen.add(cur)
-    const t = byId.get(cur)
-    if (t) stack.push(...t.dependsOn)
-  }
-  return false
-}
-
-/**
- * If adding `newDepId` as a prerequisite of `taskId` would create a cycle,
- * return the existing path of task IDs from `newDepId` back to `taskId`
- * (shortest, via BFS over `dependsOn`). The full loop is then
- * `taskId → newDepId → …returned… (ends at taskId)`. Returns null when no such
- * path exists (i.e. no cycle). Companion to `wouldCreateCycle` that also yields
- * the path so the UI can show *where* the loop runs.
- */
-export function findCyclePath(
-  taskId: string,
-  newDepId: string,
-  tasks: Task[]
-): string[] | null {
-  if (taskId === newDepId) return [newDepId]
-  const byId = new Map(tasks.map((t) => [t.id, t]))
-  const parent = new Map<string, string | null>([[newDepId, null]])
-  const queue = [newDepId]
-  while (queue.length) {
-    const cur = queue.shift()!
-    if (cur === taskId) {
-      const path: string[] = []
-      let n: string | null = cur
-      while (n != null) {
-        path.unshift(n)
-        n = parent.get(n) ?? null
-      }
-      return path
-    }
-    const t = byId.get(cur)
-    if (!t) continue
-    for (const d of t.dependsOn) {
-      if (!parent.has(d)) {
-        parent.set(d, cur)
-        queue.push(d)
-      }
-    }
-  }
-  return null
-}
-
-/**
  * Add `depId` as a prerequisite of `taskId`. Refuses cycles silently
  * (returns false). Returns true on success.
  */
@@ -2109,25 +1091,33 @@ export async function addDependency(
   depId: string
 ): Promise<boolean> {
   if (taskId === depId) return false
-  const tasks = await db.tasks.toArray()
-  if (wouldCreateCycle(taskId, depId, tasks)) return false
-  const task = tasks.find((t) => t.id === taskId)
-  if (!task) return false
-  if (task.dependsOn.includes(depId)) return true // already there
-  await db.tasks.update(taskId, {
-    dependsOn: [...task.dependsOn, depId],
+  // One transaction: the cycle check, the dependsOn read-modify-write and the
+  // recompute must not interleave with another dependency edit (a stale-array
+  // overwrite would silently drop an edge) or split on a mid-write crash.
+  return db.transaction('rw', db.tasks, db.members, async () => {
+    const tasks = await db.tasks.toArray()
+    if (wouldCreateCycle(taskId, depId, tasks)) return false
+    const task = tasks.find((t) => t.id === taskId)
+    if (!task) return false
+    if (task.dependsOn.includes(depId)) return true // already there
+    await db.tasks.update(taskId, {
+      dependsOn: [...task.dependsOn, depId],
+    })
+    await recomputeDates(taskId)
+    return true
   })
-  await recomputeDates(taskId)
-  return true
 }
 
 export async function removeDependency(taskId: string, depId: string) {
-  const task = await db.tasks.get(taskId)
-  if (!task) return
-  await db.tasks.update(taskId, {
-    dependsOn: task.dependsOn.filter((id) => id !== depId),
+  // Same transaction rationale as addDependency.
+  await db.transaction('rw', db.tasks, db.members, async () => {
+    const task = await db.tasks.get(taskId)
+    if (!task) return
+    await db.tasks.update(taskId, {
+      dependsOn: task.dependsOn.filter((id) => id !== depId),
+    })
+    await recomputeDates(taskId)
   })
-  await recomputeDates(taskId)
 }
 
 /**
@@ -2139,76 +1129,68 @@ export async function setDependencies(
   taskId: string,
   depIds: string[]
 ): Promise<string[]> {
-  const tasks = await db.tasks.toArray()
-  const task = tasks.find((t) => t.id === taskId)
-  if (!task) return []
-  const clean: string[] = []
-  // Build cumulatively so a later dep can't bypass a cycle check via an
-  // earlier dep we're about to add in the same call.
-  const probe = { ...task, dependsOn: [] as string[] }
-  const byId = new Map(tasks.map((t) => [t.id, t]))
-  byId.set(taskId, probe)
-  for (const id of depIds) {
-    if (id === taskId) continue
-    if (clean.includes(id)) continue
-    if (!byId.has(id)) continue
-    if (wouldCreateCycle(taskId, id, Array.from(byId.values()))) continue
-    clean.push(id)
-    probe.dependsOn = clean
-  }
-  const changed =
-    task.dependsOn.length !== clean.length ||
-    task.dependsOn.some((d) => !clean.includes(d))
-
-  // Snapshot this task's own dates BEFORE recompute so we can log the old→new
-  // shift the prereq change causes on THIS task (the direct consequence of the
-  // user's edit). Indirect ripple onto OTHER tasks stays unlogged (premise #2).
-  const oldStart = task.startDate
-  const oldDue = task.dueDate
-
-  await db.tasks.update(taskId, { dependsOn: clean })
-  await recomputeDates(taskId)
-
-  if (changed) {
-    const after = await db.tasks.get(taskId)
-    if (after) {
-      const label = (ids: string[]): string | null => {
-        const seqs = ids
-          .map((id) => byId.get(id)?.sequence)
-          .filter((n): n is number => typeof n === 'number')
-        return seqs.length ? formatSeqRanges(seqs) : null
-      }
-      const ts = Date.now()
-      // Built so the prereq entry ends up newest (top): the date entries are
-      // unshifted first, then dependsOn. seq is frozen (per-sprint renumbering).
-      const entries: ChangeLogEntry[] = []
-      if (after.startDate !== oldStart)
-        entries.push({ field: 'startDate', from: oldStart, to: after.startDate, ts })
-      if (after.dueDate !== oldDue)
-        entries.push({ field: 'dueDate', from: oldDue, to: after.dueDate, ts })
-      entries.push({
-        field: 'dependsOn',
-        from: label(task.dependsOn),
-        to: label(clean),
-        ts,
-      })
-      // Record prereq + caused date shifts into the sprint activity log.
-      await logTaskEdits(task, entries)
+  // One transaction spanning the deps write, the recompute AND the activity
+  // log: logTaskEdits' own contract requires db.events in scope, and a crash
+  // between the write and the log must not leave deps changed with no entry.
+  return db.transaction('rw', db.tasks, db.members, db.events, async () => {
+    const tasks = await db.tasks.toArray()
+    const task = tasks.find((t) => t.id === taskId)
+    if (!task) return []
+    const clean: string[] = []
+    // Build cumulatively so a later dep can't bypass a cycle check via an
+    // earlier dep we're about to add in the same call.
+    const probe = { ...task, dependsOn: [] as string[] }
+    const byId = new Map(tasks.map((t) => [t.id, t]))
+    byId.set(taskId, probe)
+    for (const id of depIds) {
+      if (id === taskId) continue
+      if (clean.includes(id)) continue
+      if (!byId.has(id)) continue
+      if (wouldCreateCycle(taskId, id, Array.from(byId.values()))) continue
+      clean.push(id)
+      probe.dependsOn = clean
     }
-  }
-  return clean
-}
+    const changed =
+      task.dependsOn.length !== clean.length ||
+      task.dependsOn.some((d) => !clean.includes(d))
 
-/**
- * A task is "blocked" if any of its prerequisites is not yet `done`.
- * Done tasks themselves are never blocked (visual nicety).
- */
-export function isTaskBlocked(task: Task, byId: Map<string, Task>): boolean {
-  if (task.status === 'done') return false
-  if (!task.dependsOn || task.dependsOn.length === 0) return false
-  return task.dependsOn.some((id) => {
-    const dep = byId.get(id)
-    return dep && dep.status !== 'done'
+    // Snapshot this task's own dates BEFORE recompute so we can log the old→new
+    // shift the prereq change causes on THIS task (the direct consequence of the
+    // user's edit). Indirect ripple onto OTHER tasks stays unlogged (premise #2).
+    const oldStart = task.startDate
+    const oldDue = task.dueDate
+
+    await db.tasks.update(taskId, { dependsOn: clean })
+    await recomputeDates(taskId)
+
+    if (changed) {
+      const after = await db.tasks.get(taskId)
+      if (after) {
+        const label = (ids: string[]): string | null => {
+          const seqs = ids
+            .map((id) => byId.get(id)?.sequence)
+            .filter((n): n is number => typeof n === 'number')
+          return seqs.length ? formatSeqRanges(seqs) : null
+        }
+        const ts = Date.now()
+        // Built so the prereq entry ends up newest (top): the date entries are
+        // unshifted first, then dependsOn. seq is frozen (per-sprint renumbering).
+        const entries: ChangeLogEntry[] = []
+        if (after.startDate !== oldStart)
+          entries.push({ field: 'startDate', from: oldStart, to: after.startDate, ts })
+        if (after.dueDate !== oldDue)
+          entries.push({ field: 'dueDate', from: oldDue, to: after.dueDate, ts })
+        entries.push({
+          field: 'dependsOn',
+          from: label(task.dependsOn),
+          to: label(clean),
+          ts,
+        })
+        // Record prereq + caused date shifts into the sprint activity log.
+        await logTaskEdits(task, entries)
+      }
+    }
+    return clean
   })
 }
 
@@ -2236,6 +1218,12 @@ export async function memberNameExists(
 // (it may still belong to other projects; a zero-member person is hidden from
 // the roster, not deleted — design-docs/home-dashboard.md).
 export async function deleteMember(memberId: string) {
+  // Tasks scheduled around this member's daysOff keep those pushed-out dates
+  // once unassigned — recompute them (and their dependents) right away instead
+  // of leaving stale dates until the next app-load heal pass.
+  const affected = (
+    await db.tasks.where('assigneeId').equals(memberId).toArray()
+  ).map((t) => t.id)
   await db.transaction('rw', db.members, db.tasks, async () => {
     await db.tasks
       .where('assigneeId')
@@ -2243,6 +1231,7 @@ export async function deleteMember(memberId: string) {
       .modify({ assigneeId: null })
     await db.members.delete(memberId)
   })
+  for (const id of affected) await recomputeDates(id)
 }
 
 // ---- People (cross-project identity) — design-docs/home-dashboard.md ----
@@ -2307,6 +1296,38 @@ export async function mergePeople(srcId: string, dstId: string): Promise<void> {
   })
 }
 
+// ---- Hosted share links (design-docs/hosted-share-link.md) ----
+
+/** The hosted-share record for a sprint/collection, or undefined if not shared. */
+export async function getShareForRef(refId: string): Promise<ShareRecord | undefined> {
+  return db.shares.where('refId').equals(refId).first()
+}
+
+/** The PROJECT-scope share for a project (Hướng A): one hosted link per project that
+ * points at whichever ref was last pushed. Distinct from per-ref shares (collections +
+ * legacy sprint links) which stay keyed by their own id. `projectId` is indexed; the
+ * `.and()` filters a handful of rows in memory. */
+export async function getProjectShare(
+  projectId: string,
+  kind: ShareRecord['kind'],
+): Promise<ShareRecord | undefined> {
+  return db.shares
+    .where('projectId')
+    .equals(projectId)
+    .and((s) => s.kind === kind && s.scope === 'project')
+    .first()
+}
+
+/** Upsert a share record (keyed by store id). */
+export async function saveShareRecord(rec: ShareRecord): Promise<void> {
+  await db.shares.put(rec)
+}
+
+/** Forget a share locally (after a successful revoke). */
+export async function deleteShareRecord(id: string): Promise<void> {
+  await db.shares.delete(id)
+}
+
 /** Rename a person (display name only; does not touch member.name). */
 export async function renamePerson(personId: string, name: string): Promise<void> {
   const n = name.trim()
@@ -2317,447 +1338,4 @@ export async function renamePerson(personId: string, name: string): Promise<void
 /** Recolor a person (avatar color). */
 export async function recolorPerson(personId: string, color: string): Promise<void> {
   await db.people.update(personId, { color })
-}
-
-export interface ExportPayload {
-  version: 1 | 2 | 3 | 4 | 5
-  exportedAt: string
-  /** v2 introduces multi-project. v1 payloads have no `projects` field. */
-  projects?: Project[]
-  members: Member[]
-  sprints: Sprint[]
-  /** v3 introduces collections (task ngoài sprint). */
-  collections?: Collection[]
-  tasks: Task[]
-  /** v4 introduces the sprint activity log. Older payloads have no `events`. */
-  events?: ActivityEvent[]
-  /** v5 introduces per-project AI Chat history. */
-  aiThreads?: AiThread[]
-  aiMessages?: AiMessage[]
-}
-
-export async function exportAll(): Promise<ExportPayload> {
-  const [projects, members, sprints, collections, tasks, events, aiThreads, aiMessages] = await Promise.all([
-    db.projects.toArray(),
-    db.members.toArray(),
-    db.sprints.toArray(),
-    db.collections.toArray(),
-    db.tasks.toArray(),
-    db.events.toArray(),
-    db.aiThreads.toArray(),
-    db.aiMessages.toArray(),
-  ])
-  return {
-    version: 5,
-    exportedAt: new Date().toISOString(),
-    projects,
-    members,
-    sprints,
-    collections,
-    tasks,
-    events,
-    aiThreads,
-    aiMessages,
-  }
-}
-
-export async function importAll(data: ExportPayload) {
-  if (!data || ![1, 2, 3, 4, 5].includes(data.version)) {
-    throw new Error('Unsupported export version')
-  }
-  // Validate shape BEFORE the transaction clears anything. A payload can carry
-  // a valid `version` yet have missing/non-array collections (truncated backup,
-  // hand-edited JSON, or a foreign file that happens to set `version`). The
-  // `as ExportPayload` cast at the call site is no runtime guarantee — without
-  // this guard the clears below succeed and the later `.map()` throws, leaving
-  // the user with a wiped DB and a cryptic "x.map is not a function".
-  if (
-    !Array.isArray(data.members) ||
-    !Array.isArray(data.sprints) ||
-    !Array.isArray(data.tasks) ||
-    (data.projects !== undefined && !Array.isArray(data.projects)) ||
-    (data.collections !== undefined && !Array.isArray(data.collections)) ||
-    (data.events !== undefined && !Array.isArray(data.events)) ||
-    (data.aiThreads !== undefined && !Array.isArray(data.aiThreads)) ||
-    (data.aiMessages !== undefined && !Array.isArray(data.aiMessages))
-  ) {
-    throw new Error('Not a valid plan-up backup')
-  }
-  try {
-   await db.transaction(
-    'rw',
-    [
-      db.projects,
-      db.members,
-      db.sprints,
-      db.collections,
-      db.tasks,
-      db.events,
-      db.people,
-      db.aiThreads,
-      db.aiMessages,
-    ],
-    async () => {
-      await db.aiMessages.clear()
-      await db.aiThreads.clear()
-      await db.events.clear()
-      await db.tasks.clear()
-      await db.sprints.clear()
-      await db.members.clear()
-      await db.collections.clear()
-      await db.projects.clear()
-      await db.people.clear()
-      // v1 payloads predate multi-project — synthesize a default project
-      // and stamp it onto every row. Any payload that carries `projects`
-      // (v2, v3, …) must keep its real project ids, otherwise sprints/
-      // collections/tasks (which reference projectId) get orphaned.
-      let projects: Project[]
-      let defaultId: string | null = null
-      if (data.projects && data.projects.length > 0) {
-        projects = data.projects
-      } else {
-        defaultId = uid()
-        projects = [
-          { id: defaultId, name: 'My Project', createdAt: Date.now() },
-        ]
-      }
-      await db.projects.bulkAdd(projects)
-      const fallbackId = defaultId ?? projects[0].id
-      const pidOf = (row: { projectId?: string }) => row.projectId ?? fallbackId
-
-      const members: Member[] = data.members.map((m) => {
-        const raw = (m.daysOff ?? []) as Array<string | DayOff>
-        const daysOff: DayOff[] = raw.map((d) =>
-          typeof d === 'string' ? { date: d } : d
-        )
-        return { ...m, projectId: pidOf(m), daysOff }
-      })
-      // Rebuild People fresh from the imported members (any personId in the
-      // payload references the source DB and is meaningless here) — group by
-      // normalized name so a person recurring across projects re-unifies.
-      const { people, links } = buildPersonBackfill(members, uid, colorForName, Date.now())
-      const personByMember = new Map(links.map((l) => [l.memberId, l.personId]))
-      for (const m of members) m.personId = personByMember.get(m.id)
-      if (people.length) await db.people.bulkAdd(people)
-      await db.members.bulkAdd(members)
-
-      const sprints: Sprint[] = data.sprints.map((s) => ({
-        ...s,
-        projectId: pidOf(s),
-      }))
-      await db.sprints.bulkAdd(sprints)
-
-      if (data.version >= 3 && Array.isArray(data.collections)) {
-        await db.collections.bulkAdd(
-          data.collections.map((c) => ({ ...c, projectId: pidOf(c) }))
-        )
-      }
-
-      // Sequence backfill is per-project for v1 payloads.
-      const seqCounter = new Map<string, number>()
-      const sorted = [...data.tasks].sort(
-        (a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0)
-      )
-      const tasks: Task[] = sorted.map((t) => {
-        const pid = pidOf(t)
-        let seq: number
-        if (typeof t.sequence === 'number') {
-          seq = t.sequence
-        } else {
-          const cur = seqCounter.get(pid) ?? 0
-          seq = cur + 1
-          seqCounter.set(pid, seq)
-        }
-        return {
-          ...t,
-          projectId: pid,
-          startDate: t.startDate ?? null,
-          dependsOn: Array.isArray(t.dependsOn) ? t.dependsOn : [],
-          sequence: seq,
-          collectionId: t.collectionId ?? null,
-          sectionId: t.sectionId ?? null,
-          collectionStatusId: t.collectionStatusId ?? null,
-        }
-      })
-      await db.tasks.bulkAdd(tasks)
-
-      // v4+ carries the sprint activity log. Older payloads have none — the log
-      // simply starts empty after importing them. Event rows reference real ids
-      // (taskId/sprintId/projectId) which are preserved above for v2+ payloads.
-      if (data.version >= 4 && Array.isArray(data.events) && data.events.length) {
-        await db.events.bulkAdd(data.events)
-      }
-
-      if (data.version >= 5 && Array.isArray(data.aiThreads) && data.aiThreads.length) {
-        await db.aiThreads.bulkAdd(
-          data.aiThreads.map((t) => ({ ...t, projectId: pidOf(t) }))
-        )
-      }
-      if (data.version >= 5 && Array.isArray(data.aiMessages) && data.aiMessages.length) {
-        await db.aiMessages.bulkAdd(
-          data.aiMessages.map((m) => ({ ...m, projectId: pidOf(m) }))
-        )
-      }
-    }
-   )
-  } catch (err) {
-    // Dexie aborts + rolls back the transaction on any failure, so the clears
-    // above are undone and the user's existing data survives. Translate its raw
-    // BulkError / ConstraintError (duplicate or conflicting ids in the payload)
-    // into a message the import dialog can show plainly, not Dexie internals.
-    const name = err instanceof Error ? err.name : ''
-    if (name === 'BulkError' || name === 'ConstraintError') {
-      throw new Error('Backup file contains duplicate or conflicting records.', {
-        cause: err,
-      })
-    }
-    throw err
-  }
-}
-
-/**
- * Export a SINGLE project to a portable, self-contained `ProjectBundle`
- * (version 5) — the "share one project" counterpart to the full-DB `exportAll`.
- * Reads each table filtered by `projectId`; the result can be imported into
- * another plan-up without touching existing data. See project-io.ts and
- * design-docs/project-export-import.md.
- */
-export async function exportProject(projectId: string): Promise<ProjectBundle> {
-  const [project, members, sprints, collections, tasks, events, aiThreads, aiMessages] =
-    await Promise.all([
-      db.projects.get(projectId),
-      db.members.where('projectId').equals(projectId).toArray(),
-      db.sprints.where('projectId').equals(projectId).toArray(),
-      db.collections.where('projectId').equals(projectId).toArray(),
-      db.tasks.where('projectId').equals(projectId).toArray(),
-      db.events.where('projectId').equals(projectId).toArray(),
-      db.aiThreads.where('projectId').equals(projectId).toArray(),
-      db.aiMessages.where('projectId').equals(projectId).toArray(),
-    ])
-  if (!project) throw new Error('Project not found')
-  return {
-    version: 5,
-    kind: 'project',
-    exportedAt: new Date().toISOString(),
-    project,
-    members,
-    sprints,
-    collections,
-    tasks,
-    events,
-    aiThreads,
-    aiMessages,
-  }
-}
-
-/**
- * Import a `ProjectBundle` as a BRAND-NEW project alongside existing ones —
- * non-destructive and repeatable (each import = a fresh copy). Regenerates every
- * id via `remapBundle` (a pure, unit-tested function), then bulk-adds into all
- * tables in ONE rw transaction. No clears. Returns the new projectId so the
- * caller can select it. On bulk error Dexie rolls back (existing data safe);
- * BulkError/ConstraintError are translated like `importAll`.
- */
-export async function importProject(
-  bundle: ProjectBundle
-): Promise<{ projectId: string; projectName: string; taskCount: number }> {
-  const remapped = remapBundle(bundle, uid)
-  try {
-    await db.transaction(
-      'rw',
-      [
-        db.projects,
-        db.members,
-        db.sprints,
-        db.collections,
-        db.tasks,
-        db.events,
-        db.people,
-        db.aiThreads,
-        db.aiMessages,
-      ],
-      async () => {
-        await db.projects.add(remapped.project)
-        // Link each imported member to a Person in THIS db by normalized name
-        // (reuse an existing same-name person, else create) — the bundle's
-        // personId references the source DB. Read existing people ONCE and build
-        // a name→id map, rather than re-scanning the table per member (O(n²)).
-        // New names dedupe within the bundle too. See design-docs/home-dashboard.md.
-        const byName = new Map<string, string>()
-        for (const pp of await db.people.toArray()) byName.set(normalizePersonName(pp.name), pp.id)
-        const newPeople: Person[] = []
-        for (const m of remapped.members) {
-          const key = normalizePersonName(m.name)
-          let pid = byName.get(key)
-          if (!pid) {
-            pid = uid()
-            byName.set(key, pid)
-            newPeople.push({ id: pid, name: m.name.trim(), color: colorForName(m.name), createdAt: Date.now() })
-          }
-          m.personId = pid
-        }
-        if (newPeople.length) await db.people.bulkAdd(newPeople)
-        if (remapped.members.length) await db.members.bulkAdd(remapped.members)
-        if (remapped.sprints.length) await db.sprints.bulkAdd(remapped.sprints)
-        if (remapped.collections.length)
-          await db.collections.bulkAdd(remapped.collections)
-        if (remapped.tasks.length) await db.tasks.bulkAdd(remapped.tasks)
-        if (remapped.events.length) await db.events.bulkAdd(remapped.events)
-        if (remapped.aiThreads?.length) await db.aiThreads.bulkAdd(remapped.aiThreads)
-        if (remapped.aiMessages?.length) await db.aiMessages.bulkAdd(remapped.aiMessages)
-      }
-    )
-  } catch (err) {
-    const name = err instanceof Error ? err.name : ''
-    if (name === 'BulkError' || name === 'ConstraintError') {
-      throw new Error('Project file contains duplicate or conflicting records.', {
-        cause: err,
-      })
-    }
-    throw err
-  }
-  return {
-    projectId: remapped.project.id,
-    projectName: remapped.project.name,
-    taskCount: remapped.tasks.length,
-  }
-}
-
-// Module-level promise lock prevents StrictMode double-mount from seeding twice.
-let seedPromise: Promise<void> | null = null
-export function seedIfEmpty(): Promise<void> {
-  if (!seedPromise) {
-    // On failure, release the lock so a later call (e.g. after a transient
-    // IndexedDB hiccup clears) can retry — otherwise a single rejected seed is
-    // cached forever and the app can never seed without a full reload.
-    seedPromise = doSeed().catch((e) => {
-      seedPromise = null
-      throw e
-    })
-  }
-  return seedPromise
-}
-/** Test-only: reset the per-module seed lock so a freshly cleared DB can re-seed. */
-export function __resetSeedLockForTests() {
-  seedPromise = null
-}
-
-/**
- * Merge sprints with duplicate names (legacy artifact of pre-lock seed race).
- * For each duplicate group: keep the sprint with most tasks, reassign tasks
- * from duplicates to keeper, then delete the duplicates. Idempotent.
- * Returns the number of duplicate sprints removed.
- */
-export async function dedupeSprints(): Promise<number> {
-  return db.transaction('rw', db.sprints, db.tasks, async () => {
-    const sprints = await db.sprints.toArray()
-    const tasks = await db.tasks.toArray()
-
-    // Scope by (projectId, name) — same name across projects is NOT a
-    // duplicate. (Pre-v7 single-project bucketed by name alone, which
-    // accidentally merged cross-project sprints once multi-project shipped.)
-    const byName = new Map<string, Sprint[]>()
-    for (const s of sprints) {
-      const key = `${s.projectId}::${s.name}`
-      const bucket = byName.get(key) ?? []
-      bucket.push(s)
-      byName.set(key, bucket)
-    }
-
-    let removed = 0
-    for (const group of byName.values()) {
-      if (group.length <= 1) continue
-      // keep the sprint with the most tasks (tie-break: earliest startDate)
-      group.sort((a, b) => {
-        const ca = tasks.filter((t) => t.sprintId === a.id).length
-        const cb = tasks.filter((t) => t.sprintId === b.id).length
-        if (cb !== ca) return cb - ca
-        return a.startDate.localeCompare(b.startDate)
-      })
-      const keeper = group[0]
-      const dups = group.slice(1)
-      for (const dup of dups) {
-        // Renumber as we move — sequence is per-sprint, so a plain sprintId
-        // swap would carry the dup's numbers over and collide with the keeper's.
-        const dupTasks = await db.tasks.where('sprintId').equals(dup.id).toArray()
-        for (const t of dupTasks) {
-          await db.tasks.update(t.id, {
-            sprintId: keeper.id,
-            sequence: await nextSequence(keeper.id),
-          })
-        }
-        await db.sprints.delete(dup.id)
-        removed++
-      }
-    }
-    return removed
-  })
-}
-
-async function doSeed() {
-  await db.transaction(
-    'rw',
-    [db.projects, db.members, db.sprints, db.tasks, db.people],
-    async () => {
-      // Ensure at least one project exists (the migration creates one for
-      // upgrading users; first-launch needs us to handle it here too).
-      let project = (await db.projects.toArray())[0]
-      if (!project) {
-        project = {
-          id: uid(),
-          name: 'My Project',
-          createdAt: Date.now(),
-        }
-        await db.projects.add(project)
-      }
-      const memberCount = await db.members.count()
-      if (memberCount > 0) return
-      await seedFresh(project.id)
-    }
-  )
-}
-
-async function seedFresh(projectId: string) {
-  const names = ['Alice', 'Bob', 'Charlie']
-  const members: Member[] = names.map((name) => ({
-    id: uid(),
-    projectId,
-    name,
-    color: colorForName(name),
-    daysOff: [],
-  }))
-  // Link each seeded member to a fresh Person (one per distinct name).
-  const { people, links } = buildPersonBackfill(members, uid, colorForName, Date.now())
-  const personByMember = new Map(links.map((l) => [l.memberId, l.personId]))
-  for (const m of members) m.personId = personByMember.get(m.id)
-  if (people.length) await db.people.bulkAdd(people)
-  await db.members.bulkAdd(members)
-
-  // Seeded Sprint 1 must honor the Monday-locked, 2-week cadence too — the
-  // dialog isn't the only creation path. See design-docs/sprint-cadence.md.
-  const { startDate, endDate } = defaultSprintDates(null, todayLocalISO())
-  const sprint: Sprint = {
-    id: uid(),
-    projectId,
-    name: 'Sprint 1',
-    startDate,
-    endDate,
-  }
-  await db.sprints.add(sprint)
-
-  await db.tasks.add({
-    id: uid(),
-    projectId,
-    sequence: 1,
-    title: 'Welcome — click to edit, or use ＋ Add Task',
-    assigneeId: members[0].id,
-    sprintId: sprint.id,
-    status: 'in_progress',
-    priority: 'normal',
-    startDate, // sprint start (a Monday) — keeps the welcome task inside the sprint
-    dueDate: null,
-    estimate: null,
-    createdAt: Date.now(),
-    dependsOn: [],
-  })
 }

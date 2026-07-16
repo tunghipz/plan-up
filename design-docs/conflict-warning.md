@@ -1,9 +1,10 @@
 # Schedule conflict warning
 
 **Status:** Implemented
-**Last updated:** 2026-06-05
-**Code (planned):** `app/src/SprintView.tsx` (`computeMemberConflicts`, `MemberCard`
-detection, `GroupHeader` badge, `TaskRow`/`TitleTextarea` row icon)
+**Last updated:** 2026-07-02 (`computeMemberConflicts` moved to `sprint-logic.ts`)
+**Code:** `app/src/sprint-logic.ts` (`computeMemberConflicts` — pure module shared by
+List/Board/Timeline, alongside `STATUS_META`/`derivedGroupStatus`), `app/src/SprintView.tsx`
+(`MemberCard` detection, `GroupHeader` badge, `TaskRow`/`TitleTextarea` row icon)
 
 ## Purpose
 Flag when one member is **double-booked** — two of their tasks are scheduled to

@@ -1,5 +1,6 @@
 import {
   Fragment,
+  memo,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -19,11 +20,9 @@ import {
   Ungroup,
   Link2,
   Link2Off,
-  GripVertical,
-  MoveRight,
-  ChevronsUpDown,
-  Search,
 } from 'lucide-react'
+import { useDragHandle, useDragHover, type RowDrag } from './DragHandle'
+import { computeDropSlot, resolveDropOrder } from './reorder'
 import {
   db,
   addMember,
@@ -31,8 +30,6 @@ import {
   setTaskParent,
   createGroupFromSelection,
   setDependencies,
-  moveTaskToSprint,
-  orderBetween,
   setListOrder,
   renormalizeListOrder,
   compareMembersByOrder,
@@ -42,16 +39,22 @@ import {
   recomputeDates,
   updateTask,
   computeWorkingPlan,
+  computeAllWorkingPlans,
   isTaskBlocked,
   addSprintTask,
   type Member,
   type Task,
-  type Sprint,
   type Status,
+  type WorkingPlan,
 } from './db'
 import { Avatar, MemberDaysOffButton } from './members'
+import {
+  STATUS_META,
+  computeMemberConflicts,
+  derivedGroupStatus,
+} from './sprint-logic'
 import { DatePickCell, SprintRangeContext } from './DatePicker'
-import { useConfirm } from './ConfirmDialog'
+import { useConfirm } from './confirm-context'
 import { AddGroupButton } from './AddGroupButton'
 import {
   formatRelativeDate,
@@ -59,175 +62,41 @@ import {
   isOverdue,
   parsePrereqSeqs,
   formatSeqRanges,
+  flattenDisplayOrder,
+  PRIORITY_TAG,
 } from './lib'
+import {
+  compareTasks,
+  buildDateSortKeys,
+  loadSort,
+  saveSort,
+  DEFAULT_SORT,
+  type SortField,
+  type Sort,
+} from './task-sort'
 
 // Re-exported so existing importers (BoardView) keep `from './SprintView'`.
 export { DatePickCell }
+// Sort helpers moved to ./task-sort; re-exported so existing importers
+// (sprint-sort.test) keep `from './SprintView'`.
+export { compareTasks, buildDateSortKeys }
 
 const WELCOME_PREFIX = 'Welcome —'
 
-function taskAiRef(task: Task): string {
-  const kind = task.estimate === 0 ? 'milestone' : 'task'
-  return `@${kind}[#${task.sequence}: ${task.title} | id=${task.id}]`
+// Fallback for a row whose task somehow isn't in the view's planById pass
+// (never expected — the pass covers every sprint task). Matches planFor's
+// NULL_PLAN rendering: no dates, default day-part times.
+const NULL_WORKING_PLAN: WorkingPlan = {
+  startDate: null,
+  dueDate: null,
+  startTime: '08:00',
+  endTime: '12:00',
 }
 
-type SortField =
-  | 'seq'
-  | 'title'
-  | 'effort'
-  | 'startDate'
-  | 'dueDate'
-  | 'status'
-  | 'dependsOn'
-const STATUS_RANK: Record<Status, number> = {
-  todo: 0,
-  in_progress: 1,
-  done: 2,
-}
-function compareTasks(a: Task, b: Task, field: SortField, dir: 'asc' | 'desc'): number {
-  const mul = dir === 'asc' ? 1 : -1
-  const va: string | number =
-    field === 'seq'
-      ? (a.listOrder ?? a.sequence)
-      : field === 'title'
-        ? (a.title || '').toLowerCase()
-        : field === 'effort'
-          ? (a.estimate ?? Number.POSITIVE_INFINITY)
-          : field === 'status'
-            ? STATUS_RANK[a.status]
-            : field === 'dependsOn'
-              ? (a.dependsOn?.length ?? 0)
-              : (a[field] ?? '￿')
-  const vb: string | number =
-    field === 'seq'
-      ? (b.listOrder ?? b.sequence)
-      : field === 'title'
-        ? (b.title || '').toLowerCase()
-        : field === 'effort'
-          ? (b.estimate ?? Number.POSITIVE_INFINITY)
-          : field === 'status'
-            ? STATUS_RANK[b.status]
-            : field === 'dependsOn'
-              ? (b.dependsOn?.length ?? 0)
-              : (b[field] ?? '￿')
-  if (va < vb) return -1 * mul
-  if (va > vb) return 1 * mul
-  return a.sequence - b.sequence // stable tiebreak by seq
-}
-
-export const STATUS_META: Record<Status, { label: string; varName: string }> = {
-  todo: { label: 'To do', varName: 'var(--color-status-todo)' },
-  in_progress: { label: 'In progress', varName: 'var(--color-status-progress)' },
-  done: { label: 'Done', varName: 'var(--color-status-done)' },
-}
-
-export const STATUS_ORDER: Status[] = ['todo', 'in_progress', 'done']
 
 const COLLAPSE_KEY = (sprintId: string) => `plan-up:collapsed:${sprintId}`
 const GROUP_COLLAPSE_KEY = (parentId: string) =>
   `plan-up:taskgroup-collapsed:${parentId}`
-// One global sort preference (shared across all member cards, not per-sprint), so it
-// survives switching view/sprint/project and a page reload. See list-view.md.
-const SORT_KEY = 'plan-up:sort'
-
-/**
- * Detect schedule conflicts among one member's leaf tasks. A pair conflicts if
- * their computed [start … end] intervals OVERLAP (one person can't run two tasks
- * at once), or they share a prerequisite. Same-start / same-end are kept only as a
- * fallback for zero-duration tasks (where a strict overlap is empty). Returns a
- * per-task tooltip string (absent = no conflict). O(n²) over a member's tasks
- * (small). See design-docs/conflict-warning.md.
- */
-export function computeMemberConflicts(
-  tasks: Task[],
-  tasksById: Map<string, Task>,
-  memberById: Map<string, Member>
-): Map<string, string> {
-  type Hit = { seq: number; kind: 'overlap' | 'start' | 'end' | 'prereq' }
-  // Unsized tasks (no effort) aren't really scheduled — exclude them from
-  // double-booking detection. See design-docs/conflict-warning.md.
-  const sized = tasks.filter((t) => t.estimate !== null)
-  const plans = new Map(
-    sized.map((t) => [t.id, computeWorkingPlan(t, tasksById, memberById)])
-  )
-  const startKey = (t: Task) => {
-    const p = plans.get(t.id)!
-    return p.startDate ? `${p.startDate}T${p.startTime ?? ''}` : null
-  }
-  const endKey = (t: Task) => {
-    const p = plans.get(t.id)!
-    return p.dueDate ? `${p.dueDate}T${p.endTime ?? ''}` : null
-  }
-  const hits = new Map<string, Hit[]>()
-  const push = (id: string, h: Hit) => {
-    const a = hits.get(id) ?? []
-    a.push(h)
-    hits.set(id, a)
-  }
-  for (let i = 0; i < sized.length; i++) {
-    for (let j = i + 1; j < sized.length; j++) {
-      const a = sized[i]
-      const b = sized[j]
-      const sa = startKey(a)
-      const ea = endKey(a)
-      const sb = startKey(b)
-      const eb = endKey(b)
-      // Time-range overlap: both tasks have a full [start..end] range and the
-      // intervals strictly intersect (touching endpoints, e.g. back-to-back, don't
-      // count). Keys are sortable ISO datetimes, so string `<` compares chronology.
-      const overlap = sa && ea && sb && eb && sa < eb && sb < ea
-      if (overlap) {
-        push(a.id, { seq: b.sequence, kind: 'overlap' })
-        push(b.id, { seq: a.sequence, kind: 'overlap' })
-      } else {
-        // Fallback for zero-duration tasks (strict overlap is empty): exact endpoint match.
-        if (sa && sa === sb) {
-          push(a.id, { seq: b.sequence, kind: 'start' })
-          push(b.id, { seq: a.sequence, kind: 'start' })
-        }
-        if (ea && ea === eb) {
-          push(a.id, { seq: b.sequence, kind: 'end' })
-          push(b.id, { seq: a.sequence, kind: 'end' })
-        }
-      }
-      if (a.dependsOn.some((d) => b.dependsOn.includes(d))) {
-        push(a.id, { seq: b.sequence, kind: 'prereq' })
-        push(b.id, { seq: a.sequence, kind: 'prereq' })
-      }
-    }
-  }
-  const label = (k: Hit['kind']) =>
-    k === 'overlap'
-      ? 'chồng thời gian'
-      : k === 'start'
-        ? 'giờ bắt đầu'
-        : k === 'end'
-          ? 'giờ kết thúc'
-          : 'chung prereq'
-  const tips = new Map<string, string>()
-  for (const [id, list] of hits) {
-    const byOther = new Map<number, Set<string>>()
-    for (const h of list) {
-      const s = byOther.get(h.seq) ?? new Set<string>()
-      s.add(label(h.kind))
-      byOther.set(h.seq, s)
-    }
-    const parts = [...byOther.entries()].map(
-      ([seq, kinds]) => `#${seq} (${[...kinds].join(', ')})`
-    )
-    tips.set(id, `Trùng lịch với ${parts.join('; ')}`)
-  }
-  return tips
-}
-
-/** Roll-up status of a parent task derived from its children (display only). */
-export function derivedGroupStatus(children: Task[]): Status {
-  if (children.length === 0) return 'todo'
-  if (children.every((c) => c.status === 'done')) return 'done'
-  if (children.some((c) => c.status === 'in_progress' || c.status === 'done'))
-    return 'in_progress'
-  return 'todo'
-}
 
 function loadCollapsed(sprintId: string): Set<string> {
   try {
@@ -247,43 +116,8 @@ function saveCollapsed(sprintId: string, set: Set<string>) {
   }
 }
 
-type Sort = { field: SortField; dir: 'asc' | 'desc' }
-const DEFAULT_SORT: Sort = { field: 'seq', dir: 'asc' }
-const SORT_FIELDS: SortField[] = [
-  'seq',
-  'title',
-  'effort',
-  'startDate',
-  'dueDate',
-  'status',
-  'dependsOn',
-]
 
-function loadSort(): Sort {
-  try {
-    const raw = localStorage.getItem(SORT_KEY)
-    if (!raw) return DEFAULT_SORT
-    const parsed = JSON.parse(raw) as Partial<Sort>
-    if (
-      parsed &&
-      SORT_FIELDS.includes(parsed.field as SortField) &&
-      (parsed.dir === 'asc' || parsed.dir === 'desc')
-    ) {
-      return { field: parsed.field as SortField, dir: parsed.dir }
-    }
-    return DEFAULT_SORT
-  } catch {
-    return DEFAULT_SORT
-  }
-}
 
-function saveSort(sort: Sort) {
-  try {
-    localStorage.setItem(SORT_KEY, JSON.stringify(sort))
-  } catch {
-    // localStorage unavailable, swallow
-  }
-}
 
 export function SprintView({
   projectId,
@@ -291,14 +125,12 @@ export function SprintView({
   sprintStartDate,
   sprintEndDate,
   tasks,
-  onInsertAiReference,
 }: {
   projectId: string
   sprintId: string
   sprintStartDate: string
   sprintEndDate: string
   tasks: Task[]
-  onInsertAiReference?: (text: string) => void
 }) {
   const members = useLiveQuery(
     () => db.members.where('projectId').equals(projectId).toArray(),
@@ -322,6 +154,7 @@ export function SprintView({
   const clearSelection = () => setSelectedIds(new Set())
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- sprint switch swaps the persisted collapse set + clears selection
     setCollapsed(loadCollapsed(sprintId))
     setSelectedIds(new Set())
   }, [sprintId])
@@ -345,21 +178,24 @@ export function SprintView({
   // Dependency picker + blocked check need a full lookup so a task's prereq is
   // always resolvable.
   const tasksById = useMemo(() => new Map(tasks.map((t) => [t.id, t])), [tasks])
+  const memberById = useMemo(
+    () => new Map((members ?? []).map((m) => [m.id, m])),
+    [members]
+  )
+  // ONE plan pass for every row in the view, recomputed only when data changes.
+  // Rows used to call computeWorkingPlan inline — each call re-walked its full
+  // prereq/group chain with a fresh cache, on EVERY render (drag hover, select,
+  // sidebar resize), which visibly janked large sprints.
+  const planById = useMemo(
+    () => computeAllWorkingPlans(tasks, tasksById, memberById),
+    [tasks, tasksById, memberById]
+  )
 
   // ── Member-lane drag-to-reorder (per project) ───────────────────────────
   // Mirrors the row drag in TaskRows: state lives here, scoped to this view.
   // Only the filled lanes (groups) are draggable. See member-lane-order.md.
   const [dragMemberId, setDragMemberId] = useState<string | null>(null)
-  const [laneOver, setLaneOver] = useState<{
-    id: string
-    pos: 'before' | 'after'
-  } | null>(null)
-  const laneRaf = useRef(0)
-  const lanePending = useRef<{
-    id: string
-    el: HTMLElement
-    clientY: number
-  } | null>(null)
+  const laneHover = useDragHover()
 
   const { groups, emptyMembers, unassigned } = useMemo(() => {
     // Lanes follow the manual per-project order (drag-to-reorder); both the
@@ -373,10 +209,20 @@ export function SprintView({
       if (owner) byMember.get(owner)!.push(t)
       else orphan.push(t)
     }
-    // Sort each member's tasks by the user-selected field (defaults to seq asc).
-    const cmp = (a: Task, b: Task) => compareTasks(a, b, sort.field, sort.dir)
-    for (const arr of byMember.values()) arr.sort(cmp)
-    orphan.sort(cmp)
+    // Sort each member's tasks by the user-selected field. Neutral (field null)
+    // falls back to the manual order — same as `seq asc`. Start/End sort by the
+    // displayed computed/rollup date via per-lane dateKeys (see buildDateSortKeys).
+    const sortLane = (arr: Task[]) => {
+      const dateKeys =
+        sort.field === 'startDate' || sort.field === 'dueDate'
+          ? buildDateSortKeys(arr, planById)
+          : undefined
+      arr.sort((a, b) =>
+        compareTasks(a, b, sort.field ?? 'seq', sort.field ? sort.dir : 'asc', dateKeys)
+      )
+    }
+    for (const arr of byMember.values()) sortLane(arr)
+    sortLane(orphan)
     const filled = ms.filter((m) => (byMember.get(m.id) ?? []).length > 0)
     const empty = ms.filter((m) => (byMember.get(m.id) ?? []).length === 0)
     return {
@@ -384,7 +230,15 @@ export function SprintView({
       emptyMembers: empty,
       unassigned: orphan,
     }
-  }, [members, tasks, sort])
+  }, [members, tasks, sort, planById])
+
+  // Flat top-to-bottom order exactly as rendered (lanes in order, group children
+  // nested, Unassigned last). The selection bar's "Chain prereqs" links tasks in
+  // this order — NOT the raw `tasks` DB array, which is unsorted. See design-docs/dependencies.md.
+  const orderedTasks = useMemo(
+    () => flattenDisplayOrder([...groups.map((g) => g.tasks), unassigned]),
+    [groups, unassigned]
+  )
 
   if (!members) return <p className="text-ink-muted py-12 text-center">Loading…</p>
 
@@ -397,81 +251,57 @@ export function SprintView({
 
   const endLaneDrag = () => {
     setDragMemberId(null)
-    setLaneOver(null)
-    if (laneRaf.current) {
-      cancelAnimationFrame(laneRaf.current)
-      laneRaf.current = 0
-    }
+    laneHover.cancel()
   }
-  const hoverLane = (targetId: string, el: HTMLElement, clientY: number) => {
-    if (!dragMemberId || targetId === dragMemberId) {
-      if (laneOver) setLaneOver(null)
+  const hoverLane = (targetEl: Element | null | undefined, clientY: number) => {
+    const targetId = targetEl instanceof HTMLElement ? targetEl.dataset.laneId : undefined
+    if (!dragMemberId || !targetId || targetId === dragMemberId) {
+      laneHover.clear()
       return
     }
-    lanePending.current = { id: targetId, el, clientY }
-    if (laneRaf.current) return
-    laneRaf.current = requestAnimationFrame(() => {
-      laneRaf.current = 0
-      const h = lanePending.current
-      if (!h || !dragMemberId) return
-      const r = h.el.getBoundingClientRect()
-      const pos: 'before' | 'after' =
-        h.clientY - r.top > r.height / 2 ? 'after' : 'before'
-      setLaneOver((prev) =>
-        prev && prev.id === h.id && prev.pos === pos ? prev : { id: h.id, pos }
-      )
-    })
+    // Suppress the insertion line on an own-gap no-op (same guard as dropOnLane).
+    const r = (targetEl as HTMLElement).getBoundingClientRect()
+    const pos: 'before' | 'after' = clientY - r.top > r.height / 2 ? 'after' : 'before'
+    const slot = computeDropSlot(laneMembers, (m) => m.id, dragMemberId, targetId, pos)
+    if (!slot || slot.ownGap) {
+      laneHover.clear()
+      return
+    }
+    laneHover.hover(targetId, targetEl as HTMLElement, clientY)
   }
-  const dropOnLane = (targetId: string, el: HTMLElement, clientY: number) => {
+  const dropOnLane = (targetEl: Element | null | undefined, clientY: number) => {
     const id = dragMemberId
-    endLaneDrag()
-    if (!id || targetId === id) return
+    const targetId = targetEl instanceof HTMLElement ? targetEl.dataset.laneId : undefined
+    if (!id || !targetId) return
     const arr = laneMembers
     const dragged = arr.find((m) => m.id === id)
-    if (!dragged || !arr.some((m) => m.id === targetId)) return
-    const r = el.getBoundingClientRect()
+    if (!dragged) return
+    const r = (targetEl as HTMLElement).getBoundingClientRect()
     const pos: 'before' | 'after' =
       clientY - r.top > r.height / 2 ? 'after' : 'before'
-    const fromIndex = arr.findIndex((m) => m.id === id)
-    const rest = arr.filter((m) => m.id !== id)
-    let insertAt = rest.findIndex((m) => m.id === targetId)
-    if (insertAt < 0) return
-    if (pos === 'after') insertAt += 1
-    const before = rest[insertAt - 1] ?? null
-    const after = rest[insertAt] ?? null
-    // No-op if it lands back in its own gap.
-    const left = arr[fromIndex - 1] ?? null
-    const right = arr[fromIndex + 1] ?? null
-    if (
-      (before?.id ?? null) === (left?.id ?? null) &&
-      (after?.id ?? null) === (right?.id ?? null)
-    )
-      return
-    const beforeOrder = before ? laneOrder(before) : null
-    const afterOrder = after ? laneOrder(after) : null
-    const newOrder = orderBetween(beforeOrder, afterOrder)
-    // Renormalize the lane when float precision is exhausted (same guard as the
-    // row drag), otherwise two lanes would collide on an equal order.
-    const collides =
-      (beforeOrder != null && newOrder <= beforeOrder) ||
-      (afterOrder != null && newOrder >= afterOrder)
+    const slot = computeDropSlot(arr, (m) => m.id, id, targetId, pos)
+    if (!slot || slot.ownGap) return
+    const { order, collides } = resolveDropOrder(slot, laneOrder)
+    // Renormalize the lane list when float precision is exhausted (same guard
+    // as the row drag), otherwise two lanes would collide on an equal order.
     if (collides) {
-      const orderedIds = rest.map((m) => m.id)
-      orderedIds.splice(insertAt, 0, id)
+      const orderedIds = arr.filter((m) => m.id !== id).map((m) => m.id)
+      orderedIds.splice(slot.insertAt, 0, id)
       void renormalizeMemberOrder(orderedIds)
-    } else if (newOrder !== dragged.order) {
-      void setMemberOrder(id, newOrder)
+    } else if (order !== dragged.order) {
+      void setMemberOrder(id, order)
     }
   }
   const laneDragFor = (m: Member): RowDrag => ({
     id: m.id,
     enabled: laneMembers.length > 1,
-    active: dragMemberId !== null,
     dragging: dragMemberId === m.id,
-    over: laneOver?.id === m.id ? laneOver.pos : null,
+    over: laneHover.over?.id === m.id ? laneHover.over.pos : null,
     onStart: () => setDragMemberId(m.id),
-    onOver: (el, clientY) => hoverLane(m.id, el, clientY),
-    onDrop: (el, clientY) => dropOnLane(m.id, el, clientY),
+    onMove: (x, y) =>
+      hoverLane(document.elementFromPoint(x, y)?.closest('[data-lane-id]'), y),
+    onDrop: (x, y) =>
+      dropOnLane(document.elementFromPoint(x, y)?.closest('[data-lane-id]'), y),
     onEnd: endLaneDrag,
   })
 
@@ -479,6 +309,27 @@ export function SprintView({
     <SprintRangeContext.Provider value={{ start: sprintStartDate, end: sprintEndDate }}>
     <div className="space-y-4">
       {isEmpty && <EmptyState onAddMember={() => setShowAddMember(true)} />}
+
+      {/* One column header for the whole list — pinned to the top of the scroll
+          area (sticks because nothing between here and the scroller is an overflow
+          box; the per-card overflow-x-auto that trapped the old per-group headers
+          is now BELOW this element). Floating glass capsule (same material as the
+          app toolbar) instead of an opaque full-bleed strip — option C of
+          demo/liquid-column-header.html; see liquid-glass-material.md. Member
+          layout (no Assignee column); the Unassigned card keeps its own header
+          since it adds that column. Matches the member cards' overflow-x-auto/
+          min-w so columns line up on wide screens. See design-docs/list-view.md v4. */}
+      {groups.length > 0 && (
+        <div className="sticky top-2 z-20">
+          <div className="glass-toolbar rounded-full overflow-hidden">
+            <div className="overflow-x-auto">
+              <div className="min-w-[820px]">
+                <TaskColumnHeader sort={sort} setSort={setSort} showAssignee={false} bare />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {groups.map(({ member, tasks: t }) => (
         <MemberCard
@@ -492,14 +343,13 @@ export function SprintView({
           members={members}
           allTasks={tasks}
           tasksById={tasksById}
+          planById={planById}
           collapsed={collapsed.has(member.id)}
           onToggleCollapse={() => toggleCollapse(member.id)}
           sort={sort}
-          setSort={setSort}
           selectedIds={selectedIds}
           onToggleSelect={toggleSelect}
           drag={laneDragFor(member)}
-          onInsertAiReference={onInsertAiReference}
         />
       ))}
 
@@ -509,11 +359,11 @@ export function SprintView({
           members={members}
           allTasks={tasks}
           tasksById={tasksById}
+          planById={planById}
           sort={sort}
           setSort={setSort}
           selectedIds={selectedIds}
           onToggleSelect={toggleSelect}
-          onInsertAiReference={onInsertAiReference}
         />
       )}
 
@@ -537,10 +387,9 @@ export function SprintView({
       />
 
       <SelectionBar
-        projectId={projectId}
         selectedIds={selectedIds}
         tasksById={tasksById}
-        allTasks={tasks}
+        allTasks={orderedTasks}
         onClear={clearSelection}
       />
     </div>
@@ -559,26 +408,17 @@ export function SprintView({
  * See design-docs/task-groups.md and design-docs/dependencies.md.
  */
 function SelectionBar({
-  projectId,
   selectedIds,
   tasksById,
   allTasks,
   onClear,
 }: {
-  projectId: string
   selectedIds: Set<string>
   tasksById: Map<string, Task>
   allTasks: Task[]
   onClear: () => void
 }) {
   const confirm = useConfirm()
-  const sprints = useLiveQuery(
-    () => db.sprints.where('projectId').equals(projectId).sortBy('startDate'),
-    [projectId]
-  )
-  const [moveOpen, setMoveOpen] = useState(false)
-  const [moveQuery, setMoveQuery] = useState('')
-  const barRef = useRef<HTMLDivElement>(null)
   const n = selectedIds.size
   const parentIds = useMemo(() => {
     const s = new Set<string>()
@@ -597,46 +437,12 @@ function SelectionBar({
   const canGroup = sameMember && noneParent
   const anyChild = selected.some((t) => !!t.parentId)
 
-  // Chain follows the displayed top-to-bottom order, so order by the source array
-  // (not Set insertion order). ≥2 needed to form a chain.
+  // Chain follows the displayed top-to-bottom order: `allTasks` arrives already
+  // flattened in render order (flattenDisplayOrder), so filtering it keeps that
+  // order — not Set insertion or raw DB order. ≥2 needed to form a chain.
   const selectedInOrder = allTasks.filter((t) => selectedIds.has(t.id))
   const canChain = selectedInOrder.length >= 2
   const canClearPrereq = selected.some((t) => t.dependsOn.length > 0)
-  const activeSprints = useMemo(
-    () => (sprints ?? []).filter((sprint) => sprint.archivedAt == null),
-    [sprints]
-  )
-  const visibleMoveSprints = useMemo(() => {
-    const q = moveQuery.trim().toLowerCase()
-    if (!q) return activeSprints
-    return activeSprints.filter((sprint) =>
-      `${sprint.name} ${sprint.startDate} ${sprint.endDate}`.toLowerCase().includes(q)
-    )
-  }, [activeSprints, moveQuery])
-
-  useEffect(() => {
-    if (!moveOpen) return
-    const onDown = (event: MouseEvent) => {
-      if (barRef.current?.contains(event.target as Node)) return
-      setMoveOpen(false)
-    }
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setMoveOpen(false)
-    }
-    document.addEventListener('mousedown', onDown)
-    document.addEventListener('keydown', onKey)
-    return () => {
-      document.removeEventListener('mousedown', onDown)
-      document.removeEventListener('keydown', onKey)
-    }
-  }, [moveOpen])
-
-  useEffect(() => {
-    if (n === 0) {
-      setMoveOpen(false)
-      setMoveQuery('')
-    }
-  }, [n])
 
   const doGroup = async () => {
     if (!canGroup) return
@@ -661,13 +467,6 @@ function SelectionBar({
     for (const t of selected) {
       if (t.dependsOn.length > 0) await setDependencies(t.id, [])
     }
-    onClear()
-  }
-  const doMoveToSprint = async (target: Sprint) => {
-    setMoveOpen(false)
-    setMoveQuery('')
-    const moving = selected.filter((t) => t.sprintId !== target.id)
-    for (const task of moving) await moveTaskToSprint(task.id, target.id)
     onClear()
   }
   const doUngroup = async () => {
@@ -695,8 +494,9 @@ function SelectionBar({
 
   return (
     <div
-      ref={barRef}
-      className={`fixed left-1/2 bottom-6 z-40 -translate-x-1/2 flex items-center gap-3 rounded-[14px] bg-ink dark:bg-[#2c2c2e] dark:ring-1 dark:ring-white/10 text-white pl-4 pr-2 py-2 shadow-[0_8px_30px_rgba(0,0,0,0.22),0_0_0_0.5px_rgba(0,0,0,0.06)] transition-[opacity,transform] duration-200 ${
+      // Bar is dark in both themes, so the specular rim is hardcoded white
+      // (the light-theme tokens use a dark ring, which would vanish here).
+      className={`fixed left-1/2 bottom-6 z-40 -translate-x-1/2 flex items-center gap-3 whitespace-nowrap rounded-[14px] bg-ink dark:bg-surface text-white pl-4 pr-2 py-2 shadow-[0_8px_30px_rgba(0,0,0,0.22),0_0_0_0.5px_rgba(0,0,0,0.06),inset_0_1px_0_rgba(255,255,255,0.14),inset_0_0_0_0.5px_rgba(255,255,255,0.10)] transition-[opacity,transform] duration-200 ${
         n > 0
           ? 'opacity-100 translate-y-0'
           : 'opacity-0 translate-y-3 pointer-events-none'
@@ -731,70 +531,6 @@ function SelectionBar({
       >
         <Link2Off size={14} /> Clear prereqs
       </button>
-      <div className="relative">
-        <button
-          type="button"
-          onClick={() => setMoveOpen((value) => !value)}
-          disabled={activeSprints.length === 0}
-          className="inline-flex items-center gap-1.5 text-[13px] text-white/80 hover:text-white px-2.5 py-1.5 rounded-[9px] hover:bg-white/10 transition disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
-        >
-          <MoveRight size={14} /> Move to sprint
-          <ChevronsUpDown size={13} className="opacity-60" />
-        </button>
-        {moveOpen && (
-          <div className="absolute bottom-[calc(100%+10px)] left-1/2 w-[290px] -translate-x-1/2 rounded-[12px] bg-surface p-2 text-ink shadow-[0_18px_50px_rgba(0,0,0,0.22),0_0_0_0.5px_rgba(0,0,0,0.08)]">
-            <label className="flex items-center gap-2 rounded-[8px] border border-border bg-canvas-sunk/40 px-2.5 py-1.5">
-              <Search size={14} className="shrink-0 text-ink-faint" aria-hidden />
-              <input
-                autoFocus
-                value={moveQuery}
-                onChange={(event) => setMoveQuery(event.target.value)}
-                placeholder="Search sprint"
-                className="min-w-0 flex-1 bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-faint"
-              />
-            </label>
-            <div className="mt-2 max-h-[240px] overflow-y-auto py-1">
-              {visibleMoveSprints.length === 0 ? (
-                <div className="px-2.5 py-3 text-[13px] text-ink-faint">
-                  No matching sprint
-                </div>
-              ) : (
-                visibleMoveSprints.map((sprint) => {
-                  const alreadyHere = selected.every((task) => task.sprintId === sprint.id)
-                  const hereCount = selected.filter((task) => task.sprintId === sprint.id).length
-                  return (
-                    <button
-                      key={sprint.id}
-                      type="button"
-                      disabled={alreadyHere}
-                      onClick={() => void doMoveToSprint(sprint)}
-                      className="w-full rounded-[8px] px-2.5 py-2 text-left hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent transition"
-                    >
-                      <span className="flex items-center justify-between gap-2">
-                        <span className="min-w-0 truncate text-[13px] font-semibold text-ink">
-                          {sprint.name}
-                        </span>
-                        {alreadyHere ? (
-                          <span className="shrink-0 text-[11px] font-semibold text-ink-faint">
-                            Current
-                          </span>
-                        ) : hereCount > 0 ? (
-                          <span className="shrink-0 text-[11px] font-semibold text-ink-faint">
-                            {hereCount} here
-                          </span>
-                        ) : null}
-                      </span>
-                      <span className="block text-[11.5px] text-ink-faint tabular-nums">
-                        {sprint.startDate} → {sprint.endDate}
-                      </span>
-                    </button>
-                  )
-                })
-              )}
-            </div>
-          </div>
-        )}
-      </div>
       <button
         onClick={doGroup}
         disabled={!canGroup}
@@ -803,6 +539,8 @@ function SelectionBar({
             ? undefined
             : 'Select ≥2 tasks with the same assignee (not a group) to group'
         }
+        // Button is always-white on the dark floating bar (both themes), so the
+        // label stays hardcoded near-black — text-ink would flip to white in dark.
         className="inline-flex items-center gap-1.5 text-[13px] font-semibold rounded-[9px] px-3 py-1.5 transition disabled:opacity-40 disabled:cursor-not-allowed bg-white text-[#1d1d1f] hover:bg-white/90"
       >
         <FolderPlus size={14} /> Group
@@ -826,7 +564,7 @@ function SelectionBar({
 
 function EmptyState({ onAddMember }: { onAddMember: () => void }) {
   return (
-    <div className="bg-surface border border-dashed border-border-strong rounded-lg p-10 text-center">
+    <div className="bg-surface border border-dashed border-border-strong rounded-[14px] p-10 text-center">
       <div className="text-base font-medium text-ink mb-1">No members yet</div>
       <p className="text-sm text-ink-muted max-w-sm mx-auto mb-4">
         Add a teammate to start assigning tasks. Members are labels — they don't
@@ -834,7 +572,7 @@ function EmptyState({ onAddMember }: { onAddMember: () => void }) {
       </p>
       <button
         onClick={onAddMember}
-        className="text-sm px-3 py-1.5 bg-accent hover:bg-accent-hover text-white rounded inline-flex items-center gap-1.5"
+        className="text-sm px-3 py-1.5 brand-btn text-white rounded inline-flex items-center gap-1.5"
       >
         <UserPlus size={14} /> Add first member
       </button>
@@ -857,14 +595,13 @@ function MemberCard({
   members,
   allTasks,
   tasksById,
+  planById,
   collapsed,
   onToggleCollapse,
   sort,
-  setSort,
   selectedIds,
   onToggleSelect,
   drag,
-  onInsertAiReference,
 }: {
   projectId: string
   member: Member
@@ -875,17 +612,17 @@ function MemberCard({
   members: Member[]
   allTasks: Task[]
   tasksById: Map<string, Task>
+  planById: Map<string, WorkingPlan>
   collapsed: boolean
   onToggleCollapse: () => void
-  sort: { field: SortField; dir: 'asc' | 'desc' }
-  setSort: React.Dispatch<
-    React.SetStateAction<{ field: SortField; dir: 'asc' | 'desc' }>
-  >
+  // sort drives `canReorder` (drag is only allowed in the manual/seq-asc order).
+  // setSort is no longer needed here — the column header is a single sticky bar
+  // hoisted above the list (see SprintView top), not per member card.
+  sort: Sort
   selectedIds: Set<string>
   onToggleSelect: (id: string) => void
   /** Lane drag-to-reorder wiring (absent → card is not draggable). */
   drag?: RowDrag
-  onInsertAiReference?: (text: string) => void
 }) {
   // Leaf-based counting: a parent (a task with children in this list) is a
   // container, excluded from done/total/overdue so its work isn't double-counted
@@ -912,7 +649,7 @@ function MemberCard({
     let nextDue: string | null = null
     for (const t of leafTasks) {
       if (t.status === 'done') continue
-      const plan = computeWorkingPlan(t, tasksById, memberById)
+      const plan = planById.get(t.id) ?? computeWorkingPlan(t, tasksById, memberById)
       // Milestones (effort 0) have no due span — their deadline is the milestone
       // date (start), so they count toward overdue / next-due like any task.
       const due = t.estimate === 0 ? plan.startDate : plan.dueDate
@@ -924,17 +661,10 @@ function MemberCard({
     // design-docs/conflict-warning.md). Cheap O(n²) over a member's tasks.
     const conflictTips = computeMemberConflicts(leafTasks, tasksById, memberById)
     return { total, done, pct, overdue, nextDue, conflictTips }
-  }, [tasks, parentIds, tasksById, memberById])
-  const { grip, rowProps, dragging } = useDragHandle(drag, LANE_GRIP_CLASS)
+  }, [tasks, parentIds, tasksById, memberById, planById])
+  const { grip, rowProps, dragging } = useDragHandle(drag, LANE_GRIP_CLASS, 'data-lane-id')
   return (
-    <Card
-      className={`relative ${dragging ? 'opacity-40' : ''}`}
-      {...rowProps}
-      onContextMenu={(e) => {
-        e.preventDefault()
-        onInsertAiReference?.(`@member[${member.name} | id=${member.id}]`)
-      }}
-    >
+    <Card className={`relative ${dragging ? 'opacity-40' : ''}`} {...rowProps}>
       {drag?.over === 'before' && (
         <div className="absolute left-3 right-3 top-0 h-0.5 rounded-full bg-accent pointer-events-none z-30" />
       )}
@@ -962,28 +692,31 @@ function MemberCard({
       {!collapsed && (
         // Horizontal scroll on narrow screens: fixed-width columns keep their
         // size and the table scrolls instead of crushing the title column.
+        // Assignee column is omitted — every row in a member group is the same
+        // person (shown in the group header avatar).
         <div className="overflow-x-auto">
-          <div className="min-w-[896px]">
-            {tasks.length > 0 && (
-              <TaskColumnHeader sort={sort} setSort={setSort} />
-            )}
+          <div className="min-w-[820px]">
+            {/* Column header hoisted to a single sticky header above the whole
+                list (see SprintView top). Member cards no longer carry their own. */}
             <div className="divide-y divide-border">
               <TaskRows
                 tasks={tasks}
                 members={members}
                 allTasks={allTasks}
                 tasksById={tasksById}
+                planById={planById}
+                showAssignee={false}
                 conflictTips={conflictTips}
                 selectedIds={selectedIds}
                 onToggleSelect={onToggleSelect}
-                canReorder={sort.field === 'seq'}
-                onInsertAiReference={onInsertAiReference}
+                canReorder={sort.field == null || (sort.field === 'seq' && sort.dir === 'asc')}
               />
               <AddTaskRow
                 projectId={projectId}
                 sprintId={sprintId}
                 sprintStartDate={sprintStartDate}
                 assigneeId={member.id}
+                showAssignee={false}
               />
             </div>
           </div>
@@ -998,23 +731,23 @@ function UnassignedCard({
   members,
   allTasks,
   tasksById,
+  planById,
   sort,
   setSort,
   selectedIds,
   onToggleSelect,
-  onInsertAiReference,
 }: {
   tasks: Task[]
   members: Member[]
   allTasks: Task[]
   tasksById: Map<string, Task>
-  sort: { field: SortField; dir: 'asc' | 'desc' }
+  planById: Map<string, WorkingPlan>
+  sort: Sort
   setSort: React.Dispatch<
-    React.SetStateAction<{ field: SortField; dir: 'asc' | 'desc' }>
+    React.SetStateAction<Sort>
   >
   selectedIds: Set<string>
   onToggleSelect: (id: string) => void
-  onInsertAiReference?: (text: string) => void
 }) {
   return (
     <Card>
@@ -1037,10 +770,10 @@ function UnassignedCard({
               members={members}
               allTasks={allTasks}
               tasksById={tasksById}
+              planById={planById}
               selectedIds={selectedIds}
               onToggleSelect={onToggleSelect}
-              canReorder={sort.field === 'seq'}
-              onInsertAiReference={onInsertAiReference}
+              canReorder={sort.field == null || (sort.field === 'seq' && sort.dir === 'asc')}
             />
           </div>
         </div>
@@ -1115,7 +848,7 @@ function Card({
   // `group/card` enables hover-reveal of the grip + delete button in GroupHeader.
   return (
     <div
-      className={`group/card bg-surface rounded-[14px] overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_22px_rgba(0,0,0,0.05)] ${className}`}
+      className={`group/card glass-card rounded-[18px] overflow-hidden ${className}`}
       {...rest}
     >
       {children}
@@ -1341,14 +1074,11 @@ const COL = {
 
 /**
  * Cupertino priority tag — soft-tint pill, only for urgent/high. Normal/Low/None
- * are the silent default (no tag), keeping the title row calm.
+ * are the silent default (no tag), keeping the title row calm. Colors come
+ * from the shared PRIORITY_TAG map (also used by the rollover preview).
  */
-const PRIORITY_STICKER: Record<string, { label: string; bg: string; fg: string }> = {
-  urgent: { label: 'Urgent', bg: 'rgba(255,59,48,0.12)', fg: 'color-mix(in srgb, var(--color-priority-urgent) 100%, #000 22%)' },
-  high: { label: 'High', bg: 'rgba(255,149,0,0.15)', fg: 'color-mix(in srgb, var(--color-priority-high) 100%, #000 22%)' },
-}
 function PriorityChip({ priority }: { priority: string }) {
-  const meta = PRIORITY_STICKER[priority]
+  const meta = PRIORITY_TAG[priority]
   if (!meta) return null
   return (
     <span
@@ -1517,7 +1247,7 @@ function TitleTextarea({
 function StatusPill({ status }: { status: Status }) {
   const meta = STATUS_META[status]
   const bg = `color-mix(in srgb, ${meta.varName} 15%, transparent)`
-  const fg = `color-mix(in srgb, ${meta.varName} 100%, #000 22%)`
+  const fg = `color-mix(in srgb, ${meta.varName} 78%, var(--color-ink))`
   // The interactive StatusPicker's native <select> reserves space for the
   // widest option ("In progress"), so its pill is always that wide. Reserve
   // the same width here via an invisible sizer so the group's read-only pill
@@ -1557,137 +1287,24 @@ function StatusPill({ status }: { status: Status }) {
  * title stays editable; a chevron collapses the group. The parent is excluded
  * from member counts/capacity (leaf-based counting). See design-docs/task-groups.md.
  */
-/**
- * Per-row drag state handed down from TaskRows. `enabled` gates the whole feature
- * (only in the default seq order); `active` = a drag is in progress in this card.
- */
-type RowDrag = {
-  id: string
-  enabled: boolean
-  active: boolean
-  dragging: boolean
-  over: 'before' | 'after' | null
-  onStart: () => void
-  onOver: (el: HTMLElement, clientY: number) => void
-  onDrop: (el: HTMLElement, clientY: number) => void
-  onEnd: () => void
-}
-
-/**
- * Wires native HTML5 drag to a row. The row is `draggable` ONLY while the grip
- * is held: the grip's pointerdown finds the row (via the `data-drag-row` marker)
- * and flips `el.draggable = true` synchronously, resetting it on release/dragend.
- * At rest the row is not draggable, so its text (task title) stays selectable —
- * a permanently-`draggable` ancestor blocks text selection in WebKit/Safari. The
- * `armedRef` (also set on grip pointerdown) is a belt-and-braces guard so only a
- * grip-initiated dragstart counts. The whole row is the drag image. Returns the
- * grip, the drop-slot indicator line, and the props to spread on the row element.
- */
-function useDragHandle(
-  drag?: RowDrag,
-  // Grip positioning/reveal classes. Defaults suit a task row (revealed on
-  // `group/row` hover); member lanes pass a `group/card`-scoped variant.
-  gripClassName = 'absolute left-0.5 top-1/2 -translate-y-1/2 z-20 grid place-items-center w-4 h-6 text-ink-faint/70 hover:text-ink-muted opacity-0 group-hover/row:opacity-100 transition-opacity cursor-grab active:cursor-grabbing touch-none'
-) {
-  const armedRef = useRef(false)
-  const enabled = !!drag?.enabled
-  const grip = enabled ? (
-    <button
-      type="button"
-      aria-label="Drag to reorder"
-      onPointerDown={(e) => {
-        e.stopPropagation()
-        armedRef.current = true
-        // The row is NOT draggable at rest, so its text (task title) stays
-        // selectable — a `draggable` ancestor blocks text selection in WebKit/
-        // Safari. Arm draggability imperatively (synchronously, before the
-        // browser's drag decision on the following mousemove) only while the grip
-        // is held; disarm on release whether or not a drag actually happened.
-        const row = (e.currentTarget as HTMLElement).closest<HTMLElement>('[data-drag-row]')
-        if (row) row.draggable = true
-        const off = () => {
-          armedRef.current = false
-          if (row) row.draggable = false
-          window.removeEventListener('pointerup', off)
-        }
-        window.addEventListener('pointerup', off)
-      }}
-      onClick={(e) => e.stopPropagation()}
-      className={gripClassName}
-    >
-      <GripVertical size={14} />
-    </button>
-  ) : null
-
-  const indicator = enabled ? (
-    <>
-      {drag!.over === 'before' && (
-        <div className="absolute left-3 right-3 -top-px h-0.5 rounded-full bg-accent pointer-events-none z-20" />
-      )}
-      {drag!.over === 'after' && (
-        <div className="absolute left-3 right-3 -bottom-px h-0.5 rounded-full bg-accent pointer-events-none z-20" />
-      )}
-    </>
-  ) : null
-
-  const rowProps: React.HTMLAttributes<HTMLDivElement> & {
-    'data-drag-row'?: string
-  } = enabled
-    ? {
-        // Marker the grip's pointerdown finds via closest() to flip `draggable`.
-        // No static `draggable: true` — that would break text selection (WebKit).
-        'data-drag-row': '',
-        onDragStart: (e) => {
-          // Only a grip-initiated drag counts; anything else (text selection,
-          // dragging an inline control) is cancelled.
-          if (!armedRef.current) {
-            e.preventDefault()
-            return
-          }
-          e.dataTransfer.effectAllowed = 'move'
-          e.dataTransfer.setData('text/plain', drag!.id)
-          drag!.onStart()
-        },
-        onDragOver: (e) => {
-          if (!drag!.active) return
-          e.preventDefault()
-          e.dataTransfer.dropEffect = 'move'
-          drag!.onOver(e.currentTarget, e.clientY)
-        },
-        onDrop: (e) => {
-          if (!drag!.active) return
-          e.preventDefault()
-          drag!.onDrop(e.currentTarget, e.clientY)
-        },
-        onDragEnd: (e) => {
-          armedRef.current = false
-          e.currentTarget.draggable = false
-          drag!.onEnd()
-        },
-      }
-    : {}
-
-  return { grip, indicator, rowProps, dragging: !!drag?.dragging }
-}
-
 function TaskGroupRow({
   task,
   childrenTasks,
   members,
   tasksById,
+  planById,
   collapsed,
   onToggle,
   drag,
-  onInsertAiReference,
 }: {
   task: Task
   childrenTasks: Task[]
   members: Member[]
   tasksById: Map<string, Task>
+  planById: Map<string, WorkingPlan>
   collapsed: boolean
   onToggle: () => void
   drag?: RowDrag
-  onInsertAiReference?: (text: string) => void
 }) {
   const { grip, indicator, rowProps, dragging } = useDragHandle(drag)
   const memberById = useMemo(
@@ -1701,40 +1318,38 @@ function TaskGroupRow({
   const effortSum = childrenTasks.reduce((s, c) => s + (c.estimate ?? 0), 0)
   // Span = earliest child start … latest child end, shown with the same
   // date+time format/size as a normal task row (see design-docs/task-groups.md).
-  let startLabel: string | null = null
-  let endLabel: string | null = null
+  // Date and time kept separate so the time tail can hide until row hover, exactly
+  // like a leaf DatePickCell (see design-docs/list-view.md v4).
+  let startDatePart: string | null = null
+  let startTimePart: string | null = null
+  let endDatePart: string | null = null
+  let endTimePart: string | null = null
   let minKey: string | null = null
   let maxKey: string | null = null
   for (const c of childrenTasks) {
-    const plan = computeWorkingPlan(c, tasksById, memberById)
+    const plan = planById.get(c.id) ?? computeWorkingPlan(c, tasksById, memberById)
     if (plan.startDate) {
       const k = `${plan.startDate}T${plan.startTime ?? ''}`
       if (!minKey || k < minKey) {
         minKey = k
-        startLabel = plan.startTime
-          ? `${formatRelativeDate(plan.startDate)}, ${plan.startTime}`
-          : formatRelativeDate(plan.startDate)
+        startDatePart = formatRelativeDate(plan.startDate)
+        startTimePart = plan.startTime ?? null
       }
     }
     if (plan.dueDate) {
       const k = `${plan.dueDate}T${plan.endTime ?? ''}`
       if (!maxKey || k > maxKey) {
         maxKey = k
-        endLabel = plan.endTime
-          ? `${formatRelativeDate(plan.dueDate)}, ${plan.endTime}`
-          : formatRelativeDate(plan.dueDate)
+        endDatePart = formatRelativeDate(plan.dueDate)
+        endTimePart = plan.endTime ?? null
       }
     }
   }
   return (
     <div
       {...rowProps}
-      onContextMenu={(e) => {
-        e.preventDefault()
-        e.stopPropagation()
-        onInsertAiReference?.(taskAiRef(task))
-      }}
-      className={`task-row group/row relative flex items-center gap-3 px-4 py-2 text-sm hover:bg-surface-hover transition bg-accent/[0.025] ${
+      data-task-id={task.id}
+      className={`task-row group/row relative flex items-center gap-3 px-4 py-1.5 text-sm hover:bg-surface-hover transition bg-accent/[0.025] ${
         dragging ? 'opacity-40' : ''
       }`}
     >
@@ -1776,17 +1391,31 @@ function TaskGroupRow({
       </div>
       <div className={COL.effort}>
         <span className="text-sm text-ink-muted tabular-nums">
-          {hasEffort ? effortSum : '—'}
+          {hasEffort ? effortSum : <span className="text-ink-faint opacity-40">—</span>}
         </span>
       </div>
       <div className={COL.start}>
-        <span className="inline-flex items-center justify-end w-full h-8 px-2 text-sm text-ink-muted whitespace-nowrap">
-          {startLabel ?? '—'}
+        <span className="inline-flex items-center justify-end w-full h-7 px-2 text-sm text-ink-muted whitespace-nowrap">
+          {startDatePart ? (
+            <>
+              {startDatePart}
+              {startTimePart && <span className="hidden group-hover/row:inline">, {startTimePart}</span>}
+            </>
+          ) : (
+            <span className="text-ink-faint opacity-40">—</span>
+          )}
         </span>
       </div>
       <div className={COL.due}>
-        <span className="inline-flex items-center justify-end w-full h-8 px-2 text-sm text-ink-muted whitespace-nowrap">
-          {endLabel ?? '—'}
+        <span className="inline-flex items-center justify-end w-full h-7 px-2 text-sm text-ink-muted whitespace-nowrap">
+          {endDatePart ? (
+            <>
+              {endDatePart}
+              {endTimePart && <span className="hidden group-hover/row:inline">, {endTimePart}</span>}
+            </>
+          ) : (
+            <span className="text-ink-faint opacity-40">—</span>
+          )}
         </span>
       </div>
       <div className={COL.status}>
@@ -1808,17 +1437,18 @@ function TaskRows({
   members,
   allTasks,
   tasksById,
+  planById,
   showAssignee = true,
   conflictTips,
   selectedIds,
   onToggleSelect,
   canReorder = false,
-  onInsertAiReference,
 }: {
   tasks: Task[]
   members: Member[]
   allTasks: Task[]
   tasksById: Map<string, Task>
+  planById: Map<string, WorkingPlan>
   showAssignee?: boolean
   /** taskId → conflict tooltip (member double-booking); absent map = no warnings. */
   conflictTips?: Map<string, string>
@@ -1827,7 +1457,6 @@ function TaskRows({
   onToggleSelect?: (id: string) => void
   /** Drag-to-reorder is only offered in the default (seq) order. */
   canReorder?: boolean
-  onInsertAiReference?: (text: string) => void
 }) {
   const { topLevel, childrenByParent } = useMemo(() => {
     const idSet = new Set(tasks.map((t) => t.id))
@@ -1843,31 +1472,30 @@ function TaskRows({
     return { topLevel: tasks.filter((t) => !isChild(t)), childrenByParent }
   }, [tasks])
 
-  // Collapse state per parent, persisted to localStorage. Seed once for the
-  // parents present; newly-created groups default to expanded.
-  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set())
-  useEffect(() => {
-    setCollapsed((prev) => {
-      const next = new Set(prev)
-      for (const pid of childrenByParent.keys()) {
-        if (localStorage.getItem(GROUP_COLLAPSE_KEY(pid)) === '1') next.add(pid)
-      }
-      return next
-    })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-  const toggle = (id: string) =>
-    setCollapsed((prev) => {
-      const next = new Set(prev)
-      if (next.has(id)) {
-        next.delete(id)
-        localStorage.removeItem(GROUP_COLLAPSE_KEY(id))
-      } else {
-        next.add(id)
-        localStorage.setItem(GROUP_COLLAPSE_KEY(id), '1')
-      }
-      return next
-    })
+  // Collapse state per parent: localStorage is the source of truth, in-session
+  // toggles overlay it. DERIVED (not seeded once into state) so a sprint
+  // switch — which swaps the parent set without remounting this component —
+  // picks up each parent's persisted flag instead of ignoring it. Reading
+  // localStorage per parent per render is a handful of cheap sync gets.
+  const [collapseOverrides, setCollapseOverrides] = useState<
+    Map<string, boolean>
+  >(() => new Map())
+  const collapsed = useMemo(() => {
+    const s = new Set<string>()
+    for (const pid of childrenByParent.keys()) {
+      const c =
+        collapseOverrides.get(pid) ??
+        localStorage.getItem(GROUP_COLLAPSE_KEY(pid)) === '1'
+      if (c) s.add(pid)
+    }
+    return s
+  }, [childrenByParent, collapseOverrides])
+  const toggle = (id: string) => {
+    const next = !collapsed.has(id)
+    if (next) localStorage.setItem(GROUP_COLLAPSE_KEY(id), '1')
+    else localStorage.removeItem(GROUP_COLLAPSE_KEY(id))
+    setCollapseOverrides((prev) => new Map(prev).set(id, next))
+  }
 
   // ── Drag-to-reorder (default order only) ────────────────────────────────
   // State lives here so a drag is naturally scoped to this one card: another
@@ -1877,9 +1505,9 @@ function TaskRows({
   // top-level rows (incl. group heads), or a parentId for a child. Drops only
   // land on rows in the same lane (no drag-reparenting).
   const dragLaneRef = useRef<string>('__top__')
-  const [over, setOver] = useState<{ id: string; pos: 'before' | 'after' } | null>(null)
-  const overRaf = useRef(0)
-  const pendingHit = useRef<{ id: string; el: HTMLElement; clientY: number } | null>(null)
+  // Slot math (own-gap no-op, float collision) lives in the shared, unit-
+  // tested reorder.ts; this owner keeps only lane rules + persistence.
+  const { over, hover, clear, cancel } = useDragHover()
 
   const laneOf = (t: Task) =>
     t.parentId && childrenByParent.has(t.parentId) ? t.parentId : '__top__'
@@ -1889,77 +1517,56 @@ function TaskRows({
 
   const endDrag = () => {
     setDragId(null)
-    setOver(null)
-    if (overRaf.current) {
-      cancelAnimationFrame(overRaf.current)
-      overRaf.current = 0
-    }
+    cancel()
   }
   const beginDrag = (t: Task) => {
     dragLaneRef.current = laneOf(t)
     setDragId(t.id)
   }
-  const hoverRow = (targetId: string, el: HTMLElement, clientY: number) => {
+  // Hit-testing is owner-side: the grip captures the pointer and reports
+  // coordinates; we map them to the row under the cursor via `data-task-id`.
+  // Only a same-lane row that isn't the dragged row shows a slot.
+  const hoverRow = (targetEl: Element | null | undefined, clientY: number) => {
     if (!dragId) return
-    const target = tasksById.get(targetId)
-    // Only show a slot on a same-lane row that isn't the dragged row itself.
-    if (!target || targetId === dragId || laneOf(target) !== dragLaneRef.current) {
-      if (over) setOver(null)
+    const targetId = targetEl instanceof HTMLElement ? targetEl.dataset.taskId : undefined
+    const target = targetId ? tasksById.get(targetId) : undefined
+    if (!targetId || !target || targetId === dragId || laneOf(target) !== dragLaneRef.current) {
+      clear()
       return
     }
-    pendingHit.current = { id: targetId, el, clientY }
-    if (overRaf.current) return
-    overRaf.current = requestAnimationFrame(() => {
-      overRaf.current = 0
-      const h = pendingHit.current
-      if (!h || !dragId) return
-      const r = h.el.getBoundingClientRect()
-      const pos: 'before' | 'after' =
-        h.clientY - r.top > r.height / 2 ? 'after' : 'before'
-      setOver((prev) =>
-        prev && prev.id === h.id && prev.pos === pos ? prev : { id: h.id, pos }
-      )
-    })
+    // Only light the insertion line where a drop would actually move the row —
+    // run the SAME slot math the drop does and suppress the line on an own-gap
+    // no-op (dragging a half-step onto an adjacent neighbour). See list-view.md.
+    const r = (targetEl as HTMLElement).getBoundingClientRect()
+    const pos: 'before' | 'after' = clientY - r.top > r.height / 2 ? 'after' : 'before'
+    const slot = computeDropSlot(laneArray(dragLaneRef.current), (x) => x.id, dragId, targetId, pos)
+    if (!slot || slot.ownGap) {
+      clear()
+      return
+    }
+    hover(targetId, targetEl as HTMLElement, clientY)
   }
-  const dropOnRow = (targetId: string, el: HTMLElement, clientY: number) => {
+  const dropOnRow = (targetEl: Element | null | undefined, clientY: number) => {
     const id = dragId
     const lane = dragLaneRef.current
     const dragged = id ? tasksById.get(id) : null
-    const target = tasksById.get(targetId)
-    endDrag()
-    if (!id || !dragged || !target || targetId === id || laneOf(target) !== lane) return
-    // Compute the slot fresh from the drop event (avoids a stale rAF `over`).
-    const r = el.getBoundingClientRect()
+    const targetId = targetEl instanceof HTMLElement ? targetEl.dataset.taskId : undefined
+    const target = targetId ? tasksById.get(targetId) : null
+    if (!id || !dragged || !target || !targetId || laneOf(target) !== lane) return
+    const r = (targetEl as HTMLElement).getBoundingClientRect()
     const pos: 'before' | 'after' = clientY - r.top > r.height / 2 ? 'after' : 'before'
     const arr = laneArray(lane)
-    const fromIndex = arr.findIndex((x) => x.id === id)
-    const rest = arr.filter((x) => x.id !== id)
-    let insertAt = rest.findIndex((x) => x.id === targetId)
-    if (insertAt < 0) return
-    if (pos === 'after') insertAt += 1
-    const before = rest[insertAt - 1] ?? null
-    const after = rest[insertAt] ?? null
-    // No-op if it lands back in its own gap.
-    const left = arr[fromIndex - 1] ?? null
-    const right = arr[fromIndex + 1] ?? null
-    if ((before?.id ?? null) === (left?.id ?? null) && (after?.id ?? null) === (right?.id ?? null))
-      return
-    const beforeOrder = before ? effOrder(before) : null
-    const afterOrder = after ? effOrder(after) : null
-    const newOrder = orderBetween(beforeOrder, afterOrder)
-    // If the midpoint can't separate from a neighbour (float precision exhausted
-    // after many inserts into the same gap), the cheap one-row write would make
-    // two rows share an order and the drag would silently not take — renormalize
-    // the whole lane to clean integers instead.
-    const collides =
-      (beforeOrder != null && newOrder <= beforeOrder) ||
-      (afterOrder != null && newOrder >= afterOrder)
+    const slot = computeDropSlot(arr, (x) => x.id, id, targetId, pos)
+    if (!slot || slot.ownGap) return
+    const { order, collides } = resolveDropOrder(slot, effOrder)
     if (collides) {
-      const orderedIds = rest.map((x) => x.id)
-      orderedIds.splice(insertAt, 0, id)
+      // Float precision exhausted — a one-row write would make two rows share
+      // an order; renormalize the whole lane to clean integers instead.
+      const orderedIds = arr.filter((x) => x.id !== id).map((x) => x.id)
+      orderedIds.splice(slot.insertAt, 0, id)
       void renormalizeListOrder(orderedIds)
-    } else if (newOrder !== dragged.listOrder) {
-      void setListOrder(id, newOrder)
+    } else if (order !== dragged.listOrder) {
+      void setListOrder(id, order)
     }
   }
   const dragFor = (t: Task): RowDrag | undefined =>
@@ -1967,12 +1574,13 @@ function TaskRows({
       ? {
           id: t.id,
           enabled: true,
-          active: dragId !== null,
           dragging: dragId === t.id,
           over: over?.id === t.id ? over.pos : null,
           onStart: () => beginDrag(t),
-          onOver: (el, clientY) => hoverRow(t.id, el, clientY),
-          onDrop: (el, clientY) => dropOnRow(t.id, el, clientY),
+          onMove: (x, y) =>
+            hoverRow(document.elementFromPoint(x, y)?.closest('[data-task-id]'), y),
+          onDrop: (x, y) =>
+            dropOnRow(document.elementFromPoint(x, y)?.closest('[data-task-id]'), y),
           onEnd: endDrag,
         }
       : undefined
@@ -1990,10 +1598,10 @@ function TaskRows({
                 childrenTasks={kids}
                 members={members}
                 tasksById={tasksById}
+                planById={planById}
                 collapsed={isCollapsed}
                 onToggle={() => toggle(t.id)}
                 drag={dragFor(t)}
-                onInsertAiReference={onInsertAiReference}
               />
               {!isCollapsed &&
                 kids.map((c) => (
@@ -2003,6 +1611,7 @@ function TaskRows({
                     members={members}
                     allTasks={allTasks}
                     tasksById={tasksById}
+                    planById={planById}
                     showAssignee={showAssignee}
                     isChild
                     warn={conflictTips?.get(c.id)}
@@ -2011,7 +1620,6 @@ function TaskRows({
                       onToggleSelect ? () => onToggleSelect(c.id) : undefined
                     }
                     drag={dragFor(c)}
-                    onInsertAiReference={onInsertAiReference}
                   />
                 ))}
             </Fragment>
@@ -2024,6 +1632,7 @@ function TaskRows({
             members={members}
             allTasks={allTasks}
             tasksById={tasksById}
+            planById={planById}
             showAssignee={showAssignee}
             warn={conflictTips?.get(t.id)}
             selected={selectedIds?.has(t.id)}
@@ -2031,7 +1640,6 @@ function TaskRows({
               onToggleSelect ? () => onToggleSelect(t.id) : undefined
             }
             drag={dragFor(t)}
-            onInsertAiReference={onInsertAiReference}
           />
         )
       })}
@@ -2039,23 +1647,12 @@ function TaskRows({
   )
 }
 
-function TaskRow({
-  task,
-  members,
-  allTasks,
-  tasksById,
-  showAssignee = true,
-  isChild = false,
-  warn,
-  selected = false,
-  onToggleSelect,
-  drag,
-  onInsertAiReference,
-}: {
+type TaskRowProps = {
   task: Task
   members: Member[]
   allTasks: Task[]
   tasksById: Map<string, Task>
+  planById: Map<string, WorkingPlan>
   showAssignee?: boolean
   isChild?: boolean
   /** Conflict tooltip — renders an amber warning triangle in the lead gutter. */
@@ -2063,8 +1660,50 @@ function TaskRow({
   selected?: boolean
   onToggleSelect?: () => void
   drag?: RowDrag
-  onInsertAiReference?: (text: string) => void
-}) {
+}
+
+/**
+ * Row equality for React.memo. Data props compare by identity (they're
+ * memoized upstream and only change when data changes). The two per-render
+ * closures are compared by VALUE instead:
+ * - `drag`: a fresh object every render — compare enabled/dragging/over (what
+ *   the row displays). Its callbacks only ever fire from the row whose grip
+ *   holds the pointer capture, and that row re-renders (dragging flips) and
+ *   gets fresh closures before any of them run.
+ * - `onToggleSelect`: fresh closure over (stable) functional setState — safe
+ *   to keep the old one.
+ */
+function taskRowPropsEqual(prev: TaskRowProps, next: TaskRowProps): boolean {
+  return (
+    prev.task === next.task &&
+    prev.members === next.members &&
+    prev.allTasks === next.allTasks &&
+    prev.tasksById === next.tasksById &&
+    prev.planById === next.planById &&
+    prev.showAssignee === next.showAssignee &&
+    prev.isChild === next.isChild &&
+    prev.warn === next.warn &&
+    prev.selected === next.selected &&
+    (prev.onToggleSelect === undefined) === (next.onToggleSelect === undefined) &&
+    prev.drag?.enabled === next.drag?.enabled &&
+    prev.drag?.dragging === next.drag?.dragging &&
+    prev.drag?.over === next.drag?.over
+  )
+}
+
+const TaskRow = memo(function TaskRow({
+  task,
+  members,
+  allTasks,
+  tasksById,
+  planById,
+  showAssignee = true,
+  isChild = false,
+  warn,
+  selected = false,
+  onToggleSelect,
+  drag,
+}: TaskRowProps) {
   const { grip, indicator, rowProps, dragging } = useDragHandle(drag)
   // Canonical user-edit funnel → records a change-log entry per changed field
   // (design-docs/task-change-log.md). Covers title/status/assignee/effort/dates.
@@ -2072,18 +1711,16 @@ function TaskRow({
   const assignee = members.find((m) => m.id === task.assigneeId) ?? null
   const blocked = isTaskBlocked(task, tasksById)
   const isWelcome = task.title.startsWith(WELCOME_PREFIX)
-  const memberById = useMemo(
-    () => new Map(members.map((m) => [m.id, m])),
-    [members]
-  )
   // Date + time from one live plan so they always agree and reflect current
   // data — never a stale stored dueDate paired with a freshly-computed time.
+  // The plan comes from the view-wide planById pass (one compute per data
+  // change), not a per-row computeWorkingPlan (one per render).
   const {
     startDate: liveStart,
     dueDate: liveDue,
     startTime,
     endTime,
-  } = computeWorkingPlan(task, tasksById, memberById)
+  } = planById.get(task.id) ?? NULL_WORKING_PLAN
   // Effort 0 = milestone (a checkpoint, not a span). Distinct from estimate null
   // (= not estimated). See design-docs/milestones.md.
   const isMilestone = task.estimate === 0
@@ -2095,12 +1732,7 @@ function TaskRow({
     <div
       {...rowProps}
       data-task-id={task.id}
-      onContextMenu={(e) => {
-        e.preventDefault()
-        e.stopPropagation()
-        onInsertAiReference?.(taskAiRef(task))
-      }}
-      className={`task-row group/row relative flex items-center gap-3 px-4 py-2 text-sm transition ${
+      className={`task-row group/row relative flex items-center gap-3 px-4 py-1.5 text-sm transition ${
         selected ? 'bg-accent-soft' : 'hover:bg-surface-hover'
       } ${dragging ? 'opacity-40' : ''}`}
       title={blocked ? 'Blocked — waiting on a prerequisite task' : undefined}
@@ -2197,7 +1829,10 @@ function TaskRow({
         <div className="w-[236px] flex justify-center items-center shrink-0">
           <DatePickCell
             value={liveStart}
-            time={startTime}
+            /* A milestone is a completion point, so show its END time (its
+               prereq's finish moment, e.g. 17:00) — not the work-start slot. */
+            time={endTime}
+            timeOnHover
             locked={task.dependsOn.length > 0}
             emptyHint={task.dependsOn.length > 0 ? undefined : 'Date'}
             emptyHintHover
@@ -2217,6 +1852,7 @@ function TaskRow({
             <DatePickCell
               value={liveStart}
               time={startTime}
+              timeOnHover
               locked={task.dependsOn.length > 0}
               emptyHint={task.dependsOn.length > 0 ? undefined : 'Start'}
               emptyHintHover
@@ -2234,6 +1870,7 @@ function TaskRow({
             <DatePickCell
               value={liveDue}
               time={endTime}
+              timeOnHover
               locked={
                 task.dependsOn.length > 0 ||
                 (task.estimate !== null && task.estimate > 0)
@@ -2263,7 +1900,7 @@ function TaskRow({
       </div>
     </div>
   )
-}
+}, taskRowPropsEqual)
 
 /**
  * Per-group column header rendered inside each MemberCard / UnassignedCard
@@ -2274,12 +1911,15 @@ function TaskColumnHeader({
   sort,
   setSort,
   showAssignee = true,
+  bare = false,
 }: {
-  sort: { field: SortField; dir: 'asc' | 'desc' }
+  sort: Sort
   setSort: React.Dispatch<
-    React.SetStateAction<{ field: SortField; dir: 'asc' | 'desc' }>
+    React.SetStateAction<Sort>
   >
   showAssignee?: boolean
+  /** Inside the floating capsule: the capsule's rim is the edge, so no border-b. */
+  bare?: boolean
 }) {
   // Three-state cycle per column: asc → desc → off. "Off" clears back to the
   // default seq order (DEFAULT_SORT), which also re-enables drag-to-reorder.
@@ -2292,7 +1932,12 @@ function TaskColumnHeader({
     })
   }
   return (
-    <div className="flex items-center gap-3 px-4 py-1.5 border-b border-border-hair bg-canvas-sunk/40">
+    // Lightened: no grey fill (was bg-canvas-sunk/40), tighter py — the labels read
+    // as a quiet caption under the group name, just a hairline separating them from
+    // the rows. (Sticky was attempted but the per-card overflow-x-auto + Card
+    // overflow-hidden trap the sticky context, so it can't pin to the viewport
+    // without a scroll-architecture refactor — deferred. See design-docs/list-view.md v4.)
+    <div className={`flex items-center gap-3 px-4 ${bare ? 'py-1.5' : 'py-1 border-b border-border-hair'}`}>
       <div className={COL.lead} />
       <div className={COL.dot} />
       <SortHeader
@@ -2369,25 +2014,23 @@ function SortHeader({
   className: string
   field: SortField
   label: string
-  sort: { field: SortField; dir: 'asc' | 'desc' }
+  sort: Sort
   onSort: (f: SortField) => void
   align?: 'start' | 'center' | 'end'
 }) {
   const isActive = sort.field === field
-  // Hint the NEXT click in the asc → desc → off cycle (off only clears a
-  // non-seq column, since seq is the default order). See list-view.md.
+  // Hint the NEXT click in the asc → desc → off cycle. "Off" is the neutral
+  // state (no column sorted) — reachable from every column, ID included.
   const nextHint = !isActive
     ? `Sort by ${label}`
     : sort.dir === 'asc'
       ? `Sort by ${label}, descending`
-      : field === 'seq'
-        ? `Sort by ${label}, ascending`
-        : 'Clear sort'
+      : 'Clear sort'
   return (
     <button
       type="button"
       onClick={() => onSort(field)}
-      className={`${className} group flex items-center gap-1 text-[11px] tracking-normal font-medium select-none py-0.5 hover:bg-black/[0.04] rounded transition ${
+      className={`${className} group flex items-center gap-1 text-[11px] tracking-normal font-semibold select-none py-0.5 hover:bg-surface-hover rounded transition ${
         align === 'end'
           ? 'justify-end'
           : align === 'center'
@@ -2432,7 +2075,7 @@ function StatusDot({
   return (
     <button
       onClick={onCycle}
-      className={`w-4 h-4 shrink-0 transition hover:scale-110 flex items-center justify-center ${
+      className={`w-4 h-4 shrink-0 transition hover:scale-110 motion-reduce:transform-none flex items-center justify-center ${
         popping ? 'status-pop' : ''
       }`}
       style={{ color: meta.varName }}
@@ -2513,7 +2156,7 @@ function StatusPicker({
   const meta = STATUS_META[status]
   // Cupertino status pill: soft tinted bg, colored dot + label, fully rounded.
   const bg = `color-mix(in srgb, ${meta.varName} 15%, transparent)`
-  const fg = `color-mix(in srgb, ${meta.varName} 100%, #000 22%)`
+  const fg = `color-mix(in srgb, ${meta.varName} 78%, var(--color-ink))`
   return (
     <div
       className="relative inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 cursor-pointer transition hover:opacity-90 leading-none"
@@ -2605,8 +2248,11 @@ export function EffortCell({
   onChange: (v: number | null) => void
 }) {
   const [draft, setDraft] = useState(value == null ? '' : String(value))
+  const focusedRef = useRef(false)
   useEffect(() => {
-    setDraft(value == null ? '' : String(value))
+    // Don't clobber in-flight typing when an external write (recompute,
+    // import) lands mid-edit — same focused guard as TitleTextarea/PrereqInput.
+    if (!focusedRef.current) setDraft(value == null ? '' : String(value))
   }, [value])
   const commit = () => {
     const trimmed = draft.trim()
@@ -2625,7 +2271,13 @@ export function EffortCell({
     <input
       value={draft}
       onChange={(e) => setDraft(e.target.value.replace(/[^0-9.]/g, ''))}
-      onBlur={commit}
+      onFocus={() => {
+        focusedRef.current = true
+      }}
+      onBlur={() => {
+        focusedRef.current = false
+        commit()
+      }}
       onKeyDown={(e) => {
         if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
         if (e.key === 'Escape') {
@@ -2636,7 +2288,7 @@ export function EffortCell({
       placeholder="—"
       title="Effort in days"
       aria-label="Effort in days"
-      className="editable w-full text-sm text-center tabular-nums bg-transparent placeholder:text-ink-faint"
+      className="editable w-full text-sm text-center tabular-nums bg-transparent placeholder:text-ink-faint placeholder:opacity-40"
     />
   )
 }
@@ -2676,6 +2328,7 @@ function PrereqInput({
   const [pos, setPos] = useState<{ top: number; right: number }>({ top: 0, right: 0 })
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- draft mirrors external writes only while NOT editing (focused guard)
     if (!focused) setDraft(currentLabel)
   }, [currentLabel, focused])
 
@@ -2768,7 +2421,10 @@ function PrereqInput({
     <>
       <input
         ref={inputRef}
-        value={draft}
+        // Show a `#`-prefixed ref at rest (matches the `#N` language in the cycle
+        // notices; disambiguates an ID from a count — see list-view.md v4). While
+        // editing, drop the prefix so the raw numbers are what you type/parse.
+        value={focused ? draft : draft ? `#${draft}` : ''}
         onChange={(e) => setDraft(e.target.value)}
         onFocus={() => {
           setFocused(true)
@@ -2788,7 +2444,7 @@ function PrereqInput({
         placeholder="—"
         title="Prereq task numbers — list or ranges, e.g. 2-5, 8"
         aria-label="Prerequisite task numbers"
-        className={`editable w-full text-sm text-right tabular-nums bg-transparent placeholder:text-ink-faint ${
+        className={`editable w-full text-sm text-right tabular-nums bg-transparent placeholder:text-ink-faint placeholder:opacity-40 ${
           notice ? 'text-priority-high' : ''
         }`}
       />
@@ -2874,7 +2530,7 @@ function AddMemberRow({
   }
 
   return (
-    <div className="flex items-center gap-2 bg-surface border border-border rounded-lg p-2">
+    <div className="flex items-center gap-2 bg-surface border border-border rounded-[14px] p-2">
       <UserPlus size={14} className="text-ink-faint ml-2" />
       <input
         ref={inputRef}

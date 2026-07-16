@@ -29,6 +29,10 @@ export default defineConfig({
     // `prompt` mode = the new SW WAITS; we surface the update pill and only
     // skipWaiting + reload when the user clicks it (see VersionFooter.tsx).
     VitePWA({
+      // Service workers can't run under Tauri's protocol — ship the desktop
+      // build without SW/manifest entirely (desktop-app-tauri.md). Tauri sets
+      // TAURI_ENV_PLATFORM for both `tauri dev` and `tauri build`.
+      disable: !!process.env.TAURI_ENV_PLATFORM,
       registerType: 'prompt',
       injectRegister: null, // registration is driven by useRegisterSW in React
       workbox: {
@@ -50,5 +54,24 @@ export default defineConfig({
   ],
   // Single source of truth for the app version: package.json, inlined at build
   // time and surfaced in the sidebar footer (app-shell-and-navigation.md).
-  define: { __APP_VERSION__: JSON.stringify(pkg.version) },
+  define: {
+    __APP_VERSION__: JSON.stringify(pkg.version),
+    // Vercel sets VERCEL_ENV at build time ('production' | 'preview' | ...).
+    // Preview deployments are a different origin with their own empty IndexedDB
+    // — the app warns the user there (persistence-and-backup.md). Local dev /
+    // non-Vercel builds inline '' (no banner).
+    __VERCEL_ENV__: JSON.stringify(process.env.VERCEL_ENV ?? ''),
+  },
+  // Tauri: keep its CLI output visible and expose TAURI_ENV_* to the client.
+  clearScreen: false,
+  envPrefix: ['VITE_', 'TAURI_ENV_'],
+  // Dev-only: `vite dev` runs no serverless functions, so forward `/api/*` to the
+  // deployed functions. Lets the hosted share-link flow (create/update/revoke +
+  // the /view viewer) be exercised locally. Only affects the dev server — the
+  // production build never uses it. See design-docs/hosted-share-link.md.
+  server: {
+    proxy: {
+      '/api': { target: 'https://plan-up-eta.vercel.app', changeOrigin: true, secure: true },
+    },
+  },
 })

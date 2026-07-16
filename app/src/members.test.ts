@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto'
 import { describe, it, expect } from 'vitest'
-import { daysOffInRange } from './members'
+import { daysOffInRange } from './lib'
 
 // daysOffInRange scopes a member's flat off-day list to one sprint's inclusive
 // date range. See design-docs/members-and-days-off.md.

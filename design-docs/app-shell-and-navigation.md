@@ -1,12 +1,98 @@
 # App shell & navigation
 
 **Status:** Implemented
-**Last updated:** 2026-06-20
-**Code:** `app/src/App.tsx`
+**Last updated:** 2026-07-16 (v4.3 · desktop collapse = 74px icon rail)
+**Code:** `app/src/App.tsx` (`SprintPageHeader`, `SprintNoteBanner`, `LegendDot`)
+
+> **v3 · Project switcher + compact sprint rows (2026-07-06)** — the always-on
+> **58px icon rail** (one squircle per project) is **removed**. Project switching
+> now lives in a **header dropdown** at the top of the sidebar (the current project
+> only; a popover switches to any other). The functions the rail used to own move
+> into that popover (New project, Home / All projects) and the sidebar footer +
+> Home header (dark-mode toggle). Sprint rows are also **compacted** to a two-tier
+> layout (tighter padding, meta as a small caption). The two-pane frame below is
+> now the whole app; there is no third rail pane.
+>
+> **v3.1 · Overview hidden (2026-07-06)** — the Home / All-projects overview is
+> **temporarily hidden** behind `HOME_ENABLED = false` in `App.tsx`. The
+> **"Home / All projects"** item is dropped from the switcher popover, the app never
+> lands on `screen === 'home'`, and `HomeDashboard` is never rendered. Everything else
+> below is unchanged. To restore, flip `HOME_ENABLED` back to `true`. See
+> [home-dashboard.md](./home-dashboard.md).
+>
+> **v4 · Sprint page header — merged & Notion-style (2026-07-08)** — the sprint's
+> identity, note, and capacity used to be **three stacked bands** (pinned title/date
+> bar → pinned "Add sprint note" strip → floating capacity card) split by two
+> hairlines: tall and fragmented. They now collapse into **one Notion-style page
+> header** (`SprintPageHeader`) at the top of the scroll area: a large sprint **title**,
+> the note as an inline **description** line, a **Dates** property, and the capacity
+> folded into a soft recessed **inset** panel (`--color-fill`, no floating card). The
+> pinned top bar keeps only the **toolbar** (Roll over + view toggle + search +
+> activity + Export/Import); the sprint name/date **no longer live there** — the
+> sidebar's accent row is the persistent "which sprint" context, so nothing is lost
+> when the header scrolls away. Separation is by **material** (white header → grey
+> canvas list), not lines. Collections keep their existing bar identity unchanged.
+> Approved via demo `demo/sprint-header-merge-notion.html` (variant **A+B**). See
+> [list-view.md](./list-view.md) / [sprints.md](./sprints.md).
+>
+> **v4.2 · Liquid Glass shell (2026-07-08)** — material pass per
+> [liquid-glass-material.md](./liquid-glass-material.md): the pinned toolbar
+> becomes a **floating glass capsule** (`.glass-toolbar`, `rounded-full`,
+> `mx-3 mt-3`, `relative z-30` so its dropdowns clear the glass stacking
+> contexts below), and `SprintPageHeader` sits on a **glass plate**
+> (`.glass-card`, 18px, `mx-6`) instead of a full-bleed white band — the
+> ambient canvas wash shows around it. "Separation by material" in v4 now
+> means glass plate → ambient canvas, not white → grey.
+>
+> **v4.1 · Toolbar breadcrumb (2026-07-08)** — moving the title down left the
+> pinned toolbar's left half empty. It now carries a calm, **non-interactive
+> breadcrumb** — the project squircle · project name (muted) · `ChevronRight` ·
+> **sprint name** — that fills the space with *orientation, not filler*. The sprint
+> **date range fades in** beside it **once the big page-header title scrolls out of
+> view** (a cheap `scrollTop > 48` threshold on `scrollRef` → `scrolled` state; the
+> reveal animates with the shared *move* curve, honouring reduced-motion), so context
+> persists on scroll without duplicating the title while it's visible. Switching
+> project stays a sidebar-only affordance (no duplicate trigger, §8.3), so the
+> breadcrumb is `aria-hidden` (the title `h1` + Dates property carry it for a11y).
+> Approved via demo `demo/sprint-toolbar-fill.html` (Hướng 1).
+>
+> **v4.2 · Collapsible sidebar (2026-07-08)** — a **`PanelLeft` toggle** at the far
+> left of the main toolbar hides/shows the sidebar (macOS `sidebar.left` idiom — one
+> button, both directions, always visible). Collapsed = the vibrancy panel slides to
+> **width 0** (shared *move* curve, reduced-motion safe) — fully hidden, **not** a mini
+> icon-rail (that was removed in v3). The breadcrumb (v4.1) keeps you oriented while the
+> sidebar is away. Shortcut **⌘\ / Ctrl+\** (global, fires even while typing); state
+> persists at `localStorage['plan-up:sidebarCollapsed']`. The collapsed `<aside>` is
+> `inert` so its controls drop out of the tab order, and the width transition is
+> suppressed mid drag-resize (`sidebarResizing`) so dragging still tracks the cursor
+> 1:1. Approved via demo `demo/sidebar-collapse.html` (variant A).
+>
+> **v4.3 · Desktop collapse = icon rail (2026-07-16)** — on the **desktop build only**
+> (`DESKTOP_CHROME`; web is unchanged at width 0) collapsing does not leave a bare gap.
+> The macOS traffic lights live in the top-left 74px, so the collapsed state keeps a
+> **74px vibrancy icon rail** there instead of an empty lane: drag strip (lights) →
+> `PanelLeft` show-sidebar toggle → project tile (click re-opens the sidebar) → search
+> (⌘K) → dark-mode toggle (`mt-auto`). This both fills the otherwise-orphaned gutter
+> **and** puts the toolbar + page card on one shared left rail, fixing the old
+> misalignment where the breadcrumb sat ~80px right of the sprint title (the capsule's
+> `marginLeft: 74px` shove is removed; the rail's flex width does the same job). The
+> capsule's own toggle is hidden while the rail is up. Web (no lights) is untouched:
+> plain width-0 collapse + capsule toggle. Full rationale + the 3 gutter treatments
+> considered (rail / peek / center) in [desktop-app-tauri.md](./desktop-app-tauri.md);
+> approved via demo `demo/topbar-align-fix.html` (variant **A-rail**). Preview in a
+> browser with `localhost:5173/?desktop=1`.
+
+> **v4.3 · Copy-for-Telegram button (2026-07-08)** — the `SprintPageHeader` title
+> row gains a right-aligned **Copy** button (paper-plane icon, calm `--fill`
+> background) that opens the `CopyTelegramModal` popover to copy the sprint as
+> plain-text Tree for pasting into chat. Hidden when the sprint has no tasks. The
+> title + note now share a flex row with the button; Dates + capacity unchanged.
+> Full spec in [`copy-to-telegram.md`](./copy-to-telegram.md).
 
 ## Purpose
-The three-pane macOS-style frame that hosts everything, plus the at-a-glance
-capacity banner above the active view.
+The two-pane macOS-style frame (sidebar + main) that hosts everything, plus the
+**sprint page header** (title · note · dates · capacity inset) at the top of the
+active view.
 
 ## Top-level screen (`screen`)
 `App.tsx` holds a top-level `screen: 'home' | 'project'`, persisted at
@@ -16,22 +102,63 @@ capacity banner above the active view.
 is preserved while on Home, so returning restores it. Reload lands on the last
 screen — Home is **never** force-shown over a project you left open.
 
+**As of 2026-07-06 the Home screen is gated off** by `HOME_ENABLED = false`: the
+`screen` state is forced to `'project'` on load regardless of the persisted value, so
+in practice the app is always the two-pane project frame today. The `screen` machinery
+is left intact so restoring the overview is a one-line flip.
+
 ## User-facing behavior
 Left → right:
-1. **Icon rail** (58px, vibrancy) — a **`Home` tile pinned at the top** (a `LayoutGrid`
-   glyph on a surface squircle, accent-ringed when `screen==='home'`), a hairline separator,
-   then one squircle tile per project (initial/emoji + brand color), active project ringed in
-   accent **only while `screen==='project'`**; `+` opens New Project; dark-mode toggle pinned
-   bottom. Clicking Home → portfolio overview; clicking a project tile (or a Home card) →
-   that project. Each project tile carries `aria-label={p.name}` (so the accessible name is the
-   full project name, not the single visible initial) and `aria-current="true"` on the active
-   one — screen readers announce e.g. "My Project, current, button" instead of just "M". The
-   Home tile carries `aria-label="Home"` + `aria-current` when active.
-2. **Sprint panel** (vibrancy, **resizable**) — project name + sprint/task counts, the
-   sprint list (active row = accent bg), `+`/`n` to add a sprint. **Drag the right edge**
-   to resize.
-3. **Main column** — header toolbar (sprint name, date range, Roll over, view
-   toggle, search, Export/Import), then the **capacity banner**, then the List/Board view.
+1. **Sidebar** (vibrancy, **resizable**) — top to bottom:
+   - **Project switcher** (header dropdown) — a **cover-strip** block (2026-07-08,
+     demo `sidebar-project-header.html` option C): the project's own image/color makes a
+     heavily-blurred backdrop behind the header row (photo → `blur(18px)` cover, scaled
+     to hide edges, ~50%/40% opacity light/dark under a to-canvas gradient veil; no
+     photo → a quiet tint of the project color), with a **48px** sharp `ProjectTile`
+     (photo/emoji/initial squircle), the project name (15.5px, one line, ellipsis) and
+     the `{n} sprints · {m} tasks` counts as a **single non-wrapping sub-line** riding
+     on top, plus a `ChevronDown`. Clicking it opens a
+     **popover** listing **all** projects (each = squircle + name, a `Check` on the active one;
+     clicking one switches project), then a divider and the footer action **New project**
+     (`Plus`). *(The **Home / All projects** item is hidden while `HOME_ENABLED = false`; it
+     reappears when the overview is restored.)* The trigger
+     carries `aria-haspopup="menu"` + `aria-expanded`; the active project row carries
+     `aria-current`. The popover closes on outside-press / Escape (shared `usePinnedPopover`
+     wiring) and caps its list height (scrolls) so many projects don't overflow the pane.
+     **No settings gear on the strip** (2026-07-08, demo
+     `settings-gear-placement.html` option A — briefly shipped as hover-reveal B,
+     replaced same day): the strip reads as tile + name + chevron only. **Project
+     settings** is a menuitem at the FOOT of the switcher popover, right under
+     "New project" — a rare action lives behind the switcher, not as an always-on
+     icon.
+   - **Sprints + Collections** — the sprint list (active row = accent bg), `+`/`n` to add a
+     sprint, then Collections. Both are collapsible sections (unchanged).
+   - **Footer** — `plan-up · v{version}` (see below) with the **dark-mode toggle** (`Moon`/`Sun`)
+     pinned at its right. **Drag the right edge** of the sidebar to resize.
+2. **Main column** — a slim pinned **toolbar** (left: a **breadcrumb** *project ›
+   sprint*, date revealing on scroll — v4.1; right: Roll over, view toggle, search,
+   activity, Export/Import), then the scrolling view whose top is the **sprint page
+   header** (`SprintPageHeader`: large title · inline note/description · **Dates**
+   property · capacity **inset** panel), then the List/Board view. The header scrolls
+   with content (Notion-style); the toolbar and the List's sticky column header stay
+   pinned. *(Collections show `CollectionBarIdentity` + status editor in the toolbar
+   instead, and render no page header.)*
+
+The **Home overview** (portfolio) *(currently hidden — see banner)* replaces the main column
+full-width when `screen==='home'`; its header carries its own **New project** + **dark-mode
+toggle** buttons (top-right), since the sidebar/switcher isn't shown there. The **empty state**
+(no project selected/created) shows a
+**New project** call-to-action so a fresh install can bootstrap without the old rail `+`.
+
+### Sprint row layout (compact, 2026-07-06)
+Each sprint row is a **two-tier** button, tightened from the earlier taller row:
+- **Top line** — `SprintStateDot` + sprint **name** (`text-[14px]`, medium; note glyph hugs the
+  title) + the **task count** right-aligned (`text-[11.5px]` muted, tabular-nums).
+- **Meta line** — the date range (`text-[11.5px]` muted, tabular-nums), indented under the name;
+  archived rows append `· archived {mon d}`.
+- **Active** row keeps the macOS **accent fill** (`bg-accent text-white`); meta/count go
+  `white/80`. Padding is reduced (`px-2.5 py-1.5`, `gap-2`) so more sprints fit without scroll.
+The hover **archive/unarchive** action (absolute right, appears on hover) is unchanged.
 
 ## Capacity banner (`App.tsx` `CapacityBanner`)
 A single slim block (design-system §4.7 hybrid bar), shown when a sprint is selected,
@@ -45,8 +172,15 @@ computed from the current sprint's **leaf** tasks (parents excluded — see task
 - Empty sprint (`total === 0`) → "No tasks yet — add your first task below" call to action.
 
 ## Implementation
-- Resizable sidebar: `SIDEBAR_MIN=200`, `SIDEBAR_MAX=460`, default `248`, `RAIL_W=58`.
-  Drag handler maps `clientX - RAIL_W`, clamped. Persisted to `localStorage`.
+- Resizable sidebar: `SIDEBAR_MIN=200`, `SIDEBAR_MAX=460`, default `248`. The sidebar is now
+  the leftmost pane (no rail), so the drag handler maps `clientX` directly, clamped. Persisted
+  to `localStorage`.
+- **Project switcher:** local `switcherOpen` state + `usePinnedPopover` (outside-press / Escape).
+  The popover is **portaled to `document.body`** and pinned to the trigger rect via `place`
+  (`{top, left, width}`) — it must NOT render as a DOM child of the sidebar `<aside>`, which has
+  `.vibrancy` (its own `backdrop-filter`, a backdrop root), or the glass blur is lost in WebKit
+  (see liquid-glass-material.md "Gotcha backdrop root"). Reuses `firstGrapheme`/`colorForName`
+  for the squircle, same as the old rail tiles + Home cards.
 - Live data via Dexie `useLiveQuery`: projects (by `createdAt`), sprints (by
   `currentProjectId`, ordered `startDate`), tasks (by `currentSprintId`), project-wide
   tasks (for sprint counts).
@@ -87,17 +221,15 @@ computed from the current sprint's **leaf** tasks (parents excluded — see task
   [version-and-updates.md](./version-and-updates.md).
 
 ## Motion
-- **Icon-rail tile press (2026-06-19):** every rail button — project tiles, the `+` New
-  Project tile, and the dark-mode toggle — **depresses on press** (`active:scale-[0.92]`,
-  springing back on the shared **spring** easing `cubic-bezier(.34,1.56,.64,1)` via the
-  `.tile-press` class in `index.css`). The rail is a dock of app-icon squircles; like
-  macOS/iOS home icons, tapping one should feel physical. Hover (opacity → 1) and the
-  accent selection ring are unchanged; this only adds the tactile *press*. Honours
-  `prefers-reduced-motion` (no scale). Calm, ≤120ms, serves the real act of selecting a
-  project — explored in `demo/sidebar-activitylog-motion.html` (verdict: ship). Sprint rows
-  intentionally **do not** get a press effect — they already glide their accent fill on
-  select, and adding a second motion there would be the scattered-microinteraction
+- **Switcher popover** opens/closes on the shared calm transition (fade + slight rise); the
+  chevron rotates 180° while open. Rows hover on `surface-hover`.
+- Sprint rows intentionally **do not** get a press effect — they already glide their accent
+  fill on select, and adding a second motion there would be the scattered-microinteraction
   anti-pattern (§6.5 / §8.3).
+- *Historical:* the removed icon rail carried a `.tile-press` depress
+  (`active:scale-[0.92]`, spring easing) on its squircle tiles — see git history / the earlier
+  `demo/sidebar-activitylog-motion.html`. The `.tile-press` class stays in `index.css` for any
+  future dock-style control.
 
 ## Rules & edge cases
 - **localStorage keys:** `plan-up:screen`, `plan-up:currentProjectId`, `plan-up:currentSprintId`,

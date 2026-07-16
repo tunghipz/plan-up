@@ -49,19 +49,26 @@ Non-obvious behaviors, defaults, persistence keys.
 | --- | --- |
 | [data-model.md](./data-model.md) | IndexedDB tables, fields, Dexie schema versioning |
 | [persistence-and-backup.md](./persistence-and-backup.md) | Local-first storage, export/import JSON, seeding |
-| [server-handoff.md](./server-handoff.md) | Server-primary JSON snapshot + HTTP handoff endpoints for Codex/MCP access |
+| [export-png.md](./export-png.md) | Export the current view's tasks as one shareable PNG image, grouped by member (Copy to clipboard / Download) |
+| [copy-to-telegram.md](./copy-to-telegram.md) | Copy the sprint as plain-text "Tree" (member → task → subtask, status as words) from a header button — paste straight into Telegram/chat |
+| [share-link-snapshot.md](./share-link-snapshot.md) | Share a **sprint or collection** as a read-only link packed into the URL fragment (`#v=2…` sprint / `#v=3…` collection, no server) — recipient opens a frozen board (collection viewer adds a List/Calendar toggle), warning-only when a chat might truncate (no size meter), Export PNG in the viewer; Share button on the top bar |
+| [hosted-share-link.md](./hosted-share-link.md) | Second share mode — short **updatable** link `…/view/<slug>-<id>` (data on a Vercel KV / Upstash store, not in the URL): fixed link, Update-in-place with no deploy, Revoke; server-readable (not encrypted); Dexie **v14** `shares` table keeps the write-token; falls back to the in-URL fragment link when offline |
+| [auto-backup.md](./auto-backup.md) | Desktop-only: auto-write daily full-backup JSON to a user-picked folder (30 s debounce on change, keep newest 30) |
+| [restore-versions.md](./restore-versions.md) | Desktop-only: in-app version picker over `versions/` snapshots — preview + full-DB restore via `importAll` (auto-snapshots current state first) |
+| [desktop-app-tauri.md](./desktop-app-tauri.md) | macOS desktop app — Tauri 2 shell in `app/src-tauri/`, universal DMG via GitHub Actions on `v*` tag |
+| [desktop-auto-update.md](./desktop-auto-update.md) | Desktop-only: in-app auto update via Tauri updater — signed artifacts on GitHub Releases, update pill in the footer |
 | [project-export-import.md](./project-export-import.md) | Per-project export to a portable file + non-destructive "add as new project" import (auto-detected alongside full backup) |
-| [app-shell-and-navigation.md](./app-shell-and-navigation.md) | Layout, icon rail, resizable sprint panel, capacity stats |
-| [home-dashboard.md](./home-dashboard.md) | Read-first Home screen: all-projects grid (active-sprint progress/overdue) + cross-project People roster (Dexie v13 `people` table) |
-| [ai-chat.md](./ai-chat.md) | Right-side AI command copilot: provider-backed chat + typed, confirmed app actions |
+| [app-shell-and-navigation.md](./app-shell-and-navigation.md) | Layout, project switcher dropdown, resizable sprint panel, capacity stats |
+| [liquid-glass-material.md](./liquid-glass-material.md) | Material v2.1 (iOS 26 Tempered): glass cards 18px + capsule toolbar + ambient accent tint, tokens `--color-glass`/`.glass-card` |
+| [home-dashboard.md](./home-dashboard.md) | Read-first Home screen *(temporarily hidden — `HOME_ENABLED=false`)*: all-projects grid + cross-project People roster (Dexie v13 `people` table) |
 | [projects.md](./projects.md) | Multi-project create/switch/delete |
 | [project-member-settings.md](./project-member-settings.md) | Gear → settings page: edit project info (name/description/color) + members + delete |
 | [project-icon-emoji.md](./project-icon-emoji.md) | Optional emoji override for a project's icon-rail tile (curated grid + native picker; falls back to first letter) |
 | [sprints.md](./sprints.md) | Sprint CRUD, biweekly defaults, per-sprint sequence, locked `Sprint N` name + optional goal note |
 | [sprint-cadence.md](./sprint-cadence.md) | Sprint start locked to Monday + fixed 2-week duration (Monday-strip picker, derived read-only end) |
 | [sprint-archive.md](./sprint-archive.md) | Reversible archive to declutter the sprint list (collapsible `Archived (N)` section, hover action, out of active flow) |
-| [collections.md](./collections.md) | Task ngoài sprint — collection tự đặt tên, nhiều bảng (sections), view List (giống sprint, tap-to-edit) + Calendar liền mạch, status do user tự tạo per-collection |
-| [backlog.md](./backlog.md) | Removed system Backlog behavior — use a normal collection named Backlog if needed |
+| [sprint-expiry-signal.md](./sprint-expiry-signal.md) | Signal a lapsed/lapsing sprint — header banner (roll over / go to next / create+carry) + amber sidebar dot; fires when past end date or ending today/tomorrow |
+| [collections.md](./collections.md) | Task ngoài sprint — collection tự đặt tên, nhiều bảng (sections), view List (giống sprint, tap-to-edit, **sortable columns** + **date-range picker**) + Calendar liền mạch, status do user tự tạo per-collection |
 | [sprint-rollover.md](./sprint-rollover.md) | Move unfinished tasks to next sprint — preview popover |
 | [members-and-days-off.md](./members-and-days-off.md) | Member labels, colors, off-days |
 | [member-title.md](./member-title.md) | Optional per-member role label (free-text), shown in settings + sprint header |
@@ -76,7 +83,7 @@ Non-obvious behaviors, defaults, persistence keys.
 | [conflict-warning.md](./conflict-warning.md) | Warn when a member is double-booked (same start/end/prereq) |
 | [dependencies.md](./dependencies.md) | Prerequisites, cycle prevention, blocked state |
 | [status-and-priority.md](./status-and-priority.md) | Status circle/pill, priority chip |
-| [date-picker.md](./date-picker.md) | Custom Cupertino calendar picker (sprint-aware, days-off dots + list) |
+| [date-picker.md](./date-picker.md) | Custom Cupertino calendar picker (sprint-aware, days-off dots + list; **range mode** for collection items) |
 | [list-view.md](./list-view.md) | Grouped cards, sortable columns, column widths, drag-to-reorder |
 | [member-header-summary.md](./member-header-summary.md) | Progress ring, overdue, next deadline, days off |
 | [board-view.md](./board-view.md) | Cupertino kanban |

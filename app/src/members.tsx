@@ -1,6 +1,7 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Calendar, X, Upload, Trash2 } from 'lucide-react'
+import { usePinnedPopover } from './usePinnedPopover'
 import {
   db,
   setMemberDaysOff,
@@ -11,7 +12,14 @@ import {
   type Member,
 } from './db'
 import { DateField } from './DatePicker'
-import { formatShortDate, firstGrapheme } from './lib'
+import {
+  formatShortDate,
+  firstGrapheme,
+  effectiveDaysOff,
+  daysOffInRange,
+  fmtDays,
+  PROJECT_ICON_EMOJIS,
+} from './lib'
 
 /**
  * Shared member controls used by both the Sprint group header and the
@@ -39,7 +47,7 @@ export function Avatar({
   className?: string
 } & React.HTMLAttributes<HTMLSpanElement>) {
   const ringCls = ring
-    ? 'ring-2 ring-canvas shadow-[0_0_0_1px_rgba(9,30,66,0.13)]'
+    ? 'ring-2 ring-canvas shadow-[0_0_0_1px_color-mix(in_srgb,var(--color-ink)_13%,transparent)]'
     : ''
   const base = `rounded-full inline-flex items-center justify-center text-white font-semibold shrink-0 overflow-hidden select-none ${ringCls} ${className}`
   if (member.avatarImage) {
@@ -76,8 +84,58 @@ export function Avatar({
           {member.avatarEmoji}
         </span>
       ) : (
-        member.name.slice(0, 1).toUpperCase()
+        firstGrapheme(member.name).toUpperCase()
       )}
+    </span>
+  )
+}
+
+/**
+ * The project tile — single render point for a project's squircle avatar across
+ * every surface (switcher button, switcher dropdown, toolbar breadcrumb, Home
+ * cards). Resolves in three tiers like the member Avatar: uploaded photo
+ * (`icon` starting with `data:`) → emoji → colored first letter.
+ * See design-docs/project-icon-emoji.md.
+ */
+export function ProjectTile({
+  project,
+  size = 30,
+  className = '',
+}: {
+  project: { name: string; icon?: string; color?: string }
+  size?: number
+  className?: string
+}) {
+  const icon = project.icon
+  const isImage = !!icon?.startsWith('data:')
+  const isEmoji = !!icon && !isImage
+  const radius = Math.round(size * 0.27 * 10) / 10
+  if (isImage) {
+    return (
+      <img
+        src={icon}
+        alt=""
+        aria-hidden
+        draggable={false}
+        className={`shrink-0 object-cover select-none ${className}`}
+        style={{ width: size, height: size, borderRadius: radius }}
+      />
+    )
+  }
+  return (
+    <span
+      className={`shrink-0 flex items-center justify-center text-white font-semibold select-none ${className}`}
+      style={{
+        width: size,
+        height: size,
+        borderRadius: radius,
+        background: project.color ?? colorForName(project.name),
+        fontSize: isEmoji ? Math.round(size * 0.54) : Math.round(size * 0.48),
+        letterSpacing: isEmoji ? '0' : '-0.01em',
+      }}
+      aria-hidden
+    >
+      {icon || firstGrapheme(project.name).toUpperCase() || '·'}
     </span>
   )
 }
@@ -175,22 +233,20 @@ export function AvatarPicker({ member }: { member: Member }) {
   const fileRef = useRef<HTMLInputElement>(null)
   // Popover lives in a portal with fixed positioning (like MemberDaysOffButton)
   // so it escapes the settings drawer's `overflow-auto` scroll container, which
-  // would otherwise clip it. See design-docs/member-avatars.md.
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
-
-  // Pin the popover to the trigger, flipping above when there's no room below
-  // (the popover is taller than a viewport bottom edge can hold). Re-pin on
-  // scroll/resize and whenever the panel's height changes (tab / state).
-  useLayoutEffect(() => {
-    if (!open) {
-      setPos(null)
-      return
-    }
-    const W = 264
-    const GAP = 8
-    const pin = () => {
+  // would otherwise clip it. Pins to the trigger, flipping above when there's
+  // no room below; the hook re-pins after every committed render, so a panel
+  // height change (tab / busy / error / emoji search) re-anchors automatically.
+  // See design-docs/member-avatars.md.
+  const pos = usePinnedPopover({
+    open,
+    onClose: () => setOpen(false),
+    anchorRef: btnRef,
+    popRef,
+    place: () => {
+      const W = 264
+      const GAP = 8
       const br = btnRef.current?.getBoundingClientRect()
-      if (!br) return
+      if (!br) return null
       const h = popRef.current?.offsetHeight ?? 320
       let top = br.bottom + GAP
       if (top + h > window.innerHeight - GAP) top = br.top - GAP - h // flip up
@@ -198,47 +254,9 @@ export function AvatarPicker({ member }: { member: Member }) {
       let left = br.left
       if (left + W > window.innerWidth - GAP) left = window.innerWidth - W - GAP
       if (left < GAP) left = GAP
-      setPos({ top, left })
-    }
-    pin()
-    window.addEventListener('scroll', pin, true)
-    window.addEventListener('resize', pin)
-    return () => {
-      window.removeEventListener('scroll', pin, true)
-      window.removeEventListener('resize', pin)
-    }
-  }, [open, tab, busy, savings, error, emojiQuery, member.avatarImage, member.avatarEmoji])
-
-  useEffect(() => {
-    if (!open) return
-    const onDown = (e: MouseEvent) => {
-      const t = e.target as Node
-      if (
-        btnRef.current && !btnRef.current.contains(t) &&
-        popRef.current && !popRef.current.contains(t)
-      ) {
-        setOpen(false)
-      }
-    }
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false)
-    }
-    document.addEventListener('mousedown', onDown)
-    document.addEventListener('keydown', onKey)
-    return () => {
-      document.removeEventListener('mousedown', onDown)
-      document.removeEventListener('keydown', onKey)
-    }
-  }, [open])
-
-  // Reset the active tab to the member's current state each time it opens.
-  useEffect(() => {
-    if (open) {
-      setTab(member.avatarImage ? 'photo' : 'emoji')
-      setError(null)
-      setEmojiQuery('')
-    }
-  }, [open, member.avatarImage])
+      return { top, left }
+    },
+  })
 
   const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0]
@@ -268,11 +286,21 @@ export function AvatarPicker({ member }: { member: Member }) {
         type="button"
         onClick={(e) => {
           e.stopPropagation()
-          setOpen((v) => !v)
+          if (!open) {
+            // Opening: reset the panel to the member's current state. Done
+            // here at the trigger — not in an effect — so there's no
+            // post-render state cascade. (Positioning is the pin hook's job;
+            // it re-pins pre-paint, so a stale pos from the last open never
+            // shows.)
+            setTab(member.avatarImage ? 'photo' : 'emoji')
+            setError(null)
+            setEmojiQuery('')
+          }
+          setOpen(!open)
         }}
         aria-label="Change avatar"
         title="Change avatar"
-        className="relative block rounded-full transition hover:scale-105 group/avatar"
+        className="relative block rounded-full transition hover:scale-105 motion-reduce:transform-none group/avatar"
       >
         <Avatar member={member} />
         <span
@@ -288,7 +316,7 @@ export function AvatarPicker({ member }: { member: Member }) {
           ref={popRef}
           onClick={(e) => e.stopPropagation()}
           style={{ position: 'fixed', top: pos?.top ?? -9999, left: pos?.left ?? -9999 }}
-          className={`z-[60] w-[264px] bg-surface border border-border-hair rounded-[14px] shadow-[0_10px_36px_rgba(0,0,0,0.18)] p-3.5 transition-opacity ${
+          className={`z-[60] w-[264px] glass-popover rounded-[14px] p-3.5 transition-opacity ${
             pos ? 'opacity-100' : 'opacity-0 pointer-events-none'
           }`}
         >
@@ -391,7 +419,7 @@ export function AvatarPicker({ member }: { member: Member }) {
                 </div>
               )}
               {error && (
-                <div className="mt-2 text-[11.5px] text-center text-red-500 bg-red-500/10 rounded-[7px] py-1.5">
+                <div className="mt-2 text-[11.5px] text-center text-overdue bg-overdue/10 rounded-[7px] py-1.5">
                   {error}
                 </div>
               )}
@@ -410,7 +438,7 @@ export function AvatarPicker({ member }: { member: Member }) {
                 setSavings(null)
                 setOpen(false)
               }}
-              className="mt-2 w-full inline-flex items-center justify-center gap-1.5 text-[12.5px] text-red-500 rounded-[9px] py-1.5 transition hover:bg-red-500/10"
+              className="mt-2 w-full inline-flex items-center justify-center gap-1.5 text-[12.5px] text-overdue rounded-[9px] py-1.5 transition hover:bg-overdue/10"
             >
               <Trash2 size={13} /> Remove avatar
             </button>
@@ -420,30 +448,6 @@ export function AvatarPicker({ member }: { member: Member }) {
       )}
     </div>
   )
-}
-
-/** Days off as effective days — a half-day counts 0.5 (matches scheduler). */
-export function effectiveDaysOff(days: { half?: 'am' | 'pm' }[]): number {
-  return days.reduce((s, d) => s + (d.half ? 0.5 : 1), 0)
-}
-
-/**
- * Off-days falling within an inclusive [start, end] date range (yyyy-mm-dd
- * lexical compare). Used to scope the sprint-view days-off control to the
- * sprint being viewed; settings passes no range and sees the full list.
- * See design-docs/members-and-days-off.md.
- */
-export function daysOffInRange<T extends { date: string }>(
-  days: T[],
-  start: string,
-  end: string
-): T[] {
-  return days.filter((d) => d.date >= start && d.date <= end)
-}
-
-/** Trim a day count for display: 2 → "2", 1.5 → "1.5". */
-export function fmtDays(n: number): string {
-  return Number.isInteger(n) ? String(n) : n.toFixed(1)
 }
 
 /**
@@ -472,7 +476,7 @@ export function ColorSwatchRow({
             className={`w-5 h-5 rounded-full transition ${
               active
                 ? 'ring-2 ring-offset-2 ring-offset-surface ring-ink/45'
-                : 'opacity-80 hover:opacity-100 hover:scale-110'
+                : 'opacity-80 hover:opacity-100 hover:scale-110 motion-reduce:transform-none'
             }`}
             style={{ background: c }}
           />
@@ -481,15 +485,6 @@ export function ColorSwatchRow({
     </div>
   )
 }
-
-/** Curated emoji for a project icon (see project-icon-emoji.md) — the 15 most
- *  project-relevant glyphs, sized to exactly two rows alongside the leading "Aa"
- *  chip (8 cols × 2). Everything else is reached through the search box, which
- *  filters the shared `EMOJI` keyword set (and surfaces any pasted emoji). */
-export const PROJECT_ICON_EMOJIS = [
-  '🚀', '🎯', '✅', '📌', '📋', '💡', '🔥', '⭐',
-  '📈', '🐛', '🔧', '🎨', '🧩', '📦', '🗂️',
-]
 
 /** Inline emoji picker mirroring ColorSwatchRow's `{ value, onPick }` shape.
  *  A search box sits on top: empty → two curated rows of project emoji (with a
@@ -519,7 +514,7 @@ export function EmojiPickerRow({
         className={`w-8 h-8 rounded-[8px] grid place-items-center text-[18px] leading-none transition ${
           active
             ? 'bg-surface ring-2 ring-accent'
-            : 'bg-canvas hover:bg-surface-hover hover:scale-110'
+            : 'bg-canvas hover:bg-surface-hover hover:scale-110 motion-reduce:transform-none'
         }`}
       >
         {e}
@@ -577,21 +572,9 @@ export function EmojiPickerRow({
 export function MemberColorDot({ member }: { member: Member }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    if (!open) return
-    const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
-    }
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false)
-    }
-    document.addEventListener('mousedown', onDown)
-    document.addEventListener('keydown', onKey)
-    return () => {
-      document.removeEventListener('mousedown', onDown)
-      document.removeEventListener('keydown', onKey)
-    }
-  }, [open])
+  // Outside-click / Escape close; absolute-positioned (scrolls with its row),
+  // so no pin — the ref wraps trigger + palette.
+  usePinnedPopover({ open, onClose: () => setOpen(false), popRef: ref })
   return (
     <div ref={ref} className="relative shrink-0">
       <button
@@ -599,11 +582,11 @@ export function MemberColorDot({ member }: { member: Member }) {
         onClick={() => setOpen((v) => !v)}
         aria-label="Member color"
         title="Change color"
-        className="block w-[18px] h-[18px] rounded-full transition hover:scale-110"
+        className="block w-[18px] h-[18px] rounded-full transition hover:scale-110 motion-reduce:transform-none"
         style={{ background: member.color, boxShadow: '0 0 0 1px rgba(0,0,0,0.10)' }}
       />
       {open && (
-        <div className="absolute right-0 top-7 z-20 bg-surface border border-border-hair rounded-[12px] shadow-[0_10px_36px_rgba(0,0,0,0.18)] p-2">
+        <div className="absolute right-0 top-7 z-20 glass-popover rounded-[12px] p-2">
           <ColorSwatchRow
             value={member.color}
             onPick={(c) => {
@@ -643,51 +626,26 @@ export function MemberDaysOffButton({
   const [draftHalf, setDraftHalf] = useState<'all' | 'am' | 'pm'>('all')
   const popRef = useRef<HTMLDivElement>(null)
   const btnRef = useRef<HTMLButtonElement>(null)
-  // Popover lives in a portal (escapes Card's overflow-hidden). We track the
-  // trigger's screen position and re-pin on scroll/resize so it stays glued.
-  const [pos, setPos] = useState<{ top: number; right: number }>({ top: 0, right: 0 })
-
-  useEffect(() => {
-    if (!open) return
-    const pin = () => {
+  // Popover lives in a portal (escapes Card's overflow-hidden), pinned to the
+  // trigger. `outsideIgnore`: the date picker's calendar is portaled to <body>,
+  // so it sits OUTSIDE popRef — without the guard, clicking a day would close
+  // this popover and unmount the calendar before the day's click lands.
+  // See design-docs/members-and-days-off.md.
+  const pos = usePinnedPopover({
+    open,
+    onClose: () => setOpen(false),
+    anchorRef: btnRef,
+    popRef,
+    outsideIgnore: '[data-calendar-popover]',
+    place: () => {
       const rect = btnRef.current?.getBoundingClientRect()
-      if (rect) {
-        setPos({
-          top: rect.bottom + 4,
-          right: Math.max(8, window.innerWidth - rect.right),
-        })
+      if (!rect) return null
+      return {
+        top: rect.bottom + 4,
+        right: Math.max(8, window.innerWidth - rect.right),
       }
-    }
-    pin()
-    const onClick = (e: MouseEvent) => {
-      const target = e.target as Node
-      // The date picker's calendar is portaled to <body>, so it sits OUTSIDE
-      // popRef. Without this guard, clicking a day fires this mousedown first,
-      // closes the popover, and unmounts the calendar before the day's click
-      // lands — so a day off can never be picked. Treat calendar clicks as
-      // inside. See design-docs/members-and-days-off.md.
-      if (target instanceof Element && target.closest('[data-calendar-popover]')) return
-      if (
-        popRef.current && !popRef.current.contains(target) &&
-        btnRef.current && !btnRef.current.contains(target)
-      ) {
-        setOpen(false)
-      }
-    }
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false)
-    }
-    window.addEventListener('scroll', pin, true)
-    window.addEventListener('resize', pin)
-    document.addEventListener('mousedown', onClick)
-    document.addEventListener('keydown', onKey)
-    return () => {
-      window.removeEventListener('scroll', pin, true)
-      window.removeEventListener('resize', pin)
-      document.removeEventListener('mousedown', onClick)
-      document.removeEventListener('keydown', onKey)
-    }
-  }, [open])
+    },
+  }) ?? { top: 0, right: 0 }
 
   // Full list drives mutations (date-keyed); the sprint view only displays and
   // counts the subset within its range. Out-of-range days stay untouched.
@@ -782,7 +740,7 @@ export function MemberDaysOffButton({
           ref={popRef}
           onClick={(e) => e.stopPropagation()}
           style={{ position: 'fixed', top: pos.top, right: pos.right }}
-          className="z-50 w-72 bg-surface border border-border-hair rounded-[14px] shadow-[0_10px_36px_rgba(0,0,0,0.18)] p-2"
+          className="z-50 w-72 glass-popover rounded-[14px] p-2"
         >
           <div className="text-[11px] tracking-normal text-ink-faint px-1 pb-1.5">
             Days off — {member.name}
@@ -813,7 +771,7 @@ export function MemberDaysOffButton({
               </select>
               <button
                 onClick={() => removeDay(d.date)}
-                className="text-ink-faint hover:text-red-500 opacity-0 group-hover/day:opacity-100 transition"
+                className="text-ink-faint hover:text-overdue opacity-0 group-hover/day:opacity-100 transition"
                 aria-label={`Remove ${d.date}`}
               >
                 <X size={14} />

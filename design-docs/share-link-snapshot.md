@@ -7,7 +7,39 @@
 > verbatim by the hosted mode.
 
 **Status:** Implemented
-**Last updated:** 2026-07-15 (**viewer left-rail layout** — applied to **BOTH** recipient
+**Last updated:** 2026-07-16 (**days-off detail — dates + half-days (Fix A)** — the days-off
+info went from a bare count to the **actual off dates**. The snapshot now carries, per member,
+the list of `{date, half?}` entries falling within the sprint range [not just the effective
+count]; the recipient renders them as **date chips** grouped under a `"Nghỉ <N> ngày"` label
+[the effective count is the group heading, so count ↔ dates read as one block], and a half-day
+chip is tagged `½ sáng/chiều` so the fractional total is traceable. Wire `mo` changed shape:
+`number[]` [per-member count] → **`[dayOffset, halfCode][][]`** [per member, a list of
+`[offset-from-d0, 0=full·1=am·2=pm]`]; the effective count is re-derived in the viewer via
+`effectiveDaysOff`. This shape change is safe — the previous `mo` count only existed in
+uncommitted work, never shipped; blobs ≤v0.0.47 carry no `mo` at all → empty off list.
+Demo: `demo/share-dayoff-v2-fix.html` [variant A]. Earlier same-day: **recipient meta polish**
+— the newly-carried title/note/days-off
+got a UX pass in `SnapshotViewer`: member gutter merges the two stats onto ONE dot-separated
+line [superseded by the chips above for days-off], the role `title` renders at 13.5→**11.5px
+`ink-muted`** paired under the name [identity, not a stat], and a 100%-done ratio tints green
+[`--color-status-done`, DNA §2.3]. The Sprint card's note gets a hairline separator + a
+**"Mục tiêu"** micro-label [matches the card's own "Sprint" eyebrow], bumps to 13px/`leading-relaxed`,
+and **clamps to 5 lines** with a "Xem thêm/Thu gọn" toggle so a long goal can't push
+Progress/Actions below the fold in the sticky rail. Demo: `demo/share-meta-review.html`.
+Earlier same-day: **member days-off in snapshot** — the per-member off info
+first travelled here [initially as a rolled-up count, since replaced by the date list above].
+Earlier same-day: **sprint note in snapshot** — the optional sprint-goal note
+[`Sprint.note`] now travels in the snapshot and renders under the sprint name in the
+recipient's Sprint card. Was dropped [`buildSnapshot`/`packSnapshot` only carried
+`name/startDate/endDate`], so the share page never showed the goal. Wire gains an optional
+`nt` key; **backward-compatible** — old blobs without it decode `note` as `undefined`.
+Earlier same-day: **member title in snapshot** — the optional member role
+label [`Member.title`, e.g. "Backend Engineer"; see member-title.md] now travels in the
+sprint snapshot and renders under the member's name in the recipient board. Was silently
+dropped at three layers [`normMember`, the packed `mb` wire row, `SnapshotViewer`], so the
+share page never showed a title. Wire `mb` grows a 4th cell `[name, color, avatarEmoji|'',
+title|'']`; **backward-compatible** — old blobs with 3-cell rows decode `title` as
+`undefined`. Collections carry no members, so unaffected.) Earlier 2026-07-15 (**viewer left-rail layout** — applied to **BOTH** recipient
 viewers [sprint `SnapshotViewer` + collection `CollectionSnapshotViewer`, kept in sync]:
 recipient page moved from a
 centered single column [`max-w-3xl`, empty flanks on wide screens] to a **2-column grid**
@@ -149,17 +181,23 @@ Không thêm bảng. Payload **không** phải `ProjectBundle` nữa — vì vie
 thị** (không import), payload chỉ chở đúng field cần vẽ board.
 
 **`SnapshotData`** — shape đã chuẩn hoá mà cả sender lẫn viewer dùng (in-memory):
-`exportedAt`, `project {name}`, `sprint {name, startDate, endDate}`, `members[]`
-(chỉ `name/color/avatarEmoji` — **bỏ `avatarImage`** vì data-URL ảnh nặng nhất
+`exportedAt`, `project {name}`, `sprint {name, startDate, endDate, note?}`, `members[]`
+(chỉ `name/color/avatarEmoji/title` — **bỏ `avatarImage`** vì data-URL ảnh nặng nhất
 payload), `tasks[]` (chỉ field board vẽ: `title/status/priority/estimate/startDate/
 dueDate/assigneeId/parentId`, id + assignee + parent đổi thành **index tổng hợp**
 `m0..`/`t0..`, thứ tự mảng = thứ tự hiển thị nên `sequence` = index để `byEnd`
-tie-break đúng). `buildSnapshot(...)` dựng thẳng shape này (chuẩn hoá luôn) nên
+tie-break đúng), `membersOff` (mảng `{date, half?}` off/member trong range sprint — song song
+`members`, trim lúc build). `buildSnapshot(...)` dựng thẳng shape này (chuẩn hoá luôn) nên
 encode→decode là **round-trip thuần**.
 
 **Wire format compact v2** (`packSnapshot` → JSON → lz-string): thay vì mảng object
 lặp key, đóng gói **columnar** + mã hoá chặt:
-- `mb`: `[[name, color, avatarEmoji], …]` (member 1 lần, task trỏ **index**).
+- `mb`: `[[name, color, avatarEmoji, title], …]` (member 1 lần, task trỏ **index**;
+  `avatarEmoji`/`title` là `''` khi trống. Blob cũ 3 ô đọc `title`→`undefined`, tương thích ngược).
+- `nt`: sprint-goal note (optional; vắng khi sprint không có note. Blob cũ thiếu key → `undefined`).
+- `mo`: `[dayOffset, halfCode][][]` — mỗi member 1 mảng ngày off trong range sprint, mỗi entry
+  `[offset từ d0, 0=cả ngày · 1=sáng · 2=chiều]`. Viewer decode ra `{date, half?}`, tự tính số
+  ngày hiệu dụng (`effectiveDaysOff`) + vẽ chips. Blob cũ thiếu `mo` → mảng rỗng (không có off).
 - Task đóng thành các **cột song song** (mảng cùng độ dài N): `ti` titles,
   `ss` status **enum** (0 todo · 1 in_progress · 2 done), `pp` priority **enum**
   (`['none','low','normal','high','urgent']`), `am` assignee member-index (−1 =

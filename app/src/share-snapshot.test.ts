@@ -61,6 +61,53 @@ describe('buildSnapshot', () => {
     expect(d.members[0].avatarEmoji).toBe('🦊')
   })
 
+  it('carries the member title (role label) through encode/decode', () => {
+    const withTitle = [member('a', 'An', { title: 'Backend Engineer' }), member('b', 'Bình')]
+    const d = buildSnapshot(project, sprint, withTitle, tasks)
+    expect(d.members[0].title).toBe('Backend Engineer')
+    expect(d.members[1].title).toBeUndefined()
+    const decoded = decodeSnapshot(encodeSnapshot(d))!
+    expect(decoded.members[0].title).toBe('Backend Engineer')
+    expect(decoded.members[1].title).toBeUndefined()
+  })
+
+  it('carries the sprint goal note through encode/decode', () => {
+    const withNote: Sprint = { ...sprint, note: 'Ship checkout v2\nfocus on mobile' }
+    const d = buildSnapshot(project, withNote, members, tasks)
+    expect(d.sprint.note).toBe('Ship checkout v2\nfocus on mobile')
+    const decoded = decodeSnapshot(encodeSnapshot(d))!
+    expect(decoded.sprint.note).toBe('Ship checkout v2\nfocus on mobile')
+  })
+
+  it('leaves the sprint note undefined when absent (no empty string)', () => {
+    const d = buildSnapshot(project, sprint, members, tasks)
+    expect(d.sprint.note).toBeUndefined()
+    expect(decodeSnapshot(encodeSnapshot(d))!.sprint.note).toBeUndefined()
+  })
+
+  it('carries the member off-days (dates + half) within the sprint range, sorted', () => {
+    // sprint range is 2026-07-05 … 2026-07-22.
+    const withOff = [
+      member('a', 'An', {
+        daysOff: [
+          { date: '2026-07-11', half: 'am' }, // half day, in range (given out of order)
+          { date: '2026-07-10' }, // full day, in range
+          { date: '2026-06-01' }, // out of range → dropped
+        ],
+      }),
+      member('b', 'Bình'),
+    ]
+    const d = buildSnapshot(project, sprint, withOff, tasks)
+    const ai = d.members.findIndex((m) => m.name === 'An')
+    const bi = d.members.findIndex((m) => m.name === 'Bình')
+    // trimmed to range + sorted by date
+    expect(d.membersOff[ai]).toEqual([{ date: '2026-07-10' }, { date: '2026-07-11', half: 'am' }])
+    expect(d.membersOff[bi]).toEqual([])
+    const decoded = decodeSnapshot(encodeSnapshot(d))!
+    expect(decoded.membersOff[ai]).toEqual([{ date: '2026-07-10' }, { date: '2026-07-11', half: 'am' }])
+    expect(decoded.membersOff[bi]).toEqual([])
+  })
+
   it('narrows tasks + members to one assignee when scoped', () => {
     const d = buildSnapshot(project, sprint, members, tasks, { memberId: 'a' })
     expect(d.tasks).toHaveLength(1)

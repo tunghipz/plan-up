@@ -1,12 +1,12 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Lock, AlertTriangle, Image, ArrowUpRight, Sun, Moon, Calendar } from 'lucide-react'
 import type { Priority, Status, Task } from './types'
 import type { WorkingPlan } from './scheduling'
 import { decodeSnapshot, laneRows } from './share-snapshot'
 import { groupTasksByMember } from './png-export'
 import { StatusPill } from './StatusPill'
-import { STATUS_META } from './sprint-logic'
-import { formatShortDate, formatSprintRange, fmtDays, PRIORITY_TAG, useDarkMode } from './lib'
+import { STATUS_META, derivedGroupStatus } from './sprint-logic'
+import { effectiveDaysOff, formatShortDate, formatSprintRange, fmtDays, PRIORITY_TAG, useDarkMode } from './lib'
 import { colorForName } from './schema'
 import { ExportImageModal } from './ExportImageModal'
 
@@ -127,6 +127,22 @@ export function SnapshotViewer({ raw }: { raw: string }) {
   const [exportOpen, setExportOpen] = useState(false)
   const [dark, setDark] = useDarkMode()
 
+  // Sprint-goal note: clamp to 5 lines in the sticky rail, reveal "Xem thêm" only
+  // when the note actually overflows that clamp (measured after render).
+  const noteRef = useRef<HTMLParagraphElement>(null)
+  const [noteExpanded, setNoteExpanded] = useState(false)
+  const [noteOverflows, setNoteOverflows] = useState(false)
+  const noteText = data?.sprint.note
+  useEffect(() => {
+    const el = noteRef.current
+    if (!el) {
+      setNoteOverflows(false)
+      return
+    }
+    // Measured while clamped (noteExpanded starts false) → true iff it overflows 5 lines.
+    setNoteOverflows(el.scrollHeight - el.clientHeight > 2)
+  }, [noteText])
+
   const openApp = () => {
     window.location.hash = ''
     window.location.reload()
@@ -153,6 +169,24 @@ export function SnapshotViewer({ raw }: { raw: string }) {
 
   const sprint = data.sprint
   const groups = groupTasksByMember(data.tasks, data.members)
+  // Off days per member (dates + half), keyed by member id.
+  const offById = new Map(data.members.map((m, i) => [m.id, data.membersOff[i] ?? []]))
+
+  // A parent task's DISPLAYED status is rolled up from its children (mirrors the app's
+  // List/Board/Gantt via derivedGroupStatus) — the snapshot carries each task's RAW status,
+  // so without this a parent whose kids are in progress would wrongly read "To do".
+  const kidsByParent = new Map<string, Task[]>()
+  for (const t of data.tasks) {
+    if (t.parentId) {
+      const arr = kidsByParent.get(t.parentId) ?? []
+      arr.push(t)
+      kidsByParent.set(t.parentId, arr)
+    }
+  }
+  const displayStatus = (t: Task): Status => {
+    const kids = kidsByParent.get(t.id)
+    return kids && kids.length ? derivedGroupStatus(kids) : t.status
+  }
   const stamp = shortDate(data.exportedAt)
   const range = sprint.endDate
     ? formatSprintRange(sprint.startDate, sprint.endDate)
@@ -162,9 +196,10 @@ export function SnapshotViewer({ raw }: { raw: string }) {
     ? data.exportedAt.slice(0, 10)
     : sprint.startDate
 
-  // Pulse — whole-sprint status breakdown (all tasks, children included).
+  // Pulse — whole-sprint status breakdown (all tasks, children included). Parents use their
+  // derived (rolled-up) status so the donut agrees with the status pills in the board.
   const counts: Record<Status, number> = { todo: 0, in_progress: 0, done: 0 }
-  for (const t of data.tasks) counts[t.status]++
+  for (const t of data.tasks) counts[displayStatus(t)]++
   const totalTasks = data.tasks.length
 
   let seq = 0
@@ -216,6 +251,35 @@ export function SnapshotViewer({ raw }: { raw: string }) {
                 <Calendar size={13} strokeWidth={2} aria-hidden />
                 {range}
               </div>
+              {sprint.note && (
+                <div className="mt-3 pt-3 border-t border-border-hair">
+                  <div className="text-[10px] font-bold tracking-[0.06em] uppercase text-ink-faint mb-1.5">Goal</div>
+                  <p
+                    ref={noteRef}
+                    className="text-[13px] leading-relaxed text-ink-muted whitespace-pre-wrap break-words"
+                    style={
+                      noteExpanded
+                        ? undefined
+                        : ({
+                            display: '-webkit-box',
+                            WebkitLineClamp: 5,
+                            WebkitBoxOrient: 'vertical',
+                            overflow: 'hidden',
+                          } as React.CSSProperties)
+                    }
+                  >
+                    {sprint.note}
+                  </p>
+                  {noteOverflows && (
+                    <button
+                      onClick={() => setNoteExpanded((v) => !v)}
+                      className="mt-1.5 text-[12px] font-semibold text-accent hover:underline"
+                    >
+                      {noteExpanded ? 'Show less' : 'Show more'}
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Progress — donut + legend (replaces the old top pulse strip) */}
@@ -269,11 +333,13 @@ export function SnapshotViewer({ raw }: { raw: string }) {
                 const color = g.member ? g.member.color || colorForName(name) : 'var(--color-ink-faint)'
                 const rows = laneRows(g.tasks)
                 const { done, total } = memberStats(g.tasks)
+                const offList = g.member ? offById.get(g.member.id) ?? [] : []
+                const offCount = effectiveDaysOff(offList)
                 const groupTop = gi === 0 ? 'none' : '2px solid var(--color-border-strong)'
                 return rows.map(({ task: t, child }, ri) => {
                   seq++
                   const isMilestone = t.estimate === 0
-                  const isDone = t.status === 'done'
+                  const isDone = displayStatus(t) === 'done'
                   const rowTop = ri === 0 ? groupTop : '1px solid var(--color-border-hair)'
                   const cell: React.CSSProperties = { borderTop: rowTop, padding: '8px 9px', verticalAlign: 'top' }
                   return (
@@ -291,9 +357,49 @@ export function SnapshotViewer({ raw }: { raw: string }) {
                                 {g.member?.avatarEmoji ?? name.charAt(0).toUpperCase()}
                               </span>
                             )}
-                            <span className="text-[13.5px] font-[650] text-ink truncate">{name}</span>
+                            <div className="flex flex-col min-w-0">
+                            <span className="text-[13.5px] font-[650] text-ink truncate leading-tight">{name}</span>
+                            {g.member?.title && (
+                              <span className="text-[11.5px] text-ink-muted truncate leading-tight tracking-[-0.008em] mt-px">
+                                {g.member.title}
+                              </span>
+                            )}
                           </div>
-                          <div className="text-[11px] text-ink-faint mt-1 pl-8 tab-data">{done}/{total} done</div>
+                          </div>
+                          <div className="text-[11px] text-ink-faint mt-1.5 pl-8 tab-data">
+                            <span
+                              style={
+                                total > 0 && done === total
+                                  ? { color: 'var(--color-status-done)', fontWeight: 600 }
+                                  : undefined
+                              }
+                            >
+                              {done}/{total} done
+                            </span>
+                          </div>
+                          {offList.length > 0 && (
+                            <div className="mt-1.5 pl-8">
+                              <div className="text-[10px] font-bold tracking-[0.04em] uppercase text-ink-faint mb-1">
+                                <span className="text-ink-muted tab-data">{fmtDays(offCount)}</span>{' '}
+                                {offCount === 1 ? 'day' : 'days'} off
+                              </div>
+                              <div className="flex flex-wrap gap-1">
+                                {offList.map((o, i) => (
+                                  <span
+                                    key={`${o.date}-${i}`}
+                                    className="inline-flex items-center gap-1 text-[10.5px] font-semibold text-ink-muted bg-fill rounded-[6px] px-[7px] py-0.5 whitespace-nowrap tab-data"
+                                  >
+                                    {shortDate(o.date)}
+                                    {o.half && (
+                                      <span className="text-[9.5px] font-bold text-accent bg-accent-soft rounded-[4px] px-1">
+                                        ½ {o.half === 'am' ? 'AM' : 'PM'}
+                                      </span>
+                                    )}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
                         </td>
                       )}
                       <td style={{ ...cell }} className="text-[12px] text-ink-faint tab-data">{seq}</td>
@@ -315,7 +421,7 @@ export function SnapshotViewer({ raw }: { raw: string }) {
                       </td>
                       <td style={{ ...cell }} className="text-center text-[12.5px] text-ink-muted tab-data">{effortLabel(t.estimate)}</td>
                       <td style={{ ...cell }}>
-                        <StatusPill status={t.status} />
+                        <StatusPill status={displayStatus(t)} />
                       </td>
                     </tr>
                   )

@@ -1,5 +1,5 @@
 import LZString from 'lz-string'
-import type { Collection, Member, Priority, Project, Sprint, Status, Task } from './types'
+import type { Collection, DayOff, Member, Priority, Project, Sprint, Status, Task } from './types'
 import { byEnd } from './telegram-export'
 
 /**
@@ -39,6 +39,8 @@ const MAX_BLOB_LEN = 200_000
 // Fixed enum tables — the packed form stores the index; order must stay stable.
 const STATUS_CODE: Status[] = ['todo', 'in_progress', 'done']
 const PRIO_CODE: Priority[] = ['none', 'low', 'normal', 'high', 'urgent']
+// Off-day half kind ↔ int for the compact `mo` wire: 0 = full day, 1 = am, 2 = pm.
+const HALF_CODE: DayOff['half'][] = [undefined, 'am', 'pm']
 
 /**
  * The normalized in-memory snapshot both sender and viewer speak. Ids are
@@ -50,9 +52,23 @@ const PRIO_CODE: Priority[] = ['none', 'low', 'normal', 'high', 'urgent']
 export interface SnapshotData {
   exportedAt: string
   project: { name: string }
-  sprint: { name: string; startDate: string; endDate: string | null }
+  sprint: { name: string; startDate: string; endDate: string | null; note?: string }
   members: Member[]
+  /** Off days per member within the sprint range, aligned to `members`. Trimmed at
+   * build (the viewer never re-runs scheduling); the viewer derives the effective-day
+   * count from this and renders the individual dates as chips. Sorted by date. */
+  membersOff: DayOff[][]
   tasks: Task[]
+}
+
+/** Off days of `m` within the inclusive [start, end] range (yyyy-mm-dd lexical compare),
+ * sorted by date. Inlined (not imported from lib) to keep this module free of React/DOM
+ * deps; mirrors `daysOffInRange(...)` in lib.ts — keep the two in sync. */
+function offDaysInSprint(m: Member, start: string, end: string): DayOff[] {
+  return (m.daysOff ?? [])
+    .filter((d) => d.date >= start && d.date <= end)
+    .slice()
+    .sort((a, b) => a.date.localeCompare(b.date))
 }
 
 /** Integer day-offset of `d` from `base` (both yyyy-mm-dd); null when either absent/bad. */
@@ -72,9 +88,10 @@ function fromOffset(base: string, n: number | null | undefined): string | null {
   return new Date(b + n * 86_400_000).toISOString().slice(0, 10)
 }
 
-/** A member reduced to what the board renders, with a synthetic id + no avatar image. */
+/** A member reduced to what the board renders, with a synthetic id + no avatar image.
+ * `title` (optional role label) rides along so the viewer can show it under the name. */
 function normMember(m: Member, i: number): Member {
-  return { id: `m${i}`, projectId: '', name: m.name, color: m.color, daysOff: [], avatarEmoji: m.avatarEmoji }
+  return { id: `m${i}`, projectId: '', name: m.name, color: m.color, daysOff: [], avatarEmoji: m.avatarEmoji, title: m.title }
 }
 
 /** A task reduced to display fields, ids remapped to indices, dates trimmed to yyyy-mm-dd. */
@@ -140,8 +157,9 @@ export function buildSnapshot(
   return {
     exportedAt: new Date().toISOString(),
     project: { name: project.name },
-    sprint: { name: sprint.name, startDate: sprint.startDate, endDate: sprint.endDate ?? null },
+    sprint: { name: sprint.name, startDate: sprint.startDate, endDate: sprint.endDate ?? null, note: sprint.note },
     members: usedMembers.map((m, i) => normMember(m, i)),
+    membersOff: usedMembers.map((m) => offDaysInSprint(m, sprint.startDate, sprint.endDate ?? sprint.startDate)),
     tasks: scoped.map((t, i) => normTask(t, i, memberIdx, taskIdx)),
   }
 }
@@ -177,9 +195,11 @@ interface PackedSnapshot {
   ts: string
   pj: string
   sn: string
+  nt?: string // sprint-goal note (absent when empty)
   d0: string
   d1: string | null
-  mb: [string, string, string][] // [name, color, avatarEmoji|'']
+  mb: [string, string, string, string][] // [name, color, avatarEmoji|'', title|'']
+  mo?: [number, number][][] // off days per member (aligned to mb): [dayOffset from d0, halfCode 0|1|2][]
   ti: string[]
   ss: number[] // status enum index
   pp: number[] // priority enum index
@@ -200,9 +220,15 @@ function packSnapshot(d: SnapshotData): PackedSnapshot {
     ts: d.exportedAt,
     pj: d.project.name,
     sn: d.sprint.name,
+    nt: d.sprint.note || undefined, // omit key when empty (JSON.stringify drops undefined)
     d0: base,
     d1: d.sprint.endDate,
-    mb: d.members.map((m) => [m.name, m.color, m.avatarEmoji ?? '']),
+    mb: d.members.map((m) => [m.name, m.color, m.avatarEmoji ?? '', m.title ?? '']),
+    mo: d.membersOff.map((list) =>
+      list.map(
+        (o) => [toOffset(base, o.date) ?? 0, o.half === 'am' ? 1 : o.half === 'pm' ? 2 : 0] as [number, number]
+      )
+    ),
     ti: d.tasks.map((t) => t.title),
     ss: d.tasks.map((t) => Math.max(0, STATUS_CODE.indexOf(t.status))),
     pp: d.tasks.map((t) => Math.max(0, PRIO_CODE.indexOf(t.priority))),
@@ -237,6 +263,7 @@ function unpackSnapshot(o: unknown): SnapshotData | null {
       color: String(r[1] ?? '#8e8e93'),
       daysOff: [],
       avatarEmoji: r[2] ? String(r[2]) : undefined,
+      title: r[3] ? String(r[3]) : undefined,
     }
   })
 
@@ -249,6 +276,21 @@ function unpackSnapshot(o: unknown): SnapshotData | null {
   const ef = p.ef as (number | null)[]
   const s0 = p.s0 as (number | null)[]
   const s1 = p.s1 as (number | null)[]
+
+  // Off days per member (parallel to `mb`); absent/short in old blobs → empty list.
+  const moRaw = isArr(p.mo) ? (p.mo as unknown[]) : []
+  const membersOff: DayOff[][] = members.map((_, i) => {
+    const list = isArr(moRaw[i]) ? (moRaw[i] as unknown[]) : []
+    return list
+      .map((e): DayOff | null => {
+        const pair = (isArr(e) ? e : []) as unknown[]
+        const date = fromOffset(d0, typeof pair[0] === 'number' ? pair[0] : null)
+        if (!date) return null
+        const half = HALF_CODE[typeof pair[1] === 'number' ? pair[1] : 0]
+        return half ? { date, half } : { date }
+      })
+      .filter((x): x is DayOff => x !== null)
+  })
 
   const tasks: Task[] = ti.map((title, i) => ({
     id: `t${i}`,
@@ -270,8 +312,14 @@ function unpackSnapshot(o: unknown): SnapshotData | null {
   return {
     exportedAt: typeof p.ts === 'string' ? p.ts : '',
     project: { name: p.pj as string },
-    sprint: { name: p.sn as string, startDate: d0, endDate: p.d1 == null ? null : String(p.d1) },
+    sprint: {
+      name: p.sn as string,
+      startDate: d0,
+      endDate: p.d1 == null ? null : String(p.d1),
+      note: typeof p.nt === 'string' && p.nt ? p.nt : undefined,
+    },
     members,
+    membersOff,
     tasks,
   }
 }

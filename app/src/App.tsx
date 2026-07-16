@@ -8,6 +8,9 @@ import {
   Sun,
   Search,
   ArrowRightCircle,
+  ArrowRight,
+  CalendarClock,
+  CalendarCheck2,
   List,
   LayoutGrid,
   GanttChartSquare,
@@ -94,6 +97,8 @@ import {
   sprintEndForStart,
   todayLocalISO,
   sprintTemporalState,
+  sprintExpirySignal,
+  type SprintExpiry,
   MON,
   latestActiveSprint,
   nextSprintNumber,
@@ -114,19 +119,25 @@ function SprintStateDot({
   state,
   done,
   onAccent,
+  attention = false,
 }: {
   state: 'upcoming' | 'progress' | 'past'
   done: boolean
   onAccent: boolean
+  /** Lapsed sprint still holding open work — amber "needs attention" tone (see
+   *  sprint-expiry-signal.md). Ignored on the active row (dot stays white). */
+  attention?: boolean
 }) {
   // currentColor drives every stroke/fill; the halo is the same colour at low opacity.
   const tone = onAccent
     ? 'text-white'
-    : state === 'progress'
-      ? 'text-accent'
-      : state === 'past' && done
-        ? 'text-status-done'
-        : 'text-status-todo'
+    : attention
+      ? 'text-priority-high'
+      : state === 'progress'
+        ? 'text-accent'
+        : state === 'past' && done
+          ? 'text-status-done'
+          : 'text-status-todo'
   return (
     <svg
       width="16"
@@ -318,6 +329,15 @@ function App() {
     safeStorage.set(COLLVIEW_KEY, v)
   }
   const [showNewSprint, setShowNewSprint] = useState(false)
+  // When the New Sprint dialog is opened from the expiry banner's "carry over"
+  // path, this holds the lapsed sprint to pull unfinished tasks from on create.
+  // Null for every other open path (empty state, `n` key, sidebar +). See
+  // design-docs/sprint-expiry-signal.md.
+  const [carryOnCreate, setCarryOnCreate] = useState<{
+    count: number
+    fromId: string
+    fromName: string
+  } | null>(null)
   const [backupSettingsOpen, setBackupSettingsOpen] = useState(false)
   const [shareOpen, setShareOpen] = useState(false)
   const [collShareOpen, setCollShareOpen] = useState(false)
@@ -971,7 +991,12 @@ function App() {
           {/* Top tier: state dot + name + task count (count fades on hover so it
              never collides with the absolute archive action that fades in). */}
           <span className="flex items-center gap-2 min-w-0">
-            <SprintStateDot state={state} done={allDone} onAccent={isActive} />
+            <SprintStateDot
+              state={state}
+              done={allDone}
+              onAccent={isActive}
+              attention={state === 'past' && !!c && c.total > 0 && c.done < c.total}
+            />
             {/* Note glyph hugs the title text (not the row edge). See sprint-archive.md. */}
             <span className="flex items-center gap-1.5 min-w-0 flex-1">
               <span
@@ -1763,6 +1788,26 @@ function App() {
               sprint={currentSprint}
               capacity={capacity}
               onShare={() => setShareOpen(true)}
+              today={today}
+              hasNext={!!nextSprint}
+              nextName={nextSprint ? nextSprint.name : `Sprint ${nextSprintNumber(sprints ?? [])}`}
+              openCount={unfinishedCount}
+              rolloverTasks={unfinishedTasks}
+              members={paletteMembers ?? []}
+              onRollover={doRollover}
+              onGoToNext={() => nextSprint && setCurrentSprintId(nextSprint.id)}
+              onStartNext={(carry: boolean) => {
+                setCarryOnCreate(
+                  carry && currentSprint
+                    ? {
+                        count: unfinishedCount,
+                        fromId: currentSprint.id,
+                        fromName: currentSprint.name,
+                      }
+                    : null
+                )
+                setShowNewSprint(true)
+              }}
             />
           )}
 
@@ -1949,10 +1994,27 @@ function App() {
           projectId={currentProjectId}
           lastSprint={latestActiveSprint(sprints ?? [])}
           nextNumber={nextSprintNumber(sprints ?? [])}
-          onClose={() => setShowNewSprint(false)}
-          onCreate={(s) => {
-            setCurrentSprintId(s.id)
+          carry={
+            carryOnCreate && carryOnCreate.count > 0
+              ? { count: carryOnCreate.count, fromName: carryOnCreate.fromName }
+              : null
+          }
+          onClose={() => {
             setShowNewSprint(false)
+            setCarryOnCreate(null)
+          }}
+          onCreate={async (s, doCarry) => {
+            setShowNewSprint(false)
+            // Carry-over path (expiry banner state C): the fresh sprint is the
+            // chronological "next", so rolling over from the lapsed sprint lands
+            // its unfinished tasks here. Otherwise just open the new sprint.
+            if (doCarry && carryOnCreate) {
+              const result = await moveUnfinishedToNextSprint(carryOnCreate.fromId)
+              setCurrentSprintId(result.targetSprintId ?? s.id)
+            } else {
+              setCurrentSprintId(s.id)
+            }
+            setCarryOnCreate(null)
           }}
         />
       )}
@@ -2210,10 +2272,176 @@ function SearchPalette({
  * disjoint segments (done / in-flight / open) that sum to `total`; `notEstimated`
  * rides the legend as a warning, never the bar (design-system §4.7).
  */
+/**
+ * The lapsed / lapsing-sprint signal shown inside the sprint header (one of four
+ * `SprintExpiry` kinds — see design-docs/sprint-expiry-signal.md). Amber when a
+ * lapsed sprint still holds open work (a semantic warning, §2.2 warn-ink), calm
+ * neutral for a wrapped or merely-ending-soon sprint. `ended-open` reuses the same
+ * `RolloverPopover` + move as the toolbar Roll over button (confirm-by-preview).
+ */
+function SprintExpiryBanner({
+  expiry,
+  openCount,
+  fromName,
+  nextName,
+  hasNext,
+  rolloverTasks,
+  members,
+  onRollover,
+  onGoToNext,
+  onStartNext,
+}: {
+  expiry: SprintExpiry
+  openCount: number
+  fromName: string
+  nextName: string
+  hasNext: boolean
+  rolloverTasks: Task[]
+  members: Member[]
+  onRollover: () => void
+  onGoToNext: () => void
+  onStartNext: (carry: boolean) => void
+}) {
+  const [rollOpen, setRollOpen] = useState(false)
+  const rollRef = useRef<HTMLButtonElement>(null)
+
+  const amber = expiry.kind === 'ended-open' || expiry.kind === 'ended-open-nonext'
+  const agoText = expiry.endedDays === 1 ? 'yesterday' : `${expiry.endedDays} days ago`
+  const openLabel = `${openCount} task${openCount === 1 ? '' : 's'}`
+
+  const brandCta = (children: React.ReactNode, onClick: () => void) => (
+    <button
+      onClick={onClick}
+      className="brand-btn inline-flex items-center gap-1.5 rounded-[9px] px-3.5 py-2 text-[13px] font-semibold text-white transition active:scale-[0.97]"
+    >
+      {children}
+    </button>
+  )
+  const ghostCta = (label: string, onClick: () => void) => (
+    <button
+      onClick={onClick}
+      className="inline-flex items-center gap-1 rounded-[9px] px-3 py-2 text-[13px] font-medium text-accent hover:bg-accent-soft transition"
+    >
+      {label}
+    </button>
+  )
+  const arrow = <ArrowRight size={15} strokeWidth={2} aria-hidden />
+
+  let title = ''
+  let sub = ''
+  let actions: React.ReactNode = null
+  switch (expiry.kind) {
+    case 'ended-open':
+      title = `This sprint ended ${agoText}`
+      sub = `${openLabel} still open`
+      actions = (
+        <>
+          {ghostCta(`Go to ${nextName}`, onGoToNext)}
+          <button
+            ref={rollRef}
+            onClick={() => setRollOpen((o) => !o)}
+            aria-expanded={rollOpen}
+            className="brand-btn inline-flex items-center gap-1.5 rounded-[9px] px-3.5 py-2 text-[13px] font-semibold text-white transition active:scale-[0.97]"
+          >
+            Roll over {openCount} {arrow} {nextName}
+          </button>
+        </>
+      )
+      break
+    case 'ended-open-nonext':
+      title = `This sprint ended ${agoText}`
+      sub = `${openLabel} still open · no next sprint yet`
+      actions = brandCta(
+        <>
+          Start {nextName} · carry {openCount} {arrow}
+        </>,
+        () => onStartNext(true)
+      )
+      break
+    case 'ended-done':
+      title = "Sprint wrapped — everything's done"
+      sub = `ended ${agoText}`
+      actions = brandCta(
+        <>
+          {hasNext ? `Go to ${nextName}` : `Start ${nextName}`} {arrow}
+        </>,
+        () => (hasNext ? onGoToNext() : onStartNext(false))
+      )
+      break
+    case 'ending-soon':
+      title = expiry.endsInDays === 0 ? 'This sprint ends today' : 'This sprint ends tomorrow'
+      sub = openCount > 0 ? `${openLabel} still open` : 'on track'
+      actions = ghostCta(hasNext ? `Go to ${nextName}` : `Plan ${nextName}`, () =>
+        hasNext ? onGoToNext() : onStartNext(false)
+      )
+      break
+  }
+
+  return (
+    <div
+      className={`mt-3.5 rounded-[12px] px-4 py-3 flex items-center gap-3 ${
+        amber ? 'bg-priority-high/15 ring-1 ring-inset ring-priority-high/25' : 'bg-fill'
+      }`}
+    >
+      <span
+        className={
+          amber
+            ? 'text-priority-high'
+            : expiry.kind === 'ended-done'
+              ? 'text-status-done'
+              : 'text-ink-faint'
+        }
+      >
+        {expiry.kind === 'ended-done' ? (
+          <CalendarCheck2 size={20} strokeWidth={1.8} aria-hidden />
+        ) : (
+          <CalendarClock size={20} strokeWidth={1.8} aria-hidden />
+        )}
+      </span>
+      <div className="min-w-0 flex-1">
+        <div
+          className={`text-[13.5px] font-semibold leading-tight ${
+            amber ? 'text-warn-ink' : 'text-ink'
+          }`}
+        >
+          {title}
+        </div>
+        <div className="text-[12px] text-ink-muted mt-0.5 tab-data">{sub}</div>
+      </div>
+      <div className="shrink-0 relative flex items-center gap-1.5">
+        {actions}
+        {rollOpen && (
+          <RolloverPopover
+            anchorRef={rollRef}
+            tasks={rolloverTasks}
+            members={members}
+            fromName={fromName}
+            toName={nextName}
+            onMove={() => {
+              setRollOpen(false)
+              onRollover()
+            }}
+            onClose={() => setRollOpen(false)}
+          />
+        )}
+      </div>
+    </div>
+  )
+}
+
 function SprintPageHeader({
   sprint,
   capacity,
   onShare,
+  today,
+  hasNext,
+  nextName,
+  openCount,
+  rolloverTasks,
+  members,
+  onRollover,
+  onGoToNext,
+  onStartNext,
 }: {
   sprint: Sprint
   capacity: {
@@ -2227,9 +2455,33 @@ function SprintPageHeader({
   }
   /** Open the "Share link" popover (read-only snapshot). Hidden when empty. */
   onShare: () => void
+  /** Local today (`yyyy-mm-dd`) — drives the expiry signal (see sprint-expiry-signal.md). */
+  today: string
+  /** Whether a next non-archived sprint already exists. */
+  hasNext: boolean
+  /** Name of the next sprint (existing) or the would-be next `Sprint N`. */
+  nextName: string
+  /** Unfinished LEAF tasks in this sprint (matches rollover counting). */
+  openCount: number
+  /** The exact tasks the rollover popover previews/moves. */
+  rolloverTasks: Task[]
+  members: Member[]
+  /** Perform the rollover into the next sprint (popover onMove). */
+  onRollover: () => void
+  /** Switch to the existing next sprint. */
+  onGoToNext: () => void
+  /** Open the New Sprint dialog; `carry` pre-checks the carry-over option. */
+  onStartNext: (carry: boolean) => void
 }) {
   const { total, pctAssigned, done, pctDone, inFlight, open, notEstimated } = capacity
   const pct = (n: number) => `${(n / total) * 100}%`
+  const expiry = sprintExpirySignal(
+    sprint.startDate,
+    sprint.endDate,
+    today,
+    openCount,
+    hasNext
+  )
   return (
     <div className="mx-6 mt-4 mb-3 glass-card rounded-[18px] px-5 pt-4 pb-4">
       {/* Title + Copy button on one row; note flows under the title. */}
@@ -2255,6 +2507,22 @@ function SprintPageHeader({
           </div>
         )}
       </div>
+
+      {/* Expiry signal — lapsed / lapsing sprint (sprint-expiry-signal.md). */}
+      {expiry && (
+        <SprintExpiryBanner
+          expiry={expiry}
+          openCount={openCount}
+          fromName={sprint.name}
+          nextName={nextName}
+          hasNext={hasNext}
+          rolloverTasks={rolloverTasks}
+          members={members}
+          onRollover={onRollover}
+          onGoToNext={onGoToNext}
+          onStartNext={onStartNext}
+        />
+      )}
 
       {/* Dates property — Notion-style muted label + value pill. */}
       <div className="mt-3 flex items-center gap-2.5 text-[13px]">
@@ -2428,6 +2696,7 @@ function NewSprintDialog({
   projectId,
   lastSprint,
   nextNumber,
+  carry,
   onClose,
   onCreate,
 }: {
@@ -2436,8 +2705,11 @@ function NewSprintDialog({
   lastSprint: Sprint | null
   /** Next `Sprint N` number (computed excluding archived collisions). */
   nextNumber: number
+  /** When opened from the expiry banner (state C): show a pre-checked "carry N
+   *  unfinished from {fromName}" option. Null on every other open path. */
+  carry?: { count: number; fromName: string } | null
   onClose: () => void
-  onCreate: (s: Sprint) => void
+  onCreate: (s: Sprint, carry: boolean) => void
 }) {
   // Computed once on mount — the dialog is mounted fresh per open, so the
   // suggestion shouldn't shift while it's open.
@@ -2468,6 +2740,9 @@ function NewSprintDialog({
   const thisWeekMonday = useMemo(() => snapToMonday(todayStr), [todayStr])
   const endDate = useMemo(() => sprintEndForStart(startDate), [startDate])
   const [note, setNote] = useState('')
+  // Carry-over is pre-checked when offered (the user came from a lapsed sprint
+  // with open work); irrelevant when `carry` is null.
+  const [doCarry, setDoCarry] = useState(true)
 
   const submit = async () => {
     const noteTrimmed = note.trim()
@@ -2480,7 +2755,7 @@ function NewSprintDialog({
       ...(noteTrimmed ? { note: noteTrimmed } : {}),
     }
     await createSprint(sprint)
-    onCreate(sprint)
+    onCreate(sprint, !!carry && doCarry)
   }
 
   return (
@@ -2539,6 +2814,23 @@ function NewSprintDialog({
             className="mt-1 w-full px-3 py-2 border border-border bg-surface rounded-[8px] text-sm leading-relaxed resize-y focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent transition"
           />
         </label>
+        {carry && carry.count > 0 && (
+          <label className="flex items-center gap-2.5 px-3 py-2.5 bg-fill rounded-[8px] cursor-pointer">
+            <input
+              type="checkbox"
+              checked={doCarry}
+              onChange={(e) => setDoCarry(e.target.checked)}
+              className="accent-[var(--color-accent)] w-4 h-4"
+            />
+            <span className="text-[13px] text-ink">
+              Carry{' '}
+              <span className="font-semibold tabular-nums">
+                {carry.count} unfinished task{carry.count === 1 ? '' : 's'}
+              </span>{' '}
+              from {carry.fromName}
+            </span>
+          </label>
+        )}
         <div className="flex justify-end gap-2 pt-2">
           <button
             onClick={onClose}

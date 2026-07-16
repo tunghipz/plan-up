@@ -216,6 +216,61 @@ export function sprintTemporalState(
   return 'progress'
 }
 
+/** Whole days from `fromISO` to `toISO` (both `yyyy-mm-dd`), UTC-anchored so DST
+ * never shifts the count. Positive when `toISO` is later. Pure (unlike `dayDiff`,
+ * which reads the live clock) so the expiry signal is testable with a fixed today. */
+export function daysBetween(fromISO: string, toISO: string): number {
+  const a = Date.parse(fromISO + 'T00:00:00Z')
+  const b = Date.parse(toISO + 'T00:00:00Z')
+  return Math.round((b - a) / MS)
+}
+
+/** The four "sprint is lapsing / has lapsed" signals surfaced in the sprint header
+ * banner + sidebar dot (see design-docs/sprint-expiry-signal.md):
+ *   ended-open        past, still-open work, a next sprint exists → offer rollover
+ *   ended-open-nonext past, still-open work, NO next sprint yet   → offer create+carry
+ *   ended-done        past, everything done                       → offer go-to/create next
+ *   ending-soon       in progress, ends today or tomorrow         → gentle heads-up
+ * `openCount` = unfinished LEAF tasks (containers excluded, matches rollover counting). */
+export type SprintExpiryKind =
+  | 'ended-open'
+  | 'ended-open-nonext'
+  | 'ended-done'
+  | 'ending-soon'
+
+export interface SprintExpiry {
+  kind: SprintExpiryKind
+  /** today − endDate, ≥1 for a lapsed sprint (0 otherwise). */
+  endedDays: number
+  /** endDate − today, 0 (ends today) or 1 (tomorrow) for `ending-soon` (0 otherwise). */
+  endsInDays: number
+}
+
+/** Classify a sprint's expiry signal, or `null` when there's nothing to surface
+ * (mid-sprint with time left, or an upcoming sprint). Pure — pass `today` +
+ * `openCount` + `hasNext` so it's unit-testable and never reads the clock. */
+export function sprintExpirySignal(
+  startDate: string,
+  endDate: string,
+  today: string,
+  openCount: number,
+  hasNext: boolean,
+): SprintExpiry | null {
+  const state = sprintTemporalState(startDate, endDate, today)
+  if (state === 'past') {
+    const endedDays = daysBetween(endDate, today)
+    if (openCount > 0) {
+      return { kind: hasNext ? 'ended-open' : 'ended-open-nonext', endedDays, endsInDays: 0 }
+    }
+    return { kind: 'ended-done', endedDays, endsInDays: 0 }
+  }
+  if (state === 'progress') {
+    const endsInDays = daysBetween(today, endDate)
+    if (endsInDays <= 1) return { kind: 'ending-soon', endedDays: 0, endsInDays }
+  }
+  return null
+}
+
 /** Snap a `yyyy-mm-dd` back to the Monday of its ISO week (Monday unchanged). */
 export function snapToMonday(dateStr: string): string {
   const d = new Date(dateStr + 'T00:00:00Z')

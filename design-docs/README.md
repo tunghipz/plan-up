@@ -67,6 +67,7 @@ Non-obvious behaviors, defaults, persistence keys.
 | [sprints.md](./sprints.md) | Sprint CRUD, biweekly defaults, per-sprint sequence, locked `Sprint N` name + optional goal note |
 | [sprint-cadence.md](./sprint-cadence.md) | Sprint start locked to Monday + fixed 2-week duration (Monday-strip picker, derived read-only end) |
 | [sprint-archive.md](./sprint-archive.md) | Reversible archive to declutter the sprint list (collapsible `Archived (N)` section, hover action, out of active flow) |
+| [sprint-expiry-signal.md](./sprint-expiry-signal.md) | Signal a lapsed/lapsing sprint — header banner (roll over / go to next / create+carry) + amber sidebar dot; fires when past end date or ending today/tomorrow |
 | [collections.md](./collections.md) | Task ngoài sprint — collection tự đặt tên, nhiều bảng (sections), view List (giống sprint, tap-to-edit, **sortable columns** + **date-range picker**) + Calendar liền mạch, status do user tự tạo per-collection |
 | [sprint-rollover.md](./sprint-rollover.md) | Move unfinished tasks to next sprint — preview popover |
 | [members-and-days-off.md](./members-and-days-off.md) | Member labels, colors, off-days |

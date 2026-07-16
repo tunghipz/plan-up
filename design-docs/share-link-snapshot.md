@@ -7,7 +7,12 @@
 > verbatim by the hosted mode.
 
 **Status:** Implemented
-**Last updated:** 2026-07-16 (**days-off range covers task spans + inline meta** — off-days
+**Last updated:** 2026-07-16 (**parent effort is rolled up at build** — a group head is a
+container with no own `estimate`, so the share page showed "—" for effort while the sprint
+shows the **sum of children's effort**. `buildSnapshot` now bakes `estimate = hasEffort ?
+sum(child.estimate ?? 0) : null` for a parent [`rollupEffort`, mirrors SprintView `GroupRow`],
+frozen from the FULL child set like the status rollup — so a trimmed share still shows the right
+total. Earlier same-day: **days-off range covers task spans + inline meta** — off-days
 were clamped to the sprint window, so a task dated past the sprint end [e.g. a rolled-over
 `Jul 16 → Jul 17` task] dropped its overlapping off-day and the gutter showed nothing at all
 [not a "too few tasks" layout issue — the day was never in the data]. `buildSnapshot` now

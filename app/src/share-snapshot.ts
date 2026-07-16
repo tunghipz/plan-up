@@ -105,15 +105,28 @@ function rollupStatus(t: Task, children: Task[]): Status {
   return 'todo'
 }
 
+/** Derived effort of a group head from its children — MIRRORS the sprint List/Board
+ * rollup (`hasEffort ? sum(child.estimate ?? 0) : null`, see SprintView `GroupRow`).
+ * A container parent has no own estimate, so without this the share page would show
+ * "—" while the sprint shows the summed effort. Empty children → the task's own
+ * estimate (caller only passes children for real parents). */
+function rollupEffort(t: Task, children: Task[]): number | null {
+  if (children.length === 0) return t.estimate
+  const hasEffort = children.some((c) => c.estimate !== null)
+  return hasEffort ? children.reduce((s, c) => s + (c.estimate ?? 0), 0) : null
+}
+
 /** A task reduced to display fields, ids remapped to indices, dates trimmed to yyyy-mm-dd.
- * `status` is the RESOLVED display status (a parent gets its rolled-up status; a leaf its
- * own) — frozen at build so the recipient shows what the sender saw, even for trimmed shares. */
+ * `status`/`estimate` are the RESOLVED display values (a parent gets its rolled-up status +
+ * summed effort; a leaf its own) — frozen at build so the recipient shows what the sender
+ * saw, even for trimmed shares. */
 function normTask(
   t: Task,
   i: number,
   memberIdx: Map<string, number>,
   taskIdx: Map<string, number>,
-  status: Status
+  status: Status,
+  estimate: number | null
 ): Task {
   const assignee = t.assigneeId != null && memberIdx.has(t.assigneeId) ? `m${memberIdx.get(t.assigneeId)}` : null
   const parent = t.parentId && taskIdx.has(t.parentId) ? `t${taskIdx.get(t.parentId)}` : null
@@ -127,7 +140,7 @@ function normTask(
     title: t.title,
     status,
     priority: t.priority,
-    estimate: t.estimate,
+    estimate,
     startDate: t.startDate ? t.startDate.slice(0, 10) : null,
     dueDate: t.dueDate ? t.dueDate.slice(0, 10) : null,
     assigneeId: assignee,
@@ -211,7 +224,10 @@ export function buildSnapshot(
     sprint: { name: sprint.name, startDate: sprint.startDate, endDate: sprint.endDate ?? null, note: sprint.note },
     members: usedMembers.map((m, i) => normMember(m, i)),
     membersOff: usedMembers.map((m) => offRangeFor(m)),
-    tasks: scoped.map((t, i) => normTask(t, i, memberIdx, taskIdx, rollupStatus(t, kidsByParent.get(t.id) ?? []))),
+    tasks: scoped.map((t, i) => {
+      const kids = kidsByParent.get(t.id) ?? []
+      return normTask(t, i, memberIdx, taskIdx, rollupStatus(t, kids), rollupEffort(t, kids))
+    }),
   }
 }
 

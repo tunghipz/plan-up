@@ -147,6 +147,22 @@ describe('buildSnapshot', () => {
     expect(c.status).toBe('in_progress') // leaf keeps its own status
   })
 
+  it('bakes a parent task effort as the SUM of its children (not its raw null estimate)', () => {
+    const parent = task('p', 'a', 1, { title: 'Parent' }) // container: estimate null
+    const c1 = task('c1', 'a', 2, { title: 'C1', parentId: 'p', estimate: 3 })
+    const c2 = task('c2', 'a', 3, { title: 'C2', parentId: 'p', estimate: 1.5 })
+    const d = buildSnapshot(project, sprint, members, [parent, c1, c2])
+    expect(d.tasks.find((t) => t.title === 'Parent')!.estimate).toBe(4.5) // 3 + 1.5, not null
+    expect(d.tasks.find((t) => t.title === 'C1')!.estimate).toBe(3) // leaf keeps its own
+  })
+
+  it('leaves a parent effort null when no child is estimated', () => {
+    const parent = task('p', 'a', 1, { title: 'Parent' })
+    const child = task('c', 'a', 2, { title: 'Child', parentId: 'p' }) // estimate null
+    const d = buildSnapshot(project, sprint, members, [parent, child])
+    expect(d.tasks.find((t) => t.title === 'Parent')!.estimate).toBeNull()
+  })
+
   it('rolls a parent up from ALL children even when a child is trimmed out of the share', () => {
     // Parent p (unassigned → always kept). Children: one for An, one for Bình.
     const parent = task('p', null, 1, { title: 'P' })
@@ -195,17 +211,21 @@ describe('encode / decode round-trip', () => {
     expect(decoded).toEqual(d)
   })
 
-  it('round-trips milestone (effort 0), a child, and a null-parent drop', () => {
+  it('round-trips milestone (effort 0), a group child, and a null-parent drop', () => {
+    // Milestones are leaves (a checkpoint), groups are the only parents — keep them
+    // distinct so the effort rollup (parent = sum of children) doesn't rewrite the
+    // milestone's own 0.
     const rich = [
-      task('p1', 'a', 1, { estimate: 0, startDate: '2026-07-10' }), // milestone
-      task('c1', 'a', 2, { parentId: 'p1', estimate: 2, dueDate: '2026-07-12' }), // child of p1
-      task('orphan', 'a', 3, { parentId: 'gone', dueDate: '2026-07-14' }), // parent not in scope → dropped
+      task('m1', 'a', 1, { estimate: 0, startDate: '2026-07-10' }), // milestone leaf
+      task('grp', 'a', 2, { title: 'Grp' }), // a real parent (container, estimate null)
+      task('c1', 'a', 3, { parentId: 'grp', estimate: 2, dueDate: '2026-07-12' }), // its child
+      task('orphan', 'a', 4, { parentId: 'gone', dueDate: '2026-07-14' }), // parent not in scope → dropped
     ]
     const d = buildSnapshot(project, sprint, [member('a', 'An')], rich)
-    // milestone kept as estimate 0; child points at the milestone's new index; orphan flattened
-    expect(d.tasks[0].estimate).toBe(0)
-    expect(d.tasks[1].parentId).toBe('t0')
-    expect(d.tasks[2].parentId).toBeNull()
+    expect(d.tasks[0].estimate).toBe(0) // milestone leaf keeps its own 0
+    expect(d.tasks[1].estimate).toBe(2) // parent effort rolled up from its child
+    expect(d.tasks[2].parentId).toBe('t1') // child points at the parent's new index
+    expect(d.tasks[3].parentId).toBeNull() // orphan flattened
     expect(decodeSnapshot(encodeSnapshot(d))).toEqual(d)
   })
 

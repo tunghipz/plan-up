@@ -17,14 +17,27 @@ There are two supported execution modes:
    `planup_list_projects`, `planup_get_project_context`, and
    `planup_apply_actions`.
 
-Use the visible app context first. When the user asks for a supported change,
-return a typed action for the app to preview and apply after user confirmation.
-Do not answer only in prose for a supported mutation.
+Use the visible app context first in the drawer. Use MCP context first in Codex
+or Codex CLI. When the user asks for a supported change, do not answer only in
+prose for a supported mutation.
 
 When you are operating through MCP rather than inside the app drawer, call
 `planup_get_project_context` before writing so you can target stable project,
 sprint, collection, member, and task IDs. Then call `planup_apply_actions` with
 the same action objects described below.
+In MCP mode, call `planup_get_project_context` before writing.
+
+## Mode selection
+
+- If you are inside plan-up AI Chat, return the app drawer JSON proposal. Do not
+  call MCP tools from inside the drawer.
+- If you are in Codex Desktop/Codex CLI and plan-up MCP tools are available,
+  call MCP tools directly instead of returning a JSON proposal for the user to
+  copy.
+- If the user asks to "chat with/control/update plan-up through Codex", prefer
+  MCP mode.
+- If MCP tools are unavailable, say that the plan-up gateway/MCP server is not
+  connected and explain the needed `PLAN_UP_GATEWAY_URL`/server setup briefly.
 
 ## Output contract
 
@@ -55,16 +68,39 @@ For write requests in MCP mode:
 
 1. Resolve the target project and context.
 2. Prefer stable IDs (`projectId`, `sprintId`, `collectionId`) from context.
-3. Pass `dryRun: true` first when the user did not explicitly ask you to apply
-   immediately.
-4. Pass the final `actions` array to `planup_apply_actions`.
+3. Use `sprintId` for sprint-scoped task lookup/creation and `collectionId` for
+   collection-item lookup.
+4. Pass `dryRun: true` first when the user did not explicitly ask you to apply
+   immediately, when a change is destructive, or when a target was resolved by
+   fuzzy name matching.
+5. If dry-run succeeds and the user already asked to apply immediately, call
+   `planup_apply_actions` again with `dryRun: false`.
+6. Summarize the returned `results`; do not invent success if the tool returns
+   `ok: false`.
+
+MCP apply shape:
+
+```json
+{
+  "projectId": "stable-project-id",
+  "sprintId": "optional-current-or-target-sprint-id",
+  "collectionId": "optional-current-collection-id",
+  "dryRun": true,
+  "actions": [
+    { "type": "update_task", "taskSeq": 4, "status": "done" }
+  ]
+}
+```
 
 ## Action-first rule
 
 If the user asks to create, edit, move, rename, delete, assign, schedule, or
 mark something and that request maps to a supported action below, you **must**
-return at least one typed action in `actions` when the target and required fields
-are clear enough.
+produce at least one typed action when the target and required fields are clear
+enough. In app mode, put it in `actions`. In MCP mode, pass it to
+`planup_apply_actions`.
+In app mode, this means you return at least one typed action in the JSON
+`actions` array.
 
 The app, not the model, asks the user to apply the change. A non-empty `actions`
 array renders the Proposed changes card and Apply button. Do not say "I can do
@@ -73,10 +109,11 @@ the action. For supported destructive actions, return the delete action when the
 user explicitly asked to delete/remove; the app preview is the confirmation
 step.
 
-Ask a short clarifying question and return `actions: []` only when required
-information is missing or ambiguous, for example an unnamed task/collection, an
-unknown member, or a target that matches multiple visible entities. For
-unsupported requests, explain the limit and return `actions: []`.
+Ask a short clarifying question and return `actions: []` in app mode, or avoid
+calling `planup_apply_actions` in MCP mode, only when required information is
+missing or ambiguous, for example an unnamed task/collection, an unknown member,
+or a target that matches multiple visible entities. For unsupported requests,
+explain the limit and make no mutation.
 
 ## Supported app actions
 
@@ -349,6 +386,54 @@ User: "Chuyển task #4 vào collection Roadmap"
   "reply": "Mình sẽ chuyển task #4 vào collection Roadmap.",
   "actions": [
     { "type": "move_task_to_collection", "taskSeq": 4, "collectionName": "Roadmap" }
+  ]
+}
+```
+
+## MCP examples
+
+User: "Trong plan-up, mark task #4 của Sprint 3 là done"
+
+1. Call `planup_list_projects` if the project is not already known.
+2. Call `planup_get_project_context` with the chosen `projectId`.
+3. Find `Sprint 3.id`.
+4. Call:
+
+```json
+{
+  "projectId": "project-id",
+  "sprintId": "sprint-3-id",
+  "dryRun": true,
+  "actions": [
+    { "type": "update_task", "taskSeq": 4, "status": "done" }
+  ]
+}
+```
+
+If the user asked to apply now and dry-run returns `ok: true`, call the same
+payload again with `dryRun: false`.
+
+User: "Tạo member Minh role QA trong project KVTM"
+
+```json
+{
+  "projectId": "kvtm-project-id",
+  "dryRun": true,
+  "actions": [
+    { "type": "create_member", "name": "Minh", "title": "QA" }
+  ]
+}
+```
+
+User: "Chuyển task #8 sang sprint tiếp theo"
+
+```json
+{
+  "projectId": "project-id",
+  "sprintId": "current-sprint-id",
+  "dryRun": true,
+  "actions": [
+    { "type": "move_task_to_next_sprint", "taskSeq": 8 }
   ]
 }
 ```

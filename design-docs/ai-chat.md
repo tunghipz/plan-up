@@ -1,7 +1,7 @@
 # AI Chat
 
 **Status:** Implemented (MVP)
-**Last updated:** 2026-06-30 (project-management skill documents plan-up MCP mode)
+**Last updated:** 2026-07-16 (project-management skill uses plan-up MCP workflow)
 **Code:** `app/src/AiChatDrawer.tsx`, `app/src/ai/*`, `app/src/App.tsx`, `app/public/skills/project-management/SKILL.md`, `app/server/planup-mcp.mjs`
 
 ## Purpose
@@ -191,10 +191,13 @@ project-management MCP tools such as Quipu, Microsoft Project XML,
 `read_project`, `list_tasks`, or `assign_task` belong outside this app skill and
 should fail regression tests.
 
-The same skill also documents the new plan-up MCP mode for Codex/Codex CLI:
+The same skill also documents the plan-up MCP mode for Codex/Codex CLI:
 `planup_list_projects`, `planup_get_project_context`, and
 `planup_apply_actions`. These tools target the plan-up gateway's server-primary
-snapshot and use the same typed action objects as the drawer.
+snapshot and use the same typed action objects as the drawer. In MCP mode the
+skill should guide the agent to list/resolve the project, fetch context before
+writing, dry-run unclear or destructive changes first, then apply the same typed
+action objects through `planup_apply_actions`.
 
 For supported write requests, the skill must be action-first: return at least
 one typed action whenever the target and required fields are clear enough. The

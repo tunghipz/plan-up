@@ -1,5 +1,7 @@
 import {
+  type PointerEvent as ReactPointerEvent,
   useCallback,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -10,6 +12,8 @@ import {
   db,
   computeWorkingPlan,
   compareMembersByOrder,
+  recomputeDates,
+  updateTask,
   type Task,
   type Member,
 } from './db'
@@ -68,19 +72,42 @@ type Ev = {
   isMilestone?: boolean
 }
 
+type ScheduleDragMode = 'move' | 'resize-left' | 'resize-right'
+type ScheduleDrag = {
+  task: Task
+  mode: ScheduleDragMode
+  startX: number
+  startLeftSlot: number
+  startRightSlot: number
+  leftSlot: number
+  rightSlot: number
+  moved: boolean
+}
+
+function clamp(n: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, n))
+}
+
 export function GanttView({
   projectId,
   sprintStartDate,
   sprintEndDate,
   tasks,
+  planningTasks,
+  emptyLabel = 'No assigned tasks in this sprint yet.',
+  noWorkingDaysLabel = 'This sprint has no working days (weekends only).',
   onOpenInList,
 }: {
   projectId: string
   sprintStartDate: string
   sprintEndDate: string
   tasks: Task[]
+  /** Full task graph used for dependency and parent roll-up planning. Defaults to displayed tasks. */
+  planningTasks?: Task[]
+  emptyLabel?: string
+  noWorkingDaysLabel?: string
   /** Jump to the List view (the bar popover's "Open in List"). */
-  onOpenInList?: () => void
+  onOpenInList?: (task: Task) => void
 }) {
   const members = useLiveQuery(
     () => db.members.where('projectId').equals(projectId).toArray(),
@@ -93,6 +120,9 @@ export function GanttView({
     rect: DOMRect
   } | null>(null)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const [scheduleDrag, setScheduleDrag] = useState<ScheduleDrag | null>(null)
+  const scheduleDragRef = useRef<ScheduleDrag | null>(null)
+  const suppressNextClickRef = useRef(false)
   const toggle = (id: string) =>
     setExpanded((prev) => {
       const next = new Set(prev)
@@ -111,19 +141,20 @@ export function GanttView({
     return s
   }, [workdays])
 
-  const tasksById = useMemo(() => new Map(tasks.map((t) => [t.id, t])), [tasks])
+  const planTasks = planningTasks ?? tasks
+  const tasksById = useMemo(() => new Map(planTasks.map((t) => [t.id, t])), [planTasks])
   // Parent → children (across all tasks). A parent group has no own dates; its
   // Timeline bar is a summary spanning its children (mirrors the List roll-up).
   const childrenByParent = useMemo(() => {
     const m = new Map<string, Task[]>()
-    for (const t of tasks) {
+    for (const t of planTasks) {
       if (!t.parentId) continue
       const arr = m.get(t.parentId)
       if (arr) arr.push(t)
       else m.set(t.parentId, [t])
     }
     return m
-  }, [tasks])
+  }, [planTasks])
   const memberById = useMemo(
     () => new Map((members ?? []).map((m) => [m.id, m] as [string, Member])),
     [members]
@@ -159,6 +190,139 @@ export function GanttView({
     roRef.current = ro
   }, [])
   const dayW = availW > 0 && N > 0 ? Math.max(MIN_DAY, (availW - MGUT) / N) : MIN_DAY
+
+  const slotDate = useCallback(
+    (slot: number): string => workdays[clamp(Math.floor(slot / 2), 0, N - 1)],
+    [workdays, N]
+  )
+  const rightSlotDate = useCallback(
+    (slot: number): string => workdays[clamp(Math.ceil(slot / 2) - 1, 0, N - 1)],
+    [workdays, N]
+  )
+
+  const commitScheduleDrag = useCallback(
+    async (drag: ScheduleDrag) => {
+      if (
+        drag.leftSlot === drag.startLeftSlot &&
+        drag.rightSlot === drag.startRightSlot
+      ) {
+        return
+      }
+      const startDate = slotDate(drag.leftSlot)
+      const endDate = rightSlotDate(drag.rightSlot)
+      const duration = Math.max(0.5, (drag.rightSlot - drag.leftSlot) / 2)
+      if (drag.mode === 'move') {
+        if (drag.task.estimate === null) {
+          await updateTask(drag.task.id, { startDate, dueDate: endDate })
+        } else {
+          await updateTask(drag.task.id, { startDate })
+        }
+        await recomputeDates(drag.task.id)
+        return
+      }
+
+      const patch: Partial<Task> = { estimate: duration }
+      if (drag.mode === 'resize-left' && drag.task.dependsOn.length === 0) {
+        patch.startDate = startDate
+      }
+      await updateTask(drag.task.id, patch)
+      await recomputeDates(drag.task.id)
+    },
+    [rightSlotDate, slotDate]
+  )
+
+  useEffect(() => {
+    scheduleDragRef.current = scheduleDrag
+  }, [scheduleDrag])
+
+  const isScheduleDragging = scheduleDrag !== null
+  useEffect(() => {
+    if (!scheduleDrag) return
+    const prevSelect = document.body.style.userSelect
+    const prevCursor = document.body.style.cursor
+    document.body.style.userSelect = 'none'
+    document.body.style.cursor =
+      scheduleDrag.mode === 'move' ? 'grabbing' : 'ew-resize'
+
+    const onMove = (ev: PointerEvent) => {
+      const active = scheduleDragRef.current
+      if (!active) return
+      ev.preventDefault()
+      const deltaSlots = Math.round((ev.clientX - active.startX) / (dayW / 2))
+      setScheduleDrag((prev) => {
+        if (!prev) return null
+        const maxSlot = N * 2
+        const span = Math.max(1, prev.startRightSlot - prev.startLeftSlot)
+        let leftSlot = prev.startLeftSlot
+        let rightSlot = prev.startRightSlot
+        if (prev.mode === 'move') {
+          leftSlot = clamp(prev.startLeftSlot + deltaSlots, 0, maxSlot - span)
+          rightSlot = leftSlot + span
+        } else if (prev.mode === 'resize-left') {
+          leftSlot = clamp(prev.startLeftSlot + deltaSlots, 0, prev.startRightSlot - 1)
+        } else {
+          rightSlot = clamp(prev.startRightSlot + deltaSlots, prev.startLeftSlot + 1, maxSlot)
+        }
+        return {
+          ...prev,
+          leftSlot,
+          rightSlot,
+          moved:
+            prev.moved ||
+            leftSlot !== prev.startLeftSlot ||
+            rightSlot !== prev.startRightSlot,
+        }
+      })
+    }
+
+    const onUp = () => {
+      const done = scheduleDragRef.current
+      if (done?.moved) suppressNextClickRef.current = true
+      setScheduleDrag(null)
+      document.body.style.userSelect = prevSelect
+      document.body.style.cursor = prevCursor
+      if (done?.moved) void commitScheduleDrag(done)
+    }
+
+    document.addEventListener('pointermove', onMove)
+    document.addEventListener('pointerup', onUp, { once: true })
+    document.addEventListener('pointercancel', onUp, { once: true })
+    return () => {
+      document.removeEventListener('pointermove', onMove)
+      document.removeEventListener('pointerup', onUp)
+      document.removeEventListener('pointercancel', onUp)
+      document.body.style.userSelect = prevSelect
+      document.body.style.cursor = prevCursor
+    }
+  }, [isScheduleDragging, dayW, N, commitScheduleDrag])
+
+  const startScheduleDrag = useCallback(
+    (ev: ReactPointerEvent<HTMLElement>, e: Ev, mode: ScheduleDragMode) => {
+      if (e.isParent) return
+      if (mode !== 'move' && e.isMilestone) return
+      if (mode === 'move' && e.task.dependsOn.length > 0) return
+      if (mode === 'resize-left' && e.task.dependsOn.length > 0) return
+      ev.preventDefault()
+      ev.stopPropagation()
+      const leftSlot = clamp(Math.round((e.left / dayW) * 2), 0, N * 2 - 1)
+      const rightSlot = clamp(
+        Math.max(leftSlot + 1, Math.round(((e.left + e.width) / dayW) * 2)),
+        leftSlot + 1,
+        N * 2
+      )
+      setScheduleDrag({
+        task: e.task,
+        mode,
+        startX: ev.clientX,
+        startLeftSlot: leftSlot,
+        startRightSlot: rightSlot,
+        leftSlot,
+        rightSlot,
+        moved: false,
+      })
+    },
+    [dayW, N]
+  )
 
   const groups = useMemo(() => {
     // Swimlanes follow the manual per-project member order, same as the List
@@ -404,13 +568,13 @@ export function GanttView({
   if (N === 0)
     return (
       <div className="py-16 text-center text-sm text-ink-muted">
-        This sprint has no working days (weekends only).
+        {noWorkingDaysLabel}
       </div>
     )
   if (groups.length === 0)
     return (
       <div className="py-16 text-center text-sm text-ink-muted">
-        No assigned tasks in this sprint yet.
+        {emptyLabel}
       </div>
     )
 
@@ -564,12 +728,26 @@ export function GanttView({
                     {/* event blocks */}
                     {evs.map((e) => {
                       const v = STATUS_META[e.status].varName
-                      const box = {
+                      const activeDrag =
+                        scheduleDrag?.task.id === e.task.id ? scheduleDrag : null
+                      const box = activeDrag
+                        ? {
+                            left: (activeDrag.leftSlot / 2) * dayW + 2,
+                            width:
+                              ((activeDrag.rightSlot - activeDrag.leftSlot) / 2) * dayW - 4,
+                            top: PAD_TOP + e.lane * ROWH,
+                            height: EVH,
+                          }
+                        : {
                         left: e.left + 2,
                         width: e.width - 4,
                         top: PAD_TOP + e.lane * ROWH,
                         height: EVH,
-                      }
+                          }
+                      const canMove = !e.isParent && e.task.dependsOn.length === 0
+                      const canResizeLeft =
+                        !e.isParent && !e.isMilestone && e.task.dependsOn.length === 0
+                      const canResizeRight = !e.isParent && !e.isMilestone
                       // Parent group → a slim summary rail spanning its children.
                       if (e.isParent) {
                         return (
@@ -613,7 +791,14 @@ export function GanttView({
                         return (
                           <div
                             key={e.task.id}
-                            onClick={(ev) =>
+                            onPointerDown={(ev) => {
+                              if (canMove) startScheduleDrag(ev, e, 'move')
+                            }}
+                            onClick={(ev) => {
+                              if (suppressNextClickRef.current) {
+                                suppressNextClickRef.current = false
+                                return
+                              }
                               setOpenBar({
                                 task: e.task,
                                 status: e.status,
@@ -621,9 +806,11 @@ export function GanttView({
                                   ev.currentTarget as HTMLElement
                                 ).getBoundingClientRect(),
                               })
-                            }
-                            className="absolute flex items-center gap-1.5 cursor-pointer hover:brightness-95 transition"
-                            style={{ left: e.left + 2, top: box.top, height: EVH }}
+                            }}
+                            className={`absolute flex items-center gap-1.5 hover:brightness-95 transition ${
+                              canMove ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'
+                            } ${activeDrag ? 'z-30' : ''}`}
+                            style={{ left: box.left, top: box.top, height: EVH }}
                             title={`Milestone · ${e.task.title}`}
                           >
                             <span
@@ -643,7 +830,14 @@ export function GanttView({
                       return (
                         <div
                           key={e.task.id}
-                          onClick={(ev) =>
+                          onPointerDown={(ev) => {
+                            if (canMove) startScheduleDrag(ev, e, 'move')
+                          }}
+                          onClick={(ev) => {
+                            if (suppressNextClickRef.current) {
+                              suppressNextClickRef.current = false
+                              return
+                            }
                             setOpenBar({
                               task: e.task,
                               status: e.status,
@@ -651,11 +845,22 @@ export function GanttView({
                                 ev.currentTarget as HTMLElement
                               ).getBoundingClientRect(),
                             })
-                          }
-                          className="absolute flex items-center rounded-[7px] overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.08)] cursor-pointer hover:brightness-95 transition"
+                          }}
+                          className={`absolute flex items-center rounded-[7px] overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.08)] hover:brightness-95 transition ${
+                            canMove ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'
+                          } ${activeDrag ? 'z-30 ring-2 ring-accent/35 brightness-95' : ''}`}
                           style={{ ...box, background: softBg(v) }}
                           title={`${STATUS_META[e.status].label} · ${e.task.title}`}
                         >
+                          {canResizeLeft && (
+                            <span
+                              data-no-drag
+                              onPointerDown={(ev) => startScheduleDrag(ev, e, 'resize-left')}
+                              className="absolute left-0 top-0 bottom-0 z-20 w-3 cursor-ew-resize"
+                              title="Resize duration"
+                              aria-label="Resize task duration from start"
+                            />
+                          )}
                           {e.contLeft && (
                             <span className="text-ink-faint text-[11px] pl-1.5" aria-hidden>
                               ‹
@@ -688,6 +893,20 @@ export function GanttView({
                           {e.contRight && (
                             <span className="text-ink-faint text-[11px] pr-1.5" aria-hidden>
                               ›
+                            </span>
+                          )}
+                          {canResizeRight && (
+                            <span
+                              data-no-drag
+                              onPointerDown={(ev) => startScheduleDrag(ev, e, 'resize-right')}
+                              className="absolute right-0 top-0 bottom-0 z-20 w-3 cursor-ew-resize"
+                              title="Resize duration"
+                              aria-label="Resize task duration from end"
+                            />
+                          )}
+                          {activeDrag && activeDrag.mode !== 'move' && (
+                            <span className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded bg-surface/90 px-1.5 py-0.5 text-[10.5px] font-semibold text-ink tab-data shadow-sm">
+                              {Math.max(0.5, (activeDrag.rightSlot - activeDrag.leftSlot) / 2)}d
                             </span>
                           )}
                         </div>
@@ -770,7 +989,7 @@ function BarDetailPopover({
   status: keyof typeof STATUS_META
   anchorRect: DOMRect
   onClose: () => void
-  onOpenInList?: () => void
+  onOpenInList?: (task: Task) => void
 }) {
   const popRef = useRef<HTMLDivElement>(null)
   const W = 236
@@ -838,7 +1057,7 @@ function BarDetailPopover({
       {onOpenInList && (
         <button
           onClick={() => {
-            onOpenInList()
+            onOpenInList(task)
             onClose()
           }}
           className="w-full text-left text-[12.5px] font-medium text-accent rounded-[7px] px-1 py-1 hover:bg-accent-soft transition"

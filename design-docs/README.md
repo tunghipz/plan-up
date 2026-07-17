@@ -87,7 +87,7 @@ Non-obvious behaviors, defaults, persistence keys.
 | [list-view.md](./list-view.md) | Grouped cards, sortable columns, column widths, drag-to-reorder |
 | [member-header-summary.md](./member-header-summary.md) | Progress ring, overdue, next deadline, days off |
 | [board-view.md](./board-view.md) | Cupertino kanban |
-| [gantt-view.md](./gantt-view.md) | Timeline — Apple-Calendar swimlanes (one event block per task), per sprint |
+| [gantt-view.md](./gantt-view.md) | Timeline — Apple-Calendar swimlanes (one event block per task), per sprint or selectable project range |
 | [search-and-keyboard.md](./search-and-keyboard.md) | Search filter, keyboard shortcuts |
 | [dark-mode.md](./dark-mode.md) | Theme toggle |
 | [app-icon-and-favicon.md](./app-icon-and-favicon.md) | Favicon (ring-on-squircle, dark-aware SVG) + link-preview og:image |

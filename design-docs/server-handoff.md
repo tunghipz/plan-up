@@ -1,7 +1,7 @@
 # Server handoff
 
 **Status:** Implemented
-**Last updated:** 2026-07-16 (project-local Codex skill added)
+**Last updated:** 2026-07-17 (server sync preserves unsynced local edits on refresh)
 **Code:** `app/server/openai-gateway.mjs`, `app/server/planup-mcp.mjs`, `app/src/server-sync.ts`, `app/src/App.tsx`, `.codex/skills/plan-up-mcp/SKILL.md`
 
 ## Purpose
@@ -17,8 +17,11 @@ client cache for the existing UI and syncs that cache with the server.
 
 - Running `npm run dev` starts the existing plan-up gateway and Vite app.
 - On app start, the browser asks the gateway for the latest server snapshot.
-- If the server already has a snapshot, the browser imports it into Dexie before
+- If the browser cache is empty, or if the local cache is known to match the last
+  accepted server snapshot, the browser imports the server snapshot into Dexie before
   rendering project data.
+- If the local cache has edits that the server has not acknowledged yet, refresh keeps
+  the local cache and lets the debounce upload path push that snapshot back to the server.
 - If the server has no snapshot yet, the browser uses the existing local seed
   flow and then uploads the first snapshot to the server.
 - After local data changes, the browser debounces and uploads a fresh full
@@ -71,7 +74,11 @@ These files are runtime/cache data and are gitignored.
   - `saveServerSnapshot()` uploads a full payload with `PUT /api/db/snapshot`.
   - `isServerSyncEnabled()` keeps sync enabled only when the app is served over
     HTTP(S), so tests and static file usage do not fail on missing APIs.
-- `App.tsx` hydrates from the server before `seedIfEmpty()`.
+- `App.tsx` compares server and local snapshot signatures before hydrating from the
+  server. It stores the last accepted server signature in
+  `localStorage['plan-up:lastServerSnapshotSignature']`.
+- `App.tsx` hydrates from the server before `seedIfEmpty()` only when the sync policy says
+  the server is safe to apply.
 - `App.tsx` watches the full Dexie export payload with `useLiveQuery` and
   debounces sync writes.
 - `App.tsx` also polls the server snapshot while open. If an external MCP tool
@@ -96,10 +103,13 @@ MCP config example:
 
 ## Rules & edge cases
 
-- Server data wins at startup. If the server has a snapshot, it replaces the
-  browser Dexie cache.
+- Server data wins at startup only when local has no unsynced edits. If local differs from
+  the last accepted server signature, local wins and is uploaded back to the server.
 - The first run on an empty server bootstraps from the existing seed/local data
   path, then writes that snapshot back to the server.
+- Polling follows the same rule as startup: external server changes are imported only when
+  local still matches the last accepted server state. A stale server snapshot cannot wipe
+  edits that were made locally but not uploaded yet.
 - Sync failures are non-fatal for the UI; the app logs the error and continues
   with Dexie cache so a temporary gateway issue does not block planning.
 - The cache export is full-snapshot only in this phase. Row-level write APIs and
@@ -119,5 +129,6 @@ MCP config example:
 
 - Replace full-snapshot sync with server row APIs once the UI no longer relies
   directly on Dexie writes.
-- Add optimistic concurrency with snapshot revision IDs before supporting
-  multi-client writes.
+- Add optimistic concurrency with explicit snapshot revision IDs before supporting
+  multi-client conflict resolution. The current conflict policy is intentionally
+  conservative: preserve unsynced local data.

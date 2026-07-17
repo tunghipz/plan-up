@@ -20,6 +20,7 @@ import {
   Ungroup,
   Link2,
   Link2Off,
+  MoveRight,
 } from 'lucide-react'
 import { useDragHandle, useDragHover, type RowDrag } from './DragHandle'
 import { computeDropSlot, resolveDropOrder } from './reorder'
@@ -42,7 +43,9 @@ import {
   computeAllWorkingPlans,
   isTaskBlocked,
   addSprintTask,
+  moveTaskToSprint,
   type Member,
+  type Sprint,
   type Task,
   type Status,
   type WorkingPlan,
@@ -387,6 +390,8 @@ export function SprintView({
       />
 
       <SelectionBar
+        projectId={projectId}
+        sprintId={sprintId}
         selectedIds={selectedIds}
         tasksById={tasksById}
         allTasks={orderedTasks}
@@ -408,22 +413,50 @@ export function SprintView({
  * See design-docs/task-groups.md and design-docs/dependencies.md.
  */
 function SelectionBar({
+  projectId,
+  sprintId,
   selectedIds,
   tasksById,
   allTasks,
   onClear,
 }: {
+  projectId: string
+  sprintId: string
   selectedIds: Set<string>
   tasksById: Map<string, Task>
   allTasks: Task[]
   onClear: () => void
 }) {
   const confirm = useConfirm()
+  const sprints = useLiveQuery<Sprint[] | undefined>(
+    () => db.sprints.where('projectId').equals(projectId).sortBy('startDate'),
+    [projectId]
+  )
+  const moveTargets = useMemo(
+    () => (sprints ?? []).filter((s) => s.id !== sprintId && s.archivedAt == null),
+    [sprints, sprintId]
+  )
+  const [targetSprintId, setTargetSprintId] = useState('')
+  useEffect(() => {
+    if (!targetSprintId || !moveTargets.some((s) => s.id === targetSprintId)) {
+      setTargetSprintId(moveTargets[0]?.id ?? '')
+    }
+  }, [moveTargets, targetSprintId])
   const n = selectedIds.size
   const parentIds = useMemo(() => {
     const s = new Set<string>()
     for (const t of allTasks) if (t.parentId) s.add(t.parentId)
     return s
+  }, [allTasks])
+  const childrenByParent = useMemo(() => {
+    const m = new Map<string, Task[]>()
+    for (const t of allTasks) {
+      if (!t.parentId) continue
+      const arr = m.get(t.parentId)
+      if (arr) arr.push(t)
+      else m.set(t.parentId, [t])
+    }
+    return m
   }, [allTasks])
   const selected = [...selectedIds]
     .map((id) => tasksById.get(id))
@@ -443,6 +476,7 @@ function SelectionBar({
   const selectedInOrder = allTasks.filter((t) => selectedIds.has(t.id))
   const canChain = selectedInOrder.length >= 2
   const canClearPrereq = selected.some((t) => t.dependsOn.length > 0)
+  const canMoveToSprint = n > 0 && moveTargets.length > 0 && !!targetSprintId
 
   const doGroup = async () => {
     if (!canGroup) return
@@ -473,6 +507,21 @@ function SelectionBar({
     await Promise.all(
       selected.filter((t) => t.parentId).map((t) => setTaskParent(t.id, null))
     )
+    onClear()
+  }
+  const doMoveToSprint = async () => {
+    if (!canMoveToSprint) return
+    const toMove = new Map<string, Task>()
+    for (const t of selectedInOrder) {
+      toMove.set(t.id, t)
+      const children = childrenByParent.get(t.id)
+      if (children) {
+        for (const child of children) toMove.set(child.id, child)
+      }
+    }
+    // Paranoid fallback for any selected row not present in the rendered order.
+    for (const t of selected) toMove.set(t.id, t)
+    for (const t of toMove.values()) await moveTaskToSprint(t.id, targetSprintId)
     onClear()
   }
   const doDelete = async () => {
@@ -507,6 +556,33 @@ function SelectionBar({
       <span className="text-[13.5px]">
         <b className="font-semibold tabular-nums">{n}</b> selected
       </span>
+      <div className="inline-flex items-center gap-1.5 rounded-[9px] bg-white/8 px-1.5 py-1">
+        <MoveRight size={14} className="text-white/70" aria-hidden />
+        <select
+          value={targetSprintId}
+          onChange={(e) => setTargetSprintId(e.target.value)}
+          disabled={moveTargets.length === 0}
+          aria-label="Target sprint"
+          className="h-7 max-w-[150px] rounded-[7px] bg-white/10 px-2 text-[13px] text-white outline-none hover:bg-white/15 disabled:opacity-40"
+        >
+          {moveTargets.length === 0 ? (
+            <option value="">No other sprint</option>
+          ) : (
+            moveTargets.map((s) => (
+              <option key={s.id} value={s.id} className="text-ink">
+                {s.name}
+              </option>
+            ))
+          )}
+        </select>
+        <button
+          onClick={doMoveToSprint}
+          disabled={!canMoveToSprint}
+          className="inline-flex items-center gap-1 text-[13px] font-semibold rounded-[7px] px-2.5 py-1.5 bg-white text-[#1d1d1f] hover:bg-white/90 transition disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          Move
+        </button>
+      </div>
       {anyChild && (
         <button
           onClick={doUngroup}

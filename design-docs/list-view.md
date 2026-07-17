@@ -1,7 +1,7 @@
 # List view
 
 **Status:** Implemented
-**Last updated:** 2026-07-08 (column header → floating glass capsule; sprint note → inline description in the merged Notion-style page header, see app-shell v4; prior: calm refinements — time-on-hover dates, quiet empty cells, sticky-light group headers, compact rows, `#`-prefixed prereq)
+**Last updated:** 2026-07-16 (selection bar can move selected tasks to another sprint)
 **Code:** `app/src/SprintView.tsx` (`MemberCard`, `UnassignedCard`, `GroupHeader`,
 `TaskColumnHeader`, `SortHeader`, `COL`, `TaskRows` drag state, `TaskRow` grip),
 `app/src/DatePicker.tsx` (`DatePickCell` time-on-hover), `app/src/db.ts` (`orderBetween`, `setListOrder`)
@@ -72,6 +72,12 @@ inset-grouped cards, fully editable inline.
 - A task with **Effort = 0** renders as a **milestone**: a `◆ Milestone` pill after the
   title and a single collapsed milestone date (instead of a `Start → End` span). This is
   distinct from Effort `—` (*not estimated*, ⚠). See [milestones.md](./milestones.md).
+- Selecting one or more rows opens the floating action bar. Besides grouping/prereq/delete
+  actions, it includes a **Move to sprint** control: choose any other non-archived sprint in
+  the same project and press Move. The move uses the same DB helper as AI/collection moves,
+  so tasks are renumbered into the target sprint and their dates are recomputed there. If a
+  selected row is a group parent, its children are included automatically to avoid leaving
+  cross-sprint parent links behind.
 
 ## Drag-to-reorder
 A hover-revealed **grip** (`GripVertical`, leftmost gutter, `cursor-grab`) lets you drag a

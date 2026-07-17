@@ -21,6 +21,7 @@ import {
   Lock,
   StickyNote,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   History,
   Archive,
@@ -49,6 +50,7 @@ import {
   setSprintNote,
   setSprintArchived,
   recomputeAllDates,
+  computeAllWorkingPlans,
   moveUnfinishedToNextSprint,
   planSprintRollover,
   createSprint,
@@ -83,9 +85,12 @@ import { ProjectSettingsView } from './ProjectSettingsView'
 import { HomeDashboard } from './HomeDashboard'
 import { Avatar, ProjectTile } from './members'
 import {
+  chooseServerSnapshotAction,
   isServerSyncEnabled,
   loadServerSnapshot,
   saveServerSnapshot,
+  snapshotHasUserData,
+  snapshotSignature,
 } from './server-sync'
 import {
   formatSprintRange,
@@ -114,6 +119,8 @@ import {
 const CURRENT_PROJECT_KEY = 'plan-up:currentProjectId'
 const CURRENT_SPRINT_KEY = 'plan-up:currentSprintId'
 const VIEW_KEY = 'plan-up:view'
+const TIMELINE_RANGE_KEY = 'plan-up:timelineRange'
+const LAST_SERVER_SIGNATURE_KEY = 'plan-up:lastServerSnapshotSignature'
 
 // Desktop window chrome (overlay title bar + traffic-light icon rail) is normally
 // gated on the real Tauri runtime. FORCE_DESKTOP_CHROME lets the browser dev server
@@ -127,8 +134,49 @@ const FORCE_DESKTOP_CHROME =
   (new URLSearchParams(window.location.search).has('desktop') ||
     window.localStorage?.getItem('plan-up:forceDesktopChrome') === '1')
 const DESKTOP_CHROME = IS_TAURI || FORCE_DESKTOP_CHROME
-type ViewMode = 'list' | 'board' | 'timeline'
+type ViewMode = 'list' | 'board' | 'timeline' | 'range-timeline'
 type CollectionViewMode = 'list' | 'calendar'
+type TimelineRange = { start: string; end: string }
+
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+
+function isoDateFromUTC(d: Date): string {
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`
+}
+
+function parseISODate(date: string): Date {
+  const [y, m, d] = date.split('-').map(Number)
+  return new Date(Date.UTC(y, m - 1, d))
+}
+
+function monthRangeFor(date: string): TimelineRange {
+  const [y, m] = date.split('-').map(Number)
+  return {
+    start: `${y}-${String(m).padStart(2, '0')}-01`,
+    end: isoDateFromUTC(new Date(Date.UTC(y, m, 0))),
+  }
+}
+
+function shiftMonthRange(range: TimelineRange, delta: number): TimelineRange {
+  const start = parseISODate(range.start)
+  return monthRangeFor(isoDateFromUTC(new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + delta, 1))))
+}
+
+function normalizeTimelineRange(range: TimelineRange | null): TimelineRange | null {
+  if (!range || !ISO_DATE_RE.test(range.start) || !ISO_DATE_RE.test(range.end)) return null
+  return range.start <= range.end ? range : { start: range.end, end: range.start }
+}
+
+function loadTimelineRange(): TimelineRange | null {
+  const raw = safeStorage.get(TIMELINE_RANGE_KEY)
+  if (!raw) return null
+  try {
+    const parsed = JSON.parse(raw) as TimelineRange
+    return normalizeTimelineRange(parsed)
+  } catch {
+    return null
+  }
+}
 
 // Leading row glyph encoding a sprint's temporal state (upcoming / in-progress / past),
 // using only existing status tokens — no new colour. `onAccent` = rendered on the
@@ -261,11 +309,6 @@ type ToastState = {
   kind?: 'success' | 'error'
 } | null
 
-function snapshotSignature(snapshot: ExportPayload): string {
-  const { exportedAt: _exportedAt, ...stable } = snapshot
-  return JSON.stringify(stable)
-}
-
 function App() {
   const [seedError, setSeedError] = useState<string | null>(null)
   const [seeded, setSeeded] = useState(false)
@@ -305,11 +348,26 @@ function App() {
   }
   const [view, setViewState] = useState<ViewMode>(() => {
     const v = safeStorage.get(VIEW_KEY)
-    return v === 'board' ? 'board' : v === 'timeline' ? 'timeline' : 'list'
+    return v === 'board'
+      ? 'board'
+      : v === 'timeline'
+        ? 'timeline'
+        : v === 'range-timeline'
+          ? 'range-timeline'
+          : 'list'
   })
   const setView = (v: ViewMode) => {
     setViewState(v)
     safeStorage.set(VIEW_KEY, v)
+  }
+  const [timelineRange, setTimelineRangeState] = useState<TimelineRange | null>(
+    () => loadTimelineRange()
+  )
+  const setTimelineRange = (range: TimelineRange) => {
+    const next = normalizeTimelineRange(range)
+    if (!next) return
+    setTimelineRangeState(next)
+    safeStorage.set(TIMELINE_RANGE_KEY, JSON.stringify(next))
   }
   // Top-level screen: the Home overview vs a single project. Persisted so a
   // reload lands back where you were (Home is never force-shown over a project).
@@ -548,19 +606,38 @@ function App() {
     let cancelled = false
     async function boot() {
       try {
-        let restoredFromServer = false
+        let hasBootData = false
         try {
           const snapshot = await loadServerSnapshot()
           if (snapshot) {
-            await importAll(snapshot)
-            serverSnapshotSignature.current = snapshotSignature(snapshot)
-            restoredFromServer = true
-            console.info('[plan-up] restored Dexie cache from server snapshot')
+            const localSnapshot = await exportAll()
+            const serverSignature = snapshotSignature(snapshot)
+            const action = chooseServerSnapshotAction({
+              local: localSnapshot,
+              server: snapshot,
+              lastAcceptedSignature: safeStorage.get(LAST_SERVER_SIGNATURE_KEY),
+            })
+            if (action === 'import-server') {
+              await importAll(snapshot)
+              serverSnapshotSignature.current = serverSignature
+              safeStorage.set(LAST_SERVER_SIGNATURE_KEY, serverSignature)
+              hasBootData = snapshotHasUserData(snapshot)
+              console.info('[plan-up] restored Dexie cache from server snapshot')
+            } else if (action === 'same') {
+              serverSnapshotSignature.current = serverSignature
+              safeStorage.set(LAST_SERVER_SIGNATURE_KEY, serverSignature)
+              hasBootData = snapshotHasUserData(localSnapshot)
+              console.info('[plan-up] local Dexie cache already matches server snapshot')
+            } else {
+              serverSnapshotSignature.current = serverSignature
+              hasBootData = snapshotHasUserData(localSnapshot)
+              console.warn('[plan-up] kept local Dexie cache because it has unsynced changes')
+            }
           }
         } catch (e) {
           console.warn('[plan-up] server snapshot unavailable; using local cache', e)
         }
-        if (!restoredFromServer) {
+        if (!hasBootData) {
           const didSeed = await seedIfEmpty()
           if (didSeed && safeStorage.get('plan-up:seedNoticeAck') !== '1')
             setSeedNotice(true)
@@ -602,6 +679,7 @@ function App() {
       saveServerSnapshot(serverSnapshot)
         .then(() => {
           serverSnapshotSignature.current = signature
+          safeStorage.set(LAST_SERVER_SIGNATURE_KEY, signature)
         })
         .catch((e) => {
           console.warn('[plan-up] could not sync server snapshot', e)
@@ -621,9 +699,24 @@ function App() {
         if (!snapshot || cancelled) return
         const signature = snapshotSignature(snapshot)
         if (signature !== serverSnapshotSignature.current) {
-          await importAll(snapshot)
-          serverSnapshotSignature.current = signature
-          console.info('[plan-up] pulled updated server snapshot')
+          const localSnapshot = await exportAll()
+          const action = chooseServerSnapshotAction({
+            local: localSnapshot,
+            server: snapshot,
+            lastAcceptedSignature: safeStorage.get(LAST_SERVER_SIGNATURE_KEY),
+          })
+          if (action === 'import-server') {
+            await importAll(snapshot)
+            serverSnapshotSignature.current = signature
+            safeStorage.set(LAST_SERVER_SIGNATURE_KEY, signature)
+            console.info('[plan-up] pulled updated server snapshot')
+          } else if (action === 'same') {
+            serverSnapshotSignature.current = signature
+            safeStorage.set(LAST_SERVER_SIGNATURE_KEY, signature)
+          } else {
+            serverSnapshotSignature.current = signature
+            console.warn('[plan-up] skipped stale server snapshot because local has unsynced changes')
+          }
         }
       } catch (e) {
         console.warn('[plan-up] could not pull server snapshot', e)
@@ -692,6 +785,14 @@ function App() {
         ? db.tasks.where('sprintId').equals(currentSprintId).toArray()
         : Promise.resolve([] as Task[]),
     [currentSprintId]
+  )
+
+  const projectTasks = useLiveQuery<Task[] | undefined>(
+    () =>
+      seeded && currentProjectId
+        ? db.tasks.where('projectId').equals(currentProjectId).toArray()
+        : undefined,
+    [seeded, currentProjectId]
   )
 
   // Items of the current collection — feeds the Export menu's collection
@@ -1008,6 +1109,31 @@ function App() {
   const currentSprint = sprints?.find((s) => s.id === currentSprintId) ?? null
   const currentProject =
     projects?.find((p) => p.id === currentProjectId) ?? null
+  const activeTimelineRange = useMemo(
+    () => timelineRange ?? monthRangeFor(currentSprint?.startDate ?? todayLocalISO()),
+    [timelineRange, currentSprint]
+  )
+  const rangeTimelineTasks = useMemo(() => {
+    if (!projectTasks || !paletteMembers) return undefined
+    const tasksById = new Map(projectTasks.map((t) => [t.id, t]))
+    const memberById = new Map(paletteMembers.map((m) => [m.id, m] as [string, Member]))
+    const planById = computeAllWorkingPlans(projectTasks, tasksById, memberById)
+    return projectTasks
+      .filter((task) => {
+        if (!task.sprintId) return false
+        const plan = planById.get(task.id)
+        const start = plan?.startDate ?? plan?.dueDate
+        const end = plan?.dueDate ?? plan?.startDate
+        return !!start && !!end && start <= activeTimelineRange.end && end >= activeTimelineRange.start
+      })
+      .sort((a, b) => {
+        const pa = planById.get(a.id)
+        const pb = planById.get(b.id)
+        const da = pa?.startDate ?? pa?.dueDate ?? ''
+        const db = pb?.startDate ?? pb?.dueDate ?? ''
+        return da === db ? a.sequence - b.sequence : da < db ? -1 : 1
+      })
+  }, [projectTasks, paletteMembers, activeTimelineRange])
   const nextSprint = useMemo(() => {
     if (!sprints || !currentSprint) return null
     const idx = sprints.findIndex((s) => s.id === currentSprint.id)
@@ -1940,7 +2066,7 @@ function App() {
           {/* Merged Notion-style sprint page header: title · note (description) ·
               Dates · capacity inset. Scrolls with content; keyed by sprint so the
               note draft + capacity reset on sprint change. See app-shell v4. */}
-          {selKind === 'sprint' && currentSprint && (
+          {selKind === 'sprint' && currentSprint && view !== 'range-timeline' && (
             <SprintPageHeader
               key={currentSprint.id}
               sprint={currentSprint}
@@ -2009,6 +2135,31 @@ function App() {
                   sprintEndDate={currentSprint.endDate}
                   tasks={tasks}
                 />
+              ) : view === 'range-timeline' ? (
+                projectTasks === undefined || rangeTimelineTasks === undefined ? (
+                  <p className="text-ink-muted py-12 text-center">Loading…</p>
+                ) : (
+                  <>
+                    <TimelineRangeToolbar
+                      range={activeTimelineRange}
+                      currentSprint={currentSprint}
+                      onRangeChange={setTimelineRange}
+                    />
+                    <GanttView
+                      projectId={currentProjectId}
+                      sprintStartDate={activeTimelineRange.start}
+                      sprintEndDate={activeTimelineRange.end}
+                      tasks={rangeTimelineTasks}
+                      planningTasks={projectTasks}
+                      emptyLabel="No assigned tasks in this range."
+                      noWorkingDaysLabel="This range has no working days (weekends only)."
+                      onOpenInList={(task) => {
+                        if (task.sprintId) selectSprint(task.sprintId)
+                        setView('list')
+                      }}
+                    />
+                  </>
+                )
               ) : view === 'timeline' ? (
                 <GanttView
                   projectId={currentProjectId}
@@ -3168,10 +3319,96 @@ function ViewToggle<T extends string>({
   )
 }
 
+function TimelineRangeToolbar({
+  range,
+  currentSprint,
+  onRangeChange,
+}: {
+  range: TimelineRange
+  currentSprint: Sprint
+  onRangeChange: (range: TimelineRange) => void
+}) {
+  const setStart = (start: string) =>
+    onRangeChange({ start, end: start > range.end ? start : range.end })
+  const setEnd = (end: string) =>
+    onRangeChange({ start: end < range.start ? end : range.start, end })
+  const prevMonth = shiftMonthRange(range, -1)
+  const nextMonth = shiftMonthRange(range, 1)
+
+  return (
+    <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-[16px] bg-surface px-4 py-3 shadow-soft border border-border-hair/70">
+      <div className="min-w-0">
+        <div className="flex items-center gap-2 text-[13px] font-semibold text-ink">
+          <CalendarClock size={15} />
+          <span>Range timeline</span>
+        </div>
+        <div className="mt-0.5 text-[12px] text-ink-muted">
+          {formatShortDate(range.start)} – {formatShortDate(range.end)}
+        </div>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={() => onRangeChange(prevMonth)}
+          className="h-8 w-8 inline-flex items-center justify-center rounded-[8px] hover:bg-fill text-ink-muted hover:text-ink transition"
+          title="Previous month"
+          aria-label="Previous month"
+        >
+          <ChevronLeft size={16} />
+        </button>
+        <label className="flex items-center gap-1.5 text-[12px] text-ink-muted">
+          <span>Start</span>
+          <input
+            type="date"
+            value={range.start}
+            onChange={(e) => setStart(e.target.value)}
+            className="h-8 rounded-[8px] border border-border-hair bg-surface px-2 text-[12px] text-ink"
+          />
+        </label>
+        <label className="flex items-center gap-1.5 text-[12px] text-ink-muted">
+          <span>End</span>
+          <input
+            type="date"
+            value={range.end}
+            onChange={(e) => setEnd(e.target.value)}
+            className="h-8 rounded-[8px] border border-border-hair bg-surface px-2 text-[12px] text-ink"
+          />
+        </label>
+        <button
+          type="button"
+          onClick={() => onRangeChange(monthRangeFor(todayLocalISO()))}
+          className="h-8 rounded-[8px] px-2.5 text-[12px] font-medium text-ink-muted hover:bg-fill hover:text-ink transition"
+        >
+          This month
+        </button>
+        <button
+          type="button"
+          onClick={() =>
+            onRangeChange({ start: currentSprint.startDate, end: currentSprint.endDate })
+          }
+          className="h-8 rounded-[8px] px-2.5 text-[12px] font-medium text-ink-muted hover:bg-fill hover:text-ink transition"
+        >
+          Current sprint
+        </button>
+        <button
+          type="button"
+          onClick={() => onRangeChange(nextMonth)}
+          className="h-8 w-8 inline-flex items-center justify-center rounded-[8px] hover:bg-fill text-ink-muted hover:text-ink transition"
+          title="Next month"
+          aria-label="Next month"
+        >
+          <ChevronRight size={16} />
+        </button>
+      </div>
+    </div>
+  )
+}
+
 const SPRINT_VIEWS: { value: ViewMode; label: string; Icon: typeof List }[] = [
   { value: 'list', label: 'List', Icon: List },
   { value: 'board', label: 'Board', Icon: LayoutGrid },
   { value: 'timeline', label: 'Timeline', Icon: GanttChartSquare },
+  { value: 'range-timeline', label: 'Range', Icon: CalendarClock },
 ]
 const COLLECTION_VIEWS: { value: CollectionViewMode; label: string; Icon: typeof List }[] = [
   { value: 'list', label: 'List', Icon: List },

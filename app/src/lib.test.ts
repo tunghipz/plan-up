@@ -9,6 +9,7 @@ import {
   formatSprintRange,
   firstGrapheme,
   flattenDisplayOrder,
+  daysOffWindow,
 } from './lib'
 import type { Task } from './db'
 
@@ -204,5 +205,41 @@ describe('sprintWorkdays', () => {
 
   it('start after end returns empty', () => {
     expect(sprintWorkdays('2026-06-21', '2026-06-15')).toEqual([])
+  })
+})
+
+// Days-off entry window = sprint span widened to whatever dates the member's
+// tasks touch, so an off-day on an overdue date before the sprint start is
+// pickable. See design-docs/members-and-days-off.md.
+describe('daysOffWindow', () => {
+  it('returns the sprint window unchanged when every task date sits inside', () => {
+    expect(
+      daysOffWindow('2026-07-20', '2026-07-31', ['2026-07-22', '2026-07-28'])
+    ).toEqual({ start: '2026-07-20', end: '2026-07-31' })
+  })
+
+  it('widens start down to an overdue task date before the sprint start', () => {
+    expect(
+      daysOffWindow('2026-07-20', '2026-07-31', ['2026-07-17', '2026-07-25'])
+    ).toEqual({ start: '2026-07-17', end: '2026-07-31' })
+  })
+
+  it('widens end up to a task date after the sprint end', () => {
+    expect(
+      daysOffWindow('2026-07-20', '2026-07-31', ['2026-08-03'])
+    ).toEqual({ start: '2026-07-20', end: '2026-08-03' })
+  })
+
+  it('ignores null/undefined/empty dates', () => {
+    expect(
+      daysOffWindow('2026-07-20', '2026-07-31', [null, undefined, '', '2026-07-14'])
+    ).toEqual({ start: '2026-07-14', end: '2026-07-31' })
+  })
+
+  it('no task dates leaves the window as the bare sprint span', () => {
+    expect(daysOffWindow('2026-07-20', '2026-07-31', [])).toEqual({
+      start: '2026-07-20',
+      end: '2026-07-31',
+    })
   })
 })

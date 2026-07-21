@@ -63,6 +63,7 @@ import {
   parsePrereqSeqs,
   formatSeqRanges,
   flattenDisplayOrder,
+  daysOffWindow,
   PRIORITY_TAG,
 } from './lib'
 import {
@@ -637,7 +638,7 @@ function MemberCard({
   // they don't recompute (incl. the O(n²) conflict scan + a computeWorkingPlan
   // per task) on every unrelated re-render of this card (e.g. a selection toggle
   // elsewhere). Recomputes only when this member's tasks/members actually change.
-  const { total, done, pct, overdue, nextDue, conflictTips } = useMemo(() => {
+  const { total, done, pct, overdue, nextDue, conflictTips, earliestDate, latestDate } = useMemo(() => {
     const leafTasks = tasks.filter((t) => !parentIds.has(t.id))
     const total = leafTasks.length
     const done = leafTasks.filter((t) => t.status === 'done').length
@@ -660,8 +661,29 @@ function MemberCard({
     // Double-booking warnings among this member's leaf tasks (see
     // design-docs/conflict-warning.md). Cheap O(n²) over a member's tasks.
     const conflictTips = computeMemberConflicts(leafTasks, tasksById, memberById)
-    return { total, done, pct, overdue, nextDue, conflictTips }
+    // Date span this member's tasks actually touch (computed start + due, same
+    // plan the rows show). Feeds the days-off window so an off-day on an overdue
+    // date that falls before the sprint start is still pickable. All tasks (incl.
+    // parents), any status. See members-and-days-off.md.
+    let earliestDate: string | null = null
+    let latestDate: string | null = null
+    for (const t of tasks) {
+      const plan = planById.get(t.id) ?? computeWorkingPlan(t, tasksById, memberById)
+      const due = t.estimate === 0 ? plan.startDate : plan.dueDate
+      for (const d of [plan.startDate, due]) {
+        if (!d) continue
+        if (!earliestDate || d < earliestDate) earliestDate = d
+        if (!latestDate || d > latestDate) latestDate = d
+      }
+    }
+    return { total, done, pct, overdue, nextDue, conflictTips, earliestDate, latestDate }
   }, [tasks, parentIds, tasksById, memberById, planById])
+  // Widen the sprint window to cover this member's task span (overdue tasks can
+  // sit before the sprint start), so those dates are pickable in the days-off popover.
+  const daysOffRange = useMemo(
+    () => daysOffWindow(sprintStartDate, sprintEndDate, [earliestDate, latestDate]),
+    [sprintStartDate, sprintEndDate, earliestDate, latestDate]
+  )
   const { grip, rowProps, dragging } = useDragHandle(drag, LANE_GRIP_CLASS, 'data-lane-id')
   return (
     <Card className={`relative ${dragging ? 'opacity-40' : ''}`} {...rowProps}>
@@ -683,10 +705,7 @@ function MemberCard({
         onToggleCollapse={onToggleCollapse}
         grip={grip}
         extras={
-          <MemberDaysOffButton
-            member={member}
-            range={{ start: sprintStartDate, end: sprintEndDate }}
-          />
+          <MemberDaysOffButton member={member} range={daysOffRange} />
         }
       />
       {!collapsed && (

@@ -1,10 +1,11 @@
 # Members & days off
 
 **Status:** Implemented
-**Last updated:** 2026-07-02 (deleting a member immediately recomputes the unassigned
-tasks' dates)
+**Last updated:** 2026-07-21 (days-off window widens to cover a member's task-date
+span, so off-days on overdue dates before the sprint start are pickable)
 **Code:** `app/src/members.tsx` (`MemberDaysOffButton`, `DateField`, `daysOffInRange`,
-`effectiveDaysOff`), `app/src/SprintView.tsx` (passes per-sprint `range`),
+`effectiveDaysOff`), `app/src/lib.ts` (`daysOffInRange`, `daysOffWindow`),
+`app/src/SprintView.tsx` (passes per-member days-off `range`),
 `app/src/db.ts` (`setMemberDaysOff`, `deleteMember`, `colorForName`)
 
 ## Purpose
@@ -27,12 +28,21 @@ computed dates respect real availability.
 ### Per-sprint scoping (display + entry, not data)
 Off-days are real calendar dates, so each date falls inside at most one sprint's
 date range. The two surfaces that show the days-off control treat scope differently:
-- **Sprint view** (`MemberDaysOffButton` with a `range` prop = the sprint's
-  `{ startDate, endDate }`): the popover list and the header chip count **only**
-  off-days within that sprint's range (`start ≤ date ≤ end`, inclusive both ends).
-  The add-day picker is **constrained** (`min`/`max` on the `<input type="date">`)
-  so you can only add off-days that belong to the sprint you're viewing. Empty state:
-  *"No days off this sprint."*
+- **Sprint view** (`MemberDaysOffButton` with a `range` prop): the popover list and
+  the header chip count **only** off-days within that range (`start ≤ date ≤ end`,
+  inclusive both ends). The add-day picker is **constrained** (`min`/`max` on the
+  `<input type="date">`) to the same range. Empty state: *"No days off this sprint."*
+- **The range is the sprint window widened to the member's task-date span**
+  (`daysOffWindow`, `lib.ts`): a sprint holds tasks by `sprintId`, not by date, so a
+  task can be **due before the sprint starts** (an overdue/carried task) or after it
+  ends. Clamping the picker to the bare `{ startDate, endDate }` then made those dates
+  unpickable — you could see a task due Jul 17 but not log an off-day on Jul 17 when the
+  sprint started Jul 20. So the sprint view passes `range = daysOffWindow(startDate,
+  endDate, <member's task start/due dates>)`: it widens `start` down to the earliest and
+  `end` up to the latest computed date across **that member's** tasks (using the same
+  `computeWorkingPlan` dates the rows show), leaving the window unchanged when every task
+  sits inside it. Members with **no tasks** keep the bare sprint window. This only moves
+  the display/entry bounds — see the no-data note below.
 - **Settings page** (`variant="metric"`, no `range`): shows the **full aggregate**
   list across all sprints — the single source of truth. Empty state: *"No days off."*
 

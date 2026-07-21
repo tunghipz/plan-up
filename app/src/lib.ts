@@ -672,6 +672,30 @@ export function daysOffInRange<T extends { date: string }>(
   return days.filter((d) => d.date >= start && d.date <= end)
 }
 
+/**
+ * Widen a sprint's `[start, end]` window to also cover the date span of the tasks
+ * shown in it. A sprint holds tasks by `sprintId`, not by date, so a task can be due
+ * before the sprint starts (overdue/carried) or after it ends; clamping the days-off
+ * picker to the bare window then makes those dates unpickable. This returns the
+ * inclusive window widened down to the earliest and up to the latest of `taskDates`,
+ * unchanged when every date already sits inside. Pure lexical yyyy-mm-dd min/max;
+ * empty/undefined dates ignored. See design-docs/members-and-days-off.md.
+ */
+export function daysOffWindow(
+  start: string,
+  end: string,
+  taskDates: (string | null | undefined)[]
+): { start: string; end: string } {
+  let lo = start
+  let hi = end
+  for (const d of taskDates) {
+    if (!d) continue
+    if (d < lo) lo = d
+    if (d > hi) hi = d
+  }
+  return { start: lo, end: hi }
+}
+
 /** Trim a day count for display: 2 → "2", 1.5 → "1.5". */
 export function fmtDays(n: number): string {
   return Number.isInteger(n) ? String(n) : n.toFixed(1)

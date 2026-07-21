@@ -1,7 +1,7 @@
 # Date picker (custom calendar)
 
 **Status:** Implemented
-**Last updated:** 2026-06-25
+**Last updated:** 2026-07-21 (days-off entry range widens to the member's task span)
 **Code:** `app/src/DatePicker.tsx` (component) · consumers: `SprintView.tsx` (List), `BoardView.tsx` (Board quick-edit), `App.tsx` (sprint dialog), `members.tsx` (days-off), `CollectionView.tsx` (collection items — **range** mode)
 
 ## Purpose
@@ -28,7 +28,7 @@ browsers, not Cupertino, not dark-aware, can't show planning context) with a sin
     sprint, a compact list spells out each: `Jun 6 · AM off · 08:00–12:00`, `Jun 10 · Off all
     day`. Always visible (glanceable, no hover needed). Header carries the orange dot key.
   - **Out-of-range** (min/max) — faded, not clickable (days-off entry is clamped to the
-    sprint's date range).
+    sprint's date range, widened to the member's task span — see below).
 - **Footer**: **Today** (jump+select) and **Clear** (→ null/empty) ghost actions.
 - **Keyboard**: the grid is focused on open; **← → ↑ ↓** move the focused day (crossing
   months auto-flips the view), **Enter/Space** selects, **Esc** closes.
@@ -39,7 +39,7 @@ browsers, not Cupertino, not dark-aware, can't show planning context) with a sin
 | List start/due | `DatePickCell` (SprintView task rows) | assignee `daysOff` dots · `locked` (computed-from-prereqs/effort) · `time` suffix · overdue red · **sprint range shaded, opens on the sprint month** (via `SprintRangeContext`) — **shade only, all dates selectable** |
 | Board quick-edit | `DatePickCell` (BoardView `DatePopover`) | assignee `daysOff` · same lock/time · **sprint range shaded, shade only** (context) |
 | Sprint create/edit | `DateField` (App `NewSprintDialog`) | plain (no range/days-off — it's *defining* the sprint) |
-| Member days-off | `DateField` (members popover) | `min`/`max` = sprint range · `sprintRange` shade · existing days as `daysOff` dots. The AM/PM/All `<select>` + Add stay as-is |
+| Member days-off | `DateField` (members popover) | `min`/`max` = sprint range **widened to the member's task span** (`daysOffWindow`, so an overdue task date before the sprint start is pickable) · `sprintRange` shade · existing days as `daysOff` dots. The AM/PM/All `<select>` + Add stay as-is |
 | Collection item start/end | `DateRangePickCell` (CollectionView item rows) | **range** mode — one popover sets both `startDate` + `dueDate`; no sprint range / days-off / time |
 
 ## Range mode (collection items) — 2026-06-25

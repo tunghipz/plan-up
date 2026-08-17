@@ -185,6 +185,9 @@ function PriorityPill({ priority }: { priority: Priority }) {
         fontWeight: 600,
         whiteSpace: 'nowrap',
         flexShrink: 0,
+        // Only caller is the task-title cell, whose row is `flex-start` because the
+        // title wraps — this nudge optically centres the pill on the first line.
+        marginTop: 1,
       }}
     >
       {p.label}
@@ -207,6 +210,7 @@ function MilestoneTag() {
         fontWeight: 600,
         whiteSpace: 'nowrap',
         flexShrink: 0,
+        marginTop: 1, // see PriorityPill — the title row is `flex-start`
       }}
     >
       <span style={{ width: 7, height: 7, borderRadius: 1.5, background: C.accent, transform: 'rotate(45deg)' }} />
@@ -347,7 +351,14 @@ export const PngExportCard = forwardRef<HTMLDivElement, PngExportCardProps>(
                   const isOverdue = !!overdueRef && t.status !== 'done' && overdueRef < today
                   const isChild = childIds.has(t.id)
                   const rowBorder = ti === 0 ? groupBorder : `1px solid ${C.hair}`
-                  const td: React.CSSProperties = { padding: CELL_PAD, borderTop: rowBorder }
+                  // `verticalAlign: top` matches the Member gutter (already top) and
+                  // only matters once a title wraps to 2+ lines — a no-op for the
+                  // single-line rows that make up most of an export.
+                  const td: React.CSSProperties = {
+                    padding: CELL_PAD,
+                    borderTop: rowBorder,
+                    verticalAlign: 'top',
+                  }
                   return (
                     <tr key={t.id}>
                       {ti === 0 && (
@@ -450,17 +461,25 @@ export const PngExportCard = forwardRef<HTMLDivElement, PngExportCardProps>(
                       >
                         {seq}
                       </td>
+                      {/* Title WRAPS — deliberately no ellipsis. The card is a fixed 940px
+                          and the other columns claim 508px, so Task gets ~372px; the PNG is
+                          the final artifact (it lands in a chat), so anything cut here is
+                          lost for good — there is no hover, no link, no app to open. The
+                          image simply grows taller, which domToPng handles. `flex-start`
+                          keeps the priority / milestone pill on the first line.
+                          See design-docs/export-png.md. */}
                       <td style={{ ...td, overflow: 'hidden' }}>
-                        <span style={{ display: 'flex', alignItems: 'center', gap: 7, paddingLeft: isChild ? 18 : 0 }}>
+                        <span style={{ display: 'flex', alignItems: 'flex-start', gap: 7, paddingLeft: isChild ? 18 : 0 }}>
                           <span
                             style={{
                               fontSize: 13.5,
+                              lineHeight: 1.35,
                               color: isChild ? '#3a3a3c' : C.ink,
                               textDecoration: t.status === 'done' ? 'line-through' : 'none',
                               opacity: t.status === 'done' ? 0.5 : 1,
-                              overflow: 'hidden',
-                              textOverflow: 'ellipsis',
-                              whiteSpace: 'nowrap',
+                              flex: 1,
+                              minWidth: 0,
+                              overflowWrap: 'anywhere',
                             }}
                           >
                             {isChild ? '↳ ' : ''}

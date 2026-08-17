@@ -1,7 +1,18 @@
 # Export as image (PNG)
 
 **Status:** Implemented
-**Last updated:** 2026-07-14 (**sprint** "Export as image…" **removed from the app's
+**Last updated:** 2026-08-17 (**task title wrap trong ảnh, không cắt bằng "…"** — card PNG
+rộng cố định 940px, padding 30px mỗi bên, cột cố định ăn 508px (Member 142 · # 34 · Start 64 ·
+End 64 · Effort 82 · Status 122) → cột Task chỉ còn **372px**, hẹp hơn cả share page. Title dài
+bị `whiteSpace: nowrap` + `textOverflow: ellipsis` cắt cụt, và **ảnh là sản phẩm cuối** — người
+nhận dán ảnh vào Zalo/Slack thì không có cách nào lấy lại phần chữ mất. Bỏ ellipsis, cho wrap:
+title `flex: 1, minWidth: 0, overflowWrap: 'anywhere'`; hàng title `alignItems: 'flex-start'` +
+pill `marginTop: 1` để priority / `◆ Milestone` bám dòng đầu; ô `td` thêm `verticalAlign: 'top'`
+cho khớp Member gutter (đã `top` sẵn) — no-op với row 1 dòng, chỉ có tác dụng khi row wrap.
+Ảnh **cao lên** theo nội dung là tradeoff có chủ đích; `domToPng` không giới hạn chiều cao nên
+không cần đổi gì ở `png-export.ts`. Đồng bộ với share page cùng ngày, xem
+[share-link-snapshot.md](./share-link-snapshot.md). Trước đó: 2026-07-14 — **sprint**
+"Export as image…" **removed from the app's
 Export ▾ menu** — sprint PNG export now lives only in the **share viewer**
 (`SnapshotViewer`, see [share-link-snapshot.md](./share-link-snapshot.md)); the
 `ExportImageModal`/`PngExportCard` pair is reused there. Collection variant unchanged.)

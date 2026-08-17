@@ -590,16 +590,22 @@ export function useDarkMode() {
 }
 
 /**
- * Brand theme — ZingPlay Fire (default) vs Cupertino Blue. Pure token swap:
+ * Brand theme — Cupertino Blue (current) vs ZingPlay Fire. Pure token swap:
  * the effect stamps `data-brand` on <html> and index.css does the rest
  * (design-docs/brand-theme.md). Mirrors useDarkMode (safeStorage + effect).
+ *
+ * Pinned to 'blue'. The footer Flame toggle was hidden 2026-07-15 but the default
+ * was left on 'fire', so the app kept rendering Fire with no button left to switch
+ * back — anyone on Fire was stuck there. With no UI to pick a theme, a persisted
+ * `plan-up:brand` is stale by definition, so it is deliberately NOT read; the
+ * effect below overwrites the key with 'blue', which self-heals a stuck install on
+ * the next launch. Fire still lives in index.css — restoring the toggle plus the
+ * storage read brings it back.
  */
 export type BrandTheme = 'fire' | 'blue'
 
 export function useBrandTheme() {
-  const [brand, setBrand] = useState<BrandTheme>(() =>
-    safeStorage.get('plan-up:brand') === 'blue' ? 'blue' : 'fire',
-  )
+  const [brand, setBrand] = useState<BrandTheme>('blue')
 
   useEffect(() => {
     document.documentElement.dataset.brand = brand

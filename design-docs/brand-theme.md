@@ -1,7 +1,14 @@
 # Brand theme — ZingPlay Fire ↔ Cupertino Blue
 
-**Status:** Implemented (toggle **hidden** since 2026-07-15 — app stays on Fire)
-**Last updated:** 2026-07-15 (footer **flame toggle removed** — the app now locks to its
+**Status:** Implemented (toggle **hidden** since 2026-07-15 — app pinned to **Blue** since 2026-08-17)
+**Last updated:** 2026-08-17 (**default đổi Fire → Blue, pin cứng**. Bug: 2026-07-15 ẩn nút
+Flame nhưng **quên đổi default** — `useBrandTheme()` vẫn `=== 'blue' ? 'blue' : 'fire'`, nên app
+ở lại Fire và **không còn nút nào bấm về Blue**; ai lỡ ở Fire thì kẹt vĩnh viễn. Vì không còn UI
+để chọn theme, hook giờ **pin cứng `'blue'`** và **cố tình bỏ qua** giá trị `plan-up:brand` cũ —
+effect vẫn ghi đè key đó thành `'blue'` nên máy đang kẹt Fire tự lành sau 1 lần mở app. Fire vẫn
+còn nguyên trong `index.css` (`[data-brand="fire"]` + `.brand-fill`/`.brand-btn`), muốn bật lại
+chỉ cần trả nút toggle về + cho hook đọc lại storage. Trước đó: 2026-07-15 — footer **flame
+toggle removed** — the app now locks to its
 default Fire brand; `useBrandTheme()` still runs for its side-effect [applies `data-brand`,
 reads any persisted `plan-up:brand`], so the theme is unchanged and switching is still
 possible by hand via localStorage. Removed the `Flame` import + the toggle button.)
@@ -13,7 +20,11 @@ App chạy trong studio ZingPlay (VNG) — brand chính thức là **fire-fox** 
 Guideline EN). Cho phép app mang **màu brand studio** mà không phá DNA
 Cupertino: user chọn được 1 trong 2 brand theme, đổi qua lại bất kỳ lúc nào.
 
-- **Fire (default)** — hướng **G · Fire Signature** đã chốt qua demo
+> ⚠️ **Hiện tại app chạy Blue** (2026-08-17). Phần "Fire (default)" dưới đây mô tả thiết kế
+> của theme Fire — nó vẫn còn đủ trong `index.css` — nhưng **không còn là default** và không có
+> UI nào chọn được nữa; xem *Last updated*.
+
+- **Fire** (thiết kế gốc, từng là default) — hướng **G · Fire Signature** đã chốt qua demo
   (`demo/color-dna-firefox-3.html`): gradient lửa official **chỉ ở chỗ
   signature** (active sidebar row + primary CTA), accent hệ vermilion, còn lại
   100% greyscale Cupertino sạch.

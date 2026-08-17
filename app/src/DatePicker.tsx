@@ -57,7 +57,7 @@ function offDetail(half?: 'am' | 'pm') {
 }
 
 // ---- Month grid + keyboard nav ----
-function CalendarGrid({
+export function CalendarGrid({
   value,
   onSelect,
   min,
@@ -67,6 +67,10 @@ function CalendarGrid({
   rangeStart,
   rangeEnd,
   selectingEnd,
+  month,
+  onMonthChange,
+  nav = 'both',
+  autoFocus = true,
 }: {
   value: string | null
   onSelect: (v: string) => void
@@ -83,6 +87,18 @@ function CalendarGrid({
   rangeStart?: string | null
   rangeEnd?: string | null
   selectingEnd?: boolean
+  /**
+   * Controlled month. Absent → the grid owns its own view (every existing
+   * caller). Present → the caller drives it, which is what lets a two-month
+   * layout render two grids that step together instead of drifting apart.
+   * See design-docs/project-holidays.md.
+   */
+  month?: { y: number; m: number }
+  onMonthChange?: (v: { y: number; m: number }) => void
+  /** Which arrows to draw: a two-month pair keeps prev on the left grid, next on the right. */
+  nav?: 'both' | 'prev' | 'next'
+  /** Only the first grid of a pair should steal focus on mount. */
+  autoFocus?: boolean
 }) {
   const isRange = rangeStart !== undefined
   const [hover, setHover] = useState<string | null>(null)
@@ -98,7 +114,10 @@ function CalendarGrid({
     if (hi && t > hi) return hi
     return t
   })()
-  const [view, setView] = useState(() => ymOf(initial))
+  const [ownView, setOwnView] = useState(() => ymOf(initial))
+  const view = month ?? ownView
+  const setView = (next: { y: number; m: number }) =>
+    onMonthChange ? onMonthChange(next) : setOwnView(next)
   const [focus, setFocus] = useState<string>(() => initial)
   const gridRef = useRef<HTMLDivElement>(null)
   const today = todayISO()
@@ -111,8 +130,8 @@ function CalendarGrid({
   )
 
   useEffect(() => {
-    gridRef.current?.focus()
-  }, [])
+    if (autoFocus) gridRef.current?.focus()
+  }, [autoFocus])
 
   const disabled = (iso: string) => !!((min && iso < min) || (max && iso > max))
 
@@ -147,11 +166,10 @@ function CalendarGrid({
     })
   }
 
-  const stepMonth = (delta: number) =>
-    setView((v) => {
-      const d = new Date(v.y, v.m + delta, 1)
-      return { y: d.getFullYear(), m: d.getMonth() }
-    })
+  const stepMonth = (delta: number) => {
+    const d = new Date(view.y, view.m + delta, 1)
+    setView({ y: d.getFullYear(), m: d.getMonth() })
+  }
 
   return (
     <div
@@ -162,12 +180,18 @@ function CalendarGrid({
       onKeyDown={onKey}
       className="outline-none"
     >
+      {/* A hidden arrow keeps its 28px slot (`invisible`, not unmounted) so the
+          month title stays optically centred across a two-month pair. */}
       <div className="flex items-center justify-between px-1 mb-2">
         <button
           type="button"
           onClick={() => stepMonth(-1)}
           aria-label="Previous month"
-          className="w-7 h-7 flex items-center justify-center rounded-[7px] text-ink-muted hover:bg-surface-hover hover:text-ink transition"
+          tabIndex={nav === 'next' ? -1 : undefined}
+          aria-hidden={nav === 'next'}
+          className={`w-7 h-7 flex items-center justify-center rounded-[7px] text-ink-muted hover:bg-surface-hover hover:text-ink transition ${
+            nav === 'next' ? 'invisible pointer-events-none' : ''
+          }`}
         >
           <ChevronLeft size={16} />
         </button>
@@ -178,7 +202,11 @@ function CalendarGrid({
           type="button"
           onClick={() => stepMonth(1)}
           aria-label="Next month"
-          className="w-7 h-7 flex items-center justify-center rounded-[7px] text-ink-muted hover:bg-surface-hover hover:text-ink transition"
+          tabIndex={nav === 'prev' ? -1 : undefined}
+          aria-hidden={nav === 'prev'}
+          className={`w-7 h-7 flex items-center justify-center rounded-[7px] text-ink-muted hover:bg-surface-hover hover:text-ink transition ${
+            nav === 'prev' ? 'invisible pointer-events-none' : ''
+          }`}
         >
           <ChevronRight size={16} />
         </button>

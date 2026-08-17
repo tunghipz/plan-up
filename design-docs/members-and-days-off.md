@@ -12,6 +12,11 @@ span, so off-days on overdue dates before the sprint start are pickable)
 Members are lightweight labels you assign tasks to. Their off-days feed the scheduler so
 computed dates respect real availability.
 
+> Đây là ngày nghỉ **của một người**. Ngày nghỉ **của cả project** (Tết, lễ, offsite) là
+> feature riêng — xem [project-holidays.md](./project-holidays.md). Scheduler union hai
+> nguồn lại; ngày lễ hiện trong popover này ở dạng **read-only** (không sửa được từ chỗ
+> member — §8.3 không hai cách làm cùng một việc).
+
 ## User-facing behavior
 - **Add:** "Add member" row → type a name → Enter (keeps focus for rapid entry).
 - **Rename & delete:** done from the **project settings page** (gear → see

@@ -1,4 +1,4 @@
-import type { Member, Task } from './types'
+import type { DayOff, Holiday, Member, Project, Task } from './types'
 import { db } from './schema'
 
 /**
@@ -20,6 +20,47 @@ export function isWeekend(dateStr: string): boolean {
 const EPS = 1e-9
 
 /**
+ * Project-wide off-days, keyed by `projectId` and already expanded to one entry
+ * per date. Keyed (rather than a flat array) because `recomputeDates` walks a
+ * dependency chain that can, in principle, cross into another project — each
+ * task must read ITS OWN project's holidays.
+ * See design-docs/project-holidays.md.
+ */
+export type ProjectHolidayMap = Map<string, DayOff[]>
+
+/**
+ * Expand `Holiday` ranges into one `DayOff` per date. `half` is only honoured on
+ * a single-day range — "PM off for five days running" is meaningless, and
+ * `setProjectHolidays` drops it on write, so this is belt-and-braces for rows
+ * written by an older build or a hand-edited import.
+ */
+export function expandHolidays(holidays: Holiday[] | undefined): DayOff[] {
+  if (!holidays?.length) return []
+  const out: DayOff[] = []
+  for (const h of holidays) {
+    if (!h?.from || !h?.to || h.to < h.from) continue
+    const single = h.from === h.to
+    for (let d = h.from; d <= h.to; d = addDays(d, 1)) {
+      out.push(single && h.half ? { date: d, half: h.half } : { date: d })
+    }
+  }
+  return out
+}
+
+/** Build the scheduler's holiday map from one project or a list of them. */
+export function projectHolidayMap(
+  projects: Project | Project[] | undefined | null
+): ProjectHolidayMap {
+  const list = !projects ? [] : Array.isArray(projects) ? projects : [projects]
+  const m: ProjectHolidayMap = new Map()
+  for (const p of list) {
+    const days = expandHolidays(p.holidays)
+    if (days.length) m.set(p.id, days)
+  }
+  return m
+}
+
+/**
  * Internal plan for a task — dates, plus the wall-clock fractions of the
  * start and end days needed to render times and chain to dependents.
  *
@@ -36,7 +77,12 @@ interface TaskPlan {
   dueFraction: number
 }
 
-type PlanCtx = { children: Map<string, string[]>; inProgress: Set<string> }
+type PlanCtx = {
+  children: Map<string, string[]>
+  inProgress: Set<string>
+  /** Project-wide off-days; rides on the ctx so it threads the whole recursion. */
+  holidays?: ProjectHolidayMap
+}
 const NULL_PLAN: TaskPlan = { startDate: null, dueDate: null, startOffset: 0, dueFraction: 1 }
 
 /** parentId → child ids (only children whose parent exists in the map). */
@@ -65,9 +111,14 @@ function planFor(
   byId: Map<string, Task>,
   memberById: Map<string, Member> | undefined,
   cache: Map<string, TaskPlan>,
-  ctx?: PlanCtx
+  ctx?: PlanCtx,
+  holidays?: ProjectHolidayMap
 ): TaskPlan {
-  const c = ctx ?? { children: childrenByParent(byId), inProgress: new Set<string>() }
+  const c = ctx ?? {
+    children: childrenByParent(byId),
+    inProgress: new Set<string>(),
+    holidays,
+  }
   const cached = cache.get(task.id)
   if (cached) return cached
   if (c.inProgress.has(task.id)) return NULL_PLAN
@@ -112,27 +163,42 @@ function leafPlan(
   ctx: PlanCtx
 ): TaskPlan {
   const member = task.assigneeId ? memberById?.get(task.assigneeId) : undefined
-  const halfByDate = new Map<string, 'am' | 'pm'>()
-  const contribByDate = new Map<string, 0 | 0.5>()
-  if (member?.daysOff) {
-    for (const d of member.daysOff) {
-      contribByDate.set(d.date, d.half ? 0.5 : 0)
-      if (d.half) halfByDate.set(d.date, d.half)
+  // Off-days come from TWO sources that union together: the assignee's own
+  // `daysOff` and the project's `holidays`. Tracked as two half-day sets rather
+  // than one `0 | 0.5` per date, because the sources can overlap in a way a
+  // single number can't express: member off in the MORNING + a holiday off in
+  // the AFTERNOON of the same date is a whole day off, not a half. "More off
+  // wins" falls out of set union for free. With member data only, this is
+  // behaviourally identical to what it replaced.
+  // Project holidays apply even when the task is UNASSIGNED (no member to read),
+  // which is the deliberate difference from personal days-off.
+  // See design-docs/project-holidays.md.
+  const offAm = new Set<string>()
+  const offPm = new Set<string>()
+  const markOff = (days: DayOff[] | undefined) => {
+    for (const d of days ?? []) {
+      if (d.half !== 'pm') offAm.add(d.date)
+      if (d.half !== 'am') offPm.add(d.date)
     }
   }
+  markOff(member?.daysOff)
+  markOff(ctx.holidays?.get(task.projectId))
+
   const dayContrib = (date: string): number => {
     if (isWeekend(date)) return 0
-    if (contribByDate.has(date)) return contribByDate.get(date) as number
+    const am = offAm.has(date)
+    const pm = offPm.has(date)
+    if (am && pm) return 0
+    if (am || pm) return 0.5
     return 1
   }
   // Wall position where work naturally begins on `date`. AM-off → 0.5.
   const naturalWallStart = (date: string): number =>
-    dayContrib(date) === 0.5 && halfByDate.get(date) === 'am' ? 0.5 : 0
+    offAm.has(date) && !offPm.has(date) ? 0.5 : 0
   // Wall position where work naturally ends on `date`. PM-off → 0.5.
   const naturalWallEnd = (date: string): number => {
-    const c = dayContrib(date)
-    if (c === 0) return 0
-    if (c === 0.5 && halfByDate.get(date) === 'pm') return 0.5
+    if (dayContrib(date) === 0) return 0
+    if (offPm.has(date) && !offAm.has(date)) return 0.5
     return 1
   }
   // Available work fraction on `date` given a wall-clock start offset.
@@ -288,9 +354,10 @@ function planWallTimes(plan: TaskPlan, isMilestone: boolean): { startTime: strin
 export function computeWorkingPlan(
   task: Task,
   byId: Map<string, Task>,
-  memberById?: Map<string, Member>
+  memberById?: Map<string, Member>,
+  holidays?: ProjectHolidayMap
 ): WorkingPlan {
-  const plan = planFor(task, byId, memberById, new Map())
+  const plan = planFor(task, byId, memberById, new Map(), undefined, holidays)
   return {
     startDate: plan.startDate,
     dueDate: plan.dueDate,
@@ -307,10 +374,15 @@ export function computeWorkingPlan(
 export function computeAllWorkingPlans(
   tasks: Task[],
   byId: Map<string, Task>,
-  memberById?: Map<string, Member>
+  memberById?: Map<string, Member>,
+  holidays?: ProjectHolidayMap
 ): Map<string, WorkingPlan> {
   const cache = new Map<string, TaskPlan>()
-  const ctx = { children: childrenByParent(byId), inProgress: new Set<string>() }
+  const ctx: PlanCtx = {
+    children: childrenByParent(byId),
+    inProgress: new Set<string>(),
+    holidays,
+  }
   const out = new Map<string, WorkingPlan>()
   for (const t of tasks) {
     const plan = planFor(t, byId, memberById, cache, ctx)
@@ -342,9 +414,10 @@ export function computeAllWorkingPlans(
 export function computeStartEnd(
   task: Task,
   byId: Map<string, Task>,
-  memberById?: Map<string, Member>
+  memberById?: Map<string, Member>,
+  holidays?: ProjectHolidayMap
 ): { startDate: string | null; dueDate: string | null } {
-  const plan = planFor(task, byId, memberById, new Map())
+  const plan = planFor(task, byId, memberById, new Map(), undefined, holidays)
   return { startDate: plan.startDate, dueDate: plan.dueDate }
 }
 
@@ -353,9 +426,12 @@ export function computeStartEnd(
  * it. Idempotent — stops when a task's computed dates equal current ones.
  */
 export async function recomputeDates(taskId: string): Promise<void> {
-  await db.transaction('rw', db.tasks, db.members, async () => {
+  await db.transaction('rw', db.tasks, db.members, db.projects, async () => {
     const members = await db.members.toArray()
     const memberById = new Map(members.map((m) => [m.id, m]))
+    // Every project, not just the starting task's: the walk follows `dependsOn`
+    // and a cross-project edge must still read ITS project's holidays.
+    const holidays = projectHolidayMap(await db.projects.toArray())
     // Read the table ONCE. The dependency graph (`dependsOn`) never changes
     // during a recompute — only dates do — so we keep `byId` fresh in-memory
     // after each write instead of re-materialising the whole table every queue
@@ -370,7 +446,7 @@ export async function recomputeDates(taskId: string): Promise<void> {
       visited.add(id)
       const task = byId.get(id)
       if (!task) continue
-      const next = computeStartEnd(task, byId, memberById)
+      const next = computeStartEnd(task, byId, memberById, holidays)
       if (
         next.startDate !== task.startDate ||
         next.dueDate !== task.dueDate
@@ -410,14 +486,15 @@ export async function recomputeDates(taskId: string): Promise<void> {
  * number of tasks updated.
  */
 export async function recomputeAllDates(): Promise<number> {
-  return db.transaction('rw', db.tasks, db.members, async () => {
+  return db.transaction('rw', db.tasks, db.members, db.projects, async () => {
     const members = await db.members.toArray()
     const memberById = new Map(members.map((m) => [m.id, m]))
+    const holidays = projectHolidayMap(await db.projects.toArray())
     const all = await db.tasks.toArray()
     const byId = new Map(all.map((t) => [t.id, t]))
     let changed = 0
     for (const task of all) {
-      const next = computeStartEnd(task, byId, memberById)
+      const next = computeStartEnd(task, byId, memberById, holidays)
       if (next.startDate !== task.startDate || next.dueDate !== task.dueDate) {
         await db.tasks.update(task.id, {
           startDate: next.startDate,

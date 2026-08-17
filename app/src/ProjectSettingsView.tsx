@@ -1,3 +1,4 @@
+import { ProjectHolidaysButton } from './ProjectHolidays'
 import { useEffect, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { X, Trash2, UserPlus, Upload } from 'lucide-react'
@@ -218,6 +219,18 @@ export function ProjectSettingsView({
                 />
               </div>
             </div>
+          </section>
+
+          {/* Holidays card — project-wide days off. Sits above Members
+              because it applies to all of them. See project-holidays.md. */}
+          <section className="glass-card rounded-[18px] p-5">
+            <h2 className="text-[12px] font-semibold text-ink-faint uppercase tracking-wide mb-2">
+              Holidays{' '}
+              <span className="text-ink-faint/70 normal-case font-normal">
+                · everyone is off
+              </span>
+            </h2>
+            <ProjectHolidaysButton project={project} variant="metric" />
           </section>
 
           {/* Members card */}

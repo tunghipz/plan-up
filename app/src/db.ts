@@ -15,6 +15,7 @@ import {
   type Collection,
   type CollectionStatus,
   type DayOff,
+  type Holiday,
   type LoggableField,
   type Member,
   type Person,
@@ -69,7 +70,7 @@ export async function renameCollection(id: string, name: string): Promise<void> 
  * công khai sống tiếp sau khi plan đã xoá. */
 export async function deleteCollection(id: string): Promise<void> {
   const shares = await db.shares.where('refId').equals(id).toArray()
-  await db.transaction('rw', db.collections, db.tasks, db.shares, async () => {
+  await db.transaction('rw', db.projects, db.collections, db.tasks, db.shares, async () => {
     await db.tasks.where('collectionId').equals(id).delete()
     await db.collections.delete(id)
     await db.shares.where('refId').equals(id).delete()
@@ -103,7 +104,7 @@ export async function deleteSection(
   collectionId: string,
   sectionId: string
 ): Promise<void> {
-  await db.transaction('rw', db.collections, db.tasks, async () => {
+  await db.transaction('rw', db.projects, db.collections, db.tasks, async () => {
     const c = await db.collections.get(collectionId)
     if (!c || c.sections.length <= 1) return
     const remaining = c.sections.filter((s) => s.id !== sectionId)
@@ -178,7 +179,7 @@ export async function recolorStatus(
 
 /** Xoá status: item đang dùng nó về null (ô Status trống). */
 export async function deleteStatus(collectionId: string, statusId: string): Promise<void> {
-  await db.transaction('rw', db.collections, db.tasks, async () => {
+  await db.transaction('rw', db.projects, db.collections, db.tasks, async () => {
     const c = await db.collections.get(collectionId)
     if (!c) return
     await db.collections.update(collectionId, {
@@ -207,7 +208,7 @@ export async function addCollectionItem(
   // One transaction so the maxSeq read + add can't interleave with another add:
   // two rapid "add item" clicks would otherwise read the same maxSeq and produce
   // duplicate per-project sequences.
-  return db.transaction('rw', db.collections, db.tasks, async () => {
+  return db.transaction('rw', db.projects, db.collections, db.tasks, async () => {
     const c = await db.collections.get(collectionId)
     // A deleted/unknown collection must fail loudly — falling back to
     // projectId '' would insert an invisible orphan row no view ever loads.
@@ -307,7 +308,7 @@ export async function addSprintTask(input: {
   status?: Status
   priority?: Priority
 }): Promise<Task> {
-  return db.transaction('rw', db.tasks, db.events, async () => {
+  return db.transaction('rw', db.projects, db.tasks, db.events, async () => {
     const task: Task = {
       id: uid(),
       projectId: input.projectId,
@@ -367,7 +368,7 @@ export async function setListOrder(taskId: string, order: number): Promise<void>
  * which made a drag silently "not take". Never touches the immutable `sequence`.
  */
 export async function renormalizeListOrder(orderedIds: string[]): Promise<void> {
-  await db.transaction('rw', db.tasks, async () => {
+  await db.transaction('rw', db.projects, db.tasks, async () => {
     for (let i = 0; i < orderedIds.length; i++) {
       await db.tasks.update(orderedIds[i], { listOrder: i })
     }
@@ -519,7 +520,7 @@ export async function updateTask(
   id: string,
   patch: Partial<Task>
 ): Promise<void> {
-  await db.transaction('rw', db.tasks, db.members, db.events, async () => {
+  await db.transaction('rw', db.projects, db.tasks, db.members, db.events, async () => {
     const task = await db.tasks.get(id)
     if (!task) return
     // Only load members when an assignee label needs freezing (title fires per
@@ -565,7 +566,7 @@ export async function logStatusChange(
   // OUTSIDE any open transaction (the sorted-column path calls it in `.then()`
   // after its reindex commits), so this opens its own top-level transaction —
   // it is never nested inside a narrower db.tasks-only parent.
-  await db.transaction('rw', db.tasks, db.events, async () => {
+  await db.transaction('rw', db.projects, db.tasks, db.events, async () => {
     const task = await db.tasks.get(id)
     if (!task) return
     const entry: ChangeLogEntry = { field: 'status', from, to, ts: Date.now() }
@@ -655,7 +656,7 @@ export async function moveUnfinishedToNextSprint(
   // One transaction so the move is atomic: a renumber/move that throws (or a tab
   // close) midway must NOT leave the source sprint half-emptied with inconsistent
   // sequences. recomputeDates nests safely — its scope (tasks+members) is a subset.
-  return db.transaction('rw', db.tasks, db.members, db.sprints, db.events, async () => {
+  return db.transaction('rw', [db.projects, db.tasks, db.members, db.sprints, db.events], async () => {
     // Scope to the SOURCE sprint's project. orderBy('startDate') across the whole
     // table mixes in other projects' sprints — a foreign sprint sharing (or
     // sorting near) the start date would be picked as the "next" sprint, so the
@@ -735,6 +736,47 @@ export async function moveUnfinishedToNextSprint(
   })
 }
 
+/**
+ * Replace a project's holiday list. Mirrors `setMemberDaysOff`, with one
+ * deliberate difference in blast radius: personal days-off only touch that
+ * member's tasks, whereas a holiday moves EVERY task in the project — including
+ * unassigned ones, which have no member to hang an off-day on.
+ *
+ * Normalises on write so the scheduler never has to defend itself: bad dates
+ * dropped, a backwards range swapped, `half` kept only on a single-day range
+ * (a "PM off" spanning five days is meaningless), sorted by start date.
+ * See design-docs/project-holidays.md.
+ */
+export async function setProjectHolidays(
+  projectId: string,
+  holidays: Holiday[]
+): Promise<Holiday[]> {
+  const ISO = /^\d{4}-\d{2}-\d{2}$/
+  const clean: Holiday[] = []
+  for (const h of holidays) {
+    if (!h || !ISO.test(h.from ?? '') || !ISO.test(h.to ?? '')) continue
+    const from = h.to < h.from ? h.to : h.from
+    const to = h.to < h.from ? h.from : h.to
+    const single = from === to
+    clean.push({
+      id: h.id,
+      name: (h.name ?? '').trim() || 'Untitled',
+      from,
+      to,
+      ...(single && h.half ? { half: h.half } : {}),
+    })
+  }
+  clean.sort((a, b) => a.from.localeCompare(b.from) || a.to.localeCompare(b.to))
+  // Atomic: persist + reflow the whole project in one transaction, so closing
+  // the page mid-loop can't leave stored dates stale against the saved holidays.
+  return db.transaction('rw', db.projects, db.tasks, db.members, async () => {
+    await db.projects.update(projectId, { holidays: clean })
+    const owned = await db.tasks.where('projectId').equals(projectId).toArray()
+    for (const t of owned) await recomputeDates(t.id)
+    return clean
+  })
+}
+
 export async function setMemberDaysOff(
   memberId: string,
   daysOff: DayOff[]
@@ -751,7 +793,7 @@ export async function setMemberDaysOff(
   // Atomic: persist the new off-days AND recompute every owned task's dates in
   // one transaction, so the page closing mid-loop can't leave stored dates stale
   // relative to the just-saved off-days. recomputeDates nests (subset scope).
-  return db.transaction('rw', db.members, db.tasks, async () => {
+  return db.transaction('rw', db.projects, db.members, db.tasks, async () => {
     await db.members.update(memberId, { daysOff: clean })
     const owned = await db.tasks.where('assigneeId').equals(memberId).toArray()
     for (const t of owned) await recomputeDates(t.id)
@@ -805,7 +847,7 @@ export async function setTaskParent(
   if (parentId === childId) return
   // Transactional so the guards below can't go stale between the reads and
   // the write (two overlapping group edits would otherwise TOCTOU past them).
-  await db.transaction('rw', db.tasks, async () => {
+  await db.transaction('rw', db.projects, db.tasks, async () => {
     const [child, parent, hasChildren] = await Promise.all([
       db.tasks.get(childId),
       db.tasks.get(parentId),
@@ -832,7 +874,7 @@ export async function createGroupFromSelection(
   taskIds: string[]
 ): Promise<string | null> {
   if (taskIds.length === 0) return null
-  return db.transaction('rw', db.tasks, db.sprints, async () => {
+  return db.transaction('rw', db.projects, db.tasks, db.sprints, async () => {
     const loaded = (await Promise.all(taskIds.map((id) => db.tasks.get(id)))).filter(
       (t): t is Task => !!t
     )
@@ -873,7 +915,7 @@ export async function createGroupFromSelection(
 
 export async function deleteTask(taskId: string) {
   const touched: string[] = []
-  await db.transaction('rw', db.tasks, async () => {
+  await db.transaction('rw', db.projects, db.tasks, async () => {
     await db.tasks.delete(taskId)
     // Promote any grouped children to top-level (do NOT cascade-delete them).
     const children = await db.tasks.filter((t) => t.parentId === taskId).toArray()
@@ -905,7 +947,7 @@ export async function addDependency(
   // One transaction: the cycle check, the dependsOn read-modify-write and the
   // recompute must not interleave with another dependency edit (a stale-array
   // overwrite would silently drop an edge) or split on a mid-write crash.
-  return db.transaction('rw', db.tasks, db.members, async () => {
+  return db.transaction('rw', db.projects, db.tasks, db.members, async () => {
     const tasks = await db.tasks.toArray()
     if (wouldCreateCycle(taskId, depId, tasks)) return false
     const task = tasks.find((t) => t.id === taskId)
@@ -921,7 +963,7 @@ export async function addDependency(
 
 export async function removeDependency(taskId: string, depId: string) {
   // Same transaction rationale as addDependency.
-  await db.transaction('rw', db.tasks, db.members, async () => {
+  await db.transaction('rw', db.projects, db.tasks, db.members, async () => {
     const task = await db.tasks.get(taskId)
     if (!task) return
     await db.tasks.update(taskId, {
@@ -943,7 +985,7 @@ export async function setDependencies(
   // One transaction spanning the deps write, the recompute AND the activity
   // log: logTaskEdits' own contract requires db.events in scope, and a crash
   // between the write and the log must not leave deps changed with no entry.
-  return db.transaction('rw', db.tasks, db.members, db.events, async () => {
+  return db.transaction('rw', db.projects, db.tasks, db.members, db.events, async () => {
     const tasks = await db.tasks.toArray()
     const task = tasks.find((t) => t.id === taskId)
     if (!task) return []
@@ -1035,7 +1077,7 @@ export async function deleteMember(memberId: string) {
   const affected = (
     await db.tasks.where('assigneeId').equals(memberId).toArray()
   ).map((t) => t.id)
-  await db.transaction('rw', db.members, db.tasks, async () => {
+  await db.transaction('rw', db.projects, db.members, db.tasks, async () => {
     await db.tasks
       .where('assigneeId')
       .equals(memberId)

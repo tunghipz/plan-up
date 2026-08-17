@@ -1,6 +1,7 @@
 import {
   computeWorkingPlan,
   type Member,
+  type ProjectHolidayMap,
   type Task,
   type Status,
 } from './db'
@@ -28,14 +29,17 @@ export const STATUS_ORDER: Status[] = ['todo', 'in_progress', 'done']
 export function computeMemberConflicts(
   tasks: Task[],
   tasksById: Map<string, Task>,
-  memberById: Map<string, Member>
+  memberById: Map<string, Member>,
+  /** Project-wide off-days — without them a holiday-shifted task reads as a
+   *  double-booking that isn't there. See design-docs/project-holidays.md. */
+  holidays?: ProjectHolidayMap
 ): Map<string, string> {
   type Hit = { seq: number; kind: 'overlap' | 'start' | 'end' | 'prereq' }
   // Unsized tasks (no effort) aren't really scheduled — exclude them from
   // double-booking detection. See design-docs/conflict-warning.md.
   const sized = tasks.filter((t) => t.estimate !== null)
   const plans = new Map(
-    sized.map((t) => [t.id, computeWorkingPlan(t, tasksById, memberById)])
+    sized.map((t) => [t.id, computeWorkingPlan(t, tasksById, memberById, holidays)])
   )
   const startKey = (t: Task) => {
     const p = plans.get(t.id)!

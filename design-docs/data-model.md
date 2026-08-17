@@ -15,6 +15,13 @@ Seven IndexedDB tables (Dexie database name **`plan-up`**): `projects`, `members
 
 ### `Project` (`types.ts`)
 `id` · `name` · `createdAt` (number) · `description?` (string) · `color?` (hex) · `icon?` (emoji)
+· `holidays?` (`Holiday[]`)
+
+`Holiday = { id, name, from, to, half? }` — một **dải** ngày nghỉ chung cho cả project
+(Tết, Quốc khánh, offsite), `from`/`to` là `yyyy-mm-dd` inclusive; `half` chỉ hợp lệ khi
+`from === to`. Scheduler union vào `Member.daysOff` cho **mọi** task trong project, kể cả
+task chưa assign. Optional + **non-indexed** ⇒ **không bump Dexie version** (cùng pattern
+`description`/`color`/`icon`). Xem [project-holidays.md](./project-holidays.md).
 - `description`, `color`, and `icon` are **optional, non-indexed** fields edited from the
   settings page (see [project-member-settings.md](./project-member-settings.md),
   [project-icon-emoji.md](./project-icon-emoji.md)). Because they are

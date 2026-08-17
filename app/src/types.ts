@@ -114,6 +114,32 @@ export interface Project {
    * non-indexed → no Dexie version bump (see project-icon-emoji.md).
    */
   icon?: string
+  /**
+   * Non-working days for the WHOLE project (Tết, national holidays, a team
+   * offsite) — on top of weekends and on top of each member's own `daysOff`.
+   * The scheduler unions these into every task in the project, including
+   * unassigned ones. Optional + non-indexed → no Dexie version bump (same as
+   * `description`/`color`/`icon`); rows written before this shipped read as
+   * `undefined` = no holidays. See design-docs/project-holidays.md.
+   */
+  holidays?: Holiday[]
+}
+
+/**
+ * One named, contiguous run of project-wide days off. Stored as a RANGE, not as
+ * one row per date: the name belongs to the whole run ("Tết"), so per-date rows
+ * would duplicate it N times and leave no way to rename or delete the run in one
+ * action. See design-docs/project-holidays.md.
+ */
+export interface Holiday {
+  id: string
+  name: string
+  /** yyyy-mm-dd, inclusive. */
+  from: string
+  /** yyyy-mm-dd, inclusive. `to === from` means a single day. */
+  to: string
+  /** Half-day off — only meaningful (and only kept) when `from === to`. */
+  half?: 'am' | 'pm'
 }
 
 /**

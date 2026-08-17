@@ -12,6 +12,7 @@ import {
   type Status,
   type Task,
 } from './db'
+import { useProjectHolidays } from './scheduling-context'
 import { formatShortDate, dayDiff } from './lib'
 import { Avatar } from './members'
 import { SprintRangeContext } from './DatePicker'
@@ -111,11 +112,12 @@ export function BoardView({
   // Precompute each task's working plan ONCE per data change — not per render.
   // Drag re-renders the board on every index change; recomputing the scheduler
   // for every card's due chip in that hot path was the source of drag jank.
+  const holidays = useProjectHolidays()
   const planById = useMemo(() => {
     const m = new Map<string, ReturnType<typeof computeWorkingPlan>>()
-    for (const t of tasks) m.set(t.id, computeWorkingPlan(t, tasksById, membersById))
+    for (const t of tasks) m.set(t.id, computeWorkingPlan(t, tasksById, membersById, holidays))
     return m
-  }, [tasks, tasksById, membersById])
+  }, [tasks, tasksById, membersById, holidays])
 
   const effectiveStatus = (t: Task): Status => {
     const kids = childrenByParent.get(t.id)

@@ -715,3 +715,32 @@ export const PROJECT_ICON_EMOJIS = [
   '🚀', '🎯', '✅', '📌', '📋', '💡', '🔥', '⭐',
   '📈', '🐛', '🔧', '🎨', '🧩', '📦', '🗂️',
 ]
+
+const MS_DAY = 86_400_000
+const isWeekendISO = (iso: string) => {
+  const g = new Date(iso + 'T00:00:00Z').getUTCDay()
+  return g === 0 || g === 6
+}
+
+/**
+ * WORKING days a project holiday actually costs. Weekends are already
+ * non-working, so a 9-calendar-day Tết that swallows two weekends costs 7 —
+ * labelling it "9d" would overstate what the team loses. `half` only counts on a
+ * single-day holiday (`setProjectHolidays` drops it otherwise).
+ * See design-docs/project-holidays.md.
+ */
+export function holidayWorkDays(h: {
+  from: string
+  to: string
+  half?: 'am' | 'pm'
+}): number {
+  let n = 0
+  for (
+    let t = Date.parse(h.from + 'T00:00:00Z');
+    t <= Date.parse(h.to + 'T00:00:00Z');
+    t += MS_DAY
+  ) {
+    if (!isWeekendISO(new Date(t).toISOString().slice(0, 10))) n++
+  }
+  return h.half && h.from === h.to ? n * 0.5 : n
+}

@@ -47,6 +47,7 @@ import {
   type Status,
   type WorkingPlan,
 } from './db'
+import { useProjectHolidays } from './scheduling-context'
 import { Avatar, MemberDaysOffButton } from './members'
 import {
   STATUS_META,
@@ -137,6 +138,10 @@ export function SprintView({
     () => db.members.where('projectId').equals(projectId).toArray(),
     [projectId]
   )
+  // Project-wide off-days, provided by App around the whole view area — the
+  // scheduler unions them into every task here (including unassigned ones).
+  // See design-docs/project-holidays.md.
+  const holidays = useProjectHolidays()
   const [showAddMember, setShowAddMember] = useState(false)
   const [showEmpty, setShowEmpty] = useState(false)
   const [collapsed, setCollapsed] = useState<Set<string>>(() =>
@@ -188,8 +193,8 @@ export function SprintView({
   // prereq/group chain with a fresh cache, on EVERY render (drag hover, select,
   // sidebar resize), which visibly janked large sprints.
   const planById = useMemo(
-    () => computeAllWorkingPlans(tasks, tasksById, memberById),
-    [tasks, tasksById, memberById]
+    () => computeAllWorkingPlans(tasks, tasksById, memberById, holidays),
+    [tasks, tasksById, memberById, holidays]
   )
 
   // ── Member-lane drag-to-reorder (per project) ───────────────────────────
@@ -634,6 +639,7 @@ function MemberCard({
     return s
   }, [tasks])
   const memberById = useMemo(() => new Map(members.map((m) => [m.id, m])), [members])
+  const holidays = useProjectHolidays()
   // All header stats derive from the same inputs — memoize them as one block so
   // they don't recompute (incl. the O(n²) conflict scan + a computeWorkingPlan
   // per task) on every unrelated re-render of this card (e.g. a selection toggle
@@ -650,7 +656,7 @@ function MemberCard({
     let nextDue: string | null = null
     for (const t of leafTasks) {
       if (t.status === 'done') continue
-      const plan = planById.get(t.id) ?? computeWorkingPlan(t, tasksById, memberById)
+      const plan = planById.get(t.id) ?? computeWorkingPlan(t, tasksById, memberById, holidays)
       // Milestones (effort 0) have no due span — their deadline is the milestone
       // date (start), so they count toward overdue / next-due like any task.
       const due = t.estimate === 0 ? plan.startDate : plan.dueDate
@@ -660,7 +666,7 @@ function MemberCard({
     }
     // Double-booking warnings among this member's leaf tasks (see
     // design-docs/conflict-warning.md). Cheap O(n²) over a member's tasks.
-    const conflictTips = computeMemberConflicts(leafTasks, tasksById, memberById)
+    const conflictTips = computeMemberConflicts(leafTasks, tasksById, memberById, holidays)
     // Date span this member's tasks actually touch (computed start + due, same
     // plan the rows show). Feeds the days-off window so an off-day on an overdue
     // date that falls before the sprint start is still pickable. All tasks (incl.
@@ -668,7 +674,7 @@ function MemberCard({
     let earliestDate: string | null = null
     let latestDate: string | null = null
     for (const t of tasks) {
-      const plan = planById.get(t.id) ?? computeWorkingPlan(t, tasksById, memberById)
+      const plan = planById.get(t.id) ?? computeWorkingPlan(t, tasksById, memberById, holidays)
       const due = t.estimate === 0 ? plan.startDate : plan.dueDate
       for (const d of [plan.startDate, due]) {
         if (!d) continue
@@ -677,7 +683,7 @@ function MemberCard({
       }
     }
     return { total, done, pct, overdue, nextDue, conflictTips, earliestDate, latestDate }
-  }, [tasks, parentIds, tasksById, memberById, planById])
+  }, [tasks, parentIds, tasksById, memberById, planById, holidays])
   // Widen the sprint window to cover this member's task span (overdue tasks can
   // sit before the sprint start), so those dates are pickable in the days-off popover.
   const daysOffRange = useMemo(
@@ -1338,6 +1344,7 @@ function TaskGroupRow({
     () => new Map(members.map((m) => [m.id, m])),
     [members]
   )
+  const holidays = useProjectHolidays()
   const total = childrenTasks.length
   const done = childrenTasks.filter((c) => c.status === 'done').length
   const derived = derivedGroupStatus(childrenTasks)
@@ -1354,7 +1361,7 @@ function TaskGroupRow({
   let minKey: string | null = null
   let maxKey: string | null = null
   for (const c of childrenTasks) {
-    const plan = planById.get(c.id) ?? computeWorkingPlan(c, tasksById, memberById)
+    const plan = planById.get(c.id) ?? computeWorkingPlan(c, tasksById, memberById, holidays)
     if (plan.startDate) {
       const k = `${plan.startDate}T${plan.startTime ?? ''}`
       if (!minKey || k < minKey) {

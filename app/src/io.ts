@@ -360,7 +360,7 @@ export function __resetSeedLockForTests() {
  * Returns the number of duplicate sprints removed.
  */
 export async function dedupeSprints(): Promise<number> {
-  return db.transaction('rw', db.sprints, db.tasks, db.events, async () => {
+  return db.transaction('rw', db.projects, db.sprints, db.tasks, db.events, async () => {
     const sprints = await db.sprints.toArray()
     const tasks = await db.tasks.toArray()
 

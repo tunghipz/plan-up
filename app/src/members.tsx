@@ -1,5 +1,6 @@
-import { useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { useLiveQuery } from 'dexie-react-hooks'
 import { Calendar, X, Upload, Trash2 } from 'lucide-react'
 import { usePinnedPopover } from './usePinnedPopover'
 import {
@@ -9,6 +10,7 @@ import {
   resizeImageToDataURL,
   colorForName,
   PALETTE,
+  addDays,
   type Member,
 } from './db'
 import { DateField } from './DatePicker'
@@ -650,6 +652,21 @@ export function MemberDaysOffButton({
   // Full list drives mutations (date-keyed); the sprint view only displays and
   // counts the subset within its range. Out-of-range days stay untouched.
   const days = member.daysOff ?? []
+  // Project-wide holidays, read straight off the project row (the scheduler's
+  // map is name-less by design — it only needs dates). Scoped to the same range
+  // as the personal list so a sprint view stays about this sprint.
+  const project = useLiveQuery(() => db.projects.get(member.projectId), [member.projectId])
+  const holidayDays = useMemo(() => {
+    const out: { date: string; name: string }[] = []
+    for (const h of project?.holidays ?? []) {
+      for (let d = h.from; d <= h.to; d = addDays(d, 1)) {
+        if (range && (d < range.start || d > range.end)) continue
+        out.push({ date: d, name: h.name })
+      }
+    }
+    return out.sort((a, b) => a.date.localeCompare(b.date))
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `range` is a fresh object literal every render; its two values are the real inputs
+  }, [project?.holidays, range?.start, range?.end])
   const visibleDays = range
     ? daysOffInRange(days, range.start, range.end)
     : days
@@ -745,9 +762,35 @@ export function MemberDaysOffButton({
           <div className="text-[11px] tracking-normal text-ink-faint px-1 pb-1.5">
             Days off — {member.name}
           </div>
+          {/* Project holidays first, READ-ONLY: dimmed, tagged, no remove button.
+              They are not this member's data — editing them lives in project
+              settings, and §8.3 forbids two ways to do the same thing. Without
+              this the popover would claim "None this sprint" on a week the whole
+              team is off. See design-docs/project-holidays.md. */}
+          {holidayDays.map((d) => (
+            <div key={`hol-${d.date}`} className="flex items-center gap-2 px-1.5 py-1 opacity-75">
+              <span className="text-sm text-ink-muted tabular-nums w-16 shrink-0">
+                {formatShortDate(d.date)}
+              </span>
+              <span className="flex-1 text-sm text-ink-muted truncate">
+                {d.name}
+              </span>
+              <span className="text-[10.5px] text-ink-faint bg-fill rounded px-1.5 py-0.5 shrink-0">
+                project
+              </span>
+            </div>
+          ))}
+          {holidayDays.length > 0 && visibleDays.length > 0 && (
+            <div className="border-t border-border-hair my-1" />
+          )}
           {visibleDays.length === 0 && (
             <div className="text-sm text-ink-faint px-1 pb-1.5">
-              {range ? 'None this sprint. ' : 'None. '}Weekends are already off.
+              {holidayDays.length > 0
+                ? 'No personal days off. '
+                : range
+                  ? 'None this sprint. '
+                  : 'None. '}
+              Weekends are already off.
             </div>
           )}
           {visibleDays.map((d) => (

@@ -13,6 +13,7 @@ import {
   type Task,
   type Member,
 } from './db'
+import { useProjectHolidays } from './scheduling-context'
 import { Avatar } from './members'
 import { STATUS_META, derivedGroupStatus } from './sprint-logic'
 import { usePinnedPopover } from './usePinnedPopover'
@@ -133,11 +134,12 @@ export function GanttView({
   // ResizeObserver tick / window resize; without this the entire scheduler
   // re-ran for every task on each resize frame. Mirrors BoardView's planById.
   // Covers every task so a parent's roll-up always sees all its children.
+  const holidays = useProjectHolidays()
   const planById = useMemo(() => {
     const m = new Map<string, ReturnType<typeof computeWorkingPlan>>()
-    for (const t of tasksById.values()) m.set(t.id, computeWorkingPlan(t, tasksById, memberById))
+    for (const t of tasksById.values()) m.set(t.id, computeWorkingPlan(t, tasksById, memberById, holidays))
     return m
-  }, [tasksById, memberById])
+  }, [tasksById, memberById, holidays])
 
   const N = workdays.length
   const firstDay = workdays[0]

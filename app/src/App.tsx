@@ -67,6 +67,9 @@ import { CollectionView, CollectionBarIdentity, StatusEditor } from './Collectio
 import { useConfirm } from './confirm-context'
 import { ModalSheet } from './ModalSheet'
 import { SprintView } from './SprintView'
+import { ProjectHolidaysContext } from './scheduling-context'
+import { projectHolidayMap } from './scheduling'
+import { ProjectHolidaysButton } from './ProjectHolidays'
 import { BoardView } from './BoardView'
 import { GanttView } from './GanttView'
 import { ActivityLog } from './ActivityLog'
@@ -935,6 +938,13 @@ function App() {
   const currentSprint = sprints?.find((s) => s.id === currentSprintId) ?? null
   const currentProject =
     projects?.find((p) => p.id === currentProjectId) ?? null
+  // Keyed on the holiday list itself, not the whole row — renaming the project
+  // or picking a new tile colour must not invalidate every scheduling memo below.
+  const holidayMap = useMemo(
+    () => projectHolidayMap(currentProject),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- holidays are the only field the map derives from
+    [currentProject?.id, currentProject?.holidays]
+  )
   const nextSprint = useMemo(() => {
     if (!sprints || !currentSprint) return null
     const idx = sprints.findIndex((s) => s.id === currentSprint.id)
@@ -1135,6 +1145,9 @@ function App() {
   }
 
   return (
+    // Wraps the WHOLE shell, not just the views: the settings drawer's member
+    // popovers show project holidays as read-only rows and need the same map.
+    <ProjectHolidaysContext value={holidayMap}>
     <div className="h-screen flex ambient-canvas text-ink overflow-hidden">
       {/* Browser-only preview: paint fake macOS traffic lights so `?desktop=1`
           shows the real desktop layout. Real Tauri draws OS lights instead. */}
@@ -1702,6 +1715,16 @@ function App() {
             )}
           </div>
           <div className="ml-auto flex items-center gap-1.5">
+            {/* Informational only — appears when THIS sprint loses days to a
+                project holiday, click to edit. Creating one lives in project
+                settings; see design-docs/project-holidays.md. */}
+            {selKind === 'sprint' && currentSprint && currentProject && (
+              <ProjectHolidaysButton
+                project={currentProject}
+                range={{ start: currentSprint.startDate, end: currentSprint.endDate }}
+                hideWhenEmpty
+              />
+            )}
             {selKind === 'collection' && currentCollection ? (
               <>
                 <StatusEditor collection={currentCollection} />
@@ -2190,6 +2213,7 @@ function App() {
         )}
 
     </div>
+    </ProjectHolidaysContext>
   )
 }
 

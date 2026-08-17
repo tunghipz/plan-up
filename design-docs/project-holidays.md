@@ -1,7 +1,7 @@
 # Project holidays — ngày nghỉ chung toàn project
 
 **Status:** Implemented
-**Last updated:** 2026-08-17 (bản đầu)
+**Last updated:** 2026-08-17 (bản đầu; + fix popover tràn đáy màn hình và popover không tự đóng khi đóng drawer settings)
 **Code:** `app/src/types.ts` (`Holiday`, `Project.holidays`), `app/src/scheduling.ts`
 (`expandHolidays`, `projectHolidayMap`, `ProjectHolidayMap`, `leafPlan` union,
 `recomputeDates`, `recomputeAllDates`), `app/src/scheduling-context.ts`
@@ -9,6 +9,7 @@
 (`setProjectHolidays`), `app/src/lib.ts` (`holidayWorkDays`),
 `app/src/DatePicker.tsx` (`CalendarGrid` controlled-month props),
 `app/src/ProjectHolidays.tsx` (`ProjectHolidaysButton`),
+`app/src/usePinnedPopover.ts` (tự đóng khi trigger bị ẩn),
 `app/src/App.tsx` + `app/src/ProjectSettingsView.tsx` (2 chỗ mount)
 
 ## Purpose
@@ -196,6 +197,20 @@ Ngày lễ thì **có** — union nằm ở `leafPlan` theo `task.projectId`, kh
   contract, design-system §6.5 — Esc chỉ đóng tầng trên cùng). Một cú mis-click không
   bắt phải mở lại popover rồi lật về đúng tháng.
 - **Chốt xong dải → focus tự nhảy vào ô tên**, vì tên là thứ duy nhất còn thiếu.
+- **Popover lật lên khi không đủ chỗ phía dưới.** Lịch 2 tháng + danh sách kỳ nghỉ cao
+  ~414px; pin cứng `top = rect.bottom + 6` thì phần rơi khỏi màn hình đúng là **footer**
+  — ô nhập tên + nút Add, tức là đúng phần cần để làm xong việc. `place()` đo chiều cao
+  thật rồi lật lên trên trigger; không vừa cả hai chiều thì ghim ở mép và để
+  `max-h-[calc(100vh-16px)] overflow-y-auto` của chính popover lo phần còn lại.
+  Đo thật: viewport 520px → popover 98–512, nút Add nằm trong tầm nhìn.
+- **Popover tự đóng khi trigger bị ẩn** (`usePinnedPopover`). Drawer settings và drawer
+  activity **không unmount** lúc đóng — chúng trượt ra bằng `translate-x-full` + `inert`
+  để animate được. Popover mở từ trong drawer vì thế giữ nguyên `open`, mà nó lại portal
+  ra `<body>`, nên nó **treo lơ lửng trên app ở toạ độ fixed cũ, không còn nút nào để
+  tắt**. Hook giờ kiểm mỗi render (đúng lúc drawer đổi state là subtree re-render):
+  anchor mất kết nối / nằm trong `[inert]` / `checkVisibility()` false ⇒ đóng.
+  Sửa ở hook nên **mọi popover trong drawer** (days-off, avatar picker) hết luôn bug này,
+  không riêng holidays.
 
 ## Future / open questions
 

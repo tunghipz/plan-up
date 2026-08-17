@@ -122,10 +122,19 @@ export function ProjectHolidaysButton({
     place: () => {
       const rect = btnRef.current?.getBoundingClientRect()
       if (!rect) return null
-      return {
-        top: rect.bottom + 6,
-        right: Math.max(8, window.innerWidth - rect.right),
+      const right = Math.max(8, window.innerWidth - rect.right)
+      const h = popRef.current?.offsetHeight ?? 0
+      let top = rect.bottom + 6
+      // Flip above the trigger when it would run off the bottom. A two-month
+      // calendar plus the saved list is tall, and the part that falls off the
+      // screen is the footer — the name field and Add button, i.e. exactly the
+      // part you need to finish the job. If it fits neither way, sit at the
+      // bottom margin and let the popover's own max-height scroll it.
+      if (h && top + h > window.innerHeight - 8) {
+        const above = rect.top - h - 6
+        top = above >= 8 ? above : Math.max(8, window.innerHeight - 8 - h)
       }
+      return { top, right }
     },
   }) ?? { top: 0, right: 0 }
 
@@ -242,7 +251,7 @@ export function ProjectHolidaysButton({
             ref={popRef}
             onClick={(e) => e.stopPropagation()}
             style={{ position: 'fixed', top: pos.top, right: pos.right }}
-            className="z-50 glass-popover rounded-[14px] p-3 w-[520px] max-w-[calc(100vw-16px)]"
+            className="z-50 glass-popover rounded-[14px] p-3 w-[520px] max-w-[calc(100vw-16px)] max-h-[calc(100vh-16px)] overflow-y-auto"
           >
             <div className="text-[11px] text-ink-faint px-1 pb-2">
               Project holidays — everyone in {project.name} is off

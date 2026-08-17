@@ -93,8 +93,28 @@ export function usePinnedPopover<P extends Pos>(opts: {
   }, [])
 
   // Pin before paint on every render while open — see the contract above.
+  //
+  // Also self-close when the trigger got HIDDEN without unmounting. The settings
+  // and activity drawers stay mounted while "closed" — they slide out with
+  // `translate-x-full` + `inert` so the transition can animate — so a popover
+  // opened from inside one keeps its `open` state, and being portalled to
+  // <body> it would go on floating over the app at a stale fixed position with
+  // no trigger left to dismiss it. Checked every render, which is exactly when
+  // the drawer's state change re-renders this subtree.
   useLayoutEffect(() => {
-    if (open) pin()
+    if (!open) return
+    const el = anchorRef?.current
+    if (el) {
+      const hidden =
+        !el.isConnected ||
+        !!el.closest('[inert]') ||
+        (typeof el.checkVisibility === 'function' && !el.checkVisibility())
+      if (hidden) {
+        onCloseRef.current()
+        return
+      }
+    }
+    pin()
   })
 
   useEffect(() => {

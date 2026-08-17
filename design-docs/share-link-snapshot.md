@@ -7,7 +7,17 @@
 > verbatim by the hosted mode.
 
 **Status:** Implemented
-**Last updated:** 2026-07-16 (**parent date span is rolled up at build** — a group head's OWN
+**Last updated:** 2026-08-17 (**task title wrap thay vì cắt bằng "…"** — cột Task dùng
+`truncate` (1 dòng + ellipsis) trong table `tableLayout: 'fixed'`. Card bảng bị chặn ~892px
+(`max-w-[1240px]` + rail 300px, kể cả trên màn 27″) → cột Task chỉ còn ~392px, nên title dài
+mất chữ **vĩnh viễn** với người nhận: không hover ra được, và Export PNG chụp đúng bản đã cắt.
+Đổi sang **wrap tự do** — title `flex-1 min-w-0 [overflow-wrap:anywhere]`, và hàng title đổi
+`items-center → items-start` để priority pill / `◆ Milestone` bám **dòng đầu** thay vì trôi ra
+giữa khối 2 dòng. Row cao thấp không đều là tradeoff có chủ đích: mất chữ tệ hơn mất nhịp; các
+phương án clamp-2-dòng + tooltip bị loại vì tooltip không cứu được Export PNG. Đối chiếu 5
+phương án (kèm số đo cột Task ở từng bề rộng): `demo/share-long-title.html`. *Chưa áp:*
+`CollectionSnapshotViewer` (bảng collection, `truncate` cùng kiểu) và `PngExportCard` vẫn cắt.
+Trước đó: 2026-07-16 — **parent date span is rolled up at build** — a group head's OWN
 dates are ignored in-app (the scheduler spans the children: earliest child start … latest child
 due), so a container's raw stored dates [often null] made the share page show "—" while the
 sprint shows the span. `buildSnapshot` now bakes `startDate = min(child.startDate)`,
@@ -192,6 +202,12 @@ phía server, không auth.
     (`StatusPill`, color-mix 15%/78% trên `STATUS_META`). Task trong mỗi lane (và
     subtask trong mỗi parent) **tự sort theo end date** (`byEnd`, undated cuối).
     Không edit, không ghi DB; data chỉ in-memory từ fragment.
+  - **Title dài → xuống dòng, không bao giờ cắt** (2026-08-17). Cột Task hẹp (~392px do
+    `max-w-[1240px]` + rail 300px), nên title `flex-1 min-w-0 [overflow-wrap:anywhere]`
+    và **không** `truncate`. Hàng title là `items-start` (không phải `items-center`) để
+    priority pill / `◆ Milestone` neo ở **dòng đầu** khi title chạy 2+ dòng. Lý do bỏ
+    ellipsis: người nhận share link **không có cách nào** lấy lại phần chữ mất (không phải
+    app của họ, không hover ra full text), và Export PNG đóng băng đúng khung hình đã cắt.
 - Link hỏng / giải mã lỗi → viewer hiện trạng thái "Link không hợp lệ hoặc đã hỏng"
   + nút mở plan-up bình thường. Không crash.
 

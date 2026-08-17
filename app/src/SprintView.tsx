@@ -1197,7 +1197,15 @@ function TitleTextarea({
     const el = ref.current
     if (!el) return
     el.style.height = 'auto'
-    el.style.height = el.scrollHeight + 'px'
+    // `.editable` puts a 1px transparent border on the textarea and Tailwind sets
+    // box-sizing: border-box — so `height` COUNTS the border while `scrollHeight`
+    // does NOT. Assigning scrollHeight straight up left every 2+ line title exactly
+    // the border's worth (2px) short, shaving the bottom of the last line (Vietnamese
+    // dấu nặng / descenders came out clipped). Measure the border at runtime instead
+    // of hardcoding 2 — it stays correct under a different theme or browser zoom.
+    // See design-docs/list-view.md v5.
+    const borderY = el.offsetHeight - el.clientHeight
+    el.style.height = el.scrollHeight + borderY + 'px'
   }
   // Resize on mount + every draft change. useLayoutEffect runs sync before paint
   // so users never see the "1-line then snap to N lines" flicker.

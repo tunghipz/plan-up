@@ -46,12 +46,15 @@ function memberStats(tasks: Task[]): { done: number; total: number } {
   return { total: leaf.length, done: leaf.filter((t) => t.status === 'done').length }
 }
 
+/* Both tags carry `mt-px` because their only caller is the task-title cell, whose
+ * row is `items-start` (the title wraps) — the nudge optically centres the pill on
+ * the title's first line. See design-docs/share-link-snapshot.md. */
 function PriorityPill({ priority }: { priority: Priority }) {
   const p = PRIORITY_TAG[priority]
   if (!p) return null
   return (
     <span
-      className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold whitespace-nowrap shrink-0"
+      className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold whitespace-nowrap shrink-0 mt-px"
       style={{ background: p.bg, color: p.fg }}
     >
       {p.label}
@@ -61,7 +64,7 @@ function PriorityPill({ priority }: { priority: Priority }) {
 
 function MilestoneTag() {
   return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-accent-soft text-accent px-2 py-0.5 text-[11px] font-semibold whitespace-nowrap shrink-0">
+    <span className="inline-flex items-center gap-1 rounded-full bg-accent-soft text-accent px-2 py-0.5 text-[11px] font-semibold whitespace-nowrap shrink-0 mt-px">
       <span className="w-[7px] h-[7px] bg-accent" style={{ transform: 'rotate(45deg)' }} />
       Milestone
     </span>
@@ -409,10 +412,18 @@ export function SnapshotViewer({ raw }: { raw: string }) {
                         </td>
                       )}
                       <td style={{ ...cell }} className="text-[12px] text-ink-faint tab-data">{seq}</td>
+                      {/* Title WRAPS — deliberately no `truncate`. The board card is capped
+                          at ~892px (page max-w-[1240px] + the 300px rail) even on a 27" screen,
+                          so the Task column is only ~392px and an ellipsis would drop text the
+                          recipient can NEVER recover: it isn't their app (no hover-to-full-text)
+                          and Export PNG freezes exactly the cut frame. Uneven row heights are the
+                          accepted tradeoff. `items-start` keeps the priority / milestone pill on
+                          the FIRST line instead of floating mid-block on a 2-line title.
+                          See design-docs/share-link-snapshot.md. */}
                       <td style={{ ...cell, overflow: 'hidden' }}>
-                        <span className="flex items-center gap-1.5 min-w-0" style={{ paddingLeft: child ? 18 : 0 }}>
+                        <span className="flex items-start gap-1.5 min-w-0" style={{ paddingLeft: child ? 18 : 0 }}>
                           <span
-                            className={`text-[13.5px] truncate ${child ? 'text-ink-muted' : 'text-ink'} ${isDone ? 'line-through opacity-50' : ''}`}
+                            className={`text-[13.5px] flex-1 min-w-0 leading-[1.35] [overflow-wrap:anywhere] ${child ? 'text-ink-muted' : 'text-ink'} ${isDone ? 'line-through opacity-50' : ''}`}
                           >
                             {child ? '↳ ' : ''}
                             {t.title || 'Untitled'}

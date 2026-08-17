@@ -1,11 +1,25 @@
 # List view
 
 **Status:** Implemented
-**Last updated:** 2026-07-08 (column header → floating glass capsule; sprint note → inline description in the merged Notion-style page header, see app-shell v4; prior: calm refinements — time-on-hover dates, quiet empty cells, sticky-light group headers, compact rows, `#`-prefixed prereq)
+**Last updated:** 2026-08-17 (**title 2+ dòng bị xén 2px ở đáy — fixed**, xem v5 dưới; prior:
+2026-07-08 column header → floating glass capsule; sprint note → inline description in the merged Notion-style page header, see app-shell v4; prior: calm refinements — time-on-hover dates, quiet empty cells, sticky-light group headers, compact rows, `#`-prefixed prereq)
 **Code:** `app/src/SprintView.tsx` (`MemberCard`, `UnassignedCard`, `GroupHeader`,
 `TaskColumnHeader`, `SortHeader`, `COL`, `TaskRows` drag state, `TaskRow` grip),
 `app/src/DatePicker.tsx` (`DatePickCell` time-on-hover), `app/src/db.ts` (`orderBetween`, `setListOrder`)
 
+> **v5 · title auto-grow không xén chữ (2026-08-17)** — task title trong List là một
+> `<textarea>` tự cao lên (`whitespace-pre-wrap break-words`, `overflow-hidden`, `rows={1}`),
+> nên **title dài luôn wrap, không bao giờ có "…"**. Nhưng `resize()` set
+> `el.style.height = el.scrollHeight + 'px'`, trong khi class `.editable` gắn
+> `border: 1px solid transparent` và Tailwind để `box-sizing: border-box`:
+> `height` **tính cả border**, `scrollHeight` **thì không** → mọi title từ 2 dòng trở lên bị
+> hụt đúng **2px**, xén đáy dòng cuối (dấu nặng / descender tiếng Việt bị cụt).
+> Đo trực tiếp trên app: `clientHeight 45` vs `scrollHeight 47`.
+> Fix: cộng lại phần border đo runtime — `el.scrollHeight + (el.offsetHeight - el.clientHeight)`
+> (delta này = tổng border trên+dưới, đúng cho mọi theme/zoom, không hardcode `2`).
+> Cùng đợt với share page bỏ `truncate` (share-link-snapshot.md) — cùng một nguyên tắc:
+> **title dài thì xuống dòng, không cắt chữ**.
+>
 > **v4 · calm refinements (2026-07-06)** — a signal-to-noise pass on the row grid
 > (demo `demo/list-view-refinements.html`, options approved by user):
 > 1. **Date time-of-day shows on row hover only.** The working-hours suffix (`, 08:00` /

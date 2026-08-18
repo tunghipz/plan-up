@@ -90,15 +90,19 @@ thing List and Board can't show. Read-only: a pure projection of the auto-schedu
   `{ startDate, dueDate, startTime, endTime }` at half-day precision
   (`startTime '13:00'` = PM start; `endTime '12:00'` = noon finish — see
   [scheduling.md](./scheduling.md)).
+- The hatch bands are `aria-hidden` decoration and a `title` on a non-focusable div reaches
+  neither keyboard nor touch, so the period names in view are announced **once** as an
+  `sr-only` note beside the legend instead of being trapped in per-lane hover.
 - Band geometry lives in `offBandsFor(daysOff, holidayByDate, workdays, dayW)` in `lib.ts`,
   not inline in the component — the union rule and the half-column math are the headline
   behaviour here and they need tests. The component keeps only the window clipping.
 - The legend's hatch swatch reads **"Day off / holiday"**: one texture, two sources, and the
   key has to name both, or a Tết band labelled "Day off" misattributes company leave to the
   member.
-- The holiday expansion is **clipped to the drawn window** and guarded against non-ISO
-  dates before the day-walk (a malformed `to` sorts above every real date, so the walk
-  would never terminate — see [project-holidays.md](./project-holidays.md)).
+- The holiday expansion is the shared `expandHolidaysNamed(holidays, window)` from
+  `scheduling.ts`, **clipped to the drawn window** and guarded against non-ISO dates before
+  the day-walk (a malformed `to` sorts above every real date, so the walk would never
+  terminate — see [project-holidays.md](./project-holidays.md)).
 - Day-off bands from `member.daysOff` (`{ date, half? }[]` — see
   [members-and-days-off.md](./members-and-days-off.md)) unioned with
   `Project.holidays`, read straight off the project row (the scheduler's

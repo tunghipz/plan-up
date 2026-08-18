@@ -85,23 +85,74 @@ export function normalizeHolidays(holidays: Holiday[] | undefined): Holiday[] {
 }
 
 
-export function expandHolidays(holidays: Holiday[] | undefined): DayOff[] {
-  if (!holidays?.length) return []
-  const out: DayOff[] = []
+/** A date is off for the whole day, or for one of its halves. */
+export type OffPart = 'full' | 'am' | 'pm'
+
+/**
+ * Merge two off-markers landing on the same date. Two different halves make a
+ * WHOLE day off — the rule `leafPlan` models with its `offAm`/`offPm` sets, and
+ * the Timeline bands re-state. Exported so the three of them can't drift apart.
+ */
+export function mergeOffPart(prev: OffPart | undefined, next: OffPart): OffPart {
+  return prev === undefined || prev === next ? next : 'full'
+}
+
+/**
+ * THE holiday expansion — every other one in the app is a projection of this.
+ * Ranges become one entry per date, carrying the period NAMES that touch it
+ * (the Timeline tooltip and the days-off popover need them; the scheduler does
+ * not, which is why `expandHolidays` drops them again).
+ *
+ * `window` clips before expanding, so a caller that can only draw ~20 columns
+ * never materialises more than that no matter how long the stored period is.
+ *
+ * Guards the shape, not just presence: a non-ISO `to` (e.g. 'TBD' from a
+ * hand-edited import) sorts ABOVE every real date, so `d <= h.to` never goes
+ * false and the walk runs until `addDays` throws at its year-9999 boundary.
+ * `normalizeHolidays` is the write gate, but import history predates it.
+ *
+ * `half` is only honoured on a single-day range — "PM off for five days running"
+ * is meaningless — and it is judged on the ORIGINAL range, never on the clip.
+ */
+export function expandHolidaysNamed(
+  holidays: Holiday[] | undefined,
+  window?: { start: string; end: string } | null
+): Map<string, { part: OffPart; names: string[] }> {
+  const out = new Map<string, { part: OffPart; names: string[] }>()
+  if (!holidays?.length) return out
+  if (window && (!ISO_DATE_RE.test(window.start) || !ISO_DATE_RE.test(window.end))) return out
   for (const h of holidays) {
-    // Shape guard, not just presence: a non-ISO `to` (e.g. 'TBD' from a
-    // hand-edited import) sorts ABOVE every real date, so `d <= h.to` never
-    // goes false and this walk runs until `addDays` hits its year-9999 fixed
-    // point — a frozen tab with no error to show. Import writes project rows
-    // straight to Dexie (io.ts), so this is the only gate.
     if (!ISO_DATE_RE.test(h?.from ?? '') || !ISO_DATE_RE.test(h?.to ?? '')) continue
     if (h.to < h.from) continue
-    const single = h.from === h.to
-    for (let d = h.from; d <= h.to; d = addDays(d, 1)) {
-      out.push(single && h.half ? { date: d, half: h.half } : { date: d })
+    const part: OffPart = h.from === h.to && h.half ? h.half : 'full'
+    const from = window && h.from < window.start ? window.start : h.from
+    const to = window && h.to > window.end ? window.end : h.to
+    if (from > to) continue
+    for (let d = from; d <= to; d = addDays(d, 1)) {
+      const prev = out.get(d)
+      if (prev) {
+        prev.part = mergeOffPart(prev.part, part)
+        if (!prev.names.includes(h.name)) prev.names.push(h.name)
+      } else {
+        out.set(d, { part, names: [h.name] })
+      }
     }
   }
   return out
+}
+
+/**
+ * The scheduler's view of the same thing: dates + halves, no names. Kept as a
+ * thin projection so the expansion rule lives in exactly one place.
+ */
+export function expandHolidays(holidays: Holiday[] | undefined): DayOff[] {
+  const out: DayOff[] = []
+  for (const [date, v] of expandHolidaysNamed(holidays)) {
+    out.push(v.part === 'full' ? { date } : { date, half: v.part })
+  }
+  // Map iteration follows insertion order, which follows the input order — sort
+  // so callers see dates in calendar order regardless of how periods were listed.
+  return out.sort((a, b) => a.date.localeCompare(b.date))
 }
 
 /** Build the scheduler's holiday map from one project or a list of them. */

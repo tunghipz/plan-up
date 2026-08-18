@@ -10,7 +10,8 @@ import {
   db,
   computeWorkingPlan,
   compareMembersByOrder,
-  addDays,
+  expandHolidaysNamed,
+  type OffPart,
   type Task,
   type Member,
 } from './db'
@@ -18,7 +19,7 @@ import { useProjectHolidays, useProjectHolidayList } from './scheduling-context'
 import { Avatar } from './members'
 import { STATUS_META, derivedGroupStatus } from './sprint-logic'
 import { usePinnedPopover } from './usePinnedPopover'
-import { sprintWorkdays, formatShortDate, ISO_DATE, offBandsFor } from './lib'
+import { sprintWorkdays, formatShortDate, offBandsFor } from './lib'
 
 /**
  * Timeline — an Apple-Calendar-style swimlane view of the sprint (design DNA:
@@ -148,41 +149,28 @@ export function GanttView({
   // See design-docs/project-holidays.md.
   const projectHolidays = useProjectHolidayList()
   const holidayByDate = useMemo(() => {
-    const out = new Map<string, { part: 'full' | 'am' | 'pm'; name: string }>()
-    // Clip to the drawn window before expanding. Only these columns can ever be
-    // hatched, and an unclipped walk over a decade-long imported period would
-    // build millions of entries this render never reads.
+    // One shared expansion (`expandHolidaysNamed`) clipped to the drawn window:
+    // only these columns can ever be hatched, and the clip means a decade-long
+    // imported period can't materialise millions of entries this render never
+    // reads. See design-docs/project-holidays.md.
     const first = workdays[0]
     const last = workdays[workdays.length - 1]
-    if (!first || !last) return out
-    for (const h of projectHolidays) {
-      // Shape guard: a non-ISO `to` sorts ABOVE every real date, so `d <= h.to`
-      // never goes false and the walk runs to `addDays`' year-9999 fixed point —
-      // a frozen tab, no error. Import writes project rows straight to Dexie.
-      if (!ISO_DATE.test(h.from) || !ISO_DATE.test(h.to) || h.to < h.from) continue
-      // `half` is only kept on a single-day period (setProjectHolidays drops it
-      // otherwise), so a multi-day run is always a full-column band.
-      const part: 'full' | 'am' | 'pm' =
-        h.half && h.from === h.to ? h.half : 'full'
-      const from = h.from > first ? h.from : first
-      const to = h.to < last ? h.to : last
-      if (from > to) continue
-      for (let d = from; d <= to; d = addDays(d, 1)) {
-        const prev = out.get(d)
-        out.set(
-          d,
-          prev
-            ? {
-                // Two periods on one date: different halves union to the whole day.
-                part: prev.part === part ? part : 'full',
-                name: `${prev.name} · ${h.name}`,
-              }
-            : { part, name: h.name }
-        )
-      }
-    }
+    if (!first || !last) return new Map<string, { part: OffPart; name: string }>()
+    const named = expandHolidaysNamed(projectHolidays, { start: first, end: last })
+    const out = new Map<string, { part: OffPart; name: string }>()
+    for (const [date, v] of named) out.set(date, { part: v.part, name: v.names.join(' · ') })
     return out
   }, [projectHolidays, workdays])
+  // Distinct period names hatched in the current window, in date order — the
+  // screen-reader equivalent of the bands' tooltips.
+  const holidayNames = useMemo(() => {
+    const seen: string[] = []
+    for (const v of holidayByDate.values()) {
+      for (const n of v.name.split(' · ')) if (!seen.includes(n)) seen.push(n)
+    }
+    return seen
+  }, [holidayByDate])
+
   const planById = useMemo(() => {
     const m = new Map<string, ReturnType<typeof computeWorkingPlan>>()
     for (const t of tasksById.values()) m.set(t.id, computeWorkingPlan(t, tasksById, memberById, holidays))
@@ -468,6 +456,15 @@ export function GanttView({
             style={{ background: HATCH_OFF }}
           />
           {HATCH_LEGEND}
+          {/* The bands themselves are aria-hidden decoration, and a `title` on a
+              non-focusable div reaches neither keyboard nor touch — so the
+              holiday names in this window are announced ONCE here instead of
+              being trapped in per-lane hover. See design-docs/gantt-view.md. */}
+          {holidayNames.length > 0 && (
+            <span className="sr-only">
+              {`— project holidays in view: ${holidayNames.join(', ')}`}
+            </span>
+          )}
         </span>
         <span className="inline-flex items-center gap-1.5">
           <span

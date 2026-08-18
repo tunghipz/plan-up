@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { Status, Priority, LoggableField, Sprint, Task } from './db'
+import { mergeOffPart, type OffPart } from './scheduling'
 
 const MS = 86400_000
 
@@ -740,12 +741,13 @@ export function holidayWorkDays(h: {
   half?: 'am' | 'pm'
 }): number {
   let n = 0
-  for (
-    let t = Date.parse(h.from + 'T00:00:00Z');
-    t <= Date.parse(h.to + 'T00:00:00Z');
-    t += MS_DAY
-  ) {
-    if (!isWeekendISO(new Date(t).toISOString().slice(0, 10))) n++
+  // End bound hoisted out of the condition, and the weekday read straight off
+  // the timestamp: the old form re-parsed `h.to` every iteration and round-tripped
+  // each day through toISOString → slice → parse just to ask which weekday it is.
+  const end = Date.parse(h.to + 'T00:00:00Z')
+  for (let t = Date.parse(h.from + 'T00:00:00Z'); t <= end; t += MS_DAY) {
+    const g = new Date(t).getUTCDay()
+    if (g !== 0 && g !== 6) n++
   }
   return h.half && h.from === h.to ? n * 0.5 : n
 }
@@ -826,15 +828,16 @@ export const DAY_OFF_LABEL = 'Day off'
  */
 export function offBandsFor(
   daysOff: { date: string; half?: 'am' | 'pm' }[],
-  holidayByDate: Map<string, { part: 'full' | 'am' | 'pm'; name: string }>,
+  holidayByDate: Map<string, { part: OffPart; name: string }>,
   workdays: string[],
   dayW: number
 ): { left: number; width: number; label: string }[] {
-  const offByDate = new Map<string, 'full' | 'am' | 'pm'>()
+  const offByDate = new Map<string, OffPart>()
   const offLabel = new Map<string, string>()
-  const markOff = (date: string, part: 'full' | 'am' | 'pm', label: string) => {
-    const prev = offByDate.get(date)
-    offByDate.set(date, prev === undefined || prev === part ? part : 'full')
+  const markOff = (date: string, part: OffPart, label: string) => {
+    // Shared with the scheduler's union (scheduling.ts) so a band can never
+    // disagree with the bar drawn on top of it.
+    offByDate.set(date, mergeOffPart(offByDate.get(date), part))
     offLabel.set(date, label)
   }
   for (const o of daysOff) markOff(o.date, o.half ?? 'full', DAY_OFF_LABEL)
@@ -853,4 +856,37 @@ export function offBandsFor(
       bands.push({ left: i * dayW + dayW / 2, width: dayW / 2, label })
   })
   return bands
+}
+
+/**
+ * The date span a member's tasks actually touch — computed start … computed due,
+ * across every task they hold (parents included, any status).
+ *
+ * Two consumers: the days-off picker widens its sprint window to this (an
+ * overdue task can be due before the sprint even starts), and the `Nd holiday`
+ * chip asks whether a project holiday lands inside it. A wrong span silently
+ * changes every chip while the helpers below stay green, so it lives here with
+ * tests rather than inline in `MemberCard`.
+ *
+ * A milestone (effort 0) has no span — its date IS its start, so it contributes
+ * that one day. No tasks ⇒ null ⇒ no chip.
+ * See design-docs/member-header-summary.md.
+ */
+export function memberTaskSpan(
+  tasks: { id: string; estimate: number | null }[],
+  planById: Map<string, { startDate: string | null; dueDate: string | null }>
+): { start: string; end: string } | null {
+  let start: string | null = null
+  let end: string | null = null
+  for (const t of tasks) {
+    const plan = planById.get(t.id)
+    if (!plan) continue
+    const due = t.estimate === 0 ? plan.startDate : plan.dueDate
+    for (const d of [plan.startDate, due]) {
+      if (!d) continue
+      if (!start || d < start) start = d
+      if (!end || d > end) end = d
+    }
+  }
+  return start && end ? { start, end } : null
 }

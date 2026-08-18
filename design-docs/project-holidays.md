@@ -10,7 +10,9 @@ hiện khi kỳ nghỉ chồng lên khoảng ngày task của người đó** �
 `/review`: chip union theo ngày thay vì cộng từng kỳ, guard ngày sai định dạng, clip
 expansion về đúng cửa sổ Timeline; chip đủ 24px + đúng contrast + toggle được, legend
 đổi nhãn, chuẩn hoá holidays dùng chung cho import + cap 366 ngày, `addDays` throw thay vì
-treo, một context duy nhất mang danh sách kỳ nghỉ, tách `offBandsFor` ra test được**)
+treo, một context duy nhất mang danh sách kỳ nghỉ, tách `offBandsFor` ra test được; + **gộp 3 vòng nở ngày thành một
+`expandHolidaysNamed`, dùng chung `mergeOffPart`, bỏ icon trùng trên chip, popover tự nói ra
+luật, Timeline có dòng sr-only**)
 **Code:** `app/src/types.ts` (`Holiday`, `Project.holidays`), `app/src/scheduling.ts`
 (`expandHolidays`, `projectHolidayMap`, `ProjectHolidayMap`, `leafPlan` union,
 `recomputeDates`, `recomputeAllDates`), `app/src/scheduling-context.ts`
@@ -94,6 +96,15 @@ Header member card có thêm chip **mờ, không viền**, đứng **trước** 
   nhiều ngày mang `half` (chỉ vào được qua import sửa tay) là chuỗi ngày nghỉ **nguyên
   ngày**; clip nó xuống 1 ngày không được làm sống lại nửa ngày.
 - **Member không có task** (lane "members with no tasks") ⇒ không có span ⇒ không chip.
+- **Chip không có icon.** Một glyph lịch 13px thứ hai cách glyph thứ nhất 10px làm hai control
+  khác nhau đọc thành một control lặp — đó mới là phần đúng của §8.3 ở đây. Chữ không thôi là
+  cách phân biệt rõ nhất, và bớt được một icon không mang thêm thông tin.
+- **Khi có chip lễ, pill `Days off` lúc rỗng hạ giọng** (bỏ viền đứt, về cùng cỡ chữ 11px):
+  pill viền đứt to tiếng mà **không báo gì**, đứng cạnh chip mờ đang mang dữ liệu thật là
+  ngược thứ bậc.
+- **Popover tự nói ra luật** — một dòng mờ dưới khối ngày lễ: *"Everyone is off. Shown on the
+  member card when they overlap X's task dates."* `title` không bao giờ bật trên touch, không
+  bật khi focus bàn phím, nên nó **không được là nơi duy nhất** phát biểu luật.
 - **Chip mở đúng popover days-off** đang có — nơi từng ngày lễ đã nằm sẵn ở khối trên,
   mờ, tag `project`, read-only. Không đẻ popover thứ hai (§8.3).
 - **Tooltip mang luật**: `Nghỉ hè công ty · Aug 19 – Aug 21 — chồng lên lịch task của
@@ -270,6 +281,22 @@ kể cả lane của người không set ngày nghỉ nào.
   chạy sau, nên tên kỳ nghỉ luôn đè `Day off` mà không cần so chuỗi (`DAY_OFF_LABEL` là
   hằng dùng chung với legend).
 
+### Một vòng nở ngày, một luật union
+
+`expandHolidaysNamed(holidays, window?)` (`scheduling.ts`) là **vòng nở ngày duy nhất**:
+`Map<date, { part, names }>`, có clip cửa sổ, có guard ISO, quyết `half` trên dải gốc. Ba
+chỗ trước đây tự nở riêng giờ đều là projection của nó:
+
+| Nơi dùng | Lấy gì |
+|---|---|
+| `expandHolidays` (scheduler) | bỏ tên, còn `DayOff[]` |
+| Popover days-off (`members.tsx`) | clip theo sprint, nối tên → mỗi ngày **một dòng** |
+| Band Timeline (`GanttView`) | clip theo cửa sổ vẽ, nối tên cho tooltip |
+
+`mergeOffPart(prev, next)` là **luật union dùng chung** (hai nửa khác nhau ⇒ cả ngày), export
+từ `scheduling.ts` và dùng lại trong `offBandsFor`. Trước đó luật này được viết lại ở mỗi chỗ
+— và nó **đã lệch thật** một lần (`half` tính trên dải clip, xem *Last updated*).
+
 ### Chuẩn hoá một chỗ, cho cả UI lẫn import
 
 `normalizeHolidays(holidays)` (`db.ts`) là **cửa duy nhất** dữ liệu ngày lễ đi qua trước khi
@@ -301,7 +328,8 @@ lịch); `ProjectHolidayListContext` là danh sách **có tên** cho UI (tooltip
 
 ## Rules & edge cases
 
-- **Danh sách trong popover key theo `date + name`**, không phải chỉ `date`: hai kỳ được
+- **Popover gộp mỗi ngày một dòng**: hai kỳ chồng ngày hiện `Aug 26 · Tết · Offsite`, không
+  phải hai dòng cùng ngày. Key vẫn theo `date + name`, không phải chỉ `date`: hai kỳ được
   phép chồng ngày, nên khoá trùng làm React lặng lẽ bỏ mất một dòng (đo được: console báo
   `two children with the same key, hol-2026-08-26`).
 - **Lễ ≠ phép, không trộn nguồn.** Trong popover days-off của member, ngày lễ hiện ở

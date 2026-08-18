@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Calendar, CalendarDays, X, Upload, Trash2 } from 'lucide-react'
+import { Calendar, X, Upload, Trash2 } from 'lucide-react'
 import { usePinnedPopover } from './usePinnedPopover'
 import { useProjectHolidayList } from './scheduling-context'
 import {
@@ -10,7 +10,7 @@ import {
   resizeImageToDataURL,
   colorForName,
   PALETTE,
-  addDays,
+  expandHolidaysNamed,
   type Member,
 } from './db'
 import { DateField } from './DatePicker'
@@ -670,14 +670,12 @@ export function MemberDaysOffButton({
   // not one `db.projects.get` per member card. See design-docs/project-holidays.md.
   const projectHolidays = useProjectHolidayList()
   const holidayDays = useMemo(() => {
-    const out: { date: string; name: string }[] = []
-    for (const h of projectHolidays) {
-      for (let d = h.from; d <= h.to; d = addDays(d, 1)) {
-        if (range && (d < range.start || d > range.end)) continue
-        out.push({ date: d, name: h.name })
-      }
-    }
-    return out.sort((a, b) => a.date.localeCompare(b.date))
+    // Same shared expansion the scheduler and the Timeline use, clipped to this
+    // sprint. Names come along because this list is the read-only project block.
+    const named = expandHolidaysNamed(projectHolidays, range ?? null)
+    return [...named]
+      .map(([date, v]) => ({ date, name: v.names.join(' · ') }))
+      .sort((a, b) => a.date.localeCompare(b.date))
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `range` is a fresh object literal every render; its two values are the real inputs
   }, [projectHolidays, range?.start, range?.end])
   // Holiday load on THIS member: project holidays clipped to their task span.
@@ -755,7 +753,10 @@ export function MemberDaysOffButton({
       // must be contained in the accessible name).
       aria-label={`${fmtDays(holidayLoad.days)}d project holiday during ${member.name}'s tasks`}
     >
-      <CalendarDays size={13} />
+      {/* No icon on purpose. A second 13px calendar glyph 10px from the first
+          made two different controls read as one repeated one (§8.3's real
+          complaint here); text alone is the clearest differentiator and one
+          less piece of iconography earning nothing. */}
       {fmtDays(holidayLoad.days)}d holiday
     </button>
   )
@@ -800,9 +801,14 @@ export function MemberDaysOffButton({
           className={
             count > 0
               ? 'inline-flex items-center gap-1 text-sm text-ink hover:text-ink transition'
-              : // Resting (no off-days in this sprint): always-visible quiet
-                // dashed "add" pill — calm at rest, accent on hover.
-                'inline-flex items-center gap-1.5 text-[12px] font-medium rounded-full px-2.5 py-1 border border-dashed border-border-strong text-ink-muted hover:text-accent hover:border-accent hover:bg-accent-soft transition'
+              : holidayChip
+                ? // A holiday chip is already carrying real data beside this one.
+                  // The loud dashed pill would out-shout it while reporting
+                  // nothing, so at rest it drops to the same quiet weight.
+                  'inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-[11px] font-medium text-ink-muted hover:text-accent hover:bg-accent-soft transition'
+                : // Resting (no off-days in this sprint): always-visible quiet
+                  // dashed "add" pill — calm at rest, accent on hover.
+                  'inline-flex items-center gap-1.5 text-[12px] font-medium rounded-full px-2.5 py-1 border border-dashed border-border-strong text-ink-muted hover:text-accent hover:border-accent hover:bg-accent-soft transition'
           }
           title={
             count > 0
@@ -852,6 +858,15 @@ export function MemberDaysOffButton({
               </span>
             </div>
           ))}
+          {holidayDays.length > 0 && (
+            // The rule the chip's tooltip carries, said somewhere durable: a
+            // native `title` never fires on touch or keyboard focus, so it can't
+            // be the only place "these overlap YOUR tasks" is stated.
+            <div className="text-[10.5px] text-ink-faint px-1.5 pt-0.5 pb-1">
+              Everyone is off. Shown on the member card when they overlap{' '}
+              {member.name}'s task dates.
+            </div>
+          )}
           {holidayDays.length > 0 && visibleDays.length > 0 && (
             <div className="border-t border-border-hair my-1" />
           )}

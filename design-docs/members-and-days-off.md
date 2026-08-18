@@ -38,7 +38,10 @@ computed dates respect real availability.
   wrapper**, so either opens the same popover, either closes it again, and the popover pins
   to the pair rather than jumping between them. The holiday chip carries the same padding as
   its sibling so its hit area clears 24px, and rests at `text-ink-muted` (`ink-faint` at 11px
-  falls under the 4.5:1 floor on the glass card).
+  falls under the 4.5:1 floor on the glass card). When the holiday chip is present, the resting
+  `Days off` trigger **drops its dashed border** and matches the chip's weight — a loud pill
+  reporting nothing should not out-shout a quiet one carrying real data. The popover states the
+  chip's rule in a caption, since a native `title` never fires on touch or keyboard focus.
 
 ### Per-sprint scoping (display + entry, not data)
 Off-days are real calendar dates, so each date falls inside at most one sprint's

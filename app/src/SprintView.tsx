@@ -65,6 +65,7 @@ import {
   formatSeqRanges,
   flattenDisplayOrder,
   daysOffWindow,
+  memberTaskSpan,
   PRIORITY_TAG,
 } from './lib'
 import {
@@ -667,22 +668,18 @@ function MemberCard({
     // Double-booking warnings among this member's leaf tasks (see
     // design-docs/conflict-warning.md). Cheap O(n²) over a member's tasks.
     const conflictTips = computeMemberConflicts(leafTasks, tasksById, memberById, holidays)
-    // Date span this member's tasks actually touch (computed start + due, same
-    // plan the rows show). Feeds the days-off window so an off-day on an overdue
-    // date that falls before the sprint start is still pickable, and the
-    // `Nd holiday` chip. All tasks (incl. parents), any status.
-    // See members-and-days-off.md.
-    let earliestDate: string | null = null
-    let latestDate: string | null = null
-    for (const t of tasks) {
-      const plan = planById.get(t.id) ?? computeWorkingPlan(t, tasksById, memberById, holidays)
-      const due = t.estimate === 0 ? plan.startDate : plan.dueDate
-      for (const d of [plan.startDate, due]) {
-        if (!d) continue
-        if (!earliestDate || d < earliestDate) earliestDate = d
-        if (!latestDate || d > latestDate) latestDate = d
-      }
-    }
+    // Date span this member's tasks actually touch — see `memberTaskSpan`.
+    const span = memberTaskSpan(
+      tasks,
+      new Map(
+        tasks.map((t) => [
+          t.id,
+          planById.get(t.id) ?? computeWorkingPlan(t, tasksById, memberById, holidays),
+        ])
+      )
+    )
+    const earliestDate = span?.start ?? null
+    const latestDate = span?.end ?? null
     return { total, done, pct, overdue, nextDue, conflictTips, earliestDate, latestDate }
   }, [tasks, parentIds, tasksById, memberById, planById, holidays])
   // Widen the sprint window to cover this member's task span (overdue tasks can

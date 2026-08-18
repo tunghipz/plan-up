@@ -4,6 +4,8 @@ import { db } from './schema'
 import {
   addDays,
   computeWorkingPlan,
+  expandHolidaysNamed,
+  mergeOffPart,
   normalizeHolidays,
   expandHolidays,
   projectHolidayMap,
@@ -11,7 +13,7 @@ import {
   recomputeDates,
   uid,
 } from './db'
-import { holidayLoadInSpan, holidayWorkDays, offBandsFor } from './lib'
+import { holidayLoadInSpan, holidayWorkDays, offBandsFor, memberTaskSpan } from './lib'
 import type { Holiday, Member, Project, Task } from './types'
 
 // ── pure helpers ──────────────────────────────────────────────────────────
@@ -252,6 +254,82 @@ describe('addDays — no silent fixed point', () => {
     // returns '+010000-01' again — every `d <= to` walk that reached it spun
     // forever with nothing thrown and nothing logged.
     expect(() => addDays('9999-12-31', 1)).toThrow(RangeError)
+  })
+})
+
+describe('expandHolidaysNamed — the one expansion', () => {
+  it('carries every period name that touches a date', () => {
+    const m = expandHolidaysNamed([
+      { id: 'a', name: 'Tết', from: '2027-02-10', to: '2027-02-11' },
+      { id: 'b', name: 'Offsite', from: '2027-02-11', to: '2027-02-12' },
+    ])
+    expect(m.get('2027-02-11')?.names).toEqual(['Tết', 'Offsite'])
+    expect(m.get('2027-02-10')?.names).toEqual(['Tết'])
+  })
+  it('unions AM + PM on one date into a full day', () => {
+    const m = expandHolidaysNamed([
+      { id: 'a', name: 'AM', from: '2027-03-10', to: '2027-03-10', half: 'am' },
+      { id: 'b', name: 'PM', from: '2027-03-10', to: '2027-03-10', half: 'pm' },
+    ])
+    expect(m.get('2027-03-10')?.part).toBe('full')
+  })
+  it('clips to the window BEFORE expanding', () => {
+    const m = expandHolidaysNamed(
+      [{ id: 'a', name: 'Tết', from: '2027-02-01', to: '2027-02-28' }],
+      { start: '2027-02-10', end: '2027-02-12' }
+    )
+    expect([...m.keys()]).toEqual(['2027-02-10', '2027-02-11', '2027-02-12'])
+  })
+  it('drops `half` on a multi-day run even when the clip leaves one day', () => {
+    const m = expandHolidaysNamed(
+      [{ id: 'a', name: 'Bad', from: '2027-03-08', to: '2027-03-12', half: 'pm' }],
+      { start: '2027-03-10', end: '2027-03-10' }
+    )
+    expect(m.get('2027-03-10')?.part).toBe('full')
+  })
+})
+
+describe('mergeOffPart', () => {
+  it('two different halves make a whole day', () => {
+    expect(mergeOffPart('am', 'pm')).toBe('full')
+    expect(mergeOffPart('pm', 'am')).toBe('full')
+  })
+  it('the same half twice is still a half', () => {
+    expect(mergeOffPart('am', 'am')).toBe('am')
+  })
+  it('anything merged with a full day is a full day', () => {
+    expect(mergeOffPart('full', 'am')).toBe('full')
+    expect(mergeOffPart('am', 'full')).toBe('full')
+    expect(mergeOffPart(undefined, 'pm')).toBe('pm')
+  })
+})
+
+describe('memberTaskSpan', () => {
+  const plans = (rows: [string, string | null, string | null][]) =>
+    new Map(rows.map(([id, s, e]) => [id, { startDate: s, dueDate: e }]))
+
+  it('is null when the member holds no tasks — no span, no chip', () => {
+    expect(memberTaskSpan([], new Map())).toBeNull()
+  })
+  it('spans the earliest start to the latest due across tasks', () => {
+    const tasks = [
+      { id: 'a', estimate: 3 },
+      { id: 'b', estimate: 2 },
+    ]
+    const p = plans([
+      ['a', '2027-02-10', '2027-02-12'],
+      ['b', '2027-02-03', '2027-02-04'],
+    ])
+    expect(memberTaskSpan(tasks, p)).toEqual({ start: '2027-02-03', end: '2027-02-12' })
+  })
+  it('a milestone (effort 0) contributes only its start date', () => {
+    expect(memberTaskSpan([{ id: 'm', estimate: 0 }], plans([['m', '2027-02-10', null]])))
+      .toEqual({ start: '2027-02-10', end: '2027-02-10' })
+  })
+  it('skips tasks with no computed dates rather than widening to null', () => {
+    const tasks = [{ id: 'a', estimate: 1 }, { id: 'b', estimate: null }]
+    const p = plans([['a', '2027-02-10', '2027-02-10'], ['b', null, null]])
+    expect(memberTaskSpan(tasks, p)).toEqual({ start: '2027-02-10', end: '2027-02-10' })
   })
 })
 

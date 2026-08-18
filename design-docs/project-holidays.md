@@ -6,13 +6,14 @@ tự đóng khi đóng drawer settings; + **bỏ pill khỏi top bar, chuyển x
 riêng trong sprint header card, hiện TÊN kỳ nghỉ + nút `+`** — phương án D, chốt qua
 `demo/holiday-in-sprint-header.html`; + **chip `Nd holiday` trên header member card, chỉ
 hiện khi kỳ nghỉ chồng lên khoảng ngày task của người đó** — phương án D, chốt qua
-`demo/holiday-on-member-card.html`)
+`demo/holiday-on-member-card.html`; + **hatch ngày lễ trong Timeline**)
 **Code:** `app/src/types.ts` (`Holiday`, `Project.holidays`), `app/src/scheduling.ts`
 (`expandHolidays`, `projectHolidayMap`, `ProjectHolidayMap`, `leafPlan` union,
 `recomputeDates`, `recomputeAllDates`), `app/src/scheduling-context.ts`
 (`ProjectHolidaysContext`, `useProjectHolidays`), `app/src/db.ts`
 (`setProjectHolidays`), `app/src/lib.ts` (`holidayWorkDays`, `holidayLoadInSpan`),
 `app/src/members.tsx` (`MemberDaysOffButton` — chip `Nd holiday`),
+`app/src/GanttView.tsx` (hatch ngày lễ trong lane),
 `app/src/DatePicker.tsx` (`CalendarGrid` controlled-month props),
 `app/src/ProjectHolidays.tsx` (`ProjectHolidaysButton`),
 `app/src/usePinnedPopover.ts` (tự đóng khi trigger bị ẩn),
@@ -231,6 +232,22 @@ dạng tham số rời; chỗ nhiều hơn phải chuyển sang dạng mảng.
 Days-off cá nhân không áp được cho task `assigneeId = null` (không có member để đọc).
 Ngày lễ thì **có** — union nằm ở `leafPlan` theo `task.projectId`, không đi qua member.
 Đây là khác biệt cố ý: ngày lễ là của project nên áp cho mọi task trong project.
+
+### Timeline — hatch phủ mọi lane
+
+Timeline vốn chỉ hatch `member.daysOff`, nên một bar vắt qua Tết trông **liền một mạch** —
+đọc thành "làm suốt 4 ngày" trong khi thực tế nghỉ 3. Giờ band lấy **union**
+`member.daysOff ∪ Project.holidays`, và vì lễ là của cả project nên nó hatch **mọi lane**,
+kể cả lane của người không set ngày nghỉ nào.
+
+- **Cùng một hatch cho cả hai nguồn.** Đọc một bar thì câu hỏi duy nhất là "chỗ này có làm
+  việc không"; thêm pattern thứ hai không trả lời thêm gì mà lại tốn một quy ước phải học
+  (§9.2). Phân biệt nằm ở **tooltip**: lễ hiện **tên** (`Tết`), nghỉ cá nhân hiện `Day off`.
+  Hai kỳ nghỉ chồng ngày ⇒ tooltip nối tên bằng `·`.
+- **Union giống scheduler**: member nghỉ sáng + lễ nghỉ chiều ⇒ band **cả cột**, không phải
+  hai nửa rời.
+- **Đọc thẳng `project.holidays`**, không dùng `ProjectHolidayMap` của context: map đó cố ý
+  không mang tên (scheduler chỉ cần ngày), mà tooltip thì cần tên.
 
 ## Rules & edge cases
 

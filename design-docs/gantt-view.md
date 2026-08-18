@@ -1,7 +1,9 @@
 # Timeline view (calendar swimlanes)
 
 **Status:** Implemented
-**Last updated:** 2026-07-02 (weekend manual dates snap for display; popover reads the bar's computed plan)
+**Last updated:** 2026-08-18 (day-off hatch now also covers **project holidays** — the
+timeline was the last surface where a holiday was invisible, so a bar crossing Tết read as
+uninterrupted work)
 
 > **Bar click → detail popover (2026-06-08):** event blocks were inert (chỉ `title`
 > tooltip). Nay **bấm bar** mở popover Cupertino (portal + float-shadow) hiển thị
@@ -59,8 +61,13 @@ thing List and Board can't show. Read-only: a pure projection of the auto-schedu
   label, not a span — the Gantt convention. A milestone on a non-working day falls back to
   the `no dates` bucket. See [milestones.md](./milestones.md).
 - **Day-off** renders as a faint **diagonal-hatch** band in the member's lane (full day =
-  whole column, half = its AM or PM half), from `member.daysOff` — **member-level**, so it
-  shows even when no task spans it. Where a **task bar crosses a day-off**, the bar stays one
+  whole column, half = its AM or PM half), from `member.daysOff` **∪ project holidays**
+  ([project-holidays.md](./project-holidays.md)) — **member-level**, so it shows even when
+  no task spans it. Holidays hatch **every** lane, since everyone is off. Same union rule as
+  the scheduler: member-AM-off + holiday-PM-off = a full-column band. **Same hatch for both
+  sources on purpose** — for reading a bar the question is only "does work happen here",
+  and a second pattern would buy nothing; the band's tooltip carries the holiday's **name**
+  (`Tết`) where a personal day off just says `Day off`. Where a **task bar crosses a day-off**, the bar stays one
   continuous block but the overlapping slice is overlaid with a same-status **hatch + dim
   "pause"** — connecting the off-day to the task it interrupts (the bar visibly pauses there,
   rather than the off-day being a disconnected grey band behind it). Parent summary rails are
@@ -84,7 +91,9 @@ thing List and Board can't show. Read-only: a pure projection of the auto-schedu
   (`startTime '13:00'` = PM start; `endTime '12:00'` = noon finish — see
   [scheduling.md](./scheduling.md)).
 - Day-off bands from `member.daysOff` (`{ date, half? }[]` — see
-  [members-and-days-off.md](./members-and-days-off.md)).
+  [members-and-days-off.md](./members-and-days-off.md)) unioned with
+  `Project.holidays`, read straight off the project row (the scheduler's
+  `ProjectHolidayMap` is name-less by design and the tooltip needs the name).
 - Sprint `startDate` / `endDate` define the column range.
 
 ## Implementation

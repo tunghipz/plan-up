@@ -10,6 +10,7 @@ import {
   db,
   computeWorkingPlan,
   compareMembersByOrder,
+  addDays,
   type Task,
   type Member,
 } from './db'
@@ -135,6 +136,34 @@ export function GanttView({
   // re-ran for every task on each resize frame. Mirrors BoardView's planById.
   // Covers every task so a parent's roll-up always sees all its children.
   const holidays = useProjectHolidays()
+  // Project holidays for the HATCH. Read off the project row rather than the
+  // context map: that map is deliberately name-less (the scheduler only needs
+  // dates), and the band's tooltip names the period.
+  // See design-docs/project-holidays.md.
+  const project = useLiveQuery(() => db.projects.get(projectId), [projectId])
+  const holidayByDate = useMemo(() => {
+    const out = new Map<string, { part: 'full' | 'am' | 'pm'; name: string }>()
+    for (const h of project?.holidays ?? []) {
+      // `half` is only kept on a single-day period (setProjectHolidays drops it
+      // otherwise), so a multi-day run is always a full-column band.
+      const part: 'full' | 'am' | 'pm' =
+        h.half && h.from === h.to ? h.half : 'full'
+      for (let d = h.from; d <= h.to; d = addDays(d, 1)) {
+        const prev = out.get(d)
+        out.set(
+          d,
+          prev
+            ? {
+                // Two periods on one date: different halves union to the whole day.
+                part: prev.part === part ? part : 'full',
+                name: `${prev.name} · ${h.name}`,
+              }
+            : { part, name: h.name }
+        )
+      }
+    }
+    return out
+  }, [project?.holidays])
   const planById = useMemo(() => {
     const m = new Map<string, ReturnType<typeof computeWorkingPlan>>()
     for (const t of tasksById.values()) m.set(t.id, computeWorkingPlan(t, tasksById, memberById, holidays))
@@ -375,22 +404,28 @@ export function GanttView({
         const parentRows = pack(evs.filter((e) => e.isParent), 0)
         const childRows = pack(evs.filter((e) => !e.isParent), parentRows)
         const rows = Math.max(1, parentRows + childRows)
-        // member day-off half-columns within the window
+        // Off half-columns within the window: this member's own days off UNIONED
+        // with the project's holidays (everyone is off, so a holiday hatches
+        // every lane — including lanes of members with no personal days off).
+        // Union rule matches the scheduler: AM-off + PM-off = the whole day.
         const offByDate = new Map<string, 'full' | 'am' | 'pm'>()
-        for (const o of m.daysOff) {
-          if (!o.half) offByDate.set(o.date, 'full')
-          else {
-            const prev = offByDate.get(o.date)
-            if (prev === undefined) offByDate.set(o.date, o.half)
-            else if (prev !== o.half) offByDate.set(o.date, 'full')
-          }
+        const offLabel = new Map<string, string>()
+        const markOff = (date: string, part: 'full' | 'am' | 'pm', label: string) => {
+          const prev = offByDate.get(date)
+          offByDate.set(date, prev === undefined || prev === part ? part : 'full')
+          // A holiday's name beats the generic "Day off" when both land on a date.
+          if (!offLabel.has(date) || label !== 'Day off') offLabel.set(date, label)
         }
-        const offBands: { left: number; width: number }[] = []
+        for (const o of m.daysOff) markOff(o.date, o.half ?? 'full', 'Day off')
+        for (const [date, h] of holidayByDate) markOff(date, h.part, h.name)
+        const offBands: { left: number; width: number; label: string }[] = []
         workdays.forEach((date, i) => {
           const off = offByDate.get(date)
-          if (off === 'full') offBands.push({ left: i * dayW, width: dayW })
-          else if (off === 'am') offBands.push({ left: i * dayW, width: dayW / 2 })
-          else if (off === 'pm') offBands.push({ left: i * dayW + dayW / 2, width: dayW / 2 })
+          const label = offLabel.get(date) ?? 'Day off'
+          if (off === 'full') offBands.push({ left: i * dayW, width: dayW, label })
+          else if (off === 'am') offBands.push({ left: i * dayW, width: dayW / 2, label })
+          else if (off === 'pm')
+            offBands.push({ left: i * dayW + dayW / 2, width: dayW / 2, label })
         })
         // earlier chips first, then later — each sorted by their shown date
         offWindow.sort((a, b) =>
@@ -400,7 +435,7 @@ export function GanttView({
         const laterN = offWindow.length - earlierN
         return { member: m, evs, rows, offWindow, earlierN, laterN, noDates, offBands }
       })
-  }, [members, tasks, workdays, planById, childrenByParent, N, firstDay, lastDay, dayW, sprintStartDate, sprintEndDate])
+  }, [members, tasks, workdays, planById, childrenByParent, holidayByDate, N, firstDay, lastDay, dayW, sprintStartDate, sprintEndDate])
 
   if (!members) return <p className="text-ink-muted py-12 text-center">Loading…</p>
   if (N === 0)
@@ -559,7 +594,7 @@ export function GanttView({
                         key={k}
                         className="absolute top-0 bottom-0"
                         style={{ left: o.left, width: o.width, background: HATCH_OFF }}
-                        title="Day off"
+                        title={o.label}
                         aria-hidden
                       />
                     ))}

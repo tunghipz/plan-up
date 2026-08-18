@@ -1,9 +1,11 @@
 # Auto-scheduling engine
 
 **Status:** Implemented
-**Last updated:** 2026-07-02
+**Last updated:** 2026-08-18 (project holidays union into `leafPlan`; shared expansion +
+merge helpers)
 **Code:** `app/src/scheduling.ts` (`planFor`, `computeStartEnd`, `computeWorkingPlan`,
-`computeWorkingTimes`, `recomputeDates`, `recomputeAllDates`)
+`computeWorkingTimes`, `recomputeDates`, `recomputeAllDates`, `expandHolidaysNamed`,
+`expandHolidays`, `mergeOffPart`, `normalizeHolidays`, `projectHolidayMap`, `addDays`)
 
 ## Purpose
 Turn *effort + prerequisites + availability* into concrete start/end dates (and wall-clock
@@ -48,6 +50,30 @@ times) automatically, so the plan stays correct as inputs change — no manual d
   anchor** (a dependent reads the span end). `planFor` carries an `inProgress` guard so a cycle
   introduced through group membership resolves to "no plan" instead of recursing forever.
 
+## Availability = weekends ∪ member days off ∪ project holidays
+
+`leafPlan` builds **two half-day sets** — `offAm` / `offPm` — from *both* the assignee's
+`daysOff` and the project's holidays (`ProjectHolidayMap`, keyed by `projectId` so a walk
+that crosses projects reads each task's own calendar). A day contributes `0` when it is a
+weekend or both halves are off, `0.5` when exactly one half is, else `1`.
+
+Two sets rather than one `0 | 0.5` number because they are what expresses the overlap:
+member off in the **morning** + holiday off in the **afternoon** is a **whole** day gone, not
+half. With member-only data the behaviour is byte-identical to before holidays existed.
+
+Holidays apply to **unassigned** tasks too — they hang off `task.projectId`, not off a member.
+
+Shared helpers, so the same rule can't be re-written three ways:
+- `expandHolidaysNamed(holidays, window?)` — the ONE range→dates expansion (names, window
+  clip, ISO guard, `half` judged on the original range). `expandHolidays` is its name-less
+  projection for the scheduler; the UI surfaces project it differently.
+- `mergeOffPart(prev, next)` — two different halves on one date make a whole day.
+- `normalizeHolidays(holidays)` — the single write gate (see
+  [project-holidays.md](./project-holidays.md)).
+- `addDays(date, n)` — **throws** rather than returning a value past year 9999, where
+  `toISOString()` switches to the expanded-year form and the result becomes its own
+  successor: a day-walk that reached it used to spin forever with nothing thrown.
+
 ## Public functions
 - `computeStartEnd(task, …)` — `{ startDate, dueDate }`.
 - `computeWorkingPlan(task, …)` — adds `startTime`/`endTime` (e.g. `08:00`, `17:00`,
@@ -56,6 +82,12 @@ times) automatically, so the plan stays correct as inputs change — no manual d
 - `recomputeDates(taskId)` — recompute this task and BFS-walk forward through dependents;
   idempotent (stops when nothing changes). Runs after edits to effort/start/assignee/deps.
 - `recomputeAllDates()` — recompute & persist every task; heals drift; run on app load.
+- Every public entry takes an optional trailing `holidays?: ProjectHolidayMap`; called
+  without it they schedule exactly as they did before holidays existed.
+
+> Transaction scope: `recomputeDates` reads `db.projects`, and Dexie requires a
+> sub-transaction's tables to be a **subset** of its parent's — so every rw transaction
+> containing `db.tasks` also declares `db.projects`.
 
 ## Rules & edge cases
 - A task whose end is engine-driven (has prereqs, or effort > 0) shows a **locked** date

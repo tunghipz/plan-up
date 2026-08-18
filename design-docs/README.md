@@ -71,7 +71,7 @@ Non-obvious behaviors, defaults, persistence keys.
 | [collections.md](./collections.md) | Task ngoài sprint — collection tự đặt tên, nhiều bảng (sections), view List (giống sprint, tap-to-edit, **sortable columns** + **date-range picker**) + Calendar liền mạch, status do user tự tạo per-collection |
 | [sprint-rollover.md](./sprint-rollover.md) | Move unfinished tasks to next sprint — preview popover |
 | [members-and-days-off.md](./members-and-days-off.md) | Member labels, colors, off-days |
-| [project-holidays.md](./project-holidays.md) | Project-wide days off (Tết, lễ, offsite) — two-tap range picker over a 2-month calendar, unioned into every task by the scheduler |
+| [project-holidays.md](./project-holidays.md) | Project-wide days off (Tết, lễ, offsite) — two-tap range picker over a 2-month calendar, unioned into every task by the scheduler, `Nd holiday` chip on member cards that a period actually overlaps, hatched in the Timeline |
 | [member-title.md](./member-title.md) | Optional per-member role label (free-text), shown in settings + sprint header |
 | [member-avatars.md](./member-avatars.md) | Custom member avatar — upload photo (resized) or pick emoji; edited in Project Settings; falls back to colored initial |
 | [member-lane-order.md](./member-lane-order.md) | Drag-to-reorder member lanes (per project); drives List card order + Board `member` sort |

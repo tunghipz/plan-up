@@ -1,7 +1,7 @@
 # Data model
 
 **Status:** Implemented
-**Last updated:** 2026-07-02
+**Last updated:** 2026-08-18 (`Project.holidays` write gate)
 **Code:** `app/src/types.ts` (entity types) + `app/src/schema.ts` (Dexie schema & migrations); `app/src/db.ts` is the facade re-exporting both
 
 ## Purpose
@@ -21,7 +21,10 @@ Seven IndexedDB tables (Dexie database name **`plan-up`**): `projects`, `members
 (Tết, Quốc khánh, offsite), `from`/`to` là `yyyy-mm-dd` inclusive; `half` chỉ hợp lệ khi
 `from === to`. Scheduler union vào `Member.daysOff` cho **mọi** task trong project, kể cả
 task chưa assign. Optional + **non-indexed** ⇒ **không bump Dexie version** (cùng pattern
-`description`/`color`/`icon`). Xem [project-holidays.md](./project-holidays.md).
+`description`/`color`/`icon`). **Mọi đường ghi đi qua `normalizeHolidays`** (`scheduling.ts`)
+— cả `setProjectHolidays` lẫn hai đường import: ngày sai `yyyy-mm-dd`, dải dài hơn 366 ngày,
+hay ngày không tồn tại trên lịch bị **drop**, vì các vòng lặp ngày ở downstream không sống nổi
+với chúng. Xem [project-holidays.md](./project-holidays.md).
 - `description`, `color`, and `icon` are **optional, non-indexed** fields edited from the
   settings page (see [project-member-settings.md](./project-member-settings.md),
   [project-icon-emoji.md](./project-icon-emoji.md)). Because they are

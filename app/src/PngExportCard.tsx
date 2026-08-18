@@ -1,6 +1,6 @@
 import { forwardRef } from 'react'
-import type { Priority, Status, Task } from './types'
-import { STATUS_LABEL, fmtDays, effectiveDaysOff, daysOffInRange } from './lib'
+import type { Holiday, Priority, Status, Task } from './types'
+import { STATUS_LABEL, fmtDays, effectiveDaysOff, daysOffInRange, holidayLoadInSpan } from './lib'
 import { colorForName } from './schema'
 import type { WorkingPlan } from './scheduling'
 import type { MemberGroup } from './png-export'
@@ -254,16 +254,24 @@ export interface PngExportCardProps {
   sprintEnd: string
   /** yyyy-mm-dd local — used for the header stamp and overdue comparison. */
   today: string
+  /** Project-wide days off inside the sprint range (share snapshot `hd`). The image
+   * lands in a chat with no hover and no tooltip, so this only exists if it is
+   * printed as text. Omitted/empty → the band is not rendered at all. */
+  holidays?: Holiday[]
   /** Fixed content width in px. */
   width?: number
 }
 
 export const PngExportCard = forwardRef<HTMLDivElement, PngExportCardProps>(
   function PngExportCard(
-    { projectName, viewName, groups, planById, sprintStart, sprintEnd, today, width = 940 },
+    { projectName, viewName, groups, planById, sprintStart, sprintEnd, today, holidays, width = 940 },
     ref
   ) {
     const totalTasks = groups.reduce((n, g) => n + g.tasks.length, 0)
+    // Same function the app's member card, ProjectHolidays and the share page use, so
+    // all three surfaces agree by construction (one date union, weekends skipped,
+    // half-days halved) rather than by three implementations happening to match.
+    const holidayLoad = holidayLoadInSpan(holidays, { start: sprintStart, end: sprintEnd })
     // Continuous 1..N numbering across the whole image (not Task.sequence).
     let seq = 0
 
@@ -295,6 +303,45 @@ export const PngExportCard = forwardRef<HTMLDivElement, PngExportCardProps>(
             </div>
           </div>
         </div>
+
+        {/* Project-wide days off — one band, stated once, directly under the header.
+            The board below is untouched (variant A, design-docs/share-link-snapshot.md).
+            English to match every other label in this image (MEMBER / START / `Nd off`);
+            the holiday NAMES stay as the user typed them, they're data. No warning
+            colour: `Nd off` here is already plain `C.faint` rather than the app's orange
+            pill — the image is deliberately calmer — and `C` carries no warn tone, so
+            adding one would be inventing a colour. */}
+        {holidayLoad.days > 0 && (
+          <div
+            style={{
+              marginTop: 14,
+              padding: '8px 12px',
+              background: C.panel,
+              borderRadius: 8,
+              display: 'flex',
+              flexWrap: 'wrap',
+              alignItems: 'baseline',
+              gap: '3px 12px',
+              fontSize: 11.5,
+              color: C.muted,
+            }}
+          >
+            <span style={{ fontWeight: 700, color: C.ink, fontVariantNumeric: 'tabular-nums' }}>
+              {fmtDays(holidayLoad.days)}d holiday
+            </span>
+            {holidayLoad.items.map((h) => (
+              <span key={h.id} style={{ whiteSpace: 'nowrap' }}>
+                {h.name}
+                <span style={{ color: C.faint, fontVariantNumeric: 'tabular-nums' }}>
+                  {' · '}
+                  {shortDate(h.from)}
+                  {h.to !== h.from && ` – ${shortDate(h.to)}`}
+                  {h.half && ` ½${h.half === 'am' ? 'AM' : 'PM'}`}
+                </span>
+              </span>
+            ))}
+          </div>
+        )}
 
         {groups.length === 0 ? (
           <div style={{ padding: '32px 0', textAlign: 'center', color: C.faint, fontSize: 14 }}>

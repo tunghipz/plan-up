@@ -1,7 +1,14 @@
 # Export as image (PNG)
 
 **Status:** Implemented
-**Last updated:** 2026-08-17 (**task title wrap trong ảnh, không cắt bằng "…"** — card PNG
+**Last updated:** 2026-08-18 (**ngày nghỉ chung vào ảnh** — một dải ngay dưới header,
+trên bảng: `2.5d holiday` + tên & ngày từng kỳ. Ảnh là sản phẩm cuối nằm trong chat —
+không hover, không tooltip — nên thông tin phải **hiện thành chữ** hoặc coi như không tồn
+tại. Cùng phương án A với share page: nói đúng một lần ở cấp project, **bảng không đụng**;
+số ngày tính bằng chính `holidayLoadInSpan` nên khớp app & share page do cấu tạo. Xem
+[share-link-snapshot.md](./share-link-snapshot.md) mục *Ngày nghỉ chung*. Cũng sửa mục
+*Wiring* bên dưới cho khớp thực tế: entry trong App.tsx **không còn**, PNG chỉ vào được
+qua share viewer. Trước đó: 2026-08-17 (**task title wrap trong ảnh, không cắt bằng "…"** — card PNG
 rộng cố định 940px, padding 30px mỗi bên, cột cố định ăn 508px (Member 142 · # 34 · Start 64 ·
 End 64 · Effort 82 · Status 122) → cột Task chỉ còn **372px**, hẹp hơn cả share page. Title dài
 bị `whiteSpace: nowrap` + `textOverflow: ellipsis` cắt cụt, và **ảnh là sản phẩm cuối** — người
@@ -60,6 +67,17 @@ export (bàn giao dữ liệu). PNG là *người đọc*, JSON là *máy đọc
 ### Nội dung ảnh
 
 - **Header ảnh:** tên project · tên view (Sprint N) · ngày xuất · tổng số task.
+- **Dải ngày nghỉ chung** (chỉ khi sprint có kỳ nghỉ): ngay dưới header, trên bảng — nền
+  `C.panel` bo 8px, `{fmtDays(days)}d holiday` in đậm + tên & khoảng ngày từng kỳ
+  (`Quốc khánh · Sep 2 – Sep 3`, nửa ngày gắn `½AM/½PM`). Dùng tiếng Anh vì **mọi nhãn
+  khác trong ảnh đều tiếng Anh** (`MEMBER`/`START`/`Nd off`/`N overdue`) — trộn ngôn ngữ
+  trong cùng một tấm ảnh đọc rất chối; tên kỳ nghỉ giữ nguyên chữ user gõ vì đó là dữ liệu.
+  Không dùng màu cảnh báo: `Nd off` trong ảnh vốn đã là `C.faint` chứ không phải pill cam
+  như trong app — ảnh cố tình dịu hơn, và bảng màu `C` không có tông warn nên thêm vào là
+  bịa màu mới.
+- Số ngày do card tự tính bằng `holidayLoadInSpan(holidays, {sprintStart, sprintEnd})` —
+  **đúng hàm** member card, ProjectHolidays và share page dùng. Nên ba mặt hiển thị không
+  thể lệch nhau: cùng union theo ngày, cùng bỏ cuối tuần, cùng luật nửa ngày.
 - **Thứ tự khớp List view 1:1**: lanes sắp theo `compareMembersByOrder`; task
   trong lane sắp bằng `compareTasks` theo **đúng sort đang chọn** (`loadSort()`,
   mặc định neutral → `listOrder ?? sequence`); subtask nest dưới parent qua
@@ -153,11 +171,16 @@ re-rasterize DOM không mờ), thay zoom hard-code cũ bị lệch khi đổi b�
 card. Nút Copy/Download gọi glue ở trên. Copy fail → disable nút + hint
 "Trình duyệt không cho copy ảnh — dùng Download".
 
-### Wiring `App.tsx`
+### Wiring — chỉ qua share viewer
 
-- State `exportImageOpen`. Menu item mới trong dropdown Export (App.tsx ~1489).
-- Truyền `tasks`, `paletteMembers`, `currentProject`, tên view (sprint/collection).
-- Chỉ mở được khi có view + có task (disable + hint nếu rỗng).
+**Không còn entry trong app.** Menu Export trong App.tsx giờ **thuần data-export**; cả
+"Export as image…" của sprint lẫn của collection đều đã gỡ (collection gỡ 2026-07-15, xem
+comment tại chỗ). Đường duy nhất tới PNG là: **Share link → mở viewer → nút Export PNG**.
+
+Nghĩa là `ExportImageModal` chỉ có **một** caller (`SnapshotViewer.tsx`), và mọi thứ card
+cần đều lấy từ snapshot đã decode — gồm `holidays` (xem
+[share-link-snapshot.md](./share-link-snapshot.md), wire key `hd`). Ai thêm prop mới cho
+card thì chỉ phải sửa đúng một chỗ nối.
 
 ### Dependency
 

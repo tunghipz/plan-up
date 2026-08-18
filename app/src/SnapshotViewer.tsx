@@ -517,6 +517,7 @@ export function SnapshotViewer({ raw }: { raw: string }) {
           sprintStart={sprint.startDate}
           sprintEnd={sprint.endDate ?? sprint.startDate}
           today={stampYmd}
+          holidays={data.holidays}
           onClose={() => setExportOpen(false)}
         />
       )}

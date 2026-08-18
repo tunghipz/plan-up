@@ -5,6 +5,7 @@ import { PngExportCard } from './PngExportCard'
 import { ScaledPreview } from './ScaledPreview'
 import type { WorkingPlan } from './scheduling'
 import type { MemberGroup } from './png-export'
+import type { Holiday } from './types'
 import {
   canCopyImage,
   copyPngToClipboard,
@@ -27,6 +28,7 @@ export function ExportImageModal({
   sprintStart,
   sprintEnd,
   today,
+  holidays,
   onClose,
 }: {
   projectName: string
@@ -36,6 +38,8 @@ export function ExportImageModal({
   sprintStart: string
   sprintEnd: string
   today: string
+  /** Project-wide days off in the sprint range — printed as a band in the image. */
+  holidays?: Holiday[]
   onClose: () => void
 }) {
   const cardRef = useRef<HTMLDivElement>(null)
@@ -84,6 +88,7 @@ export function ExportImageModal({
       sprintStart={sprintStart}
       sprintEnd={sprintEnd}
       today={today}
+      holidays={holidays}
     />
   )
 

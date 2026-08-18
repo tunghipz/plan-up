@@ -6,7 +6,7 @@ import { CalendarGrid } from './DatePicker'
 import { usePinnedPopover } from './usePinnedPopover'
 import { setProjectHolidays, uid } from './db'
 import { expandHolidays } from './scheduling'
-import { formatShortDate, fmtDays, holidayWorkDays } from './lib'
+import { formatShortDate, fmtDays, holidayWorkDays, holidayLoadInSpan } from './lib'
 import type { Holiday, Project } from './types'
 
 /**
@@ -87,7 +87,18 @@ export function ProjectHolidaysButton({
     [project.holidays]
   )
   const visible = range ? holidaysInRange(holidays, range) : holidays
-  const totalDays = visible.reduce((s, h) => s + holidayWorkDays(h), 0)
+  // Union by date, not a per-period sum: two overlapping periods share days, and
+  // this badge is a TOTAL. Summing gave "6d holidays" beside a member chip
+  // reading "5d holiday" and a Timeline hatching 5 columns.
+  // See design-docs/project-holidays.md.
+  const totalDays = holidayLoadInSpan(
+    visible,
+    range
+      ? { start: range.start, end: range.end }
+      : visible.length
+        ? { start: visible[0].from, end: visible.reduce((m, h) => (h.to > m ? h.to : m), visible[0].to) }
+        : null
+  ).days
   const count = visible.length
 
   const clearDraft = () => {

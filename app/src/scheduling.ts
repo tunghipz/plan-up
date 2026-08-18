@@ -8,7 +8,18 @@ import { db } from './schema'
 export function addDays(dateStr: string, days: number): string {
   const d = new Date(dateStr + 'T00:00:00Z')
   d.setUTCDate(d.getUTCDate() + days)
-  return d.toISOString().slice(0, 10)
+  const iso = d.toISOString()
+  // Past year 9999 `toISOString()` switches to the expanded-year form
+  // (`+010000-01-01T…`), and `.slice(0, 10)` of that is `'+010000-01'` — a string
+  // whose own successor is ITSELF, and which sorts BELOW every real date because
+  // '+' is 0x2B. Every `for (d = a; d <= b; d = addDays(d, 1))` in the app that
+  // reaches it spins forever with nothing thrown and nothing logged. A crash is
+  // strictly better than a frozen tab. (`toISOString()` already throws on an
+  // Invalid Date, so malformed input is covered too.)
+  if (iso.length !== 24) {
+    throw new RangeError(`addDays(${dateStr}, ${days}) left the yyyy-mm-dd range`)
+  }
+  return iso.slice(0, 10)
 }
 
 /** True if the date falls on Saturday or Sunday. */
@@ -35,6 +46,44 @@ export type ProjectHolidayMap = Map<string, DayOff[]>
  * written by an older build or a hand-edited import.
  */
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+
+/** No real holiday runs longer than a year — anything past this is corrupt data. */
+export const MAX_HOLIDAY_SPAN_DAYS = 366
+
+/**
+ * The ONE gate every holiday row passes before it reaches Dexie — used by
+ * `setProjectHolidays` (the UI path) and by `importAll` (the backup path, which
+ * used to `bulkAdd` project rows untouched).
+ *
+ * Drops what the day-walks downstream cannot survive: a non-ISO date sorts ABOVE
+ * every real date, so `for (d = from; d <= to; …)` never terminates; a range of
+ * decades expands into millions of entries in the scheduler and the Timeline.
+ * `half` only means something on a single day, and a nameless period is
+ * unidentifiable in the list. See design-docs/project-holidays.md.
+ */
+export function normalizeHolidays(holidays: Holiday[] | undefined): Holiday[] {
+  const ISO = ISO_DATE_RE
+  const clean: Holiday[] = []
+  for (const h of holidays ?? []) {
+    if (!h || !ISO.test(h.from ?? '') || !ISO.test(h.to ?? '')) continue
+    const from = h.to < h.from ? h.to : h.from
+    const to = h.to < h.from ? h.from : h.to
+    const span = (Date.parse(to + 'T00:00:00Z') - Date.parse(from + 'T00:00:00Z')) / 86_400_000
+    // NaN (a shape-valid but non-calendar date like 2027-99-99) fails this too.
+    if (!(span >= 0 && span < MAX_HOLIDAY_SPAN_DAYS)) continue
+    const single = from === to
+    clean.push({
+      id: h.id,
+      name: (h.name ?? '').trim() || 'Untitled',
+      from,
+      to,
+      ...(single && h.half ? { half: h.half } : {}),
+    })
+  }
+  clean.sort((a, b) => a.from.localeCompare(b.from) || a.to.localeCompare(b.to))
+  return clean
+}
+
 
 export function expandHolidays(holidays: Holiday[] | undefined): DayOff[] {
   if (!holidays?.length) return []

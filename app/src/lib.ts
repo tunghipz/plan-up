@@ -807,3 +807,50 @@ export function holidayLoadInSpan<
   for (const p of part.values()) days += p === 'full' ? 1 : 0.5
   return { days, items }
 }
+
+/** Band tooltip for a PERSONAL day off (a holiday band shows its own name). */
+export const DAY_OFF_LABEL = 'Day off'
+
+/**
+ * The Timeline's non-working bands for one member lane: their own days off
+ * UNIONED with the project's holidays, projected onto the drawn day columns.
+ *
+ * A holiday hatches EVERY lane (everyone is off), including lanes of members
+ * with no personal days off — that union is the whole point of the feature, so
+ * it lives here with tests rather than inside a component `useMemo`.
+ *
+ * Union rule matches the scheduler: AM-off + PM-off on one date is the whole
+ * day, not two halves. Label: last writer wins and the holiday pass runs second,
+ * so a named period beats the generic `Day off` without comparing strings.
+ * See design-docs/gantt-view.md.
+ */
+export function offBandsFor(
+  daysOff: { date: string; half?: 'am' | 'pm' }[],
+  holidayByDate: Map<string, { part: 'full' | 'am' | 'pm'; name: string }>,
+  workdays: string[],
+  dayW: number
+): { left: number; width: number; label: string }[] {
+  const offByDate = new Map<string, 'full' | 'am' | 'pm'>()
+  const offLabel = new Map<string, string>()
+  const markOff = (date: string, part: 'full' | 'am' | 'pm', label: string) => {
+    const prev = offByDate.get(date)
+    offByDate.set(date, prev === undefined || prev === part ? part : 'full')
+    offLabel.set(date, label)
+  }
+  for (const o of daysOff) markOff(o.date, o.half ?? 'full', DAY_OFF_LABEL)
+  const bands: { left: number; width: number; label: string }[] = []
+  workdays.forEach((date, i) => {
+    // Holidays are looked up per DRAWN column rather than pre-walked per lane —
+    // same result, but the cost is bounded by the window, not by how long the
+    // holiday list happens to be.
+    const hol = holidayByDate.get(date)
+    if (hol) markOff(date, hol.part, hol.name)
+    const off = offByDate.get(date)
+    const label = offLabel.get(date) ?? DAY_OFF_LABEL
+    if (off === 'full') bands.push({ left: i * dayW, width: dayW, label })
+    else if (off === 'am') bands.push({ left: i * dayW, width: dayW / 2, label })
+    else if (off === 'pm')
+      bands.push({ left: i * dayW + dayW / 2, width: dayW / 2, label })
+  })
+  return bands
+}

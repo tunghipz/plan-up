@@ -2,14 +2,16 @@ import { describe, expect, it, beforeEach } from 'vitest'
 import 'fake-indexeddb/auto'
 import { db } from './schema'
 import {
+  addDays,
   computeWorkingPlan,
+  normalizeHolidays,
   expandHolidays,
   projectHolidayMap,
   setProjectHolidays,
   recomputeDates,
   uid,
 } from './db'
-import { holidayLoadInSpan, holidayWorkDays } from './lib'
+import { holidayLoadInSpan, holidayWorkDays, offBandsFor } from './lib'
 import type { Holiday, Member, Project, Task } from './types'
 
 // ── pure helpers ──────────────────────────────────────────────────────────
@@ -185,6 +187,71 @@ describe('holidayLoadInSpan', () => {
   it('handles a project with no holidays at all', () => {
     expect(holidayLoadInSpan(undefined, { start: '2027-01-01', end: '2027-12-31' }))
       .toEqual({ days: 0, items: [] })
+  })
+})
+
+describe('offBandsFor — Timeline bands', () => {
+  // Mon 8 – Wed 10 March 2027.
+  const workdays = ['2027-03-08', '2027-03-09', '2027-03-10']
+  const hol = new Map([
+    ['2027-03-10', { part: 'full' as const, name: 'Giỗ Tổ' }],
+  ])
+
+  it('hatches a holiday for a member with NO personal days off', () => {
+    // The whole point of the feature: holidays are project-wide, so every lane
+    // gets the band, not just lanes of people who logged leave.
+    expect(offBandsFor([], hol, workdays, 40)).toEqual([
+      { left: 80, width: 40, label: 'Giỗ Tổ' },
+    ])
+  })
+  it('names the holiday rather than the generic label', () => {
+    const bands = offBandsFor([{ date: '2027-03-10' }], hol, workdays, 40)
+    expect(bands.map((b) => b.label)).toEqual(['Giỗ Tổ'])
+  })
+  it('personal AM-off + holiday PM-off on one date is ONE full-width band', () => {
+    const pm = new Map([['2027-03-10', { part: 'pm' as const, name: 'Chiều lễ' }]])
+    expect(offBandsFor([{ date: '2027-03-10', half: 'am' }], pm, workdays, 40)).toEqual([
+      { left: 80, width: 40, label: 'Chiều lễ' },
+    ])
+  })
+  it('a lone half-day draws half a column on the right side for PM', () => {
+    expect(offBandsFor([{ date: '2027-03-09', half: 'pm' }], new Map(), workdays, 40)).toEqual([
+      { left: 60, width: 20, label: 'Day off' },
+    ])
+  })
+  it('ignores off-days outside the drawn window', () => {
+    expect(offBandsFor([{ date: '2027-03-20' }], new Map(), workdays, 40)).toEqual([])
+  })
+})
+
+describe('normalizeHolidays — the single write gate', () => {
+  it('drops non-ISO dates (they make every day-walk run away)', () => {
+    expect(normalizeHolidays([{ id: 'a', name: 'x', from: '2027-2-3', to: '2027-02-05' }])).toEqual([])
+    expect(normalizeHolidays([{ id: 'a', name: 'x', from: '2027-02-03', to: 'TBD' }])).toEqual([])
+  })
+  it('drops a non-calendar date that still matches the shape', () => {
+    expect(normalizeHolidays([{ id: 'a', name: 'x', from: '2027-99-99', to: '2027-99-99' }])).toEqual([])
+  })
+  it('drops a period longer than a year — that is corrupt data, not intent', () => {
+    expect(normalizeHolidays([{ id: 'a', name: 'x', from: '2027-01-01', to: '9999-12-31' }])).toEqual([])
+  })
+  it('swaps a backwards range and keeps it', () => {
+    const [h] = normalizeHolidays([{ id: 'a', name: 'x', from: '2027-02-11', to: '2027-02-03' }])
+    expect([h.from, h.to]).toEqual(['2027-02-03', '2027-02-11'])
+  })
+  it('keeps `half` only on a single day, and names the nameless', () => {
+    expect(normalizeHolidays([
+      { id: 'a', name: '  ', from: '2027-02-03', to: '2027-02-05', half: 'pm' },
+    ])).toEqual([{ id: 'a', name: 'Untitled', from: '2027-02-03', to: '2027-02-05' }])
+  })
+})
+
+describe('addDays — no silent fixed point', () => {
+  it('throws instead of returning a value whose successor is itself', () => {
+    // addDays('9999-12-31', 1) used to return '+010000-01', and addDays of THAT
+    // returns '+010000-01' again — every `d <= to` walk that reached it spun
+    // forever with nothing thrown and nothing logged.
+    expect(() => addDays('9999-12-31', 1)).toThrow(RangeError)
   })
 })
 

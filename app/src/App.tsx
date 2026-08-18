@@ -68,9 +68,10 @@ import { CollectionView, CollectionBarIdentity, StatusEditor } from './Collectio
 import { useConfirm } from './confirm-context'
 import { ModalSheet } from './ModalSheet'
 import { SprintView } from './SprintView'
-import { ProjectHolidaysContext } from './scheduling-context'
+import { ProjectHolidaysContext, ProjectHolidayListContext } from './scheduling-context'
 import { projectHolidayMap } from './scheduling'
 import { ProjectHolidaysButton } from './ProjectHolidays'
+import type { Holiday } from './types'
 import { BoardView } from './BoardView'
 import { GanttView } from './GanttView'
 import { ActivityLog } from './ActivityLog'
@@ -121,6 +122,9 @@ const VIEW_KEY = 'plan-up:view'
 // localStorage['plan-up:forceDesktopChrome']='1'. True Tauri-only features
 // (auto-backup, updater) stay gated on IS_TAURI and are never faked. See
 // desktop-app-tauri.md.
+/** Stable empty list — a fresh `[]` each render would re-run every consumer's memo. */
+const EMPTY_HOLIDAYS: Holiday[] = []
+
 const FORCE_DESKTOP_CHROME =
   typeof window !== 'undefined' &&
   (new URLSearchParams(window.location.search).has('desktop') ||
@@ -1149,6 +1153,7 @@ function App() {
     // Wraps the WHOLE shell, not just the views: the settings drawer's member
     // popovers show project holidays as read-only rows and need the same map.
     <ProjectHolidaysContext value={holidayMap}>
+    <ProjectHolidayListContext value={currentProject?.holidays ?? EMPTY_HOLIDAYS}>
     <div className="h-screen flex ambient-canvas text-ink overflow-hidden">
       {/* Browser-only preview: paint fake macOS traffic lights so `?desktop=1`
           shows the real desktop layout. Real Tauri draws OS lights instead. */}
@@ -2205,6 +2210,7 @@ function App() {
         )}
 
     </div>
+    </ProjectHolidayListContext>
     </ProjectHolidaysContext>
   )
 }

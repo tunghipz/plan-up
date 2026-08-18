@@ -26,7 +26,7 @@ import {
   type Task,
 } from './types'
 import { db, uid, colorForName, nextSequence } from './schema'
-import { recomputeDates, wouldCreateCycle } from './scheduling'
+import { recomputeDates, wouldCreateCycle, normalizeHolidays } from './scheduling'
 import { logEvent, logTaskEdits } from './activity-log'
 import { revokeShare } from './share-hosted'
 
@@ -751,22 +751,7 @@ export async function setProjectHolidays(
   projectId: string,
   holidays: Holiday[]
 ): Promise<Holiday[]> {
-  const ISO = /^\d{4}-\d{2}-\d{2}$/
-  const clean: Holiday[] = []
-  for (const h of holidays) {
-    if (!h || !ISO.test(h.from ?? '') || !ISO.test(h.to ?? '')) continue
-    const from = h.to < h.from ? h.to : h.from
-    const to = h.to < h.from ? h.from : h.to
-    const single = from === to
-    clean.push({
-      id: h.id,
-      name: (h.name ?? '').trim() || 'Untitled',
-      from,
-      to,
-      ...(single && h.half ? { half: h.half } : {}),
-    })
-  }
-  clean.sort((a, b) => a.from.localeCompare(b.from) || a.to.localeCompare(b.to))
+  const clean = normalizeHolidays(holidays)
   // Atomic: persist + reflow the whole project in one transaction, so closing
   // the page mid-loop can't leave stored dates stale against the saved holidays.
   return db.transaction('rw', db.projects, db.tasks, db.members, async () => {

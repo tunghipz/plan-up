@@ -8,7 +8,9 @@ riêng trong sprint header card, hiện TÊN kỳ nghỉ + nút `+`** — phươ
 hiện khi kỳ nghỉ chồng lên khoảng ngày task của người đó** — phương án D, chốt qua
 `demo/holiday-on-member-card.html`; + **hatch ngày lễ trong Timeline**; + **fix từ
 `/review`: chip union theo ngày thay vì cộng từng kỳ, guard ngày sai định dạng, clip
-expansion về đúng cửa sổ Timeline**)
+expansion về đúng cửa sổ Timeline; chip đủ 24px + đúng contrast + toggle được, legend
+đổi nhãn, chuẩn hoá holidays dùng chung cho import + cap 366 ngày, `addDays` throw thay vì
+treo, một context duy nhất mang danh sách kỳ nghỉ, tách `offBandsFor` ra test được**)
 **Code:** `app/src/types.ts` (`Holiday`, `Project.holidays`), `app/src/scheduling.ts`
 (`expandHolidays`, `projectHolidayMap`, `ProjectHolidayMap`, `leafPlan` union,
 `recomputeDates`, `recomputeAllDates`), `app/src/scheduling-context.ts`
@@ -63,7 +65,9 @@ lần cho cả project**, scheduler tự union vào mọi member.
   trong popover days-off). Không confirm: §6.4 chỉ bắt confirm cho delete
   member/task/import, và thêm lại chỉ mất 2 cú bấm.
 - **Đếm ngày công** — badge hiện số **ngày công** mất đi, đã trừ T7/CN: Tết 9 ngày lịch
-  mà rơi 2 ngày cuối tuần thì hiện `7d`.
+  mà rơi 2 ngày cuối tuần thì hiện `7d`. Badge **tổng** (nút `metric`, trang settings) đi
+  qua `holidayLoadInSpan` nên union theo ngày — trước đó nó cộng rời từng kỳ và hiện
+  `6d holidays` ngay cạnh chip member `5d holiday` và 5 cột hatch.
 - **Empty state** — *"Chưa có ngày nghỉ chung. Cuối tuần đã tự động nghỉ sẵn."*
 
 ### Chip `Nd holiday` trên header member card
@@ -266,8 +270,40 @@ kể cả lane của người không set ngày nghỉ nào.
   chạy sau, nên tên kỳ nghỉ luôn đè `Day off` mà không cần so chuỗi (`DAY_OFF_LABEL` là
   hằng dùng chung với legend).
 
+### Chuẩn hoá một chỗ, cho cả UI lẫn import
+
+`normalizeHolidays(holidays)` (`db.ts`) là **cửa duy nhất** dữ liệu ngày lễ đi qua trước khi
+vào Dexie: `setProjectHolidays` gọi nó, và `importAll` (`io.ts`) cũng gọi nó cho từng project
+trong payload. Trước đó import `bulkAdd` nguyên row, chỉ check `Array.isArray(data.projects)`,
+nên một file backup sửa tay/hỏng đưa thẳng `from: '2027-2-3'` hay dải `2027 → 9999` vào DB.
+
+Luật chuẩn hoá: drop ngày sai `^\d{4}-\d{2}-\d{2}$`, `to < from` thì swap, **drop hẳn kỳ dài
+hơn `MAX_HOLIDAY_SPAN_DAYS = 366`** (không kỳ nghỉ thật nào dài hơn một năm; một dải 73 năm
+là dữ liệu hỏng, không phải ý định), `half` chỉ giữ khi `from === to`, tên rỗng → `Untitled`,
+sort theo `from`.
+
+`addDays` (`scheduling.ts`) giờ **throw** khi kết quả rơi khỏi dạng `yyyy-mm-dd` (qua mốc năm
+9999 `toISOString()` đổi sang dạng năm mở rộng `+010000-01-01T…`). Trước đó nó im lặng trả
+`'+010000-01'` — chuỗi đó `addDays` ra **chính nó**, nên mọi vòng `d <= to` chạm mốc này treo
+vĩnh viễn, không throw, không log. Treo im lặng tệ hơn crash.
+
+### Một context, một subscription
+
+`ProjectHolidayListContext` (`scheduling-context.ts`) mang `Holiday[]` **có tên** của project
+đang mở, provide một lần ở `App.tsx` từ `currentProject`. Trước đó `MemberDaysOffButton` mở
+`useLiveQuery(db.projects.get(...))` **mỗi member card** (10 member = 10 subscription cùng một
+row, và mỗi lần lưu ngày lễ đánh thức cả 10), `GanttView` mở thêm một cái nữa — trong khi
+`App.tsx` đã giữ sẵn `currentProject` cách đó vài dòng.
+
+Hai context, hai mục đích, không gộp: `ProjectHolidaysContext` là `Map<projectId, DayOff[]>`
+**không tên** cho scheduler (giữ `scheduling.ts` framework-free, khỏi kéo tên vào lõi tính
+lịch); `ProjectHolidayListContext` là danh sách **có tên** cho UI (tooltip, popover, chip).
+
 ## Rules & edge cases
 
+- **Danh sách trong popover key theo `date + name`**, không phải chỉ `date`: hai kỳ được
+  phép chồng ngày, nên khoá trùng làm React lặng lẽ bỏ mất một dòng (đo được: console báo
+  `two children with the same key, hol-2026-08-26`).
 - **Lễ ≠ phép, không trộn nguồn.** Trong popover days-off của member, ngày lễ hiện ở
   **trên vạch, mờ hơn, tag `project`, không có nút X** — read-only. Sửa lễ chỉ có một
   nơi (§8.3 không hai cách làm cùng một việc).
@@ -321,14 +357,6 @@ kể cả lane của người không set ngày nghỉ nào.
 
 ## Future / open questions
 
-- **Validate `holidays` ở tầng import.** `importAll` bulkAdd nguyên row project, chỉ check
-  `Array.isArray(data.projects)`. File backup sửa tay/hỏng có thể mang `from: '2027-2-3'`
-  hoặc dải 2027→9999. Guard ở các vòng lặp đã chặn treo máy, nhưng nơi đúng để chặn là lúc
-  **ghi**: tách phần chuẩn hoá của `setProjectHolidays` ra dùng chung cho import, + cap độ
-  dài một kỳ (vd 366 ngày). Chưa làm.
-- **`addDays('9999-12-31', 1)` là điểm bất động** (`'+010000-01'` → chính nó). Mọi vòng
-  `for (d = a; d <= b; d = addDays(d, 1))` trong app đều treo nếu chạm mốc đó. Nên cho
-  `addDays` throw khi kết quả không còn là `yyyy-mm-dd` — treo im lặng tệ hơn crash. Chưa làm.
 
 - **Số ngày công còn lại trên header member** (`0/15 · 9d công` — đã trừ cuối tuần, lễ,
   phép) là phương án C trong `demo/holiday-on-member-card.html`. Trả lời đúng câu hỏi

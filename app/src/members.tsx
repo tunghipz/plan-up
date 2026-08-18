@@ -1,8 +1,8 @@
 import { useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { useLiveQuery } from 'dexie-react-hooks'
 import { Calendar, CalendarDays, X, Upload, Trash2 } from 'lucide-react'
 import { usePinnedPopover } from './usePinnedPopover'
+import { useProjectHolidayList } from './scheduling-context'
 import {
   db,
   setMemberDaysOff,
@@ -637,7 +637,8 @@ export function MemberDaysOffButton({
   const [draftDate, setDraftDate] = useState('')
   const [draftHalf, setDraftHalf] = useState<'all' | 'am' | 'pm'>('all')
   const popRef = useRef<HTMLDivElement>(null)
-  const btnRef = useRef<HTMLButtonElement>(null)
+  // Anchor is the CHIP PAIR in the header variant (a span), the button itself in settings.
+  const btnRef = useRef<HTMLElement>(null)
   // Popover lives in a portal (escapes Card's overflow-hidden), pinned to the
   // trigger. `outsideIgnore`: the date picker's calendar is portaled to <body>,
   // so it sits OUTSIDE popRef — without the guard, clicking a day would close
@@ -665,10 +666,12 @@ export function MemberDaysOffButton({
   // Project-wide holidays, read straight off the project row (the scheduler's
   // map is name-less by design — it only needs dates). Scoped to the same range
   // as the personal list so a sprint view stays about this sprint.
-  const project = useLiveQuery(() => db.projects.get(member.projectId), [member.projectId])
+  // One subscription for the whole app (App provides it from `currentProject`),
+  // not one `db.projects.get` per member card. See design-docs/project-holidays.md.
+  const projectHolidays = useProjectHolidayList()
   const holidayDays = useMemo(() => {
     const out: { date: string; name: string }[] = []
-    for (const h of project?.holidays ?? []) {
+    for (const h of projectHolidays) {
       for (let d = h.from; d <= h.to; d = addDays(d, 1)) {
         if (range && (d < range.start || d > range.end)) continue
         out.push({ date: d, name: h.name })
@@ -676,14 +679,14 @@ export function MemberDaysOffButton({
     }
     return out.sort((a, b) => a.date.localeCompare(b.date))
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `range` is a fresh object literal every render; its two values are the real inputs
-  }, [project?.holidays, range?.start, range?.end])
+  }, [projectHolidays, range?.start, range?.end])
   // Holiday load on THIS member: project holidays clipped to their task span.
   // Deliberately a different window from `range` (the sprint) — the chip answers
   // "does this holiday hit your schedule", not "is it in this sprint".
   const holidayLoad = useMemo(
-    () => holidayLoadInSpan(project?.holidays, taskSpan),
+    () => holidayLoadInSpan(projectHolidays, taskSpan),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `taskSpan` is a fresh object literal every render; its two values are the real inputs
-    [project?.holidays, taskSpan?.start, taskSpan?.end]
+    [projectHolidays, taskSpan?.start, taskSpan?.end]
   )
   const visibleDays = range
     ? daysOffInRange(days, range.start, range.end)
@@ -713,46 +716,55 @@ export function MemberDaysOffButton({
     setDraftHalf('all')
   }
 
+  const holidayChip = variant === 'header' && holidayLoad.days > 0 && (
+    /* Project holidays that hit THIS member's schedule. Borderless and dimmer
+       than its sibling — the visual hierarchy says "inherited from the project",
+       where the days-off chip says "yours, editable". Same padding though: a
+       17px-tall hit target next to a 28px one is a mis-click waiting to collapse
+       the whole card, and 24px is the WCAG 2.5.8 floor. `ink-muted`, not
+       `ink-faint`: at 11px on the glass card the fainter token lands under the
+       4.5:1 contrast floor, and this is an interactive control at rest.
+       Opens the same popover (holidays already sit there, read-only) rather than
+       a second one (§8.3). Hidden when it costs no working day, so a holiday
+       falling on a weekend never claims lost capacity.
+       See design-docs/project-holidays.md. */
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation()
+        // Toggle, like every other trigger in the app: the chip lives inside the
+        // popover's anchor, so a press on it is NOT an outside-press and would
+        // otherwise leave the popover with no way to dismiss it from here.
+        setOpen((v) => !v)
+      }}
+      className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] font-medium text-ink-muted hover:text-accent hover:bg-accent-soft transition whitespace-nowrap"
+      // The tooltip carries the RULE — "only when it overlaps" is otherwise
+      // invisible, and two neighbouring cards differing with no stated reason
+      // reads as a bug. English, matching the chip's own label: a control whose
+      // explanation is in another language explains nothing.
+      title={`${holidayLoad.items
+        .map(
+          (h) =>
+            `${h.name} · ${formatShortDate(h.from)}${
+              h.to === h.from ? '' : ` – ${formatShortDate(h.to)}`
+            }`
+        )
+        .join('\n')}\nOverlaps ${member.name}'s task dates`}
+      // The number is the datum — an aria-label that omits it would replace the
+      // visible text for screen readers and break WCAG 2.5.3 (the visible label
+      // must be contained in the accessible name).
+      aria-label={`${fmtDays(holidayLoad.days)}d project holiday during ${member.name}'s tasks`}
+    >
+      <CalendarDays size={13} />
+      {fmtDays(holidayLoad.days)}d holiday
+    </button>
+  )
+
   return (
     <>
-      {/* Project holidays that hit THIS member's schedule. Dimmed, borderless,
-          no chrome of its own — the visual hierarchy says "inherited from the
-          project", where the days-off chip beside it says "yours, editable".
-          Opens the same popover (holidays already sit there, read-only) rather
-          than a second one (§8.3). Hidden when it costs no working day, so a
-          holiday that falls on a weekend never claims lost capacity.
-          See design-docs/project-holidays.md. */}
-      {variant === 'header' && holidayLoad.days > 0 && (
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation()
-            setOpen(true)
-          }}
-          className="inline-flex items-center gap-1 text-[11px] font-medium text-ink-faint hover:text-accent transition whitespace-nowrap"
-          // The tooltip carries the RULE — "only when it overlaps" is otherwise
-          // invisible, and two neighbouring cards differing with no stated reason
-          // reads as a bug.
-          title={`${holidayLoad.items
-            .map(
-              (h) =>
-                `${h.name} · ${formatShortDate(h.from)}${
-                  h.to === h.from ? '' : ` – ${formatShortDate(h.to)}`
-                }`
-            )
-            .join('\n')}\nTrùng lịch task của ${member.name}`}
-          // The number is the datum — an aria-label that omits it would replace
-          // the visible text for screen readers and break WCAG 2.5.3 (the
-          // visible label must be contained in the accessible name).
-          aria-label={`${fmtDays(holidayLoad.days)}d project holiday during ${member.name}'s tasks`}
-        >
-          <CalendarDays size={13} />
-          {fmtDays(holidayLoad.days)}d holiday
-        </button>
-      )}
       {variant === 'metric' ? (
         <button
-          ref={btnRef}
+          ref={btnRef as React.RefObject<HTMLButtonElement>}
           type="button"
           onClick={(e) => {
             e.stopPropagation()
@@ -774,8 +786,12 @@ export function MemberDaysOffButton({
           </span>
         </button>
       ) : (
+        // Both chips share ONE anchor: the popover pins to the pair instead of
+        // jumping between triggers, and a press on either counts as inside, so
+        // either one can dismiss it. See design-docs/members-and-days-off.md.
+        <span ref={btnRef} className="inline-flex items-center gap-2.5">
+        {holidayChip}
         <button
-          ref={btnRef}
           type="button"
           onClick={(e) => {
             e.stopPropagation()
@@ -804,6 +820,7 @@ export function MemberDaysOffButton({
             <span className="whitespace-nowrap">Days off</span>
           )}
         </button>
+        </span>
       )}
       {open && createPortal(
         <div
@@ -821,7 +838,9 @@ export function MemberDaysOffButton({
               this the popover would claim "None this sprint" on a week the whole
               team is off. See design-docs/project-holidays.md. */}
           {holidayDays.map((d) => (
-            <div key={`hol-${d.date}`} className="flex items-center gap-2 px-1.5 py-1 opacity-75">
+            // Two periods may share a date (overlap is allowed), so the date
+            // alone is not a unique key — React silently drops one row.
+            <div key={`hol-${d.date}-${d.name}`} className="flex items-center gap-2 px-1.5 py-1 opacity-75">
               <span className="text-sm text-ink-muted tabular-nums w-16 shrink-0">
                 {formatShortDate(d.date)}
               </span>

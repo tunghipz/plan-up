@@ -14,11 +14,11 @@ import {
   type Task,
   type Member,
 } from './db'
-import { useProjectHolidays } from './scheduling-context'
+import { useProjectHolidays, useProjectHolidayList } from './scheduling-context'
 import { Avatar } from './members'
 import { STATUS_META, derivedGroupStatus } from './sprint-logic'
 import { usePinnedPopover } from './usePinnedPopover'
-import { sprintWorkdays, formatShortDate, ISO_DATE } from './lib'
+import { sprintWorkdays, formatShortDate, ISO_DATE, offBandsFor } from './lib'
 
 /**
  * Timeline — an Apple-Calendar-style swimlane view of the sprint (design DNA:
@@ -51,8 +51,12 @@ function gapBefore(prev: string, cur: string): boolean {
 const softBg = (v: string) => `color-mix(in srgb, ${v} 15%, transparent)`
 const softFg = (v: string) => `color-mix(in srgb, ${v} 78%, var(--color-ink))`
 // Faint diagonal hatch — the universal "non-working time" texture for day-offs.
-/** Legend + tooltip wording for the non-working hatch (personal days off). */
-const DAY_OFF_LABEL = 'Day off'
+/**
+ * Legend wording for the hatch. It names BOTH sources: the same texture now
+ * carries project holidays, and holidays hatch every lane, so a key reading just
+ * "Day off" would pin company leave on the member.
+ */
+const HATCH_LEGEND = 'Day off / holiday'
 
 const HATCH_OFF =
   'repeating-linear-gradient(45deg, color-mix(in srgb, var(--color-ink) 13%, transparent) 0 3px, transparent 3px 7px)'
@@ -139,11 +143,10 @@ export function GanttView({
   // re-ran for every task on each resize frame. Mirrors BoardView's planById.
   // Covers every task so a parent's roll-up always sees all its children.
   const holidays = useProjectHolidays()
-  // Project holidays for the HATCH. Read off the project row rather than the
-  // context map: that map is deliberately name-less (the scheduler only needs
-  // dates), and the band's tooltip names the period.
+  // Project holidays for the HATCH, from the NAMED context — the scheduler's map
+  // is deliberately name-less and the band's tooltip needs the period's name.
   // See design-docs/project-holidays.md.
-  const project = useLiveQuery(() => db.projects.get(projectId), [projectId])
+  const projectHolidays = useProjectHolidayList()
   const holidayByDate = useMemo(() => {
     const out = new Map<string, { part: 'full' | 'am' | 'pm'; name: string }>()
     // Clip to the drawn window before expanding. Only these columns can ever be
@@ -152,7 +155,7 @@ export function GanttView({
     const first = workdays[0]
     const last = workdays[workdays.length - 1]
     if (!first || !last) return out
-    for (const h of project?.holidays ?? []) {
+    for (const h of projectHolidays) {
       // Shape guard: a non-ISO `to` sorts ABOVE every real date, so `d <= h.to`
       // never goes false and the walk runs to `addDays`' year-9999 fixed point —
       // a frozen tab, no error. Import writes project rows straight to Dexie.
@@ -179,7 +182,7 @@ export function GanttView({
       }
     }
     return out
-  }, [project?.holidays, workdays])
+  }, [projectHolidays, workdays])
   const planById = useMemo(() => {
     const m = new Map<string, ReturnType<typeof computeWorkingPlan>>()
     for (const t of tasksById.values()) m.set(t.id, computeWorkingPlan(t, tasksById, memberById, holidays))
@@ -421,33 +424,9 @@ export function GanttView({
         const childRows = pack(evs.filter((e) => !e.isParent), parentRows)
         const rows = Math.max(1, parentRows + childRows)
         // Off half-columns within the window: this member's own days off UNIONED
-        // with the project's holidays (everyone is off, so a holiday hatches
-        // every lane — including lanes of members with no personal days off).
-        // Union rule matches the scheduler: AM-off + PM-off = the whole day.
-        const offByDate = new Map<string, 'full' | 'am' | 'pm'>()
-        const offLabel = new Map<string, string>()
-        const markOff = (date: string, part: 'full' | 'am' | 'pm', label: string) => {
-          const prev = offByDate.get(date)
-          offByDate.set(date, prev === undefined || prev === part ? part : 'full')
-          // Last writer wins, and the holiday pass runs after the personal one —
-          // so a named period beats the generic label without comparing strings.
-          offLabel.set(date, label)
-        }
-        for (const o of m.daysOff) markOff(o.date, o.half ?? 'full', DAY_OFF_LABEL)
-        const offBands: { left: number; width: number; label: string }[] = []
-        workdays.forEach((date, i) => {
-          // Holidays are looked up per drawn column rather than pre-walked per
-          // lane — same result, but the cost is bounded by the window, not by
-          // how long the holiday list is.
-          const hol = holidayByDate.get(date)
-          if (hol) markOff(date, hol.part, hol.name)
-          const off = offByDate.get(date)
-          const label = offLabel.get(date) ?? DAY_OFF_LABEL
-          if (off === 'full') offBands.push({ left: i * dayW, width: dayW, label })
-          else if (off === 'am') offBands.push({ left: i * dayW, width: dayW / 2, label })
-          else if (off === 'pm')
-            offBands.push({ left: i * dayW + dayW / 2, width: dayW / 2, label })
-        })
+        // with the project's holidays. Geometry + union rule live in lib.ts so
+        // they are testable — see design-docs/gantt-view.md.
+        const offBands = offBandsFor(m.daysOff, holidayByDate, workdays, dayW)
         // earlier chips first, then later — each sorted by their shown date
         offWindow.sort((a, b) =>
           a.dir !== b.dir ? (a.dir === 'earlier' ? -1 : 1) : a.date < b.date ? -1 : 1
@@ -488,7 +467,7 @@ export function GanttView({
             className="inline-block w-3.5 h-3.5 rounded-[4px]"
             style={{ background: HATCH_OFF }}
           />
-          Day off
+          {HATCH_LEGEND}
         </span>
         <span className="inline-flex items-center gap-1.5">
           <span

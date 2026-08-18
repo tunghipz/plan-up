@@ -10,6 +10,7 @@ import type {
   Task,
 } from './types'
 import { db, uid, colorForName, nextSequence } from './schema'
+import { normalizeHolidays } from './scheduling'
 import { buildPersonBackfill, normalizePersonName } from './people'
 import { defaultSprintDates, todayLocalISO } from './lib'
 import { remapBundle, type ProjectBundle } from './project-io'
@@ -107,7 +108,12 @@ export async function importAll(data: ExportPayload) {
       let projects: Project[]
       let defaultId: string | null = null
       if (data.projects && data.projects.length > 0) {
-        projects = data.projects
+        // Import is the one path that used to reach Dexie unfiltered — a
+        // hand-edited backup could plant a non-ISO or decade-long holiday that
+        // hangs every day-walk downstream. See design-docs/project-holidays.md.
+        projects = data.projects.map((p) =>
+          p.holidays ? { ...p, holidays: normalizeHolidays(p.holidays) } : p
+        )
       } else {
         defaultId = uid()
         projects = [
@@ -286,7 +292,11 @@ export async function importProject(
       'rw',
       [db.projects, db.members, db.sprints, db.collections, db.tasks, db.events, db.people],
       async () => {
-        await db.projects.add(remapped.project)
+        await db.projects.add(
+          remapped.project.holidays
+            ? { ...remapped.project, holidays: normalizeHolidays(remapped.project.holidays) }
+            : remapped.project
+        )
         // Link each imported member to a Person in THIS db by normalized name
         // (reuse an existing same-name person, else create) — the bundle's
         // personId references the source DB. Read existing people ONCE and build

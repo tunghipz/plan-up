@@ -34,11 +34,19 @@ export type ProjectHolidayMap = Map<string, DayOff[]>
  * `setProjectHolidays` drops it on write, so this is belt-and-braces for rows
  * written by an older build or a hand-edited import.
  */
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+
 export function expandHolidays(holidays: Holiday[] | undefined): DayOff[] {
   if (!holidays?.length) return []
   const out: DayOff[] = []
   for (const h of holidays) {
-    if (!h?.from || !h?.to || h.to < h.from) continue
+    // Shape guard, not just presence: a non-ISO `to` (e.g. 'TBD' from a
+    // hand-edited import) sorts ABOVE every real date, so `d <= h.to` never
+    // goes false and this walk runs until `addDays` hits its year-9999 fixed
+    // point — a frozen tab with no error to show. Import writes project rows
+    // straight to Dexie (io.ts), so this is the only gate.
+    if (!ISO_DATE_RE.test(h?.from ?? '') || !ISO_DATE_RE.test(h?.to ?? '')) continue
+    if (h.to < h.from) continue
     const single = h.from === h.to
     for (let d = h.from; d <= h.to; d = addDays(d, 1)) {
       out.push(single && h.half ? { date: d, half: h.half } : { date: d })

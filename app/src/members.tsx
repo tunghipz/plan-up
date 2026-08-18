@@ -741,7 +741,10 @@ export function MemberDaysOffButton({
                 }`
             )
             .join('\n')}\nTrùng lịch task của ${member.name}`}
-          aria-label={`Project holidays during ${member.name}'s tasks`}
+          // The number is the datum — an aria-label that omits it would replace
+          // the visible text for screen readers and break WCAG 2.5.3 (the
+          // visible label must be contained in the accessible name).
+          aria-label={`${fmtDays(holidayLoad.days)}d project holiday during ${member.name}'s tasks`}
         >
           <CalendarDays size={13} />
           {fmtDays(holidayLoad.days)}d holiday

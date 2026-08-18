@@ -2,8 +2,9 @@
 
 **Status:** Implemented
 **Last updated:** 2026-08-18 (+ chip `Nd holiday`)
-**Code:** `app/src/SprintView.tsx` (`MemberCard`, `AvatarRing`, `MemberStatsBar`,
-`MemberScheduleButton`, `effectiveDaysOff`)
+**Code:** `app/src/SprintView.tsx` (`MemberCard`, `AvatarRing`, `MemberStatsBar`),
+`app/src/members.tsx` (`MemberDaysOffButton`),
+`app/src/lib.ts` (`effectiveDaysOff`, `holidayLoadInSpan`)
 
 ## Purpose
 Tell the manager, at a glance per assignee: how far along, what's late, when the next

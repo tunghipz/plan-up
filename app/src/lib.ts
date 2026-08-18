@@ -721,6 +721,11 @@ const isWeekendISO = (iso: string) => {
   const g = new Date(iso + 'T00:00:00Z').getUTCDay()
   return g === 0 || g === 6
 }
+/** Shape guard for a stored date. Anything else makes a `d <= to` day-walk run away. */
+export const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
+/** Next calendar day. Local twin of `addDays(d, 1)` — keeps lib.ts off scheduling.ts. */
+const nextISODate = (iso: string): string =>
+  new Date(Date.parse(iso + 'T00:00:00Z') + MS_DAY).toISOString().slice(0, 10)
 
 /**
  * WORKING days a project holiday actually costs. Weekends are already
@@ -764,19 +769,41 @@ export function holidayLoadInSpan<
   holidays: H[] | undefined,
   span: { start: string; end: string } | null | undefined
 ): { days: number; items: H[] } {
-  if (!span) return { days: 0, items: [] }
-  let days = 0
+  if (!span || !ISO_DATE.test(span.start) || !ISO_DATE.test(span.end)) {
+    return { days: 0, items: [] }
+  }
+  if (span.end < span.start) return { days: 0, items: [] }
+  // Union by DATE before counting. Two periods are allowed to overlap (see
+  // project-holidays.md), and summing them per-period would claim a day twice —
+  // the chip would read "10d holiday" beside a Timeline hatching the 8 days the
+  // scheduler actually removes. The scheduler unions through its offAm/offPm
+  // sets; this is the same rule in one map.
+  const part = new Map<string, 'full' | 'am' | 'pm'>()
   const items: H[] = []
   for (const h of holidays ?? []) {
+    // Shape guard, same as `expandHolidays`: a non-ISO `to` (a hand-edited
+    // import) sorts ABOVE any real date, so the day-walk below would never
+    // terminate on its own.
+    if (!ISO_DATE.test(h.from) || !ISO_DATE.test(h.to) || h.to < h.from) continue
     // Clip to the span — a partial overlap costs only its overlapping part.
     const from = h.from > span.start ? h.from : span.start
     const to = h.to < span.end ? h.to : span.end
     if (from > to) continue
-    // `half` survives the clip only while the holiday is still a single day.
-    const n = holidayWorkDays({ from, to, half: h.half })
-    if (n <= 0) continue
-    days += n
-    items.push(h)
+    // `half` is decided on the ORIGINAL range, exactly like `expandHolidays`:
+    // a multi-day run that carries a stale `half` is a run of WHOLE days off,
+    // and clipping it down to one day must not resurrect the half.
+    const half = h.from === h.to ? h.half : undefined
+    let touched = false
+    for (let d = from; d <= to; d = nextISODate(d)) {
+      if (isWeekendISO(d)) continue
+      touched = true
+      const prev = part.get(d)
+      const next = half ?? 'full'
+      part.set(d, prev === undefined || prev === next ? next : 'full')
+    }
+    if (touched) items.push(h)
   }
+  let days = 0
+  for (const p of part.values()) days += p === 'full' ? 1 : 0.5
   return { days, items }
 }

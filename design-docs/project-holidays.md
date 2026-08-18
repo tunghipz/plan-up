@@ -6,7 +6,9 @@ tự đóng khi đóng drawer settings; + **bỏ pill khỏi top bar, chuyển x
 riêng trong sprint header card, hiện TÊN kỳ nghỉ + nút `+`** — phương án D, chốt qua
 `demo/holiday-in-sprint-header.html`; + **chip `Nd holiday` trên header member card, chỉ
 hiện khi kỳ nghỉ chồng lên khoảng ngày task của người đó** — phương án D, chốt qua
-`demo/holiday-on-member-card.html`; + **hatch ngày lễ trong Timeline**)
+`demo/holiday-on-member-card.html`; + **hatch ngày lễ trong Timeline**; + **fix từ
+`/review`: chip union theo ngày thay vì cộng từng kỳ, guard ngày sai định dạng, clip
+expansion về đúng cửa sổ Timeline**)
 **Code:** `app/src/types.ts` (`Holiday`, `Project.holidays`), `app/src/scheduling.ts`
 (`expandHolidays`, `projectHolidayMap`, `ProjectHolidayMap`, `leafPlan` union,
 `recomputeDates`, `recomputeAllDates`), `app/src/scheduling-context.ts`
@@ -78,6 +80,15 @@ Header member card có thêm chip **mờ, không viền**, đứng **trước** 
 - **Số trên chip là ngày công bị mất trong phần giao nhau**, đã trừ T7/CN
   (`holidayLoadInSpan`). Kỳ nghỉ rơi trọn cuối tuần ⇒ 0 ⇒ **không có chip** (khớp luật
   "badge chỉ đếm ngày công" ở dưới).
+- **Union theo NGÀY, không cộng từng kỳ.** Hai kỳ chồng nhau (được phép — xem *Rules*)
+  mà cộng rời thì chip báo `10d` trong khi scheduler chỉ bỏ `8d`, và nó nằm **ngay cạnh**
+  dải hatch Timeline đếm đúng 8 — hai con số đá nhau trên cùng màn hình. `holidayLoadInSpan`
+  vì thế dựng `Map<date, part>` rồi mới cộng, đúng luật `offAm`/`offPm` của scheduler:
+  AM + PM cùng ngày = **1 ngày**, hai kỳ cùng ngày = **1 ngày**. Đo thật: lễ 24–26 Aug +
+  offsite 26–28 Aug ⇒ chip `5d holiday`, Timeline hatch đúng 5 cột.
+- **`half` quyết trên dải GỐC**, không phải dải đã clip — giống `expandHolidays`. Một kỳ
+  nhiều ngày mang `half` (chỉ vào được qua import sửa tay) là chuỗi ngày nghỉ **nguyên
+  ngày**; clip nó xuống 1 ngày không được làm sống lại nửa ngày.
 - **Member không có task** (lane "members with no tasks") ⇒ không có span ⇒ không chip.
 - **Chip mở đúng popover days-off** đang có — nơi từng ngày lễ đã nằm sẵn ở khối trên,
   mờ, tag `project`, read-only. Không đẻ popover thứ hai (§8.3).
@@ -248,6 +259,12 @@ kể cả lane của người không set ngày nghỉ nào.
   hai nửa rời.
 - **Đọc thẳng `project.holidays`**, không dùng `ProjectHolidayMap` của context: map đó cố ý
   không mang tên (scheduler chỉ cần ngày), mà tooltip thì cần tên.
+- **Expansion clip về đúng cửa sổ đang vẽ** (`workdays[0]…workdays[N-1]`) rồi mới nở ngày,
+  và tra theo từng cột trong `workdays.forEach` thay vì duyệt cả map mỗi lane. Chi phí chặn
+  bởi bề rộng sprint, không phải bởi độ dài kỳ nghỉ.
+- **Nhãn tooltip: người ghi sau thắng.** Pass ngày nghỉ cá nhân chạy trước, pass ngày lễ
+  chạy sau, nên tên kỳ nghỉ luôn đè `Day off` mà không cần so chuỗi (`DAY_OFF_LABEL` là
+  hằng dùng chung với legend).
 
 ## Rules & edge cases
 
@@ -265,8 +282,17 @@ kể cả lane của người không set ngày nghỉ nào.
 - **Half-day chỉ cho dải 1 ngày.** Dải nhiều ngày mà kèm `half` là vô nghĩa (nghỉ chiều
   suốt 5 ngày?) → `setProjectHolidays` **drop** `half` khi `to !== from`.
 - **Dải chồng nhau** không bị chặn — 2 kỳ đè lên nhau thì ngày chung vẫn chỉ nghỉ một
-  lần (`offAm`/`offPm` là Set). Danh sách vẫn hiện 2 kỳ; tổng "ngày công" của từng kỳ
-  cộng lại có thể lớn hơn số ngày thực mất. Chấp nhận: chặn chồng chéo đắt hơn giá trị.
+  lần (`offAm`/`offPm` là Set). Danh sách vẫn hiện 2 kỳ, và **badge từng kỳ** trong
+  popover vẫn là ngày công của riêng kỳ đó (cộng lại có thể lớn hơn số ngày thực mất —
+  chấp nhận, vì mỗi badge nói về một kỳ). Nhưng **mọi con số TỔNG phải union theo ngày**:
+  chip `Nd holiday` union trước khi cộng (`holidayLoadInSpan`).
+- **Ngày sai định dạng phải bị chặn ở mọi vòng lặp ngày.** `d <= h.to` so sánh chuỗi, mà
+  `'TBD'` / `'2027-2-3'` sort **trên** mọi ngày ISO ⇒ vòng lặp không bao giờ dừng, chạy tới
+  điểm bất động của `addDays` (`addDays('9999-12-31', 1) === '+010000-01'`, rồi `addDays`
+  của chuỗi đó ra chính nó) ⇒ **tab đơ, không throw, không log**. `importAll` (`io.ts`) ghi
+  thẳng row project vào Dexie **không qua `setProjectHolidays`**, nên guard `ISO_DATE` ở
+  `expandHolidays`, `holidayLoadInSpan` và `holidayByDate` (Gantt) là cửa duy nhất.
+  Đo thật: trước khi guard, `expandHolidays({to:'nope'})` chạy tới **hết heap (OOM)**.
 - **Esc** bỏ dải đang chọn trước, bấm lần nữa mới đóng popover (overlay keyboard
   contract, design-system §6.5 — Esc chỉ đóng tầng trên cùng). Một cú mis-click không
   bắt phải mở lại popover rồi lật về đúng tháng.
@@ -294,6 +320,15 @@ kể cả lane của người không set ngày nghỉ nào.
   không riêng holidays.
 
 ## Future / open questions
+
+- **Validate `holidays` ở tầng import.** `importAll` bulkAdd nguyên row project, chỉ check
+  `Array.isArray(data.projects)`. File backup sửa tay/hỏng có thể mang `from: '2027-2-3'`
+  hoặc dải 2027→9999. Guard ở các vòng lặp đã chặn treo máy, nhưng nơi đúng để chặn là lúc
+  **ghi**: tách phần chuẩn hoá của `setProjectHolidays` ra dùng chung cho import, + cap độ
+  dài một kỳ (vd 366 ngày). Chưa làm.
+- **`addDays('9999-12-31', 1)` là điểm bất động** (`'+010000-01'` → chính nó). Mọi vòng
+  `for (d = a; d <= b; d = addDays(d, 1))` trong app đều treo nếu chạm mốc đó. Nên cho
+  `addDays` throw khi kết quả không còn là `yyyy-mm-dd` — treo im lặng tệ hơn crash. Chưa làm.
 
 - **Số ngày công còn lại trên header member** (`0/15 · 9d công` — đã trừ cuối tuần, lễ,
   phép) là phương án C trong `demo/holiday-on-member-card.html`. Trả lời đúng câu hỏi

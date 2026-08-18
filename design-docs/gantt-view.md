@@ -90,6 +90,9 @@ thing List and Board can't show. Read-only: a pure projection of the auto-schedu
   `{ startDate, dueDate, startTime, endTime }` at half-day precision
   (`startTime '13:00'` = PM start; `endTime '12:00'` = noon finish — see
   [scheduling.md](./scheduling.md)).
+- The holiday expansion is **clipped to the drawn window** and guarded against non-ISO
+  dates before the day-walk (a malformed `to` sorts above every real date, so the walk
+  would never terminate — see [project-holidays.md](./project-holidays.md)).
 - Day-off bands from `member.daysOff` (`{ date, half? }[]` — see
   [members-and-days-off.md](./members-and-days-off.md)) unioned with
   `Project.holidays`, read straight off the project row (the scheduler's

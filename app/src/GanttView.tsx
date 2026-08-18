@@ -18,7 +18,7 @@ import { useProjectHolidays } from './scheduling-context'
 import { Avatar } from './members'
 import { STATUS_META, derivedGroupStatus } from './sprint-logic'
 import { usePinnedPopover } from './usePinnedPopover'
-import { sprintWorkdays, formatShortDate } from './lib'
+import { sprintWorkdays, formatShortDate, ISO_DATE } from './lib'
 
 /**
  * Timeline — an Apple-Calendar-style swimlane view of the sprint (design DNA:
@@ -51,6 +51,9 @@ function gapBefore(prev: string, cur: string): boolean {
 const softBg = (v: string) => `color-mix(in srgb, ${v} 15%, transparent)`
 const softFg = (v: string) => `color-mix(in srgb, ${v} 78%, var(--color-ink))`
 // Faint diagonal hatch — the universal "non-working time" texture for day-offs.
+/** Legend + tooltip wording for the non-working hatch (personal days off). */
+const DAY_OFF_LABEL = 'Day off'
+
 const HATCH_OFF =
   'repeating-linear-gradient(45deg, color-mix(in srgb, var(--color-ink) 13%, transparent) 0 3px, transparent 3px 7px)'
 // In-bar "pause": same-status stripes over a dim scrim, clipped inside the task block.
@@ -143,12 +146,25 @@ export function GanttView({
   const project = useLiveQuery(() => db.projects.get(projectId), [projectId])
   const holidayByDate = useMemo(() => {
     const out = new Map<string, { part: 'full' | 'am' | 'pm'; name: string }>()
+    // Clip to the drawn window before expanding. Only these columns can ever be
+    // hatched, and an unclipped walk over a decade-long imported period would
+    // build millions of entries this render never reads.
+    const first = workdays[0]
+    const last = workdays[workdays.length - 1]
+    if (!first || !last) return out
     for (const h of project?.holidays ?? []) {
+      // Shape guard: a non-ISO `to` sorts ABOVE every real date, so `d <= h.to`
+      // never goes false and the walk runs to `addDays`' year-9999 fixed point —
+      // a frozen tab, no error. Import writes project rows straight to Dexie.
+      if (!ISO_DATE.test(h.from) || !ISO_DATE.test(h.to) || h.to < h.from) continue
       // `half` is only kept on a single-day period (setProjectHolidays drops it
       // otherwise), so a multi-day run is always a full-column band.
       const part: 'full' | 'am' | 'pm' =
         h.half && h.from === h.to ? h.half : 'full'
-      for (let d = h.from; d <= h.to; d = addDays(d, 1)) {
+      const from = h.from > first ? h.from : first
+      const to = h.to < last ? h.to : last
+      if (from > to) continue
+      for (let d = from; d <= to; d = addDays(d, 1)) {
         const prev = out.get(d)
         out.set(
           d,
@@ -163,7 +179,7 @@ export function GanttView({
       }
     }
     return out
-  }, [project?.holidays])
+  }, [project?.holidays, workdays])
   const planById = useMemo(() => {
     const m = new Map<string, ReturnType<typeof computeWorkingPlan>>()
     for (const t of tasksById.values()) m.set(t.id, computeWorkingPlan(t, tasksById, memberById, holidays))
@@ -413,15 +429,20 @@ export function GanttView({
         const markOff = (date: string, part: 'full' | 'am' | 'pm', label: string) => {
           const prev = offByDate.get(date)
           offByDate.set(date, prev === undefined || prev === part ? part : 'full')
-          // A holiday's name beats the generic "Day off" when both land on a date.
-          if (!offLabel.has(date) || label !== 'Day off') offLabel.set(date, label)
+          // Last writer wins, and the holiday pass runs after the personal one —
+          // so a named period beats the generic label without comparing strings.
+          offLabel.set(date, label)
         }
-        for (const o of m.daysOff) markOff(o.date, o.half ?? 'full', 'Day off')
-        for (const [date, h] of holidayByDate) markOff(date, h.part, h.name)
+        for (const o of m.daysOff) markOff(o.date, o.half ?? 'full', DAY_OFF_LABEL)
         const offBands: { left: number; width: number; label: string }[] = []
         workdays.forEach((date, i) => {
+          // Holidays are looked up per drawn column rather than pre-walked per
+          // lane — same result, but the cost is bounded by the window, not by
+          // how long the holiday list is.
+          const hol = holidayByDate.get(date)
+          if (hol) markOff(date, hol.part, hol.name)
           const off = offByDate.get(date)
-          const label = offLabel.get(date) ?? 'Day off'
+          const label = offLabel.get(date) ?? DAY_OFF_LABEL
           if (off === 'full') offBands.push({ left: i * dayW, width: dayW, label })
           else if (off === 'am') offBands.push({ left: i * dayW, width: dayW / 2, label })
           else if (off === 'pm')

@@ -43,6 +43,15 @@ describe('expandHolidays', () => {
   })
 })
 
+describe('expandHolidays — malformed input', () => {
+  it('drops a non-ISO date instead of walking forever', () => {
+    // `'2027-02-03' <= 'TBD'` is always true (letters sort above digits), so an
+    // unguarded walk runs to addDays' year-9999 fixed point and hangs the tab.
+    expect(expandHolidays([{ id: 'z', name: 'b', from: '2027-02-03', to: 'TBD' }])).toEqual([])
+    expect(expandHolidays([{ id: 'z', name: 'b', from: '2027-2-3', to: '2027-02-05' }])).toEqual([])
+  })
+})
+
 describe('projectHolidayMap', () => {
   const proj = (id: string, holidays?: Holiday[]): Project => ({
     id,
@@ -116,6 +125,62 @@ describe('holidayLoadInSpan', () => {
       { id: 'c', name: 'Nửa ngày', from: '2027-03-10', to: '2027-03-10', half: 'pm' },
     ]
     expect(holidayLoadInSpan(half, { start: '2027-03-01', end: '2027-03-31' }).days).toBe(0.5)
+  })
+  it('counts a date ONCE when two periods overlap', () => {
+    // Tết Wed 3 – Thu 11 (7 working) + offsite Wed 10 – Fri 12 (3 working), and
+    // the 10th/11th are shared. The schedule loses 8 days, not 10 — summing per
+    // period would make the chip contradict the Timeline hatch beside it.
+    const overlap: Holiday[] = [
+      { id: 'a', name: 'Tết', from: '2027-02-03', to: '2027-02-11' },
+      { id: 'b', name: 'Offsite', from: '2027-02-10', to: '2027-02-12' },
+    ]
+    const r = holidayLoadInSpan(overlap, { start: '2027-01-01', end: '2027-12-31' })
+    expect(r.days).toBe(8)
+    expect(r.items.map((h) => h.id)).toEqual(['a', 'b'])
+  })
+  it('does not double-count two periods on the same single date', () => {
+    const dup: Holiday[] = [
+      { id: 'a', name: 'X', from: '2027-03-10', to: '2027-03-10' },
+      { id: 'b', name: 'Y', from: '2027-03-10', to: '2027-03-10' },
+    ]
+    expect(holidayLoadInSpan(dup, { start: '2027-03-01', end: '2027-03-31' }).days).toBe(1)
+  })
+  it('unions AM + PM on one date into a whole day', () => {
+    const halves: Holiday[] = [
+      { id: 'a', name: 'AM', from: '2027-03-10', to: '2027-03-10', half: 'am' },
+      { id: 'b', name: 'PM', from: '2027-03-10', to: '2027-03-10', half: 'pm' },
+    ]
+    expect(holidayLoadInSpan(halves, { start: '2027-03-01', end: '2027-03-31' }).days).toBe(1)
+  })
+  it('does not resurrect `half` when a MULTI-day period is clipped to one day', () => {
+    // Only reachable via a hand-edited import (setProjectHolidays drops `half`
+    // on a range), but the scheduler treats every day of it as a WHOLE day off —
+    // the chip must agree.
+    const stale: Holiday[] = [
+      { id: 'm', name: 'Bad', from: '2027-02-03', to: '2027-02-05', half: 'pm' },
+    ]
+    expect(holidayLoadInSpan(stale, { start: '2027-02-05', end: '2027-02-28' }).days).toBe(1)
+  })
+  it('ignores malformed or backwards input instead of inventing days', () => {
+    const span = { start: '2027-01-01', end: '2027-12-31' }
+    expect(holidayLoadInSpan([{ id: 'z', name: 'b', from: '2027-02-03', to: 'nope' }], span))
+      .toEqual({ days: 0, items: [] })
+    expect(holidayLoadInSpan([{ id: 'z', name: 'b', from: '2027-2-3', to: '2027-02-11' }], span))
+      .toEqual({ days: 0, items: [] })
+    expect(holidayLoadInSpan([{ id: 'z', name: 'b', from: '2027-02-11', to: '2027-02-03' }], span))
+      .toEqual({ days: 0, items: [] })
+    expect(holidayLoadInSpan(hols, { start: '2027-03-31', end: '2027-02-01' }))
+      .toEqual({ days: 0, items: [] })
+  })
+  it('clips the LEADING edge inclusively', () => {
+    // Span opens mid-Tết: Tue 9, Wed 10, Thu 11.
+    expect(holidayLoadInSpan(hols, { start: '2027-02-09', end: '2027-02-28' }).days).toBe(3)
+  })
+  it('counts the shared day when the span ends exactly on holiday.from', () => {
+    expect(holidayLoadInSpan(hols, { start: '2027-01-01', end: '2027-02-03' }).days).toBe(1)
+  })
+  it('counts the shared day when the span starts exactly on holiday.to', () => {
+    expect(holidayLoadInSpan(hols, { start: '2027-02-11', end: '2027-03-01' }).days).toBe(1)
   })
   it('handles a project with no holidays at all', () => {
     expect(holidayLoadInSpan(undefined, { start: '2027-01-01', end: '2027-12-31' }))

@@ -15,6 +15,7 @@ import {
   LayoutGrid,
   GanttChartSquare,
   Calendar,
+  CalendarDays,
   Plus,
   Settings,
   X,
@@ -1715,16 +1716,6 @@ function App() {
             )}
           </div>
           <div className="ml-auto flex items-center gap-1.5">
-            {/* Informational only — appears when THIS sprint loses days to a
-                project holiday, click to edit. Creating one lives in project
-                settings; see design-docs/project-holidays.md. */}
-            {selKind === 'sprint' && currentSprint && currentProject && (
-              <ProjectHolidaysButton
-                project={currentProject}
-                range={{ start: currentSprint.startDate, end: currentSprint.endDate }}
-                hideWhenEmpty
-              />
-            )}
             {selKind === 'collection' && currentCollection ? (
               <>
                 <StatusEditor collection={currentCollection} />
@@ -1890,8 +1881,9 @@ function App() {
           {/* Merged Notion-style sprint page header: title · note (description) ·
               Dates · capacity inset. Scrolls with content; keyed by sprint so the
               note draft + capacity reset on sprint change. See app-shell v4. */}
-          {selKind === 'sprint' && currentSprint && (
+          {selKind === 'sprint' && currentSprint && currentProject && (
             <SprintPageHeader
+              project={currentProject}
               key={currentSprint.id}
               sprint={currentSprint}
               capacity={capacity}
@@ -2539,6 +2531,7 @@ function SprintExpiryBanner({
 }
 
 function SprintPageHeader({
+  project,
   sprint,
   capacity,
   onShare,
@@ -2552,6 +2545,8 @@ function SprintPageHeader({
   onGoToNext,
   onStartNext,
 }: {
+  /** Owns `holidays` — the Holidays row edits them in place. */
+  project: Project
   sprint: Sprint
   capacity: {
     total: number
@@ -2642,6 +2637,24 @@ function SprintPageHeader({
         <span className="text-ink tab-data bg-fill rounded-full px-2.5 py-1">
           {formatSprintRange(sprint.startDate, sprint.endDate)}
         </span>
+      </div>
+
+      {/* Holidays — its own row, borrowing the Dates row's grammar (muted label
+          + value pills). Shows the NAME of each period overlapping this sprint,
+          not one rolled-up number, and carries the `+` that creates one. It sits
+          here rather than on the top bar: holidays are set once or twice a year,
+          so a permanent affordance up there fails the affordance-density check
+          (§9.2), and here it sits beside the very thing it qualifies — the
+          sprint's date span. See design-docs/project-holidays.md. */}
+      <div className="mt-2 flex items-center gap-2.5 text-[13px]">
+        <span className="inline-flex shrink-0 items-center gap-2 text-ink-muted">
+          <CalendarDays size={14} strokeWidth={1.8} className="text-ink-faint" aria-hidden />
+          Holidays
+        </span>
+        <ProjectHolidaysButton
+          project={project}
+          range={{ start: sprint.startDate, end: sprint.endDate }}
+        />
       </div>
 
       {/* Capacity — recessed soft-fill inset (keeps a touch of Cupertino depth

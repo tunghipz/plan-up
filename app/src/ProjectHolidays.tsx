@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { CalendarDays, X } from 'lucide-react'
+import { CalendarDays, Plus, X } from 'lucide-react'
 import type { DateRange } from './DatePicker'
 import { CalendarGrid } from './DatePicker'
 import { usePinnedPopover } from './usePinnedPopover'
@@ -56,13 +56,15 @@ const spanLabel = (h: Pick<Holiday, 'from' | 'to' | 'half'>) =>
 
 export function ProjectHolidaysButton({
   project,
-  variant = 'header',
+  variant = 'row',
   range,
-  hideWhenEmpty = false,
 }: {
   project: Project
-  /** 'header' = sprint toolbar pill; 'metric' = always-visible settings line. */
-  variant?: 'header' | 'metric'
+  /**
+   * `'row'` = the `Holidays` row in the sprint header card (named pills + `+`);
+   * `'metric'` = the always-visible settings line.
+   */
+  variant?: 'row' | 'metric'
   /**
    * Sprint window. Present (sprint view) → the trigger counts only holidays
    * landing inside it, mirroring `MemberDaysOffButton`. Absent (settings) → the
@@ -70,15 +72,6 @@ export function ProjectHolidaysButton({
    * holiday is a property of the year, not of the sprint you happen to be in.
    */
   range?: DateRange
-  /**
-   * Render nothing when there is nothing to show. Used by the sprint toolbar:
-   * holidays get set once or twice a YEAR, so a permanent "add" affordance up
-   * there would fail the affordance-density check (design-system §9.2). The
-   * toolbar pill is therefore informational — it appears only when this sprint
-   * actually loses days — and creation lives in project settings, the same
-   * discovery path member days-off already uses.
-   */
-  hideWhenEmpty?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const [start, setStart] = useState<string | null>(null)
@@ -86,7 +79,7 @@ export function ProjectHolidaysButton({
   const [name, setName] = useState('')
   const [month, setMonth] = useState(() => ymOf(todayISO()))
   const popRef = useRef<HTMLDivElement>(null)
-  const btnRef = useRef<HTMLButtonElement>(null)
+  const btnRef = useRef<HTMLElement>(null)
   const nameRef = useRef<HTMLInputElement>(null)
 
   const holidays = useMemo(
@@ -122,7 +115,14 @@ export function ProjectHolidaysButton({
     place: () => {
       const rect = btnRef.current?.getBoundingClientRect()
       if (!rect) return null
-      const right = Math.max(8, window.innerWidth - rect.right)
+      const w = popRef.current?.offsetWidth ?? 0
+      // The row starts at the card's left margin, so it pins LEFT (clamped so a
+      // 520px popover can't run off a narrow window); the settings metric line
+      // sits at the right of a drawer, so it pins RIGHT.
+      const side: Record<string, number> =
+        variant === 'row'
+          ? { left: Math.max(8, Math.min(rect.left, window.innerWidth - 8 - w)) }
+          : { right: Math.max(8, window.innerWidth - rect.right) }
       const h = popRef.current?.offsetHeight ?? 0
       let top = rect.bottom + 6
       // Flip above the trigger when it would run off the bottom. A two-month
@@ -134,9 +134,9 @@ export function ProjectHolidaysButton({
         const above = rect.top - h - 6
         top = above >= 8 ? above : Math.max(8, window.innerHeight - 8 - h)
       }
-      return { top, right }
+      return { top, ...side }
     },
-  }) ?? { top: 0, right: 0 }
+  }) as { top: number; left?: number; right?: number } | null
 
   /**
    * Two-tap, identical in behaviour to `DateRangePopover.pick`: no start yet (or
@@ -195,13 +195,11 @@ export function ProjectHolidaysButton({
   // every other picker in the app. Two states, two visuals, no collision.
   const savedDots = useMemo(() => expandHolidays(holidays), [holidays])
 
-  if (hideWhenEmpty && count === 0 && !open) return null
-
   return (
     <>
       {variant === 'metric' ? (
+        <span ref={btnRef} className="inline-flex">
         <button
-          ref={btnRef}
           type="button"
           onClick={(e) => {
             e.stopPropagation()
@@ -216,33 +214,66 @@ export function ProjectHolidaysButton({
           <CalendarDays size={13} />
           <span className="whitespace-nowrap">{label}</span>
         </button>
+        </span>
       ) : (
-        <button
-          ref={btnRef}
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation()
-            setOpen((v) => !v)
-          }}
-          className={
-            count > 0
-              ? 'inline-flex items-center gap-1.5 text-[12px] font-medium rounded-full px-2.5 py-1 bg-accent-tint text-accent transition'
-              : // Resting: quiet dashed pill — calm at rest, accent on hover
-                // (same affordance grammar as MemberDaysOffButton).
-                'inline-flex items-center gap-1.5 text-[12px] font-medium rounded-full px-2.5 py-1 border border-dashed border-border-strong text-ink-muted hover:text-accent hover:border-accent hover:bg-accent-soft transition'
-          }
-          title={
-            count > 0
-              ? `${fmtDays(totalDays)} holiday day${totalDays === 1 ? '' : 's'} — click to edit`
-              : 'Set project holidays'
-          }
-          aria-label="Project holidays"
-        >
-          <CalendarDays size={13} />
-          <span className="whitespace-nowrap">
-            {count > 0 ? `${fmtDays(totalDays)}d holidays` : 'Holidays'}
-          </span>
-        </button>
+        // The row: label + one pill PER NAMED holiday + a `+`. Names, not one
+        // rolled-up number — the name is what people remember and what tells a
+        // public holiday apart from a team offsite, so the row reads without
+        // being clicked. Every trigger in here opens the same popover, anchored
+        // to the ROW (this span) rather than to whichever pill was pressed, so
+        // it doesn't jump around. See design-docs/project-holidays.md.
+        <span ref={btnRef} className="inline-flex items-center gap-2 flex-wrap min-w-0">
+          {visible.map((h) => (
+            <button
+              key={h.id}
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                // Open on the month this holiday lives in, not today's.
+                setMonth(ymOf(h.from))
+                setOpen(true)
+              }}
+              className="inline-flex items-center gap-1.5 max-w-[280px] rounded-full bg-accent-tint px-2.5 py-1 text-[12.5px] text-accent transition hover:bg-accent-soft"
+              title={`${fmtDays(holidayWorkDays(h))} working day${holidayWorkDays(h) === 1 ? '' : 's'} — click to edit`}
+              aria-label={`Edit holiday ${h.name}`}
+            >
+              <span className="truncate">{h.name}</span>
+              <span className="tabular-nums opacity-70 whitespace-nowrap">
+                · {spanLabel(h)}
+              </span>
+            </button>
+          ))}
+          {count > 0 ? (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                setOpen(true)
+              }}
+              className="inline-flex h-6 w-6 items-center justify-center rounded-[7px] text-ink-faint transition hover:bg-surface-hover hover:text-accent"
+              title="Add a holiday"
+              aria-label="Add holiday period"
+            >
+              <Plus size={14} />
+            </button>
+          ) : (
+            // Resting: quiet dashed pill — calm at rest, accent on hover (the
+            // same affordance grammar as MemberDaysOffButton's "Days off").
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                setOpen(true)
+              }}
+              className="inline-flex items-center gap-1.5 rounded-full border border-dashed border-border-strong px-2.5 py-1 text-[12.5px] font-medium text-ink-muted transition hover:border-accent hover:bg-accent-soft hover:text-accent"
+              title="Set days off for the whole project"
+              aria-label="Project holidays"
+            >
+              <Plus size={13} />
+              <span className="whitespace-nowrap">Add holiday</span>
+            </button>
+          )}
+        </span>
       )}
 
       {open &&
@@ -250,7 +281,7 @@ export function ProjectHolidaysButton({
           <div
             ref={popRef}
             onClick={(e) => e.stopPropagation()}
-            style={{ position: 'fixed', top: pos.top, right: pos.right }}
+            style={{ position: 'fixed', top: pos?.top ?? -9999, left: pos?.left, right: pos?.right }}
             className="z-50 glass-popover rounded-[14px] p-3 w-[520px] max-w-[calc(100vw-16px)] max-h-[calc(100vh-16px)] overflow-y-auto"
           >
             <div className="text-[11px] text-ink-faint px-1 pb-2">

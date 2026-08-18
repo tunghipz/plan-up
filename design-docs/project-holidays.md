@@ -1,7 +1,10 @@
 # Project holidays — ngày nghỉ chung toàn project
 
 **Status:** Implemented
-**Last updated:** 2026-08-17 (bản đầu; + fix popover tràn đáy màn hình và popover không tự đóng khi đóng drawer settings)
+**Last updated:** 2026-08-17 (bản đầu; + fix popover tràn đáy màn hình và popover không
+tự đóng khi đóng drawer settings; + **bỏ pill khỏi top bar, chuyển xuống hàng `Holidays`
+riêng trong sprint header card, hiện TÊN kỳ nghỉ + nút `+`** — phương án D, chốt qua
+`demo/holiday-in-sprint-header.html`)
 **Code:** `app/src/types.ts` (`Holiday`, `Project.holidays`), `app/src/scheduling.ts`
 (`expandHolidays`, `projectHolidayMap`, `ProjectHolidayMap`, `leafPlan` union,
 `recomputeDates`, `recomputeAllDates`), `app/src/scheduling-context.ts`
@@ -10,7 +13,7 @@
 `app/src/DatePicker.tsx` (`CalendarGrid` controlled-month props),
 `app/src/ProjectHolidays.tsx` (`ProjectHolidaysButton`),
 `app/src/usePinnedPopover.ts` (tự đóng khi trigger bị ẩn),
-`app/src/App.tsx` + `app/src/ProjectSettingsView.tsx` (2 chỗ mount)
+`app/src/App.tsx` (`SprintPageHeader` — hàng `Holidays`) + `app/src/ProjectSettingsView.tsx` (2 chỗ mount)
 
 ## Purpose
 
@@ -23,16 +26,22 @@ lần cho cả project**, scheduler tự union vào mọi member.
 
 ## User-facing behavior
 
-- **Trigger** — pill dạng lịch, có ở **2 chỗ** (cùng một component, `MemberDaysOffButton`
-  đã có tiền lệ này):
-  - **Sprint toolbar** (`hideWhenEmpty`) — **chỉ hiện khi sprint đang xem thật sự mất
-    ngày** (`2d holidays`), bấm vào để sửa. Không có ngày lễ nào → **không render gì**.
-    Lý do: ngày lễ set 1–2 lần một **năm**, để một nút "thêm" thường trú trên top bar là
-    trượt checklist affordance-density (design-system §9.2) — và top bar đã chật với
-    Roll over / Search / Share.
+- **Trigger** — cùng một component ở **2 chỗ** (`MemberDaysOffButton` đã có tiền lệ):
+  - **Sprint header card** (`variant="row"`) — **một hàng riêng ngay dưới hàng `Dates`**,
+    mượn nguyên grammar của nó: nhãn xám `🗓 Holidays` + các pill giá trị. Pill hiện
+    **TÊN kỳ nghỉ + khoảng ngày** (`Nghỉ hè công ty · Aug 24 – Aug 28`), không phải con
+    số gộp — tên là thứ người ta nhớ, và là thứ phân biệt "nghỉ lễ" với "team offsite";
+    đọc là hiểu, không cần bấm. Nút `+` cuối hàng để thêm. Rỗng → pill viền đứt
+    `Add holiday`. **Chỉ hiện kỳ nghỉ chồng sprint đang xem** (scope như
+    `MemberDaysOffButton`); popover thì vẫn liệt kê toàn bộ.
   - **Project settings** — `variant="metric"`, luôn hiện, đếm **toàn bộ** (không scope
-    theo sprint). **Đây là nơi tạo mới** và là đường discovery, y hệt cách days-off của
-    member sống trong settings.
+    theo sprint).
+
+  **Không đặt trên top bar.** Từng làm vậy (pill `2d holidays` cạnh Roll over) rồi bỏ:
+  top bar đã chật Roll over / Search / Export / Import, và ngày lễ set 1–2 lần một
+  **năm** nên chiếm real estate thường trú ở đó là trượt checklist affordance-density
+  (design-system §9.2). Trong sprint header card thì có chỗ, và nó nằm cạnh đúng thứ nó
+  nói về — khoảng ngày của sprint.
 - **Popover** — `glass-popover`, **lịch 2 tháng cạnh nhau**, dưới là danh sách kỳ nghỉ
   đã lưu.
 - **Chọn dải = bấm 2 lần** (không phím phụ):
@@ -197,6 +206,13 @@ Ngày lễ thì **có** — union nằm ở `leafPlan` theo `task.projectId`, kh
   contract, design-system §6.5 — Esc chỉ đóng tầng trên cùng). Một cú mis-click không
   bắt phải mở lại popover rồi lật về đúng tháng.
 - **Chốt xong dải → focus tự nhảy vào ô tên**, vì tên là thứ duy nhất còn thiếu.
+- **Hàng `Holidays` có nhiều trigger, một popover.** Mỗi pill tên + nút `+` đều mở cùng
+  popover; anchor là **cả hàng** (một wrapper span), không phải từng pill, nên popover
+  không nhảy chỗ tuỳ theo bấm vào đâu. Bấm vào pill tên thì lịch **mở sẵn ở tháng của kỳ
+  nghỉ đó**; bấm `+` thì mở ở tháng hiện tại. Anchor căn **trái** (`left`) theo **nhóm
+  pill** (không phải mép hàng — nó lệch đúng bề rộng nhãn `Holidays`), khác `metric`
+  trong drawer settings căn **phải**; cả hai đều clamp 8px để popover 520px không tràn
+  mép cửa sổ hẹp.
 - **Popover lật lên khi không đủ chỗ phía dưới.** Lịch 2 tháng + danh sách kỳ nghỉ cao
   ~414px; pin cứng `top = rect.bottom + 6` thì phần rơi khỏi màn hình đúng là **footer**
   — ô nhập tên + nút Add, tức là đúng phần cần để làm xong việc. `place()` đo chiều cao

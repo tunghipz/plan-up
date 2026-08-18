@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { Calendar, X, Upload, Trash2 } from 'lucide-react'
+import { Calendar, CalendarDays, X, Upload, Trash2 } from 'lucide-react'
 import { usePinnedPopover } from './usePinnedPopover'
 import {
   db,
@@ -20,6 +20,7 @@ import {
   effectiveDaysOff,
   daysOffInRange,
   fmtDays,
+  holidayLoadInSpan,
   PROJECT_ICON_EMOJIS,
 } from './lib'
 
@@ -612,6 +613,7 @@ export function MemberDaysOffButton({
   member,
   variant = 'header',
   range,
+  taskSpan,
 }: {
   member: Member
   /** 'header' = Sprint group-header chip; 'metric' = always-visible settings line. */
@@ -622,6 +624,14 @@ export function MemberDaysOffButton({
    * See design-docs/members-and-days-off.md.
    */
   range?: { start: string; end: string }
+  /**
+   * This member's computed task span (earliest start … latest due) in the sprint.
+   * Drives the sibling `Nd holiday` chip, which only appears when a project
+   * holiday actually overlaps THIS member's work — not merely the sprint. Null /
+   * omitted (settings, members with no tasks) ⇒ no chip.
+   * See design-docs/project-holidays.md.
+   */
+  taskSpan?: { start: string; end: string } | null
 }) {
   const [open, setOpen] = useState(false)
   const [draftDate, setDraftDate] = useState('')
@@ -667,6 +677,14 @@ export function MemberDaysOffButton({
     return out.sort((a, b) => a.date.localeCompare(b.date))
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `range` is a fresh object literal every render; its two values are the real inputs
   }, [project?.holidays, range?.start, range?.end])
+  // Holiday load on THIS member: project holidays clipped to their task span.
+  // Deliberately a different window from `range` (the sprint) — the chip answers
+  // "does this holiday hit your schedule", not "is it in this sprint".
+  const holidayLoad = useMemo(
+    () => holidayLoadInSpan(project?.holidays, taskSpan),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `taskSpan` is a fresh object literal every render; its two values are the real inputs
+    [project?.holidays, taskSpan?.start, taskSpan?.end]
+  )
   const visibleDays = range
     ? daysOffInRange(days, range.start, range.end)
     : days
@@ -697,6 +715,38 @@ export function MemberDaysOffButton({
 
   return (
     <>
+      {/* Project holidays that hit THIS member's schedule. Dimmed, borderless,
+          no chrome of its own — the visual hierarchy says "inherited from the
+          project", where the days-off chip beside it says "yours, editable".
+          Opens the same popover (holidays already sit there, read-only) rather
+          than a second one (§8.3). Hidden when it costs no working day, so a
+          holiday that falls on a weekend never claims lost capacity.
+          See design-docs/project-holidays.md. */}
+      {variant === 'header' && holidayLoad.days > 0 && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation()
+            setOpen(true)
+          }}
+          className="inline-flex items-center gap-1 text-[11px] font-medium text-ink-faint hover:text-accent transition whitespace-nowrap"
+          // The tooltip carries the RULE — "only when it overlaps" is otherwise
+          // invisible, and two neighbouring cards differing with no stated reason
+          // reads as a bug.
+          title={`${holidayLoad.items
+            .map(
+              (h) =>
+                `${h.name} · ${formatShortDate(h.from)}${
+                  h.to === h.from ? '' : ` – ${formatShortDate(h.to)}`
+                }`
+            )
+            .join('\n')}\nTrùng lịch task của ${member.name}`}
+          aria-label={`Project holidays during ${member.name}'s tasks`}
+        >
+          <CalendarDays size={13} />
+          {fmtDays(holidayLoad.days)}d holiday
+        </button>
+      )}
       {variant === 'metric' ? (
         <button
           ref={btnRef}

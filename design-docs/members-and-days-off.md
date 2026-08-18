@@ -1,8 +1,9 @@
 # Members & days off
 
 **Status:** Implemented
-**Last updated:** 2026-07-21 (days-off window widens to cover a member's task-date
-span, so off-days on overdue dates before the sprint start are pickable)
+**Last updated:** 2026-08-18 (days-off window widens to cover a member's task-date
+span, so off-days on overdue dates before the sprint start are pickable; + sibling
+`Nd holiday` chip driven by `taskSpan`)
 **Code:** `app/src/members.tsx` (`MemberDaysOffButton`, `DateField`, `daysOffInRange`,
 `effectiveDaysOff`), `app/src/lib.ts` (`daysOffInRange`, `daysOffWindow`),
 `app/src/SprintView.tsx` (passes per-member days-off `range`),
@@ -29,6 +30,11 @@ computed dates respect real availability.
   (calendar + label, dashed border, accent on hover) — previously hover-revealed, now
   persistent so the affordance is always discoverable while staying calm.
   (Same control also lives in the settings page, `variant="metric"`.)
+  The chip counts **personal** off-days only. When a project holiday overlaps this
+  member's task span, a **separate dimmed `Nd holiday` chip** appears in front of it
+  (sprint view only, via the `taskSpan` prop) — see
+  [project-holidays.md](./project-holidays.md). Two sources, two chips: yours is solid
+  and editable, the project's is dimmed and read-only.
 
 ### Per-sprint scoping (display + entry, not data)
 Off-days are real calendar dates, so each date falls inside at most one sprint's

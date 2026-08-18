@@ -669,8 +669,9 @@ function MemberCard({
     const conflictTips = computeMemberConflicts(leafTasks, tasksById, memberById, holidays)
     // Date span this member's tasks actually touch (computed start + due, same
     // plan the rows show). Feeds the days-off window so an off-day on an overdue
-    // date that falls before the sprint start is still pickable. All tasks (incl.
-    // parents), any status. See members-and-days-off.md.
+    // date that falls before the sprint start is still pickable, and the
+    // `Nd holiday` chip. All tasks (incl. parents), any status.
+    // See members-and-days-off.md.
     let earliestDate: string | null = null
     let latestDate: string | null = null
     for (const t of tasks) {
@@ -711,7 +712,15 @@ function MemberCard({
         onToggleCollapse={onToggleCollapse}
         grip={grip}
         extras={
-          <MemberDaysOffButton member={member} range={daysOffRange} />
+          <MemberDaysOffButton
+            member={member}
+            range={daysOffRange}
+            taskSpan={
+              earliestDate && latestDate
+                ? { start: earliestDate, end: latestDate }
+                : null
+            }
+          />
         }
       />
       {!collapsed && (

@@ -744,3 +744,39 @@ export function holidayWorkDays(h: {
   }
   return h.half && h.from === h.to ? n * 0.5 : n
 }
+
+/**
+ * Working days a project's holidays cost INSIDE one member's task span — the
+ * input to the member-card `Nd holiday` chip. Each holiday is clipped to the
+ * span first, so a Tết that only pokes one day into someone's schedule reports
+ * `1d`, not `7d`. Holidays that land entirely on a weekend contribute 0 and are
+ * left out of `items` (no chip → no lie about lost capacity).
+ *
+ * `items` carries the ORIGINAL (unclipped) holidays that contributed — the
+ * tooltip names the real period, not the sliver that overlaps.
+ *
+ * `span` null (member holds no tasks) ⇒ nothing: the chip's whole point is
+ * "this overlaps YOUR work". See design-docs/project-holidays.md.
+ */
+export function holidayLoadInSpan<
+  H extends { name: string; from: string; to: string; half?: 'am' | 'pm' },
+>(
+  holidays: H[] | undefined,
+  span: { start: string; end: string } | null | undefined
+): { days: number; items: H[] } {
+  if (!span) return { days: 0, items: [] }
+  let days = 0
+  const items: H[] = []
+  for (const h of holidays ?? []) {
+    // Clip to the span — a partial overlap costs only its overlapping part.
+    const from = h.from > span.start ? h.from : span.start
+    const to = h.to < span.end ? h.to : span.end
+    if (from > to) continue
+    // `half` survives the clip only while the holiday is still a single day.
+    const n = holidayWorkDays({ from, to, half: h.half })
+    if (n <= 0) continue
+    days += n
+    items.push(h)
+  }
+  return { days, items }
+}

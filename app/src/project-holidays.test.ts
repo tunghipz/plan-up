@@ -9,7 +9,7 @@ import {
   recomputeDates,
   uid,
 } from './db'
-import { holidayWorkDays } from './lib'
+import { holidayLoadInSpan, holidayWorkDays } from './lib'
 import type { Holiday, Member, Project, Task } from './types'
 
 // ── pure helpers ──────────────────────────────────────────────────────────
@@ -76,6 +76,50 @@ describe('holidayWorkDays', () => {
   })
   it('half a single day is 0.5', () => {
     expect(holidayWorkDays({ from: '2026-12-25', to: '2026-12-25', half: 'pm' })).toBe(0.5)
+  })
+})
+
+describe('holidayLoadInSpan', () => {
+  // Wed Feb 3 → Thu Feb 11 2027 (7 working days), plus a one-off in March.
+  const hols: Holiday[] = [
+    { id: 'a', name: 'Tết', from: '2027-02-03', to: '2027-02-11' },
+    { id: 'b', name: 'Giỗ Tổ', from: '2027-03-10', to: '2027-03-10' },
+  ]
+
+  it('is empty without a span — a member holding no tasks gets no chip', () => {
+    expect(holidayLoadInSpan(hols, null)).toEqual({ days: 0, items: [] })
+  })
+  it('is empty when the span misses every holiday', () => {
+    const r = holidayLoadInSpan(hols, { start: '2027-01-01', end: '2027-02-02' })
+    expect(r.days).toBe(0)
+    expect(r.items).toEqual([])
+  })
+  it('clips to the span — a partial overlap costs only its overlapping part', () => {
+    // Span ends Fri Feb 5 → only Wed/Thu/Fri of Tết count.
+    const r = holidayLoadInSpan(hols, { start: '2027-01-20', end: '2027-02-05' })
+    expect(r.days).toBe(3)
+    expect(r.items.map((h) => h.id)).toEqual(['a'])
+  })
+  it('sums across holidays and reports each contributing period once', () => {
+    const r = holidayLoadInSpan(hols, { start: '2027-02-01', end: '2027-03-31' })
+    expect(r.days).toBe(8) // 7 (Tết) + 1 (Giỗ Tổ, a Wednesday)
+    expect(r.items.map((h) => h.name)).toEqual(['Tết', 'Giỗ Tổ'])
+  })
+  it('drops a holiday whose overlap is all weekend — no chip, no false capacity loss', () => {
+    // Sat Feb 6 + Sun Feb 7 are the only days inside this span.
+    const r = holidayLoadInSpan(hols, { start: '2027-02-06', end: '2027-02-07' })
+    expect(r.days).toBe(0)
+    expect(r.items).toEqual([])
+  })
+  it('keeps half-day weight when the clipped holiday is still a single day', () => {
+    const half: Holiday[] = [
+      { id: 'c', name: 'Nửa ngày', from: '2027-03-10', to: '2027-03-10', half: 'pm' },
+    ]
+    expect(holidayLoadInSpan(half, { start: '2027-03-01', end: '2027-03-31' }).days).toBe(0.5)
+  })
+  it('handles a project with no holidays at all', () => {
+    expect(holidayLoadInSpan(undefined, { start: '2027-01-01', end: '2027-12-31' }))
+      .toEqual({ days: 0, items: [] })
   })
 })
 

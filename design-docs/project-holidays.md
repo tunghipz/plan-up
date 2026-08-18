@@ -1,15 +1,18 @@
 # Project holidays — ngày nghỉ chung toàn project
 
 **Status:** Implemented
-**Last updated:** 2026-08-17 (bản đầu; + fix popover tràn đáy màn hình và popover không
+**Last updated:** 2026-08-18 (bản đầu; + fix popover tràn đáy màn hình và popover không
 tự đóng khi đóng drawer settings; + **bỏ pill khỏi top bar, chuyển xuống hàng `Holidays`
 riêng trong sprint header card, hiện TÊN kỳ nghỉ + nút `+`** — phương án D, chốt qua
-`demo/holiday-in-sprint-header.html`)
+`demo/holiday-in-sprint-header.html`; + **chip `Nd holiday` trên header member card, chỉ
+hiện khi kỳ nghỉ chồng lên khoảng ngày task của người đó** — phương án D, chốt qua
+`demo/holiday-on-member-card.html`)
 **Code:** `app/src/types.ts` (`Holiday`, `Project.holidays`), `app/src/scheduling.ts`
 (`expandHolidays`, `projectHolidayMap`, `ProjectHolidayMap`, `leafPlan` union,
 `recomputeDates`, `recomputeAllDates`), `app/src/scheduling-context.ts`
 (`ProjectHolidaysContext`, `useProjectHolidays`), `app/src/db.ts`
-(`setProjectHolidays`), `app/src/lib.ts` (`holidayWorkDays`),
+(`setProjectHolidays`), `app/src/lib.ts` (`holidayWorkDays`, `holidayLoadInSpan`),
+`app/src/members.tsx` (`MemberDaysOffButton` — chip `Nd holiday`),
 `app/src/DatePicker.tsx` (`CalendarGrid` controlled-month props),
 `app/src/ProjectHolidays.tsx` (`ProjectHolidaysButton`),
 `app/src/usePinnedPopover.ts` (tự đóng khi trigger bị ẩn),
@@ -59,6 +62,51 @@ lần cho cả project**, scheduler tự union vào mọi member.
 - **Đếm ngày công** — badge hiện số **ngày công** mất đi, đã trừ T7/CN: Tết 9 ngày lịch
   mà rơi 2 ngày cuối tuần thì hiện `7d`.
 - **Empty state** — *"Chưa có ngày nghỉ chung. Cuối tuần đã tự động nghỉ sẵn."*
+
+### Chip `Nd holiday` trên header member card
+
+Header member card có thêm chip **mờ, không viền**, đứng **trước** chip days-off:
+`🗓 3d holiday`. Nó **chỉ hiện khi kỳ nghỉ chồng lên khoảng ngày task của chính member
+đó** — người xong hết task trước kỳ nghỉ thì card sạch, không có chip.
+
+- **Cửa sổ xét là task span của member** (`earliestDate…latestDate` — computed start/due
+  của **mọi** task họ giữ trong sprint, kể cả parent; đúng cái span đã dùng để nới cửa sổ
+  days-off), **không phải** cửa sổ sprint. Đây là khác biệt cố ý với chip days-off: hỏi
+  "kỳ nghỉ này có chạm vào việc của người này không", không phải "kỳ nghỉ có trong sprint
+  không".
+- **Số trên chip là ngày công bị mất trong phần giao nhau**, đã trừ T7/CN
+  (`holidayLoadInSpan`). Kỳ nghỉ rơi trọn cuối tuần ⇒ 0 ⇒ **không có chip** (khớp luật
+  "badge chỉ đếm ngày công" ở dưới).
+- **Member không có task** (lane "members with no tasks") ⇒ không có span ⇒ không chip.
+- **Chip mở đúng popover days-off** đang có — nơi từng ngày lễ đã nằm sẵn ở khối trên,
+  mờ, tag `project`, read-only. Không đẻ popover thứ hai (§8.3).
+- **Tooltip mang luật**: `Nghỉ hè công ty · Aug 19 – Aug 21 — chồng lên lịch task của
+  Alice`. Đây là chỗ trả giá của phương án D: luật "chỉ hiện khi chạm" là **luật ẩn** —
+  hai card cạnh nhau, một có chip một không, người dùng không tự đoán ra. Tooltip là
+  chỗ duy nhất nói ra luật, nên nó bắt buộc phải có.
+- **Chip days-off vẫn chỉ đếm ngày nghỉ cá nhân.** Hai nguồn, hai chip, hai thứ bậc thị
+  giác: của-mình thì đậm và sửa được, kế-thừa-từ-project thì mờ và read-only.
+- `variant="metric"` (drawer settings) **không** có chip: ở đó không có sprint, không có
+  task span, và trang settings đã có card `Holidays` riêng.
+- **Giới hạn đã biết — kỳ nghỉ *đẩy* task thì chip im lặng.** Ngày computed không bao giờ
+  rơi vào ngày nghỉ, nên một task 1 ngày bị lễ đẩy sang hôm sau có span **né đúng cái lễ
+  đã đẩy nó**. App ghi đè `startDate` bằng ngày computed (`recomputeDates`) nên cũng không
+  còn "ý định gốc" để so. Chấp nhận: ca thường gặp là kỳ nghỉ **nằm giữa** khoảng làm việc
+  nhiều ngày — chỗ đó chip chạy đúng; đo thật: task 8d từ 17 Aug + lễ 24–26 Aug ⇒
+  `3d holiday`, due đẩy 26 Aug → 31 Aug.
+
+**Vì sao không gộp thành một chip** (`5d off` = 2 phép + 3 lễ), phương án A trong
+`demo/holiday-on-member-card.html`: con số đúng về capacity nhưng sai về "ai làm gì" —
+member không tự set ngày nào vẫn hiện `3d off`, phải bấm vào mới hiểu đó là lễ.
+
+**Vì sao không hiện chip trên mọi card** (phương án B): ngày lễ là dữ kiện của
+**project**, giống hệt nhau trên mọi card. In nó N lần ngay dưới hàng `Holidays` của
+sprint header (đã in một lần rồi) là data slop — đúng nhưng không earn its place.
+Điều kiện "chạm task" cắt phần lặp vô nghĩa, chỉ giữ lại lần in **có tin**.
+
+**Vì sao không đổi thành số ngày công còn lại** (`0/15 · 9d công`, phương án C): trả lời
+đúng câu manager hỏi hơn, nhưng thêm một **khái niệm mới** phải dạy, và giấu mất nguyên
+nhân (nhìn card không biết vì sao 12 rơi xuống 9). Để ngỏ.
 
 ### Lịch 2 tháng dùng lại `CalendarGrid`, không nhân bản
 
@@ -230,8 +278,9 @@ Ngày lễ thì **có** — union nằm ở `leafPlan` theo `task.projectId`, kh
 
 ## Future / open questions
 
-- **Chip trên header member** đang gộp: `3d off` = 1 ngày phép + 2 ngày lễ. Tách thành
-  `1d off · 2d lễ` thì đúng hơn nhưng header vốn đã chật. Chưa chốt.
+- **Số ngày công còn lại trên header member** (`0/15 · 9d công` — đã trừ cuối tuần, lễ,
+  phép) là phương án C trong `demo/holiday-on-member-card.html`. Trả lời đúng câu hỏi
+  manager thật sự hỏi, nhưng là khái niệm mới và giấu nguyên nhân. Chưa làm.
 - **Cảnh báo sprint đè kỳ nghỉ** ("Sprint 45 chồng Tết — mất 7 ngày công") — chưa làm.
   Không có nó thì ngày lễ **âm thầm** đẩy ngày, không ai biết vì sao lịch trượt.
 - **Dùng chung nhiều project**: hiện mỗi project set riêng. Muốn một lịch lễ quốc gia

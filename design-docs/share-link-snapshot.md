@@ -7,7 +7,13 @@
 > verbatim by the hosted mode.
 
 **Status:** Implemented
-**Last updated:** 2026-08-17 (**task title wrap thay vì cắt bằng "…"** — cột Task dùng
+**Last updated:** 2026-08-18 (**ngày nghỉ chung của project lên share page** — payload
+trước giờ chở `membersOff` (ngày nghỉ *riêng từng người*) nhưng **không** chở project
+holidays, nên người nhận link thấy task kéo dài mà không biết vì sao. Thêm wire key
+**`hd`** (optional, **không bump version** — theo đúng tiền lệ của `mo`) + một khối trong
+**Sprint card** ở rail trái. Chọn *phương án A · cấp project* trong 4 phương án của
+`demo/holiday-on-share-page.html`: nói đúng một lần, ngay dưới khoảng ngày, **bảng không
+đụng tới**. Xem *Ngày nghỉ chung* bên dưới.) Trước đó: 2026-08-17 (**task title wrap thay vì cắt bằng "…"** — cột Task dùng
 `truncate` (1 dòng + ellipsis) trong table `tableLayout: 'fixed'`. Card bảng bị chặn ~892px
 (`max-w-[1240px]` + rail 300px, kể cả trên màn 27″) → cột Task chỉ còn ~392px, nên title dài
 mất chữ **vĩnh viễn** với người nhận: không hover ra được, và Export PNG chụp đúng bản đã cắt.
@@ -173,7 +179,8 @@ phía server, không auth.
       subline "shared snapshot · {ngày}" (từ `data.exportedAt`); **dark-mode toggle**
       (Sun/Moon) nằm cuối hàng brand; chip **🔒 Read-only** ngay dưới.
     - **Sprint card** (`glass-card`): label `SPRINT` + `📋 {sprint.name} ·
-      {project.name}` + pill ngày `{range}` (start → end, `whitespace-nowrap`).
+      {project.name}` + pill ngày `{range}` (start → end, `whitespace-nowrap`) +
+      **khối ngày nghỉ chung** (chỉ khi có) — xem *Ngày nghỉ chung*.
     - **Progress card** (`glass-card`, chỉ khi có task): label `PROGRESS` + **donut**
       (ring 3 màu theo `PULSE_ORDER`, tâm hiện **% done** + "done") + **legend dọc**
       (`{N} tasks` + Done / In progress / To do, số căn phải). *(Thay cho pulse strip
@@ -233,7 +240,8 @@ payload), `tasks[]` (chỉ field board vẽ: `title/status/priority/estimate/sta
 dueDate/assigneeId/parentId`, id + assignee + parent đổi thành **index tổng hợp**
 `m0..`/`t0..`, thứ tự mảng = thứ tự hiển thị nên `sequence` = index để `byEnd`
 tie-break đúng), `membersOff` (mảng `{date, half?}` off/member trong range sprint — song song
-`members`, trim lúc build). `buildSnapshot(...)` dựng thẳng shape này (chuẩn hoá luôn) nên
+`members`, trim lúc build), `holidays` (mảng `Holiday` của project **giao với range sprint** —
+xem *Ngày nghỉ chung*). `buildSnapshot(...)` dựng thẳng shape này (chuẩn hoá luôn) nên
 encode→decode là **round-trip thuần**.
 
 **Wire format compact v2** (`packSnapshot` → JSON → lz-string): thay vì mảng object
@@ -244,6 +252,11 @@ lặp key, đóng gói **columnar** + mã hoá chặt:
 - `mo`: `[dayOffset, halfCode][][]` — mỗi member 1 mảng ngày off trong range sprint, mỗi entry
   `[offset từ d0, 0=cả ngày · 1=sáng · 2=chiều]`. Viewer decode ra `{date, half?}`, tự tính số
   ngày hiệu dụng (`effectiveDaysOff`) + vẽ chips. Blob cũ thiếu `mo` → mảng rỗng (không có off).
+- `hd`: `[fromOffset, toOffset, halfCode, name][]` — ngày nghỉ **chung cả project** giao với
+  range sprint. Offset tính từ `d0` như mọi ngày khác nên **có thể âm** (kỳ nghỉ bắt đầu trước
+  sprint). `halfCode` dùng chung bảng `HALF_CODE` với `mo`. **Optional, `v` vẫn = 2** — y hệt
+  cách `mo` từng được thêm: blob cũ thiếu `hd` → mảng rỗng, và viewer đời cũ đọc blob mới chỉ
+  đơn giản bỏ qua key nó không biết. Không cần bump version, không cần đường đọc tương thích.
 - Task đóng thành các **cột song song** (mảng cùng độ dài N): `ti` titles,
   `ss` status **enum** (0 todo · 1 in_progress · 2 done), `pp` priority **enum**
   (`['none','low','normal','high','urgent']`), `am` assignee member-index (−1 =
@@ -291,6 +304,59 @@ lặp key, đóng gói **columnar** + mã hoá chặt:
 - **`SprintPageHeader`** (`App.tsx`): nút **Share** cạnh tiêu đề (prop `onShare`);
   state `shareOpen`; render `<ShareLinkModal>` với sprint/members/tasks hiện tại.
 - **Dep mới**: `lz-string` (~3 KB) — import động nếu muốn giữ bundle web nhẹ.
+
+## Ngày nghỉ chung (project holidays)
+
+**Vấn đề:** payload chở `membersOff` — ngày nghỉ *riêng của từng người* — và viewer vẽ nó
+thành chip trong cột member. Nhưng ngày nghỉ **chung cả project** (Tết, Quốc khánh, offsite)
+thì không có trong payload chút nào. Người nhận link thấy task từ 31/8 kéo tới 4/9 mà không
+biết 2–3/9 cả team nghỉ, nên đọc thành "task này làm 5 ngày".
+
+**Chọn phương án A · cấp project** (4 phương án trong `demo/holiday-on-share-page.html`, xếp
+trên đúng một trục: *ngày nghỉ được nói ở độ mịn nào*):
+
+| | Độ mịn | Ở đâu | Vì sao không chọn |
+| --- | --- | --- | --- |
+| **A** ✅ | project | 1 khối trong Sprint card, dưới pill ngày | — |
+| B | phép tính | pill ngày thành `7.5 ngày công · 10 − 2.5 nghỉ` | Thêm một số phái sinh phải đúng tuyệt đối; lệch 0.5d so với Timeline là mất lòng tin cả trang |
+| C | member | A + chip ở member bị chồng ngày (giống app) | In một sự thật chung **N+1 lần**; meta line vốn đã có `3/5 done` + pill off + chip ngày |
+| D | task | A + hatch ở ô End của task bắc qua ngày nghỉ | Đụng từng dòng của bảng — thứ dày nhất trang; nhiều task cùng bắc qua thì hatch lặp rất nhiều |
+
+A rẻ nhất, không rủi ro, và là **nền của cả C lẫn D** nếu sau này muốn đi sâu hơn.
+
+**Phát hiện lúc thiết kế** (đáng ghi lại vì nó loại một ý tưởng nghe rất hợp lý): *không*
+đánh dấu ô Start/End rơi trúng ngày nghỉ được — scheduler coi ngày nghỉ là ngày không làm
+việc nên **start/end không bao giờ rơi vào đó**, dấu hiệu sẽ không bao giờ kích hoạt. Tín
+hiệu thật là task **bắc qua** kỳ nghỉ. Đó là lý do D (nếu làm) phải đánh dấu *span*, không
+phải *ô ngày*.
+
+**Phạm vi = range sprint, không nới.** Ngày nghỉ chung được lọc theo `[startDate, endDate ??
+startDate]`, khác với `membersOff` (nới theo task của chính người đó, vì task rollover có thể
+nằm ngoài sprint). Hai lý do: khối này nằm trong **Sprint card** nên nói về sprint là trung
+thực; và sender với viewer phải tính ra **cùng một con số** — dùng range sprint (`d0`/`d1`,
+cả hai bên đều có nguyên vẹn) thì không có đường nào lệch.
+
+**Số ngày do viewer tự tính**, không chở trên wire: `holidayLoadInSpan(holidays, {start, end})`
+trong `lib.ts` — **đúng hàm mà member card và ProjectHolidays trong app đang dùng**. Nên con số
+trên share page bằng con số trong app *do cấu tạo*, không phải do trùng hợp: cùng union theo
+ngày (2 kỳ nghỉ chồng ngày không cộng đôi), cùng bỏ cuối tuần, cùng quy tắc nửa ngày. Wire chỉ
+chở dữ liệu thô. `share-snapshot.ts` **không** import `lib.ts` (giữ module sạch React/DOM) —
+việc tính nằm ở viewer, nơi đã import `lib` sẵn.
+
+**Hiển thị** (`SnapshotViewer`, trong Sprint card, ngăn bằng `border-t` như khối Goal):
+- Dòng tổng: `{fmtDays(days)}d` (màu `warn-ink`, đúng màu pill `Xd off` của member) +
+  `nghỉ chung cả team`.
+- Chips từng kỳ: `{from} – {to}` + tên, dùng **lại đúng style chip ngày** của member off
+  (`bg-fill rounded-[6px]`), nửa ngày gắn badge `½AM/½PM` accent — không phát minh từ vựng mới.
+- Không có ngày nghỉ → **cả khối biến mất**, Sprint card về đúng hình dạng cũ. Chi phí bằng 0
+  cho sprint bình thường, đó là trạng thái hay gặp nhất.
+
+Không dùng icon lịch cho khối này: pill ngày ngay trên đã có một icon lịch rồi, thêm cái thứ
+hai đọc thành "một control bị lặp" (cùng lý do chip holiday trong app không mang icon — xem
+[project-holidays.md](./project-holidays.md)).
+
+**Collections (v3) không có** khối này: collection không thuộc sprint và không có range để
+ngày nghỉ bám vào.
 
 ## Rules & edge cases
 

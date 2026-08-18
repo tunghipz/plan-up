@@ -12,7 +12,7 @@ import {
   SNAPSHOT_VERSION,
   COLLECTION_SNAPSHOT_VERSION,
 } from './share-snapshot'
-import type { Collection, Member, Project, Sprint, Task } from './types'
+import type { Collection, Holiday, Member, Project, Sprint, Task } from './types'
 
 const project: Project = { id: 'p', name: 'Checkout revamp', createdAt: 0 }
 const sprint: Sprint = { id: 's', projectId: 'p', name: 'Sprint 12', startDate: '2026-07-05', endDate: '2026-07-22' }
@@ -35,6 +35,77 @@ const tasks = [
   task('t2', 'b', 18, { dueDate: '2026-07-19', status: 'in_progress' }),
   task('t3', null, 21),
 ]
+
+/** Sprint is 2026-07-05 … 2026-07-22. */
+function hol(id: string, from: string, to = from, over: Partial<Holiday> = {}): Holiday {
+  return { id, name: `Hol ${id}`, from, to, ...over }
+}
+
+describe('project holidays on the wire (hd)', () => {
+  it('carries only the runs overlapping the sprint, with ids renumbered', () => {
+    const withHols: Project = {
+      ...project,
+      holidays: [
+        hol('x1', '2026-06-01'), // entirely before the sprint
+        hol('x2', '2026-07-10', '2026-07-13'), // inside
+        hol('x3', '2026-07-22'), // last day — inclusive, kept
+        hol('x4', '2026-07-23'), // day after — dropped
+      ],
+    }
+    const d = buildSnapshot(withHols, sprint, members, tasks)
+    expect(d.holidays.map((h) => [h.id, h.from, h.to])).toEqual([
+      ['h0', '2026-07-10', '2026-07-13'],
+      ['h1', '2026-07-22', '2026-07-22'],
+    ])
+  })
+
+  it('round-trips through encode/decode, half-day included', () => {
+    const withHols: Project = {
+      ...project,
+      holidays: [hol('x', '2026-07-10', '2026-07-13'), hol('y', '2026-07-16', '2026-07-16', { half: 'pm' })],
+    }
+    const d = buildSnapshot(withHols, sprint, members, tasks)
+    expect(decodeSnapshot(encodeSnapshot(d))).toEqual(d)
+  })
+
+  it('encodes a run that STARTS BEFORE the sprint as a negative offset', () => {
+    // Offsets are from d0, so a run straddling the sprint start must survive going negative.
+    const withHols: Project = { ...project, holidays: [hol('x', '2026-07-02', '2026-07-06')] }
+    const d = buildSnapshot(withHols, sprint, members, tasks)
+    expect(d.holidays[0]).toMatchObject({ from: '2026-07-02', to: '2026-07-06' })
+    expect(decodeSnapshot(encodeSnapshot(d))!.holidays[0]).toMatchObject({
+      from: '2026-07-02',
+      to: '2026-07-06',
+    })
+  })
+
+  it('omits the hd key entirely when the sprint has no holidays', () => {
+    // Same deal as `nt`: no key at all, so the blob of a normal sprint pays nothing.
+    const d = buildSnapshot(project, sprint, members, tasks)
+    expect(d.holidays).toEqual([])
+    const blob = encodeSnapshot(d)
+    expect(decodeSnapshot(blob)!.holidays).toEqual([])
+    expect(JSON.stringify(d)).not.toContain('"hd"')
+  })
+
+  it('decodes a pre-holidays blob (no hd) to an empty list', () => {
+    // Backward compat is the whole reason `hd` is optional and `v` stayed 2.
+    const d = buildSnapshot(project, sprint, members, tasks)
+    const decoded = decodeSnapshot(encodeSnapshot(d))
+    expect(decoded).not.toBeNull()
+    expect(decoded!.holidays).toEqual([])
+    expect(decoded!.members.length).toBe(2) // the rest still decodes
+  })
+
+  it('drops a run whose dates do not parse', () => {
+    const withHols: Project = { ...project, holidays: [hol('bad', 'nope', 'nope'), hol('ok', '2026-07-10')] }
+    const d = buildSnapshot(withHols, sprint, members, tasks)
+    // The overlap filter is a lexical compare, so 'nope' can slip through the build...
+    const decoded = decodeSnapshot(encodeSnapshot(d))!
+    // ...but it can never survive the wire, where dates become day offsets.
+    expect(decoded.holidays.map((h) => h.from)).toEqual(['2026-07-10'])
+  })
+})
 
 describe('buildSnapshot', () => {
   it('scopes to the one sprint and normalizes ids/fields', () => {

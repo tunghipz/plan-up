@@ -6,7 +6,15 @@ import { decodeSnapshot, laneRows } from './share-snapshot'
 import { groupTasksByMember } from './png-export'
 import { StatusPill } from './StatusPill'
 import { STATUS_META } from './sprint-logic'
-import { effectiveDaysOff, formatShortDate, formatSprintRange, fmtDays, PRIORITY_TAG, useDarkMode } from './lib'
+import {
+  effectiveDaysOff,
+  formatShortDate,
+  formatSprintRange,
+  fmtDays,
+  holidayLoadInSpan,
+  PRIORITY_TAG,
+  useDarkMode,
+} from './lib'
 import { colorForName } from './schema'
 import { ExportImageModal } from './ExportImageModal'
 
@@ -196,6 +204,16 @@ export function SnapshotViewer({ raw }: { raw: string }) {
   const range = sprint.endDate
     ? formatSprintRange(sprint.startDate, sprint.endDate)
     : formatShortDate(sprint.startDate)
+  // Project-wide days off. The DAY TOTAL is computed here, not carried on the wire,
+  // via the very function the app's member card and ProjectHolidays use — so this
+  // number equals the in-app one by construction (same date union, same weekend
+  // skip, same half-day rule) instead of by coincidence. The span is the sprint
+  // range, which sender and viewer both hold verbatim, so neither can drift.
+  // See design-docs/share-link-snapshot.md, *Ngày nghỉ chung*.
+  const holidayLoad = holidayLoadInSpan(data.holidays, {
+    start: sprint.startDate,
+    end: sprint.endDate ?? sprint.startDate,
+  })
   const exportGroups = groupTasksByMember(data.tasks, data.members, { nestChildren: true })
   const stampYmd = /^\d{4}-\d{2}-\d{2}$/.test((data.exportedAt ?? '').slice(0, 10))
     ? data.exportedAt.slice(0, 10)
@@ -257,6 +275,40 @@ export function SnapshotViewer({ raw }: { raw: string }) {
                 <Calendar size={13} strokeWidth={2} aria-hidden />
                 {range}
               </div>
+              {/* Project-wide days off — stated ONCE, right under the range it modifies;
+                  the board is left untouched (variant A of demo/holiday-on-share-page.html).
+                  No calendar icon on purpose: the range pill directly above already has
+                  one, and a second reads as a repeated control. Absent entirely when the
+                  sprint has no holidays, so the normal case pays nothing. */}
+              {holidayLoad.days > 0 && (
+                <div className="mt-3 pt-3 border-t border-border-hair">
+                  <div className="flex items-baseline gap-1.5 flex-wrap">
+                    <span className="text-[12px] font-bold text-warn-ink tab-data">
+                      {fmtDays(holidayLoad.days)}d
+                    </span>
+                    <span className="text-[11.5px] text-ink-faint">nghỉ chung cả team</span>
+                  </div>
+                  <div className="mt-1.5 flex flex-wrap gap-1.5">
+                    {holidayLoad.items.map((h) => (
+                      <span
+                        key={h.id}
+                        className="inline-flex items-center gap-1.5 text-[10.5px] font-semibold text-ink-muted bg-fill rounded-[6px] px-[7px] py-0.5 whitespace-nowrap"
+                      >
+                        <span className="text-ink font-bold tab-data">
+                          {formatShortDate(h.from)}
+                          {h.to !== h.from && ` – ${formatShortDate(h.to)}`}
+                        </span>
+                        {h.half && (
+                          <span className="text-[9px] font-bold text-accent bg-accent-soft rounded-[3px] px-1">
+                            ½{h.half === 'am' ? 'AM' : 'PM'}
+                          </span>
+                        )}
+                        {h.name}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
               {sprint.note && (
                 <div className="mt-3 pt-3 border-t border-border-hair">
                   <div className="text-[10px] font-bold tracking-[0.06em] uppercase text-ink-faint mb-1.5">Goal</div>

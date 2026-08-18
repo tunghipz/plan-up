@@ -1,5 +1,5 @@
 import LZString from 'lz-string'
-import type { Collection, DayOff, Member, Priority, Project, Sprint, Status, Task } from './types'
+import type { Collection, DayOff, Holiday, Member, Priority, Project, Sprint, Status, Task } from './types'
 import { byEnd } from './telegram-export'
 
 /**
@@ -58,7 +58,30 @@ export interface SnapshotData {
    * build (the viewer never re-runs scheduling); the viewer derives the effective-day
    * count from this and renders the individual dates as chips. Sorted by date. */
   membersOff: DayOff[][]
+  /** Project-wide holidays intersecting the SPRINT range. Deliberately not widened
+   * by task dates the way `membersOff` is: this rides in the Sprint card, so the
+   * sprint is the honest scope — and both sides derive the day total from the same
+   * `d0`/`d1`, so sender and viewer can never disagree. Empty = none.
+   * See design-docs/share-link-snapshot.md, *Ngày nghỉ chung*. */
+  holidays: Holiday[]
   tasks: Task[]
+}
+
+/** Project holidays overlapping the inclusive [start, end] range (yyyy-mm-dd lexical
+ * compare), in stored order, with ids renumbered to synthetic `h0…`.
+ *
+ * The renumbering matters: the real uuid never rides the wire (nothing needs it — the
+ * viewer only keys React rows with it), so decode has to invent one, and build must
+ * invent the SAME one or `decodeSnapshot(encodeSnapshot(x))` stops round-tripping.
+ * Same trick as `normMember` / `normTask`.
+ *
+ * Only the OVERLAP test happens here — the day total is the viewer's job
+ * (`holidayLoadInSpan` in lib.ts, the same one the app's member card uses), which keeps
+ * this module free of React/DOM deps and makes the two numbers equal by construction. */
+function holidaysInRange(holidays: Holiday[] | undefined, start: string, end: string): Holiday[] {
+  return (holidays ?? [])
+    .filter((h) => h.to >= start && h.from <= end)
+    .map((h, i) => ({ ...h, id: `h${i}` }))
 }
 
 /** Off days of `m` within the inclusive [start, end] range (yyyy-mm-dd lexical compare),
@@ -243,6 +266,7 @@ export function buildSnapshot(
     sprint: { name: sprint.name, startDate: sprint.startDate, endDate: sprint.endDate ?? null, note: sprint.note },
     members: usedMembers.map((m, i) => normMember(m, i)),
     membersOff: usedMembers.map((m) => offRangeFor(m)),
+    holidays: holidaysInRange(project.holidays, sprintStart, sprintEnd),
     tasks: scoped.map((t, i) => {
       const kids = kidsByParent.get(t.id) ?? []
       const rd = rollupDates(t, kids)
@@ -287,6 +311,11 @@ interface PackedSnapshot {
   d1: string | null
   mb: [string, string, string, string][] // [name, color, avatarEmoji|'', title|'']
   mo?: [number, number][][] // off days per member (aligned to mb): [dayOffset from d0, halfCode 0|1|2][]
+  // Project holidays in the sprint range: [from-offset, to-offset, halfCode, name].
+  // Offsets are from d0 like every other date here, so a run starting before the
+  // sprint encodes NEGATIVE. Optional and `v` stays 2 — exactly how `mo` was added:
+  // an old blob simply has no `hd`, and an old viewer ignores a key it doesn't read.
+  hd?: [number, number, number, string][]
   ti: string[]
   ss: number[] // status enum index
   pp: number[] // priority enum index
@@ -321,6 +350,16 @@ function packSnapshot(d: SnapshotData): PackedSnapshot {
         })
         .filter((e): e is [number, number] => e !== null)
     ),
+    hd: d.holidays.length
+      ? d.holidays
+          // Drop runs whose dates don't parse (matches decode, which drops null offsets).
+          .map((h): [number, number, number, string] | null => {
+            const from = toOffset(base, h.from)
+            const to = toOffset(base, h.to)
+            return from == null || to == null ? null : [from, to, Math.max(0, HALF_CODE.indexOf(h.half)), h.name]
+          })
+          .filter((e): e is [number, number, number, string] => e !== null)
+      : undefined, // omit the key entirely when there are none (JSON.stringify drops undefined)
     ti: d.tasks.map((t) => t.title),
     ss: d.tasks.map((t) => Math.max(0, STATUS_CODE.indexOf(t.status))),
     pp: d.tasks.map((t) => Math.max(0, PRIO_CODE.indexOf(t.priority))),
@@ -384,6 +423,20 @@ function unpackSnapshot(o: unknown): SnapshotData | null {
       .filter((x): x is DayOff => x !== null)
   })
 
+  // Project holidays; absent in blobs written before this shipped → empty list.
+  const holidays: Holiday[] = (isArr(p.hd) ? (p.hd as unknown[]) : [])
+    .map((e, i): Holiday | null => {
+      const r = (isArr(e) ? e : []) as unknown[]
+      const from = fromOffset(d0, typeof r[0] === 'number' ? r[0] : null)
+      const to = fromOffset(d0, typeof r[1] === 'number' ? r[1] : null)
+      if (!from || !to) return null
+      const half = HALF_CODE[typeof r[2] === 'number' ? r[2] : 0]
+      // Synthetic id: the viewer only ever keys React rows with it, never looks it up.
+      const h: Holiday = { id: `h${i}`, name: String(r[3] ?? ''), from, to }
+      return half ? { ...h, half } : h
+    })
+    .filter((x): x is Holiday => x !== null)
+
   const tasks: Task[] = ti.map((title, i) => ({
     id: `t${i}`,
     projectId: '',
@@ -412,6 +465,7 @@ function unpackSnapshot(o: unknown): SnapshotData | null {
     },
     members,
     membersOff,
+    holidays,
     tasks,
   }
 }

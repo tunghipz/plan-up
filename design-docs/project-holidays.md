@@ -12,7 +12,11 @@ expansion về đúng cửa sổ Timeline; chip đủ 24px + đúng contrast + t
 đổi nhãn, chuẩn hoá holidays dùng chung cho import + cap 366 ngày, `addDays` throw thay vì
 treo, một context duy nhất mang danh sách kỳ nghỉ, tách `offBandsFor` ra test được; + **gộp 3 vòng nở ngày thành một
 `expandHolidaysNamed`, dùng chung `mergeOffPart`, bỏ icon trùng trên chip, popover tự nói ra
-luật, Timeline có dòng sr-only**)
+luật, Timeline có dòng sr-only**; + **lên share page** — Sprint card ở rail trái nói ngày
+nghỉ chung đúng một lần, wire key `hd`, phương án A chốt qua
+`demo/holiday-on-share-page.html`; số ngày do viewer tính bằng chính `holidayLoadInSpan`
+nên khớp app do cấu tạo — chi tiết ở
+[share-link-snapshot.md](./share-link-snapshot.md) mục *Ngày nghỉ chung*)
 **Code:** `app/src/types.ts` (`Holiday`, `Project.holidays`), `app/src/scheduling.ts`
 (`expandHolidays`, `projectHolidayMap`, `ProjectHolidayMap`, `leafPlan` union,
 `recomputeDates`, `recomputeAllDates`), `app/src/scheduling-context.ts`

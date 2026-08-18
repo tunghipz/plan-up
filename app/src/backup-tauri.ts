@@ -36,9 +36,11 @@ export async function pickBackupDir(): Promise<string | null> {
 
 /**
  * Export the whole DB and back it up in two tiers (design-docs/auto-backup.md):
- *   1. the daily rolling file (overwritten in place), pruned to the newest 30;
+ *   1. the daily rolling file (overwritten in place), pruned to the newest 30 —
+ *      plain JSON, so it stays openable and hand-Importable;
  *   2. unless the payload is unchanged since the last snapshot (content dedup),
- *      an immutable `versions/plan-up-…-HHMMSS.json`, pruned to the newest 200.
+ *      an immutable `versions/plan-up-…-HHMMSS.json.gz`, pruned to the newest 50.
+ *      We pass plain JSON here too — the `.gz` in the name tells Rust to compress.
  * Never throws — every failure lands in the returned (and persisted) status so
  * the settings modal can surface it.
  */
@@ -54,6 +56,7 @@ export async function runBackupNow(): Promise<BackupStatus> {
     const contents = JSON.stringify(payload)
 
     // 1. Daily rolling file — overwrite the same-day file, prune to 30 days.
+    // Deliberately uncompressed: this is the "app is gone, open it by hand" copy.
     const fileName = backupFilename(now)
     await invoke('write_backup', { dir, fileName, contents })
     await invoke('prune_backups', { dir, keep: BACKUP_KEEP })

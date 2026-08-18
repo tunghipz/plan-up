@@ -17,7 +17,13 @@ export const BACKUP_HASH_KEY = 'plan-up:backupHash'
 export const BACKUP_KEEP = 30
 /** Immutable timestamped snapshots kept in the `versions/` subfolder. */
 export const VERSIONS_DIR = 'versions'
-export const VERSIONS_KEEP = 200
+/**
+ * Retention for `versions/`. Counts WRITES, not days — an active day burns ~20
+ * snapshots, a quiet week none. Dropped 200 → 50 in 2026-08 after the tier
+ * measured 198 MB for ~1 month of history (auto-backup.md, *Disk footprint*);
+ * the daily tier is what guarantees reach back in time.
+ */
+export const VERSIONS_KEEP = 50
 export const BACKUP_QUIET_MS = 30_000
 
 export interface BackupStatus {
@@ -99,8 +105,12 @@ export function backupFilename(d: Date): string {
 
 /**
  * Timestamped name for an immutable snapshot in `versions/`:
- * `plan-up-YYYY-MM-DD-HHMMSS.json`. Same LOCAL-clock rationale as
+ * `plan-up-YYYY-MM-DD-HHMMSS.json.gz`. Same LOCAL-clock rationale as
  * `backupFilename`; fixed-width so lexicographic order stays chronological.
+ *
+ * The `.gz` is not decoration — Rust keys off it to gzip on write and gunzip on
+ * read (measured 3.5× on a real payload), so the extension alone describes the
+ * encoding and a folder holding both generations needs no migration.
  */
 export function versionFilename(d: Date): string {
   const y = d.getFullYear()
@@ -109,13 +119,17 @@ export function versionFilename(d: Date): string {
   const hh = String(d.getHours()).padStart(2, '0')
   const mm = String(d.getMinutes()).padStart(2, '0')
   const ss = String(d.getSeconds()).padStart(2, '0')
-  return `plan-up-${y}-${m}-${day}-${hh}${mm}${ss}.json`
+  return `plan-up-${y}-${m}-${day}-${hh}${mm}${ss}${VERSION_EXT}`
 }
 
 /**
- * Inverse of `versionFilename`: parse `plan-up-YYYY-MM-DD-HHMMSS.json` back to a
- * LOCAL Date (same clock the name was written with). Returns null for the daily
- * shape (no time) or any malformed name — the version picker drops those.
+ * Inverse of `versionFilename`: parse `plan-up-YYYY-MM-DD-HHMMSS.json[.gz]` back
+ * to a LOCAL Date (same clock the name was written with). Returns null for the
+ * daily shape (no time) or any malformed name — the version picker drops those.
+ *
+ * Both extensions parse: snapshots written before gzip landed are never
+ * migrated, they just age out of the retention window. The timestamp is a
+ * fixed-width prefix, so the slices below don't care which suffix follows.
  */
 export function parseVersionFilename(name: string): Date | null {
   if (!VERSION_NAME_RE.test(name)) return null
@@ -128,8 +142,12 @@ export function parseVersionFilename(name: string): Date | null {
   return new Date(y, mo - 1, d, hh, mm, ss)
 }
 
+/** Extension for new `versions/` writes — the gzip switch, read by Rust. */
+export const VERSION_EXT = '.json.gz'
+
 const BACKUP_NAME_RE = /^plan-up-\d{4}-\d{2}-\d{2}\.json$/
-const VERSION_NAME_RE = /^plan-up-\d{4}-\d{2}-\d{2}-\d{6}\.json$/
+/** Accepts the pre-gzip `.json` too — old snapshots stay listed and restorable. */
+const VERSION_NAME_RE = /^plan-up-\d{4}-\d{2}-\d{2}-\d{6}\.json(\.gz)?$/
 
 /**
  * Which daily files retention should delete: strict `plan-up-YYYY-MM-DD.json`
@@ -145,9 +163,12 @@ export function selectPrunable(names: string[], keep = BACKUP_KEEP): string[] {
 }
 
 /**
- * Retention for the `versions/` subfolder: strict `plan-up-YYYY-MM-DD-HHMMSS.json`
- * matches only, newest `keep` survive. Same fixed-width lexicographic ordering.
- * Executable spec for the Rust `prune_backups` when called with `subdir: 'versions'`.
+ * Retention for the `versions/` subfolder: strict
+ * `plan-up-YYYY-MM-DD-HHMMSS.json[.gz]` matches only, newest `keep` survive.
+ * Same fixed-width lexicographic ordering — the two extensions only diverge past
+ * index 25, by which point the timestamps already have, so a mixed folder still
+ * sorts chronologically. Executable spec for the Rust `prune_backups` when
+ * called with `subdir: 'versions'`.
  */
 export function selectPrunableVersions(names: string[], keep = VERSIONS_KEEP): string[] {
   return names

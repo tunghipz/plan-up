@@ -1,15 +1,30 @@
+use flate2::read::GzDecoder;
+use flate2::write::GzEncoder;
+use flate2::Compression;
 use std::fs;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
+/// A `.gz` name means the bytes on disk are gzipped — `write_backup` compresses
+/// and `read_backup` inflates, so the extension alone describes the encoding and
+/// a folder holding both generations needs no migration. Only the `versions/`
+/// tier uses it; the daily file stays plain so it can be opened by hand.
+fn is_gzipped(name: &str) -> bool {
+    name.ends_with(".json.gz")
+}
+
 /// Only files the frontend itself names may ever be written or deleted — no
-/// separators possible in either shape, so the picked dir can't be escaped:
-///   `plan-up-YYYY-MM-DD.json`         (23 chars) — daily rolling file
-///   `plan-up-YYYY-MM-DD-HHMMSS.json`  (30 chars) — immutable `versions/` snapshot
+/// separators possible in any shape, so the picked dir can't be escaped:
+///   `plan-up-YYYY-MM-DD.json`            (23 chars) — daily rolling file
+///   `plan-up-YYYY-MM-DD-HHMMSS.json`     (30 chars) — pre-gzip `versions/` snapshot
+///   `plan-up-YYYY-MM-DD-HHMMSS.json.gz`  (33 chars) — `versions/` snapshot
 fn is_backup_filename(name: &str) -> bool {
-    if !name.starts_with("plan-up-") || !name.ends_with(".json") {
+    // Strip the optional `.gz` first, then the shape check is the same as before.
+    let stem = name.strip_suffix(".gz").unwrap_or(name);
+    if !stem.starts_with("plan-up-") || !stem.ends_with(".json") {
         return false;
     }
-    let bytes = name.as_bytes();
+    let bytes = stem.as_bytes();
     // bytes[8..18] = "YYYY-MM-DD" in both shapes
     let date_ok = |b: &[u8]| {
         b.len() == 10
@@ -19,7 +34,9 @@ fn is_backup_filename(name: &str) -> bool {
             })
     };
     match bytes.len() {
-        23 => date_ok(&bytes[8..18]),
+        // The daily file is never gzipped — `plan-up-YYYY-MM-DD.json.gz` is not a
+        // name we write, so don't accept it either.
+        23 => !is_gzipped(name) && date_ok(&bytes[8..18]),
         // "-HHMMSS": a dash then 6 digits between the date and ".json"
         30 => {
             date_ok(&bytes[8..18])
@@ -57,7 +74,15 @@ fn write_backup(
     }
     let target = resolve_dir(&dir, subdir.as_deref())?;
     fs::create_dir_all(&target).map_err(|e| e.to_string())?;
-    fs::write(target.join(&file_name), contents).map_err(|e| e.to_string())
+    let path = target.join(&file_name);
+    if !is_gzipped(&file_name) {
+        return fs::write(path, contents).map_err(|e| e.to_string());
+    }
+    // The frontend always hands us plain JSON; compression is ours to do.
+    let mut enc = GzEncoder::new(Vec::new(), Compression::default());
+    enc.write_all(contents.as_bytes()).map_err(|e| e.to_string())?;
+    let bytes = enc.finish().map_err(|e| e.to_string())?;
+    fs::write(path, bytes).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -109,7 +134,16 @@ fn read_backup(dir: String, file_name: String, subdir: Option<String>) -> Result
         return Err(format!("invalid backup filename: {file_name}"));
     }
     let target = resolve_dir(&dir, subdir.as_deref())?;
-    fs::read_to_string(target.join(&file_name)).map_err(|e| e.to_string())
+    let path = target.join(&file_name);
+    if !is_gzipped(&file_name) {
+        return fs::read_to_string(path).map_err(|e| e.to_string());
+    }
+    let bytes = fs::read(path).map_err(|e| e.to_string())?;
+    let mut out = String::new();
+    GzDecoder::new(&bytes[..])
+        .read_to_string(&mut out)
+        .map_err(|e| e.to_string())?;
+    Ok(out)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -146,9 +180,12 @@ mod tests {
         // daily
         assert!(is_backup_filename("plan-up-2026-07-07.json"));
         assert!(is_backup_filename("plan-up-1999-12-31.json"));
-        // versioned (with -HHMMSS)
+        // versioned (with -HHMMSS) — pre-gzip snapshots stay valid
         assert!(is_backup_filename("plan-up-2026-07-07-153045.json"));
         assert!(is_backup_filename("plan-up-1999-12-31-000000.json"));
+        // versioned, gzipped — what we write today
+        assert!(is_backup_filename("plan-up-2026-07-07-153045.json.gz"));
+        assert!(is_backup_filename("plan-up-1999-12-31-000000.json.gz"));
     }
 
     #[test]
@@ -163,6 +200,76 @@ mod tests {
         assert!(!is_backup_filename("plan-up-2026-07-07-15304.json")); // 5 time digits
         assert!(!is_backup_filename("plan-up-2026-07-07_153045.json")); // wrong separator
         assert!(!is_backup_filename("plan-up-2026-07-07-15304x.json")); // non-digit
+        // the daily file is never gzipped, so don't accept that name either
+        assert!(!is_backup_filename("plan-up-2026-07-07.json.gz"));
+        // `.gz` doesn't excuse a malformed stem
+        assert!(!is_backup_filename("plan-up-2026-7-7.json.gz"));
+        assert!(!is_backup_filename("plan-up-2026-07-07-153045.json.gz.gz"));
+        assert!(!is_backup_filename("plan-up-2026-07-07-153045.gz"));
+    }
+
+    /// Round-trip through the gzip path: on-disk bytes are real gzip (not the
+    /// JSON), `read_backup` inflates them back, and a big repetitive payload
+    /// actually shrinks — the whole point of the tier.
+    #[test]
+    fn gzip_version_round_trips() {
+        let dir = temp_dir("gzip");
+        let d = dir.to_string_lossy().to_string();
+        let name = "plan-up-2026-07-07-153045.json.gz";
+        let payload = format!("[{}]", vec!["{\"taskId\":\"abc\"}"; 500].join(","));
+        write_backup(
+            d.clone(),
+            name.into(),
+            payload.clone(),
+            Some("versions".into()),
+        )
+        .unwrap();
+
+        let raw = fs::read(dir.join("versions").join(name)).unwrap();
+        assert_eq!(&raw[..2], &[0x1f, 0x8b], "gzip magic bytes on disk");
+        assert!(
+            raw.len() < payload.len() / 4,
+            "expected real compression, got {} from {}",
+            raw.len(),
+            payload.len()
+        );
+
+        let back = read_backup(d, name.into(), Some("versions".into())).unwrap();
+        assert_eq!(back, payload);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A folder holding both generations: each file reads back correctly by its
+    /// own extension, and prune orders them by timestamp, not by extension.
+    #[test]
+    fn mixed_plain_and_gzip_versions() {
+        let dir = temp_dir("mixed");
+        let d = dir.to_string_lossy().to_string();
+        let plain = "plan-up-2026-07-07-100000.json";
+        let gz = "plan-up-2026-07-07-100001.json.gz";
+        write_backup(d.clone(), plain.into(), "{\"old\":1}".into(), Some("versions".into()))
+            .unwrap();
+        write_backup(d.clone(), gz.into(), "{\"new\":1}".into(), Some("versions".into())).unwrap();
+
+        assert_eq!(
+            read_backup(d.clone(), plain.into(), Some("versions".into())).unwrap(),
+            "{\"old\":1}"
+        );
+        assert_eq!(
+            read_backup(d.clone(), gz.into(), Some("versions".into())).unwrap(),
+            "{\"new\":1}"
+        );
+        // newest-first regardless of extension
+        assert_eq!(
+            list_backups(d.clone(), Some("versions".into())).unwrap(),
+            vec![gz.to_string(), plain.to_string()]
+        );
+        // keep 1 → the older PLAIN one goes, the newer .gz survives
+        assert_eq!(
+            prune_backups(d, 1, Some("versions".into())).unwrap(),
+            vec![plain.to_string()]
+        );
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

@@ -25,13 +25,17 @@ describe('backupFilename', () => {
 describe('versionFilename', () => {
   it('appends local HHMMSS, zero-padded', () => {
     expect(versionFilename(new Date(2026, 6, 7, 15, 30, 45))).toBe(
-      'plan-up-2026-07-07-153045.json',
+      'plan-up-2026-07-07-153045.json.gz',
     )
   })
 
   it('pads single-digit time parts and midnight', () => {
-    expect(versionFilename(new Date(2026, 0, 3, 1, 2, 5))).toBe('plan-up-2026-01-03-010205.json')
-    expect(versionFilename(new Date(2026, 0, 3, 0, 0, 0))).toBe('plan-up-2026-01-03-000000.json')
+    expect(versionFilename(new Date(2026, 0, 3, 1, 2, 5))).toBe(
+      'plan-up-2026-01-03-010205.json.gz',
+    )
+    expect(versionFilename(new Date(2026, 0, 3, 0, 0, 0))).toBe(
+      'plan-up-2026-01-03-000000.json.gz',
+    )
   })
 })
 
@@ -42,6 +46,7 @@ describe('parseVersionFilename', () => {
   })
 
   it('parses zero-padded midnight', () => {
+    // pre-gzip snapshots are never migrated — they must still parse
     expect(parseVersionFilename('plan-up-1999-12-31-000000.json')).toEqual(
       new Date(1999, 11, 31, 0, 0, 0),
     )
@@ -56,6 +61,8 @@ describe('parseVersionFilename', () => {
     expect(parseVersionFilename('plan-up-2026-07-07_153045.json')).toBeNull()
     expect(parseVersionFilename('other-2026-07-07-153045.json')).toBeNull()
     expect(parseVersionFilename('')).toBeNull()
+    expect(parseVersionFilename('plan-up-2026-07-07-153045.json.gz.gz')).toBeNull()
+    expect(parseVersionFilename('plan-up-2026-07-07-153045.gz')).toBeNull()
   })
 })
 
@@ -72,8 +79,19 @@ describe('selectPrunableVersions', () => {
     expect(selectPrunableVersions(names, 1)).toEqual([ver(1)])
   })
 
-  it('defaults to keeping 200', () => {
-    const names = Array.from({ length: 200 }, (_, i) => ver(i + 1))
+  it('sorts a mixed .json / .json.gz folder by timestamp, not extension', () => {
+    // Upgrading leaves both generations side by side; the timestamp is a
+    // fixed-width prefix, so the extension must never decide who survives.
+    const plain = 'plan-up-2026-01-01-100001.json'
+    const gz = 'plan-up-2026-01-01-100002.json.gz'
+    expect(selectPrunableVersions([plain, gz], 1)).toEqual([plain])
+    // and the other way round — newer plain beats older gz
+    const olderGz = 'plan-up-2026-01-01-100000.json.gz'
+    expect(selectPrunableVersions([olderGz, plain], 1)).toEqual([olderGz])
+  })
+
+  it('defaults to keeping 50', () => {
+    const names = Array.from({ length: 50 }, (_, i) => ver(i + 1))
     expect(selectPrunableVersions(names)).toEqual([])
   })
 })
@@ -237,14 +255,14 @@ describe('runBackupNow', () => {
     expect(daily.subdir).toBeUndefined()
     expect(JSON.parse(daily.contents).version).toBe(6)
     expect(invoke.mock.calls[1]).toEqual(['prune_backups', { dir: '/tmp/backups', keep: 30 }])
-    // 2. immutable version into versions/ + its own prune (keep 200)
+    // 2. immutable version into versions/ + its own prune (keep 50)
     expect(invoke.mock.calls[2][0]).toBe('write_backup')
     const ver = invoke.mock.calls[2][1] as { fileName: string; subdir: string }
-    expect(ver.fileName).toMatch(/^plan-up-\d{4}-\d{2}-\d{2}-\d{6}\.json$/)
+    expect(ver.fileName).toMatch(/^plan-up-\d{4}-\d{2}-\d{2}-\d{6}\.json\.gz$/)
     expect(ver.subdir).toBe('versions')
     expect(invoke.mock.calls[3]).toEqual([
       'prune_backups',
-      { dir: '/tmp/backups', keep: 200, subdir: 'versions' },
+      { dir: '/tmp/backups', keep: 50, subdir: 'versions' },
     ])
     expect(JSON.parse(store.get('plan-up:backupLast')!).ok).toBe(true)
     expect(store.get('plan-up:backupHash')).toBeTruthy()

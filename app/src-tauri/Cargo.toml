@@ -19,6 +19,8 @@ tauri-plugin-process = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri-plugin-opener = "2.5.4"
+# gzip for the versions/ backup tier (auto-backup.md, "Disk footprint")
+flate2 = "1"
 
 [profile.release]
 codegen-units = 1

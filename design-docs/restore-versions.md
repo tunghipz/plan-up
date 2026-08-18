@@ -1,14 +1,17 @@
 # Restore from version (in-app)
 
 **Status:** Implemented
-**Last updated:** 2026-07-15
+**Last updated:** 2026-08-18 (snapshots are now gzipped `.json.gz` and the tier keeps
+50, not 200 — see [auto-backup.md](./auto-backup.md) *Disk footprint*. The picker is
+unaffected: `read_backup` gunzips in Rust, and pre-existing `.json` snapshots stay
+listed and restorable.)
 **Code:** `app/src-tauri/src/lib.rs`, `app/src/backup.ts`, `app/src/backup-tauri.ts`, `app/src/BackupSettingsModal.tsx`
 
 ## Purpose
 
 Today the only way to restore old data is to manually locate a JSON backup file and
 Import it. Desktop auto-backup already writes immutable timestamped snapshots to
-`<backupDir>/versions/plan-up-YYYY-MM-DD-HHMMSS.json` (keep 200) — but nothing reads
+`<backupDir>/versions/plan-up-YYYY-MM-DD-HHMMSS.json.gz` (keep 50) — but nothing reads
 them back. This feature surfaces that existing history as an **in-app version picker**:
 pick a past version, preview it, restore the whole DB to it — without leaving the app.
 
@@ -19,7 +22,8 @@ Related: [auto-backup.md](./auto-backup.md) (writes the snapshots), [persistence
 - **Desktop only (Tauri).** The web build hides the feature entirely (same gate as
   auto-backup — `IS_TAURI`). Web has no snapshot history to read.
 - **Source = `<backupDir>/versions/` only.** The immutable `-HHMMSS` snapshots are the
-  real history. The daily rolling root files (`plan-up-YYYY-MM-DD.json`, keep 30) are
+  real history (both the gzipped `.json.gz` written today and any older plain `.json`).
+  The daily rolling root files (`plan-up-YYYY-MM-DD.json`, keep 30) are
   **excluded** from the picker — they get overwritten in place, so they aren't distinct
   versions.
 - **Granularity = full-DB replace.** Restoring swaps the entire database for the chosen
@@ -31,7 +35,7 @@ Related: [auto-backup.md](./auto-backup.md) (writes the snapshots), [persistence
    below the existing backup controls. Shown only when a backup folder is set.
 2. Section lists past versions, newest first, each as a human timestamp
    (e.g. `15 Jul 2026, 14:03:07`) parsed from the filename. No file contents read yet —
-   the list stays fast even at 200 entries.
+   the list stays fast even at the full retention window.
 3. Click a version → the app reads **that one file** and expands an inline preview:
    the filename plus counts of projects / sprints / tasks.
 4. Click **Restore bản này** → confirm dialog titled `Thay toàn bộ dữ liệu?` (its message
@@ -64,7 +68,8 @@ Mirror the existing `write_backup` / `prune_backups`: reuse `is_backup_filename`
 ### TS pure — `app/src/backup.ts`
 
 - `parseVersionFilename(name) -> Date | null` — inverse of `versionFilename(d)`
-  (`plan-up-YYYY-MM-DD-HHMMSS.json` → local `Date`), reusing the existing `VERSION_RE`.
+  (`plan-up-YYYY-MM-DD-HHMMSS.json[.gz]` → local `Date`), reusing the existing
+  `VERSION_RE` (which accepts both extensions — the timestamp is a fixed-width prefix).
   Pure + unit-testable.
 
 ### TS glue — `app/src/backup-tauri.ts` (dynamic `@tauri-apps/*` imports)
@@ -121,7 +126,7 @@ two-pane picker — inline expand keeps the narrow-modal idiom without widening 
 - **Safety-snapshot failure aborts the restore** — deliberate: we never run the
   destructive replace unless a current-state snapshot just landed on disk.
 - **Read / parse failure** → inline error, DB untouched (we fail before `importAll`).
-- **Restoring the oldest snapshot at the 200-file cap** — reading before the safety
+- **Restoring the oldest snapshot at the retention cap** — reading before the safety
   snapshot (flow step 1) means the snapshot's prune can't evict the target first.
 - **Old payload versions** — `importAll` already accepts v1–v6 with backfills, so older
   snapshots restore fine.

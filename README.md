@@ -46,7 +46,10 @@ click to download the signed update and relaunch (see
 Desktop-only **Auto backup**: Export menu → *Auto backup…*
 → pick a folder; the app writes `plan-up-YYYY-MM-DD.json` there 30 s after any data
 change, keeping the newest 30 files (plus an immutable `versions/` snapshot per change,
-newest 200). Desktop-only **Restore từ version**: the backup settings modal lists those
+newest 50). The daily file stays **plain JSON** so you can open or Import it by hand;
+the `versions/` snapshots are **gzipped** (`…-HHMMSS.json.gz`, ≈3.5× smaller — a real
+folder had reached 211 MB, see *Disk footprint* in the doc). Older uncompressed
+snapshots keep working, no migration. Desktop-only **Restore từ version**: the backup settings modal lists those
 `versions/` snapshots — pick one, preview its project/sprint/task counts, and restore the
 whole DB to it (it auto-snapshots the current state first, so a mistaken restore is
 undoable). See [`design-docs/desktop-app-tauri.md`](./design-docs/desktop-app-tauri.md),

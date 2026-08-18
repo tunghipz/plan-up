@@ -1,7 +1,12 @@
 # Export as image (PNG)
 
 **Status:** Implemented
-**Last updated:** 2026-08-18 (**ngày nghỉ chung vào ảnh** — một dải ngay dưới header,
+**Last updated:** 2026-08-18 (+ **fix từ `/review`**: chữ ngày trong dải đổi từ `C.faint`
+sang `C.muted` — `#a1a1a6` chỉ đạt **2.36:1**, dưới xa AA 4.5:1, và nó đã **trôi** khỏi token
+mà comment palette tự nhận là mirror (`--color-ink-faint` đã đổi thành `#76767a`); bỏ
+`whiteSpace: nowrap` để tên dài tự xuống dòng thay vì bị cắt mất ở mép ảnh; đổi nhãn thành
+`Nd team off` cho khớp share page và phân biệt với `Nd off` của member; luật nhãn dùng chung
+`holidayChipParts`. Trước đó cùng ngày: **ngày nghỉ chung vào ảnh** — một dải ngay dưới header,
 trên bảng: `2.5d holiday` + tên & ngày từng kỳ. Ảnh là sản phẩm cuối nằm trong chat —
 không hover, không tooltip — nên thông tin phải **hiện thành chữ** hoặc coi như không tồn
 tại. Cùng phương án A với share page: nói đúng một lần ở cấp project, **bảng không đụng**;
@@ -67,17 +72,29 @@ export (bàn giao dữ liệu). PNG là *người đọc*, JSON là *máy đọc
 ### Nội dung ảnh
 
 - **Header ảnh:** tên project · tên view (Sprint N) · ngày xuất · tổng số task.
-- **Dải ngày nghỉ chung** (chỉ khi sprint có kỳ nghỉ): ngay dưới header, trên bảng — nền
-  `C.panel` bo 8px, `{fmtDays(days)}d holiday` in đậm + tên & khoảng ngày từng kỳ
-  (`Quốc khánh · Sep 2 – Sep 3`, nửa ngày gắn `½AM/½PM`). Dùng tiếng Anh vì **mọi nhãn
-  khác trong ảnh đều tiếng Anh** (`MEMBER`/`START`/`Nd off`/`N overdue`) — trộn ngôn ngữ
-  trong cùng một tấm ảnh đọc rất chối; tên kỳ nghỉ giữ nguyên chữ user gõ vì đó là dữ liệu.
-  Không dùng màu cảnh báo: `Nd off` trong ảnh vốn đã là `C.faint` chứ không phải pill cam
-  như trong app — ảnh cố tình dịu hơn, và bảng màu `C` không có tông warn nên thêm vào là
-  bịa màu mới.
+- **Dải ngày nghỉ chung** (chỉ khi sprint có kỳ nghỉ **tốn ngày công** — rơi trọn cuối tuần
+  thì ẩn): ngay dưới header, trên bảng — nền `C.panel` bo 8px, `{fmtDays(days)}d team off`
+  in đậm + tên & khoảng ngày từng kỳ (`Quốc khánh · Sep 2 – Sep 3`, nửa ngày gắn `½AM/½PM`).
+  Tiếng Anh vì **mọi nhãn khác trong ảnh đều tiếng Anh** (`MEMBER`/`START`/`Nd off`/
+  `N overdue`) — trộn ngôn ngữ trong cùng một tấm ảnh đọc rất chối; tên kỳ nghỉ giữ nguyên
+  chữ user gõ vì đó là dữ liệu. `team off` chứ không phải `holiday`: cạnh nó cột member có
+  `Nd off`, hai con số **rời nhau** (cá nhân vs cả team) nên danh từ phải nói ra phạm vi.
+  Không dùng màu cảnh báo: `Nd off` trong ảnh vốn đã dịu chứ không phải pill cam như trong
+  app, và bảng màu `C` không có tông warn nên thêm vào là bịa màu mới.
+- **Không `whiteSpace: nowrap`** trên item: tên user tự gõ phải wrap, đúng lý lẽ mà cột Task
+  trong file này đã áp — ảnh nằm trong chat, không hover được, chữ bị cắt là mất vĩnh viễn.
+- Luật `range`/`half` lấy từ **`holidayChipParts` (lib.ts)** dùng chung với share page.
+- ⚠️ **`C.faint = #a1a1a6` đã trôi khỏi token nó tự nhận là mirror.** `index.css` đổi
+  `--color-ink-faint` thành `#76767a` khi phát hiện `#a1a1a6` fail contrast (design-system.md
+  §2.2); bản sao trong `PngExportCard` không được cập nhật. Trên nền `C.panel` nó là
+  **2.36:1**, trên `C.surface` là **2.57:1** — đều dưới xa AA 4.5:1. Chữ mới dùng `C.muted`
+  (4.66:1 trên panel). `C.faint` vẫn đang gánh `Nd off`, số thứ tự và `done/total` — **nợ có
+  sẵn**, sửa nó đổi diện mạo mọi ảnh đã xuất nên phải quyết riêng, không gộp vào đây.
 - Số ngày do card tự tính bằng `holidayLoadInSpan(holidays, {sprintStart, sprintEnd})` —
-  **đúng hàm** member card, ProjectHolidays và share page dùng. Nên ba mặt hiển thị không
-  thể lệch nhau: cùng union theo ngày, cùng bỏ cuối tuần, cùng luật nửa ngày.
+  cùng hàm **và cùng span** với share page và với badge sprint của ProjectHolidays, nên **ba
+  chỗ đó** không thể lệch: cùng union theo ngày, cùng bỏ cuối tuần, cùng luật nửa ngày.
+  ⚠️ Chip trên **member card** gọi đúng hàm đó nhưng trên **task span của người ấy**, cố ý —
+  nên nó được phép ra số khác. Cùng hàm thôi không bảo đảm gì; phải cùng span nữa.
 - **Thứ tự khớp List view 1:1**: lanes sắp theo `compareMembersByOrder`; task
   trong lane sắp bằng `compareTasks` theo **đúng sort đang chọn** (`loadSort()`,
   mặc định neutral → `listOrder ?? sequence`); subtask nest dưới parent qua

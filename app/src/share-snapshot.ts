@@ -24,17 +24,33 @@ export const COLLECTION_SNAPSHOT_VERSION = 3
 /** Snapshot versions this build knows how to decode (boot picks the viewer). */
 const KNOWN_VERSIONS = new Set([SNAPSHOT_VERSION, COLLECTION_SNAPSHOT_VERSION])
 
-/** Warn threshold for the whole share URL (characters). The blob rides in the URL
- * *fragment* (`#v=2&s=…`), which is never sent to a server, so the classic ~8 KB
- * request-line limit doesn't apply and browsers handle far longer. The real limit
- * is the paste target: chat apps cap a single message (Telegram ~4096 chars) and
- * silently truncate past it. 4000 sits just under that — a typical snapshot is
- * ~1 KB, so this only fires on genuinely huge sprints. */
+/** Budget for the whole share URL (characters) — **asserted in tests only**.
+ *
+ * It is NOT wired into any runtime path: nothing warns the sender, and nothing
+ * refuses to build the link. Read it as "the size the test suite holds us to",
+ * not as a guard. (It was described as a warn threshold before; grep found the
+ * warning was never built.)
+ *
+ * The blob rides in the URL *fragment* (`#v=2&s=…`), which is never sent to a
+ * server, so the classic ~8 KB request-line limit doesn't apply and browsers
+ * handle far longer. The real limit is the paste target: chat apps cap a single
+ * message (Telegram ~4096 chars) and silently truncate past it. 4000 sits just
+ * under that — a typical snapshot is ~1 KB. */
 export const SHARE_MAX_BYTES = 4000
 
 // Reject an absurdly long blob before decompressing (cheap decompression-bomb
-// guard). No real sprint snapshot comes close.
+// guard). No real sprint snapshot comes close. NOTE: this bounds the COMPRESSED
+// input only — lz-string reaches ~150:1 on repeated columnar rows, so the decoded
+// arrays are capped individually below.
 const MAX_BLOB_LEN = 200_000
+
+/** Shape of every date on the wire. Only a SHAPE check — `0001-01-01` passes. */
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+
+/** Cap on decoded `hd` rows. `holidaysClippedTo` can only ever emit one run per
+ * sprint day, but decode reads attacker-supplied arrays, and every surviving row
+ * becomes a rendered span (and a day-walk). 64 is far above any real sprint. */
+const MAX_HOLIDAYS = 64
 
 // Fixed enum tables — the packed form stores the index; order must stay stable.
 const STATUS_CODE: Status[] = ['todo', 'in_progress', 'done']
@@ -61,27 +77,49 @@ export interface SnapshotData {
   /** Project-wide holidays intersecting the SPRINT range. Deliberately not widened
    * by task dates the way `membersOff` is: this rides in the Sprint card, so the
    * sprint is the honest scope — and both sides derive the day total from the same
-   * `d0`/`d1`, so sender and viewer can never disagree. Empty = none.
+   * `d0`/`d1`, so sender and viewer can never disagree on the number. Empty = none.
    * See design-docs/share-link-snapshot.md, *Ngày nghỉ chung*. */
   holidays: Holiday[]
   tasks: Task[]
 }
 
-/** Project holidays overlapping the inclusive [start, end] range (yyyy-mm-dd lexical
- * compare), in stored order, with ids renumbered to synthetic `h0…`.
+/** Project holidays overlapping [start, end], **clipped to it**, sorted, with ids
+ * renumbered to synthetic `h0…`.
  *
- * The renumbering matters: the real uuid never rides the wire (nothing needs it — the
- * viewer only keys React rows with it), so decode has to invent one, and build must
- * invent the SAME one or `decodeSnapshot(encodeSnapshot(x))` stops round-tripping.
- * Same trick as `normMember` / `normTask`.
+ * **Clipped**, matching the in-app `holidaysInRange` in ProjectHolidays.tsx — and
+ * that is what makes the printed label agree with the printed number.
+ * `holidayLoadInSpan` clips internally when it counts, so shipping the run
+ * UNCLIPPED put "Jun 29 – Jul 7" next to a total of 2d. Clipping first also drops
+ * payload nobody can see and removes negative offsets from the wire entirely.
  *
- * Only the OVERLAP test happens here — the day total is the viewer's job
- * (`holidayLoadInSpan` in lib.ts, the same one the app's member card uses), which keeps
- * this module free of React/DOM deps and makes the two numbers equal by construction. */
-function holidaysInRange(holidays: Holiday[] | undefined, start: string, end: string): Holiday[] {
+ * **`half` survives only on a run that is one day AFTER clipping** — the same rule
+ * `holidayLoadInSpan` counts by and `normalizeHolidays` enforces on write. Clipping
+ * can turn a 4-day run into a 1-day one, so this has to be decided here, after the
+ * clip, not before it: an unclipped 22–25 Jul run carrying `half` reads 1d on the
+ * wire but 0.5d in the app for the very same data.
+ *
+ * **Unparseable dates are dropped HERE, not at pack time**, so build and pack see
+ * the same list. Numbered over different arrays, the synthetic ids diverged and
+ * decode renumbered the survivors — `decodeSnapshot(encodeSnapshot(x))` stopped
+ * round-tripping (built `[h0=bad, h1=ok]` decoded to `[h0=ok]`).
+ *
+ * Sorted because `normalizeHolidays` only started sorting on write after this
+ * feature shipped; ProjectHolidays re-sorts defensively for the same reason. */
+function holidaysClippedTo(holidays: Holiday[] | undefined, start: string, end: string): Holiday[] {
   return (holidays ?? [])
+    .filter((h) => ISO_DATE_RE.test(h.from) && ISO_DATE_RE.test(h.to) && h.from <= h.to)
     .filter((h) => h.to >= start && h.from <= end)
-    .map((h, i) => ({ ...h, id: `h${i}` }))
+    .map((h) => ({
+      name: h.name,
+      half: h.half,
+      from: h.from < start ? start : h.from,
+      to: h.to > end ? end : h.to,
+    }))
+    .sort((a, b) => (a.from === b.from ? a.to.localeCompare(b.to) : a.from.localeCompare(b.from)))
+    .map((h, i) => {
+      const out: Holiday = { id: `h${i}`, name: h.name, from: h.from, to: h.to }
+      return h.half && h.from === h.to ? { ...out, half: h.half } : out
+    })
 }
 
 /** Off days of `m` within the inclusive [start, end] range (yyyy-mm-dd lexical compare),
@@ -103,12 +141,20 @@ function toOffset(base: string, d: string | null | undefined): number | null {
   return Math.round((x - b) / 86_400_000)
 }
 
-/** Inverse of {@link toOffset}: `base` + `n` days → yyyy-mm-dd; null when absent/bad. */
+/** Inverse of {@link toOffset}: `base` + `n` days → yyyy-mm-dd; null when absent/bad.
+ *
+ * Fails CLOSED on an out-of-range offset. `n` arrives from a URL fragment, and
+ * `new Date(…).toISOString()` throws `RangeError` past ±8.64e15 ms — which used
+ * to propagate out of `decodeSnapshot` (a render-time `useMemo` with no error
+ * boundary above it) as a blank page instead of the documented "invalid link"
+ * state. `JSON.parse('1e999')` is `Infinity`, so the bad value is reachable. */
 function fromOffset(base: string, n: number | null | undefined): string | null {
-  if (n == null) return null
+  if (n == null || !Number.isFinite(n)) return null
   const b = Date.parse(base.slice(0, 10) + 'T00:00:00Z')
   if (Number.isNaN(b)) return null
-  return new Date(b + n * 86_400_000).toISOString().slice(0, 10)
+  const t = b + n * 86_400_000
+  if (!Number.isFinite(t) || Math.abs(t) > 8.64e15) return null
+  return new Date(t).toISOString().slice(0, 10)
 }
 
 /** A member reduced to what the board renders, with a synthetic id + no avatar image.
@@ -266,7 +312,7 @@ export function buildSnapshot(
     sprint: { name: sprint.name, startDate: sprint.startDate, endDate: sprint.endDate ?? null, note: sprint.note },
     members: usedMembers.map((m, i) => normMember(m, i)),
     membersOff: usedMembers.map((m) => offRangeFor(m)),
-    holidays: holidaysInRange(project.holidays, sprintStart, sprintEnd),
+    holidays: holidaysClippedTo(project.holidays, sprintStart, sprintEnd),
     tasks: scoped.map((t, i) => {
       const kids = kidsByParent.get(t.id) ?? []
       const rd = rollupDates(t, kids)
@@ -379,6 +425,11 @@ function unpackSnapshot(o: unknown): SnapshotData | null {
   const p = o as Record<string, unknown>
   if (p.v !== 2) return null
   if (typeof p.pj !== 'string' || typeof p.sn !== 'string' || typeof p.d0 !== 'string') return null
+  // `d0`/`d1` become the span every date on this page is measured against — and
+  // the span `holidayLoadInSpan` walks. A shape check is not enough on its own
+  // (see MAX_WALK_DAYS in lib.ts) but it is the cheapest half of the guard.
+  if (!ISO_DATE_RE.test(p.d0)) return null
+  if (p.d1 != null && (typeof p.d1 !== 'string' || !ISO_DATE_RE.test(p.d1))) return null
   const cols = [p.ti, p.ss, p.pp, p.am, p.pa, p.ef, p.s0, p.s1]
   if (!isArr(p.mb) || cols.some((c) => !isArr(c))) return null
   const n = (p.ti as unknown[]).length
@@ -425,6 +476,7 @@ function unpackSnapshot(o: unknown): SnapshotData | null {
 
   // Project holidays; absent in blobs written before this shipped → empty list.
   const holidays: Holiday[] = (isArr(p.hd) ? (p.hd as unknown[]) : [])
+    .slice(0, MAX_HOLIDAYS)
     .map((e, i): Holiday | null => {
       const r = (isArr(e) ? e : []) as unknown[]
       const from = fromOffset(d0, typeof r[0] === 'number' ? r[0] : null)
@@ -433,7 +485,10 @@ function unpackSnapshot(o: unknown): SnapshotData | null {
       const half = HALF_CODE[typeof r[2] === 'number' ? r[2] : 0]
       // Synthetic id: the viewer only ever keys React rows with it, never looks it up.
       const h: Holiday = { id: `h${i}`, name: String(r[3] ?? ''), from, to }
-      return half ? { ...h, half } : h
+      // Same single-day rule as the build side and as `holidayLoadInSpan`: a
+      // crafted blob must not be able to put a "½AM" badge next to a total that
+      // counted whole days.
+      return half && from === to ? { ...h, half } : h
     })
     .filter((x): x is Holiday => x !== null)
 
@@ -496,7 +551,14 @@ export function decodeSnapshot(blob: string): SnapshotData | null {
   } catch {
     return null
   }
-  return unpackSnapshot(data)
+  try {
+    return unpackSnapshot(data)
+  } catch {
+    // The contract above promises null, never a throw. The viewer calls this in a
+    // render-time `useMemo` with no error boundary above it, so anything escaping
+    // here is a blank page instead of the "invalid link" state.
+    return null
+  }
 }
 
 /** The full share URL: origin+path + `#v=<n>&s=<blob>`. Low-level — the `version`
@@ -715,5 +777,12 @@ export function decodeCollectionSnapshot(blob: string): CollectionSnapshotData |
   } catch {
     return null
   }
-  return unpackCollection(data)
+  try {
+    return unpackCollection(data)
+  } catch {
+    // Same contract as decodeSnapshot: null, never a throw. The collection viewer
+    // decodes during render too (CollectionSnapshotViewer), and its date columns
+    // go through the same unbounded `fromOffset` arithmetic.
+    return null
+  }
 }

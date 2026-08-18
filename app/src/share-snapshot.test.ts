@@ -12,6 +12,7 @@ import {
   SNAPSHOT_VERSION,
   COLLECTION_SNAPSHOT_VERSION,
 } from './share-snapshot'
+import { holidayChipParts, holidayLoadInSpan, holidayWorkDays } from './lib'
 import type { Collection, Holiday, Member, Project, Sprint, Task } from './types'
 
 const project: Project = { id: 'p', name: 'Checkout revamp', createdAt: 0 }
@@ -68,15 +69,145 @@ describe('project holidays on the wire (hd)', () => {
     expect(decodeSnapshot(encodeSnapshot(d))).toEqual(d)
   })
 
-  it('encodes a run that STARTS BEFORE the sprint as a negative offset', () => {
-    // Offsets are from d0, so a run straddling the sprint start must survive going negative.
-    const withHols: Project = { ...project, holidays: [hol('x', '2026-07-02', '2026-07-06')] }
+  it('CLIPS a run that straddles the sprint edge, so label and total agree', () => {
+    // Unclipped, the chip printed "Jun 29 – Jul 7" beside a total of 2d, because
+    // holidayLoadInSpan clips internally when it counts. Clip on the wire instead.
+    const withHols: Project = { ...project, holidays: [hol('x', '2026-06-29', '2026-07-07')] }
     const d = buildSnapshot(withHols, sprint, members, tasks)
-    expect(d.holidays[0]).toMatchObject({ from: '2026-07-02', to: '2026-07-06' })
-    expect(decodeSnapshot(encodeSnapshot(d))!.holidays[0]).toMatchObject({
-      from: '2026-07-02',
-      to: '2026-07-06',
-    })
+    expect(d.holidays[0]).toMatchObject({ from: '2026-07-05', to: '2026-07-07' })
+    const rt = decodeSnapshot(encodeSnapshot(d))!
+    expect(rt.holidays[0]).toMatchObject({ from: '2026-07-05', to: '2026-07-07' })
+    // The printed range now spans exactly the days the total counts.
+    const span = { start: sprint.startDate, end: sprint.endDate! }
+    expect(holidayLoadInSpan(rt.holidays, span).days).toBe(
+      holidayWorkDays({ from: rt.holidays[0].from, to: rt.holidays[0].to })
+    )
+  })
+
+  it('matches the app for every boundary shape (same clipped list, same number)', () => {
+    const span = { start: sprint.startDate, end: sprint.endDate! }
+    const cases: [string, string, string, ('am' | 'pm')?][] = [
+      ['straddles the start', '2026-06-29', '2026-07-07'],
+      ['straddles the end', '2026-07-20', '2026-07-25'],
+      ['swallows the sprint', '2026-06-01', '2026-08-01'],
+      // Clipping turns this into a SINGLE day, which is what resurrects `half`:
+      // unclipped it counted 1 whole day, the app counted 0.5.
+      ['clipped down to one day, half kept', '2026-07-22', '2026-07-25', 'pm'],
+    ]
+    for (const [label, from, to, half] of cases) {
+      const hols = [{ id: 'x', name: 'H', from, to, ...(half ? { half } : {}) }]
+      // What the app renders: ProjectHolidays clips the same way.
+      const appList = hols.map((h) => ({
+        ...h,
+        from: h.from < span.start ? span.start : h.from,
+        to: h.to > span.end ? span.end : h.to,
+      }))
+      const rt = decodeSnapshot(encodeSnapshot(buildSnapshot({ ...project, holidays: hols }, sprint, members, tasks)))!
+      expect(holidayLoadInSpan(rt.holidays, span).days, label).toBe(holidayLoadInSpan(appList, span).days)
+    }
+  })
+
+  it('never lets a half-day badge ride a multi-day run', () => {
+    // The badge and the total are decided by the same rule now. Before, a 5-day
+    // run kept `half` across the wire and printed "½AM" beside a total of 5d.
+    const hols = [{ id: 'x', name: 'Tet', from: '2026-07-06', to: '2026-07-10', half: 'am' as const }]
+    const rt = decodeSnapshot(encodeSnapshot(buildSnapshot({ ...project, holidays: hols }, sprint, members, tasks)))!
+    expect(rt.holidays[0].half).toBeUndefined()
+    expect(holidayChipParts(rt.holidays[0], (d) => d).half).toBeNull()
+    expect(holidayLoadInSpan(rt.holidays, { start: sprint.startDate, end: sprint.endDate! }).days).toBe(5)
+  })
+
+  it('sorts by date, so a legacy unsorted project still reads in order', () => {
+    const withHols: Project = {
+      ...project,
+      holidays: [hol('c', '2026-07-20'), hol('a', '2026-07-06'), hol('b', '2026-07-13')],
+    }
+    const d = buildSnapshot(withHols, sprint, members, tasks)
+    expect(d.holidays.map((h) => h.from)).toEqual(['2026-07-06', '2026-07-13', '2026-07-20'])
+  })
+
+  it('keeps holiday ids stable when a run is dropped', () => {
+    // '2026-07-1x' passes the lexical overlap test but Date.parse rejects it, so
+    // it is the shape that used to survive the build and die at pack time —
+    // renumbering the survivors on only one side and breaking the round-trip.
+    const withHols: Project = { ...project, holidays: [hol('bad', '2026-07-1x', '2026-07-2x'), hol('ok', '2026-07-10')] }
+    const d = buildSnapshot(withHols, sprint, members, tasks)
+    expect(d.holidays.map((h) => h.from)).toEqual(['2026-07-10']) // dropped at BUILD, not at pack
+    expect(decodeSnapshot(encodeSnapshot(d))).toEqual(d) // ids line up, so this holds
+  })
+
+  it('a hostile link can neither hang nor crash the viewer', () => {
+    // A share blob is fully attacker-controlled: it rides in a URL fragment, or in
+    // a KV store keyed by a public id. These three shapes each used to be fatal.
+    const raw = (extra: Record<string, unknown>) =>
+      LZString.compressToEncodedURIComponent(
+        JSON.stringify({
+          v: 2, ts: '', pj: 'p', sn: 's', d0: '2026-07-05', d1: '2026-07-22',
+          mb: [['An', '#111', '', '']],
+          ti: ['T'], ss: [0], pp: [2], am: [0], pa: [-1], ef: [null], s0: [null], s1: [null],
+          ...extra,
+        })
+      )
+
+    // 1. Out-of-Date-range offset. `new Date(...).toISOString()` threw RangeError,
+    //    and decode runs inside a render useMemo with no error boundary above it,
+    //    so that throw was a blank page. It now fails closed PER FIELD: the bad row
+    //    is dropped and the rest of the snapshot still renders.
+    const huge = decodeSnapshot(raw({ hd: [[1e12, 1e12, 0, 'X']] }))
+    expect(huge).not.toBeNull()
+    expect(huge!.holidays).toEqual([])
+    expect(huge!.members).toHaveLength(1) // the board survives one bad holiday
+    // `JSON.parse('1e999')` is Infinity, so the literal has to survive into the
+    // TEXT — `JSON.stringify(Infinity)` writes `null` and would test nothing.
+    const infinite = LZString.compressToEncodedURIComponent(
+      JSON.stringify({
+        v: 2, ts: '', pj: 'p', sn: 's', d0: '2026-07-05', d1: '2026-07-22',
+        mb: [['An', '#111', '', '']],
+        ti: ['T'], ss: [0], pp: [2], am: [0], pa: [-1], ef: [null], s0: [null], s1: [null],
+        hd: [['__INF__', 0, 0, 'X']],
+      }).replace('"__INF__"', '1e999')
+    )
+    expect(decodeSnapshot(infinite)!.holidays).toEqual([])
+    // Same hole, pre-existing column: a huge task offset degrades to no date.
+    expect(decodeSnapshot(raw({ s0: [1e12] }))!.tasks[0].startDate).toBeNull()
+
+    // 2. A span shaped like a date but 3.65 million days long. The old walk
+    //    stepped by STRING successor, and past 9999-12-31 that successor is its
+    //    own fixed point AND sorts below every real date, so it never terminated.
+    //    168 chars was enough to freeze the tab.
+    const bomb = raw({ d0: '0001-01-01', d1: '9999-12-31', hd: [[0, 3652058, 0, 'boom']] })
+    const d = decodeSnapshot(bomb)
+    expect(d).not.toBeNull()
+    const t0 = Date.now()
+    const load = holidayLoadInSpan(d!.holidays, { start: d!.sprint.startDate, end: d!.sprint.endDate! })
+    expect(Date.now() - t0).toBeLessThan(1000) // was: never returned
+    expect(load.days).toBe(0) // over the cap, so it contributes nothing
+
+    // 3. Junk rows are skipped, valid neighbours survive, nothing throws.
+    const mixed = decodeSnapshot(raw({ hd: [7, null, ['x', 3, 0, 'BadFrom'], [1, 1, 99, 'BadHalfCode'], [2, 3, 1, 'Ok']] }))!
+    expect(mixed.holidays.map((h) => [h.from, h.to, h.half ?? null, h.name])).toEqual([
+      ['2026-07-06', '2026-07-06', null, 'BadHalfCode'],
+      ['2026-07-07', '2026-07-08', null, 'Ok'],
+    ])
+
+    // 4. A malformed sprint range is rejected outright, not carried into the walk.
+    expect(decodeSnapshot(raw({ d0: 'nope' }))).toBeNull()
+    expect(decodeSnapshot(raw({ d1: '9999-13-99x' }))).toBeNull()
+  })
+
+  it('caps how many holiday rows a blob can decode into', () => {
+    const many = Array.from({ length: 500 }, (_, i) => [i % 17, (i % 17) + 1, 0, `H${i}`])
+    const blob = LZString.compressToEncodedURIComponent(
+      JSON.stringify({
+        v: 2, ts: '', pj: 'p', sn: 's', d0: '2026-07-05', d1: '2026-07-22',
+        mb: [['An', '#111', '', '']],
+        ti: ['T'], ss: [0], pp: [2], am: [0], pa: [-1], ef: [null], s0: [null], s1: [null],
+        hd: many,
+      })
+    )
+    // Each surviving row becomes a rendered span AND a day-walk; lz-string reaches
+    // ~150:1 on repeated rows, so MAX_BLOB_LEN alone does not bound this.
+    expect(decodeSnapshot(blob)!.holidays.length).toBe(64)
   })
 
   it('omits the hd key entirely when the sprint has no holidays', () => {
@@ -97,13 +228,13 @@ describe('project holidays on the wire (hd)', () => {
     expect(decoded!.members.length).toBe(2) // the rest still decodes
   })
 
-  it('drops a run whose dates do not parse', () => {
+  it('drops a non-ISO run at build', () => {
+    // 'nope' never reached the wire in the first place: 'nope' <= '2026-07-22' is
+    // false, so the overlap filter already discarded it. The claim this test used
+    // to make (that it survived the build) was backwards.
     const withHols: Project = { ...project, holidays: [hol('bad', 'nope', 'nope'), hol('ok', '2026-07-10')] }
     const d = buildSnapshot(withHols, sprint, members, tasks)
-    // The overlap filter is a lexical compare, so 'nope' can slip through the build...
-    const decoded = decodeSnapshot(encodeSnapshot(d))!
-    // ...but it can never survive the wire, where dates become day offsets.
-    expect(decoded.holidays.map((h) => h.from)).toEqual(['2026-07-10'])
+    expect(d.holidays.map((h) => h.from)).toEqual(['2026-07-10'])
   })
 })
 
@@ -317,7 +448,16 @@ describe('encode / decode round-trip', () => {
     const bigTasks = Array.from({ length: 30 }, (_, i) =>
       task(`b${i}`, `u${i % 5}`, i, { dueDate: '2026-07-2' + (i % 9), startDate: '2026-07-1' + (i % 9), estimate: (i % 5) + 1 })
     )
-    const d = buildSnapshot(project, sprint, bigMembers, bigTasks)
+    // Holidays are inside the budget on purpose: `hd` carries the first unbounded
+    // free text added to the wire since task titles, and the fixture used to have
+    // none, so `hd` contributed 0 bytes to the one size assertion that exists.
+    const bigHols = [
+      hol('a', '2026-07-06', '2026-07-08'),
+      hol('b', '2026-07-13'),
+      hol('c', '2026-07-20', '2026-07-21'),
+    ].map((h, i) => ({ ...h, name: ['Tết Nguyên đán', 'Giỗ Tổ Hùng Vương', 'Quốc khánh mùng 2 tháng 9'][i] }))
+    const d = buildSnapshot({ ...project, holidays: bigHols }, sprint, bigMembers, bigTasks)
+    expect(d.holidays).toHaveLength(3)
     const url = buildShareUrl(encodeSnapshot(d), 'https://plan-up.app/')
     expect(url.length).toBeLessThan(SHARE_MAX_BYTES)
     expect(decodeSnapshot(parseShareHash(new URL(url).hash)!.blob)).toEqual(d)

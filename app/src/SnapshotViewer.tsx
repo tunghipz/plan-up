@@ -11,6 +11,7 @@ import {
   formatShortDate,
   formatSprintRange,
   fmtDays,
+  holidayChipParts,
   holidayLoadInSpan,
   PRIORITY_TAG,
   useDarkMode,
@@ -205,10 +206,12 @@ export function SnapshotViewer({ raw }: { raw: string }) {
     ? formatSprintRange(sprint.startDate, sprint.endDate)
     : formatShortDate(sprint.startDate)
   // Project-wide days off. The DAY TOTAL is computed here, not carried on the wire,
-  // via the very function the app's member card and ProjectHolidays use — so this
-  // number equals the in-app one by construction (same date union, same weekend
-  // skip, same half-day rule) instead of by coincidence. The span is the sprint
-  // range, which sender and viewer both hold verbatim, so neither can drift.
+  // via the same function ProjectHolidays' sprint badge uses, over the same span —
+  // so those two agree by construction (one date union, one weekend rule, one
+  // half-day rule), not by coincidence. Same function is NOT enough on its own:
+  // the member-card chip calls it over that member's task span deliberately, so it
+  // is expected to read differently. The span here is `d0`/`d1`, which sender and
+  // viewer both hold verbatim, so neither side can drift.
   // See design-docs/share-link-snapshot.md, *Ngày nghỉ chung*.
   const holidayLoad = holidayLoadInSpan(data.holidays, {
     start: sprint.startDate,
@@ -281,31 +284,39 @@ export function SnapshotViewer({ raw }: { raw: string }) {
                   one, and a second reads as a repeated control. Absent entirely when the
                   sprint has no holidays, so the normal case pays nothing. */}
               {holidayLoad.days > 0 && (
-                <div className="mt-3 pt-3 border-t border-border-hair">
-                  <div className="flex items-baseline gap-1.5 flex-wrap">
-                    <span className="text-[12px] font-bold text-warn-ink tab-data">
-                      {fmtDays(holidayLoad.days)}d
-                    </span>
-                    <span className="text-[11.5px] text-ink-faint">nghỉ chung cả team</span>
-                  </div>
-                  <div className="mt-1.5 flex flex-wrap gap-1.5">
-                    {holidayLoad.items.map((h) => (
-                      <span
-                        key={h.id}
-                        className="inline-flex items-center gap-1.5 text-[10.5px] font-semibold text-ink-muted bg-fill rounded-[6px] px-[7px] py-0.5 whitespace-nowrap"
-                      >
-                        <span className="text-ink font-bold tab-data">
-                          {formatShortDate(h.from)}
-                          {h.to !== h.from && ` – ${formatShortDate(h.to)}`}
+                <div className="mt-3 pt-3 border-t border-border-hair" role="group" aria-label="Project days off">
+                  {/* Same pill shape as the member `Nd off` beside it — one visual
+                      treatment for one semantic (a days-off count in warn amber);
+                      only the noun says whose. English like every other label in
+                      this card (Sprint / Goal / Progress / N done / Nd off) and
+                      like the PNG this very page exports, so the same number is
+                      not labelled in two languages one click apart. */}
+                  <span className="inline-flex items-center gap-1 text-[10.5px] font-bold text-warn-ink bg-priority-high/15 rounded-full px-2 py-0.5 whitespace-nowrap tab-data">
+                    {fmtDays(holidayLoad.days)}d team off
+                  </span>
+                  <div className="mt-1.5 flex flex-wrap gap-1">
+                    {holidayLoad.items.map((h) => {
+                      const part = holidayChipParts(h, formatShortDate)
+                      return (
+                        <span
+                          key={h.id}
+                          title={`${h.name} · ${part.range}`}
+                          className="inline-flex items-center gap-1 max-w-full text-[10px] font-semibold text-ink-muted bg-fill rounded-[6px] px-[6px] py-px"
+                        >
+                          {/* The NAME is what people remember, so it leads and it
+                              truncates — `whitespace-nowrap` on an unbounded
+                              user-typed string overflowed this 300px rail by 47px
+                              at 44 characters. The in-app pill guards the same way. */}
+                          <span className="truncate">{h.name}</span>
+                          <span className="text-ink font-semibold tab-data shrink-0">{part.range}</span>
+                          {part.half && (
+                            <span className="text-[9px] font-bold text-accent-strong bg-accent-soft rounded-[3px] px-1 shrink-0">
+                              {part.half}
+                            </span>
+                          )}
                         </span>
-                        {h.half && (
-                          <span className="text-[9px] font-bold text-accent bg-accent-soft rounded-[3px] px-1">
-                            ½{h.half === 'am' ? 'AM' : 'PM'}
-                          </span>
-                        )}
-                        {h.name}
-                      </span>
-                    ))}
+                      )
+                    })}
                   </div>
                 </div>
               )}

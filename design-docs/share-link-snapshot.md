@@ -7,7 +7,13 @@
 > verbatim by the hosted mode.
 
 **Status:** Implemented
-**Last updated:** 2026-08-18 (**ngày nghỉ chung của project lên share page** — payload
+**Last updated:** 2026-08-18 (+ **fix từ `/review`**: chặn vòng lặp vô hạn khi span
+đi quá 9999-12-31 — `hd` là thứ đầu tiên đẩy ngày do người ngoài kiểm soát vào
+`holidayLoadInSpan`, và một link 168 ký tự khoá cứng tab; `decodeSnapshot` giờ không
+throw nữa; `hd` **clip** theo range nên nhãn và số khớp nhau; bỏ `half` thừa; sort;
+cap số dòng; chip có truncate; PNG đổi sang `C.muted` cho đủ contrast; hai bề mặt dùng
+chung `holidayChipParts`; thống nhất tiếng Anh. Xem *Ngày nghỉ chung*.
+Trước đó cùng ngày: **ngày nghỉ chung của project lên share page** — payload
 trước giờ chở `membersOff` (ngày nghỉ *riêng từng người*) nhưng **không** chở project
 holidays, nên người nhận link thấy task kéo dài mà không biết vì sao. Thêm wire key
 **`hd`** (optional, **không bump version** — theo đúng tiền lệ của `mo`) + một khối trong
@@ -252,11 +258,12 @@ lặp key, đóng gói **columnar** + mã hoá chặt:
 - `mo`: `[dayOffset, halfCode][][]` — mỗi member 1 mảng ngày off trong range sprint, mỗi entry
   `[offset từ d0, 0=cả ngày · 1=sáng · 2=chiều]`. Viewer decode ra `{date, half?}`, tự tính số
   ngày hiệu dụng (`effectiveDaysOff`) + vẽ chips. Blob cũ thiếu `mo` → mảng rỗng (không có off).
-- `hd`: `[fromOffset, toOffset, halfCode, name][]` — ngày nghỉ **chung cả project** giao với
-  range sprint. Offset tính từ `d0` như mọi ngày khác nên **có thể âm** (kỳ nghỉ bắt đầu trước
-  sprint). `halfCode` dùng chung bảng `HALF_CODE` với `mo`. **Optional, `v` vẫn = 2** — y hệt
+- `hd`: `[fromOffset, toOffset, halfCode, name][]` — ngày nghỉ **chung cả project**, đã
+  **clip** vào range sprint (nên offset **không bao giờ âm**; xem *Clip* bên dưới).
+  `halfCode` dùng chung bảng `HALF_CODE` với `mo`. **Optional, `v` vẫn = 2** — y hệt
   cách `mo` từng được thêm: blob cũ thiếu `hd` → mảng rỗng, và viewer đời cũ đọc blob mới chỉ
   đơn giản bỏ qua key nó không biết. Không cần bump version, không cần đường đọc tương thích.
+  Lúc decode: cap **64 dòng** (`MAX_HOLIDAYS`) và `half` chỉ sống sót khi `from === to`.
 - Task đóng thành các **cột song song** (mảng cùng độ dài N): `ti` titles,
   `ss` status **enum** (0 todo · 1 in_progress · 2 done), `pp` priority **enum**
   (`['none','low','normal','high','urgent']`), `am` assignee member-index (−1 =
@@ -330,11 +337,21 @@ việc nên **start/end không bao giờ rơi vào đó**, dấu hiệu sẽ kh�
 hiệu thật là task **bắc qua** kỳ nghỉ. Đó là lý do D (nếu làm) phải đánh dấu *span*, không
 phải *ô ngày*.
 
-**Phạm vi = range sprint, không nới.** Ngày nghỉ chung được lọc theo `[startDate, endDate ??
-startDate]`, khác với `membersOff` (nới theo task của chính người đó, vì task rollover có thể
-nằm ngoài sprint). Hai lý do: khối này nằm trong **Sprint card** nên nói về sprint là trung
-thực; và sender với viewer phải tính ra **cùng một con số** — dùng range sprint (`d0`/`d1`,
-cả hai bên đều có nguyên vẹn) thì không có đường nào lệch.
+**Phạm vi = range sprint, không nới, và CLIP vào đó.** Ngày nghỉ chung được lọc theo
+`[startDate, endDate ?? startDate]` rồi **cắt đúng vào range**, khác với `membersOff` (nới
+theo task của chính người đó, vì task rollover có thể nằm ngoài sprint).
+
+Vì sao clip, chứ không chỉ lọc: `holidayLoadInSpan` **tự clip khi đếm**. Nếu wire chở
+nguyên kỳ nghỉ thì chip in `Jun 29 – Jul 7` cạnh con số `2d` — chữ và số nói khác nhau
+trên cùng một dòng. Tệ hơn: clip có thể biến kỳ 4 ngày thành 1 ngày, mà `half` chỉ có
+nghĩa khi 1 ngày — nên kỳ `22–25/7` mang `half` đọc **1d** trên share page trong khi app
+đọc **0.5d** cho đúng dữ liệu đó. Clip trước rồi mới quyết `half` là cách duy nhất để hai
+bên trùng nhau. Clip cũng bỏ luôn phần payload không ai nhìn thấy và xoá sạch offset âm.
+
+Sender và viewer tính ra **cùng con số** vì dùng chung hàm **và** chung span (`d0`/`d1`, cả
+hai bên đều có nguyên vẹn). ⚠️ **Chung hàm thôi thì chưa đủ**: chip trên member card gọi
+đúng hàm đó nhưng trên **task span của người đó**, cố ý — nên nó *được phép* khác. Bảo đảm
+này chỉ áp cho share page ↔ PNG ↔ badge sprint của ProjectHolidays.
 
 **Số ngày do viewer tự tính**, không chở trên wire: `holidayLoadInSpan(holidays, {start, end})`
 trong `lib.ts` — **đúng hàm mà member card và ProjectHolidays trong app đang dùng**. Nên con số
@@ -346,14 +363,78 @@ việc tính nằm ở viewer, nơi đã import `lib` sẵn.
 **Hiển thị** (`SnapshotViewer`, trong Sprint card, ngăn bằng `border-t` như khối Goal):
 - Dòng tổng: `{fmtDays(days)}d` (màu `warn-ink`, đúng màu pill `Xd off` của member) +
   `nghỉ chung cả team`.
-- Chips từng kỳ: `{from} – {to}` + tên, dùng **lại đúng style chip ngày** của member off
-  (`bg-fill rounded-[6px]`), nửa ngày gắn badge `½AM/½PM` accent — không phát minh từ vựng mới.
+- Chips từng kỳ: **tên trước** (thứ người ta nhớ) rồi `{from} – {to}`, dùng lại đúng style
+  chip ngày của member off (`bg-fill rounded-[6px]`, cùng `10px/gap-1/px-[6px]` — không còn
+  near-miss), nửa ngày gắn badge `½AM/½PM`. Tên có `truncate` + `title`: `whitespace-nowrap`
+  trên chuỗi user tự gõ **tràn rail 300px mất 47px** ở tên 44 ký tự (pill trong app thủ sẵn
+  bằng `max-w-[280px] truncate`, lúc đầu không mang sang).
+- Luật `range`/`half` nằm trong **`holidayChipParts` (lib.ts)** dùng chung với PNG, nên hai
+  bề mặt không thể lệch **luật** dù style vẫn riêng. Trước khi tách, cả hai đều in badge theo
+  `h.half` đơn thuần → kỳ 5 ngày mang `half` sót in `½AM` cạnh tổng 5 ngày nguyên.
 - Không có ngày nghỉ → **cả khối biến mất**, Sprint card về đúng hình dạng cũ. Chi phí bằng 0
-  cho sprint bình thường, đó là trạng thái hay gặp nhất.
+  cho sprint bình thường, đó là trạng thái hay gặp nhất. Kỳ nghỉ rơi trọn vào cuối tuần cũng
+  ẩn (tốn 0 ngày công) — đúng luật chip member card.
+- **Tiếng Anh** (`2.5d team off`), khớp mọi nhãn khác trong card (Sprint / Goal / Progress /
+  `N done` / `Nd off`) **và** khớp tấm PNG do chính trang này xuất ra — trước đó cùng một con
+  số được dán nhãn hai ngôn ngữ cách nhau một cú click. Dùng đúng pill của member `Nd off`
+  (`bg-priority-high/15 rounded-full`), chỉ khác danh từ: một cách vẽ cho một ngữ nghĩa.
 
 Không dùng icon lịch cho khối này: pill ngày ngay trên đã có một icon lịch rồi, thêm cái thứ
 hai đọc thành "một control bị lặp" (cùng lý do chip holiday trong app không mang icon — xem
 [project-holidays.md](./project-holidays.md)).
+
+### Biên tin cậy (blob là dữ liệu của người lạ)
+
+Blob đi trong URL fragment hoặc nằm trong KV store tra bằng id công khai — tức **hoàn toàn do
+người gửi link kiểm soát**. Trước `/review`, `hd` mở ra hai lỗ:
+
+1. **Treo tab bằng link 168 ký tự.** `ISO_DATE` chỉ kiểm *hình dạng*, không kiểm *độ lớn* —
+   `0001-01-01 … 9999-12-31` hợp lệ và dài 3.65 triệu ngày. Vòng đếm trong `holidayLoadInSpan`
+   đi bằng **successor chuỗi**, mà quá `9999-12-31` thì `toISOString()` đổi sang dạng năm mở
+   rộng `+010000-01` — vừa là fixed point vừa sort **dưới** mọi ngày thật (`+` = 0x2B, `9` =
+   0x39), nên `d <= to` đúng vĩnh viễn. Không throw, không phình bộ nhớ (fixed point đọc ra
+   cuối tuần nên không vào Map): **treo trắng, im lặng**, không có ErrorBoundary.
+   → Vòng lặp giờ chạy bằng **timestamp** (luôn kết thúc) + cap `MAX_WALK_DAYS = 4000`, đặt
+   trong `lib.ts` nên **mọi caller cùng hưởng** — member card, ProjectHolidays, share page, PNG.
+   `nextISODate` bị xoá hẳn để không ai dựng lại vòng lặp chuỗi.
+   Đây đúng fixed point mà `scheduling.ts` đã cho `addDays` throw; `lib.ts` là **bản sao thứ
+   hai** của cùng vòng lặp và bản vá chưa bao giờ với tới.
+2. **`decodeSnapshot` throw thay vì trả `null`**, phá chính contract nó ghi. `unpackSnapshot`
+   nằm ngoài cả hai `try`, và `fromOffset` kết thúc bằng `new Date(...).toISOString()` — ném
+   `RangeError` với offset ngoài dải Date (`JSON.parse('1e999')` là `Infinity`, tới được).
+   Viewer gọi decode trong `useMemo` lúc render ⇒ **trang trắng**. Lỗ này có sẵn qua `s0`/`s1`/
+   `mo`; `hd` thêm hai cửa.
+   → `fromOffset` fail-closed (`Number.isFinite` + `|t| <= 8.64e15`), và cả `decodeSnapshot`
+   lẫn `decodeCollectionSnapshot` bọc `unpack` trong `try/catch`. Hỏng **một field** thì bỏ
+   đúng field đó, phần còn lại của board vẫn hiện.
+
+Thêm: `d0`/`d1` phải khớp `ISO_DATE_RE` mới decode; `hd` cap 64 dòng (`MAX_BLOB_LEN` chỉ chặn
+kích thước **đã nén** — lz-string đạt ~150:1 trên dòng lặp lại nên không bao giờ đủ một mình).
+
+Test ở `share-snapshot.test.ts`: *"a hostile link can neither hang nor crash the viewer"*.
+
+### ⚠️ Người nhận có thể xem bản viewer cũ rất lâu (chưa fix)
+
+Phát hiện lúc `/review`, **không sửa trong lần này** vì nó nằm ngoài feature và là một
+quyết định UX riêng. Ghi lại để không ai giả định "recipient thấy ngay".
+
+`vite.config.ts` đặt `registerType: 'prompt'` + `injectRegister: null` — service worker mới
+**không bao giờ tự activate**, phải có người bấm nút update. Nút đó nằm trong `VersionFooter`
+(`useRegisterSW`), mà `VersionFooter` **chỉ mount trong `<App/>`** (`App.tsx:1550`). Trong khi
+`main.tsx` cho link share đi thẳng vào `HostedViewer` / `SnapshotViewer` / `CollectionSnapshotViewer`,
+**thay cho** `<App/>`. Cộng thêm `navigateFallback: '/index.html'` phục vụ route `/view/*` từ
+`index.html` đã precache.
+
+Nghĩa là: **người chỉ mở link share, không bao giờ mở app, không có đường nào nhận bản mới.**
+SW mới chỉ activate khi mọi tab đang bị điều khiển đã đóng hết.
+
+Cắn đúng vào luồng hosted mà feature này phục vụ: sender thêm ngày nghỉ → bấm **Cập nhật**
+(blob mới có `hd`, URL không đổi) → recipient mở lại đúng link đó và thấy board **không có**
+ngày nghỉ — chính cái "task kéo dài mà không biết vì sao" mà feature sinh ra để chữa. Còn
+sender thì cả share page lẫn PNG của mình đều hiện dải, nên **không có cách nào tự phát hiện**.
+
+Hai hướng, phải chọn: mount đường update vào route viewer (nhưng có nên hiện pill update trên
+một trang read-only không?), hoặc chấp nhận và nói rõ độ trễ ở chỗ nút Cập nhật.
 
 **Collections (v3) không có** khối này: collection không thuộc sprint và không có range để
 ngày nghỉ bám vào.

@@ -1,6 +1,13 @@
 import { forwardRef } from 'react'
 import type { Holiday, Priority, Status, Task } from './types'
-import { STATUS_LABEL, fmtDays, effectiveDaysOff, daysOffInRange, holidayLoadInSpan } from './lib'
+import {
+  STATUS_LABEL,
+  fmtDays,
+  effectiveDaysOff,
+  daysOffInRange,
+  holidayChipParts,
+  holidayLoadInSpan,
+} from './lib'
 import { colorForName } from './schema'
 import type { WorkingPlan } from './scheduling'
 import type { MemberGroup } from './png-export'
@@ -20,7 +27,13 @@ import type { MemberGroup } from './png-export'
  * title as before.
  */
 
-// Light palette — hard-coded to match the light `--color-*` tokens in index.css.
+// Light palette — hard-coded from the light `--color-*` tokens in index.css.
+// CAVEAT: `faint` has DRIFTED. index.css darkened `--color-ink-faint` to #76767a
+// when #a1a1a6 was found to fail contrast (design-system.md §2.2); this copy was
+// never updated, so #a1a1a6 sits at 2.36:1 on `panel` and 2.57:1 on `surface` —
+// both far under AA 4.5:1. It still carries `Nd off`, the row numbers and the
+// done counts, which is a pre-existing defect this file should fix on its own
+// terms (it changes how every exported image looks). New text uses `muted`.
 const C = {
   ink: '#1d1d1f',
   muted: '#6e6e73',
@@ -254,9 +267,11 @@ export interface PngExportCardProps {
   sprintEnd: string
   /** yyyy-mm-dd local — used for the header stamp and overdue comparison. */
   today: string
-  /** Project-wide days off inside the sprint range (share snapshot `hd`). The image
-   * lands in a chat with no hover and no tooltip, so this only exists if it is
-   * printed as text. Omitted/empty → the band is not rendered at all. */
+  /** Project-wide days off, already CLIPPED to the sprint range by the sender
+   * (share snapshot `hd`). The image lands in a chat with no hover and no tooltip,
+   * so this only exists if it is printed as text. The band is skipped whenever the
+   * runs cost no WORKING day inside the range — an empty list, but equally a run
+   * that lands entirely on a weekend. */
   holidays?: Holiday[]
   /** Fixed content width in px. */
   width?: number
@@ -268,9 +283,11 @@ export const PngExportCard = forwardRef<HTMLDivElement, PngExportCardProps>(
     ref
   ) {
     const totalTasks = groups.reduce((n, g) => n + g.tasks.length, 0)
-    // Same function the app's member card, ProjectHolidays and the share page use, so
-    // all three surfaces agree by construction (one date union, weekends skipped,
-    // half-days halved) rather than by three implementations happening to match.
+    // Same function AND the same span (the sprint) as the share page and as
+    // ProjectHolidays' sprint-scoped badge, so those three agree by construction:
+    // one date union, weekends skipped, half-days halved. The member-card chip
+    // calls the same function over the MEMBER'S TASK SPAN on purpose, so it is
+    // expected to differ — same function alone guarantees nothing.
     const holidayLoad = holidayLoadInSpan(holidays, { start: sprintStart, end: sprintEnd })
     // Continuous 1..N numbering across the whole image (not Task.sequence).
     let seq = 0
@@ -326,20 +343,29 @@ export const PngExportCard = forwardRef<HTMLDivElement, PngExportCardProps>(
               color: C.muted,
             }}
           >
+            {/* `team off` mirrors the share page's pill and reads against the
+                gutter's `Nd off`, so it is clear the two numbers are disjoint —
+                personal days versus everyone's. */}
             <span style={{ fontWeight: 700, color: C.ink, fontVariantNumeric: 'tabular-nums' }}>
-              {fmtDays(holidayLoad.days)}d holiday
+              {fmtDays(holidayLoad.days)}d team off
             </span>
-            {holidayLoad.items.map((h) => (
-              <span key={h.id} style={{ whiteSpace: 'nowrap' }}>
-                {h.name}
-                <span style={{ color: C.faint, fontVariantNumeric: 'tabular-nums' }}>
-                  {' · '}
-                  {shortDate(h.from)}
-                  {h.to !== h.from && ` – ${shortDate(h.to)}`}
-                  {h.half && ` ½${h.half === 'am' ? 'AM' : 'PM'}`}
+            {holidayLoad.items.map((h) => {
+              const part = holidayChipParts(h, shortDate)
+              return (
+                // No `whiteSpace: nowrap`: a long user-typed name must wrap, the
+                // same reasoning the task-title column already applies — an image
+                // in a chat has no hover, so anything clipped is gone for good.
+                <span key={h.id}>
+                  {h.name}
+                  {/* `muted`, not `faint`: #a1a1a6 on this panel is 2.36:1. */}
+                  <span style={{ color: C.muted, fontVariantNumeric: 'tabular-nums' }}>
+                    {' · '}
+                    {part.range}
+                    {part.half && ` ${part.half}`}
+                  </span>
                 </span>
-              </span>
-            ))}
+              )
+            })}
           </div>
         )}
 

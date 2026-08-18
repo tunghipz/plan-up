@@ -724,10 +724,28 @@ const isWeekendISO = (iso: string) => {
 }
 /** Shape guard for a stored date. Anything else makes a `d <= to` day-walk run away. */
 export const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
-/** Next calendar day. Local twin of `addDays(d, 1)` — keeps lib.ts off scheduling.ts. */
-const nextISODate = (iso: string): string =>
-  new Date(Date.parse(iso + 'T00:00:00Z') + MS_DAY).toISOString().slice(0, 10)
+// There is deliberately no `nextISODate` here any more. A string successor is
+// what made the walk below runaway: past 9999-12-31 `toISOString()` switches to
+// the expanded-year form `+010000-01`, which is its OWN successor and sorts below
+// every real date ('+' is 0x2B, '9' is 0x39), so `d <= to` stayed true forever.
+// Walk by timestamp instead — it always terminates.
 
+/**
+ * Hard ceiling on ONE holiday's day-walk, and the reason it exists.
+ *
+ * A real run is days or weeks. The cap is here because both ends of the walk can
+ * arrive from a **share link** — `share-snapshot`'s `hd` offsets plus the
+ * `d0`/`d1` sprint range — and `ISO_DATE` above only validates a date's SHAPE,
+ * never its magnitude. `0001-01-01 … 9999-12-31` is well-shaped and 3.65M days
+ * long; with the old string walk a 168-char link froze the tab silently — no
+ * throw and no memory growth, because the fixed point reads as a weekend and
+ * never entered the Map. `scheduling.ts`'s `addDays` throws on that same fixed
+ * point; this was the second copy of the pattern and needed its own guard.
+ *
+ * Every caller inherits the bound: the member card, ProjectHolidays, the share
+ * page and the PNG export.
+ */
+const MAX_WALK_DAYS = 4000
 /**
  * WORKING days a project holiday actually costs. Weekends are already
  * non-working, so a 9-calendar-day Tết that swallows two weekends costs 7 —
@@ -795,8 +813,16 @@ export function holidayLoadInSpan<
     // a multi-day run that carries a stale `half` is a run of WHOLE days off,
     // and clipping it down to one day must not resurrect the half.
     const half = h.from === h.to ? h.half : undefined
+    // Walk by TIMESTAMP, not by string successor. Both bounds now reach here
+    // from a share link (share-snapshot's `hd` plus `d0`/`d1`), and `ISO_DATE`
+    // only checks a date's SHAPE, never its magnitude — see MAX_WALK_DAYS.
+    const fromT = Date.parse(from + 'T00:00:00Z')
+    const toT = Date.parse(to + 'T00:00:00Z')
+    if (Number.isNaN(fromT) || Number.isNaN(toT)) continue
+    if (toT - fromT > MAX_WALK_DAYS * MS_DAY) continue
     let touched = false
-    for (let d = from; d <= to; d = nextISODate(d)) {
+    for (let t = fromT; t <= toT; t += MS_DAY) {
+      const d = new Date(t).toISOString().slice(0, 10)
       if (isWeekendISO(d)) continue
       touched = true
       const prev = part.get(d)
@@ -808,6 +834,26 @@ export function holidayLoadInSpan<
   let days = 0
   for (const p of part.values()) days += p === 'full' ? 1 : 0.5
   return { days, items }
+}
+
+/**
+ * The two halves of a holiday chip label. Shared so the share page and the
+ * exported PNG cannot drift apart on the RULES while still styling themselves
+ * independently (they already differ on palette, font size and element order —
+ * that part is deliberate, the rules are not).
+ *
+ * `half` comes back only for a run that is a SINGLE day, which is exactly the
+ * condition `holidayLoadInSpan` uses when counting. Hand-written, the two
+ * surfaces both printed the badge on `h.half` alone, so a 5-day run carrying a
+ * stale `half` rendered "½AM" beside a total of 5 whole days.
+ */
+export function holidayChipParts<
+  H extends { from: string; to: string; half?: 'am' | 'pm' },
+>(h: H, fmt: (iso: string) => string): { range: string; half: string | null } {
+  return {
+    range: h.to === h.from ? fmt(h.from) : `${fmt(h.from)} – ${fmt(h.to)}`,
+    half: h.half && h.from === h.to ? (h.half === 'am' ? '\u00bdAM' : '\u00bdPM') : null,
+  }
 }
 
 /** Band tooltip for a PERSONAL day off (a holiday band shows its own name). */

@@ -1,7 +1,7 @@
 # Task groups (parent task with nested children)
 
 **Status:** Implemented
-**Last updated:** 2026-07-02 (`setTaskParent` enforces parent + child share the same sprint)
+**Last updated:** 2026-09-11 (bulk Assign obeys the no-cross-member rule; see tasks.md)
 **Code:** `app/src/db.ts` (`Task.parentId`, `createGroupFromSelection`, `setTaskParent`),
 `app/src/SprintView.tsx` (`MemberCard` task tree render, `TaskGroupRow` parent roll-up,
 `SelectionBar` group/ungroup/delete), collapse persisted in `localStorage`
@@ -145,7 +145,10 @@ child finish), exactly as if it depended on the latest child. Mechanics:
 - **Empty group**: a parent whose children are all removed/ungrouped silently reverts
   to a normal leaf task (no special "empty group" state).
 - **Cross-member / cross-sprint**: groups never span members or sprints; moving a task
-  out clears `parentId`, and `setTaskParent` refuses a parent in a different sprint.
+  out clears `parentId`, and `setTaskParent` refuses a parent in a different sprint. The
+  SelectionBar's bulk **Assign** obeys the same rule from the other side: a child reassigned
+  on its own is ungrouped, a head takes its children along (see
+  [tasks.md](./tasks.md) "Bulk assign").
 - **Board view**: out of scope this round — `parentId` is ignored in BoardView (tasks
   show flat). Flag if grouping is wanted there later.
 - **Dark mode**: all via tokens (derived status dot via `STATUS_META` varName).

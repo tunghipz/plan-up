@@ -28,6 +28,12 @@ html.dark input, html.dark select, html.dark textarea, html.dark button {
   --color-accent-strong: #0058b0;
   --color-accent-tint: rgba(0, 113, 227, 0.12);
 
+  /* Marker-pen highlight for ==text== inside a task title. Apple yellow at low
+     alpha — reads as ink on paper, and deliberately NOT the accent blue or
+     --color-priority-high (those already mean something else in a row).
+     See design-docs/task-rich-text.md. */
+  --color-highlight: rgba(255, 214, 10, 0.45);
+
   /* Apple greyscale — grey canvas so white cards pop (inset-grouped) */
   --color-canvas: #f5f5f7;
   --color-canvas-sunk: #ececee;
@@ -89,6 +95,8 @@ html.dark input, html.dark select, html.dark textarea, html.dark button {
   --color-accent-soft: #0a2a4d;
   --color-accent-strong: #5aa9ff;
   --color-accent-tint: rgba(10, 132, 255, 0.24);
+  /* Dimmer on the dark canvas — the same alpha would glare. */
+  --color-highlight: rgba(255, 214, 10, 0.3);
 
   --color-canvas: #1c1c1e;
   --color-canvas-sunk: #161618;

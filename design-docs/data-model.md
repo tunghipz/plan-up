@@ -66,6 +66,10 @@ với chúng. Xem [project-holidays.md](./project-holidays.md).
 `estimate` (`number|null`, effort in days) · `createdAt` · `dependsOn: string[]` (task IDs) ·
 `boardOrder?: number` · `listOrder?: number` ·
 `collectionId?: string | null` · `sectionId?: string | null` · `collectionStatusId?: string | null`
+- `title` may carry **markdown-lite markers** — `**bold**`, `*italic*`, `~~strike~~`,
+  `==highlight==` — stored inline in the string. Still a plain `string`, so **no schema
+  change and no Dexie bump**; plain-text sinks (Telegram export, tooltips, search) call
+  `stripRich()`. See [task-rich-text.md](./task-rich-text.md).
 - The per-task `changeLog?: ChangeLogEntry[]` field was **removed in v11** (the per-task
   change log feature is gone — see [task-change-log.md](./task-change-log.md)). Edit history
   now lives sprint-wide in the `events` table (`ActivityEvent`, below).

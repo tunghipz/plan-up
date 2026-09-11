@@ -1,6 +1,7 @@
 import { forwardRef } from 'react'
 import type { Collection, Task } from './types'
 import { formatShortDate } from './lib'
+import { RichText } from './RichText'
 
 /**
  * Off-screen card that becomes the exported collection PNG (design-docs/export-png.md
@@ -126,7 +127,7 @@ export const CollectionPngCard = forwardRef<
                     <tr key={task.id}>
                       <td style={{ ...td, paddingLeft: child ? 28 : 10 }}>
                         {child && <span style={{ color: C.faint, marginRight: 6 }}>↳</span>}
-                        {task.title}
+                        <RichText text={task.title} />
                       </td>
                       <td style={dateCell}>
                         {task.startDate ? formatShortDate(task.startDate) : '—'}

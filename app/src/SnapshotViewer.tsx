@@ -18,6 +18,7 @@ import {
 } from './lib'
 import { colorForName } from './schema'
 import { ExportImageModal } from './ExportImageModal'
+import { RichText } from './RichText'
 
 /**
  * Recipient side of the share link. main.tsx renders this INSTEAD of <App> when
@@ -489,7 +490,7 @@ export function SnapshotViewer({ raw }: { raw: string }) {
                             className={`text-[13.5px] flex-1 min-w-0 leading-[1.35] [overflow-wrap:anywhere] ${child ? 'text-ink-muted' : 'text-ink'} ${isDone ? 'line-through opacity-50' : ''}`}
                           >
                             {child ? '↳ ' : ''}
-                            {t.title || 'Untitled'}
+                            {t.title ? <RichText text={t.title} /> : 'Untitled'}
                           </span>
                           <PriorityPill priority={t.priority} />
                           {isMilestone && <MilestoneTag />}

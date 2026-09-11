@@ -28,6 +28,7 @@ import {
   formatRelativeTime,
   formatTimestamp,
 } from './lib'
+import { stripRich } from './rich-text'
 
 /**
  * Sprint-wide activity log page (design-docs/sprint-activity-log.md). Aggregates
@@ -153,7 +154,7 @@ function TaskRef({ e }: { e: ActivityEvent }) {
       {e.taskSeq !== null && (
         <span className="text-ink-faint tabular-nums mr-1.5">#{e.taskSeq}</span>
       )}
-      <span className="text-ink">{e.taskTitle}</span>
+      <span className="text-ink">{stripRich(e.taskTitle ?? '')}</span>
     </span>
   )
 }

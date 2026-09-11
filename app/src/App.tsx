@@ -110,6 +110,8 @@ import {
   sprintToSelect,
   PRIORITY_TAG,
 } from './lib'
+import { RichText } from './RichText'
+import { stripRich } from './rich-text'
 
 const CURRENT_PROJECT_KEY = 'plan-up:currentProjectId'
 const CURRENT_SPRINT_KEY = 'plan-up:currentSprintId'
@@ -2247,7 +2249,7 @@ function SearchPalette({
   const results = useMemo(() => {
     const query = q.trim().toLowerCase()
     const list = query
-      ? tasks.filter((t) => t.title.toLowerCase().includes(query))
+      ? tasks.filter((t) => stripRich(t.title).toLowerCase().includes(query))
       : tasks
     // Stable, predictable order: by sequence.
     return [...list].sort((a, b) => a.sequence - b.sequence).slice(0, 50)
@@ -2279,7 +2281,11 @@ function SearchPalette({
     // Escape is handled by the global key handler (closes the palette).
   }
 
-  const renderTitle = (title: string) => {
+  // The palette highlights the query inside the title, so it works on the
+  // STRIPPED text — a <mark> span and the inline formatting spans would have to
+  // be interleaved otherwise, for a row that is one line of search result.
+  const renderTitle = (raw: string) => {
+    const title = stripRich(raw)
     const query = q.trim()
     if (!query) return title
     const i = title.toLowerCase().indexOf(query.toLowerCase())
@@ -3271,7 +3277,9 @@ function RolloverPopover({
                   {pri.label}
                 </span>
               )}
-              <span className="flex-1 min-w-0 text-[13.5px] truncate">{t.title}</span>
+              <span className="flex-1 min-w-0 text-[13.5px] truncate">
+                <RichText text={t.title} />
+              </span>
               {m ? (
                 <Avatar member={m} size={20} ring={false} />
               ) : (

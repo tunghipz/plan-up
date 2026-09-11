@@ -20,6 +20,8 @@ import { Avatar } from './members'
 import { STATUS_META, derivedGroupStatus } from './sprint-logic'
 import { usePinnedPopover } from './usePinnedPopover'
 import { sprintWorkdays, formatShortDate, offBandsFor } from './lib'
+import { RichText } from './RichText'
+import { stripRich } from './rich-text'
 
 /**
  * Timeline — an Apple-Calendar-style swimlane view of the sprint (design DNA:
@@ -611,7 +613,7 @@ export function GanttView({
                             key={e.task.id}
                             className="absolute flex items-center"
                             style={box}
-                            title={`Group · ${e.task.title}`}
+                            title={`Group · ${stripRich(e.task.title)}`}
                           >
                             <span
                               className="absolute inset-x-0 top-1/2 -translate-y-1/2 h-[4px] rounded-full"
@@ -636,7 +638,7 @@ export function GanttView({
                               className="relative z-10 ml-1.5 inline-block max-w-full truncate rounded bg-surface px-1.5 text-[11.5px] font-semibold"
                               style={{ color: softFg(v), maxWidth: e.width - 16 }}
                             >
-                              ▾ #{e.task.sequence} {e.task.title}
+                              ▾ #{e.task.sequence} <RichText text={e.task.title} />
                             </span>
                           </div>
                         )
@@ -658,7 +660,7 @@ export function GanttView({
                             }
                             className="absolute flex items-center gap-1.5 cursor-pointer hover:brightness-95 transition"
                             style={{ left: e.left + 2, top: box.top, height: EVH }}
-                            title={`Milestone · ${e.task.title}`}
+                            title={`Milestone · ${stripRich(e.task.title)}`}
                           >
                             <span
                               className="w-[12px] h-[12px] rotate-45 rounded-[2px] shrink-0 shadow-[0_1px_2px_rgba(0,0,0,0.15)]"
@@ -669,7 +671,7 @@ export function GanttView({
                               className="text-[11.5px] font-semibold whitespace-nowrap"
                               style={{ color: softFg(v) }}
                             >
-                              #{e.task.sequence} {e.task.title}
+                              #{e.task.sequence} <RichText text={e.task.title} />
                             </span>
                           </div>
                         )
@@ -688,7 +690,7 @@ export function GanttView({
                           }
                           className="absolute flex items-center rounded-[7px] overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.08)] cursor-pointer hover:brightness-95 transition"
                           style={{ ...box, background: softBg(v) }}
-                          title={`${STATUS_META[e.status].label} · ${e.task.title}`}
+                          title={`${STATUS_META[e.status].label} · ${stripRich(e.task.title)}`}
                         >
                           {e.contLeft && (
                             <span className="text-ink-faint text-[11px] pl-1.5" aria-hidden>
@@ -703,7 +705,7 @@ export function GanttView({
                             className="text-[11.5px] font-semibold px-2 truncate"
                             style={{ color: softFg(v) }}
                           >
-                            #{e.task.sequence} {e.task.title}
+                            #{e.task.sequence} <RichText text={e.task.title} />
                           </span>
                           {/* pause: hatch+dim where the bar overlaps a day-off */}
                           {offBands.map((o, k) => {
@@ -742,10 +744,12 @@ export function GanttView({
                           key={task.id}
                           className="inline-flex items-center gap-1 text-[11px] rounded-full px-2 py-0.5"
                           style={{ background: softBg(v), color: softFg(v) }}
-                          title={`${STATUS_META[status].label} · ${task.title}`}
+                          title={`${STATUS_META[status].label} · ${stripRich(task.title)}`}
                         >
                           <span className="tab-data">#{task.sequence}</span>
-                          <span className="max-w-[160px] truncate">{task.title}</span>
+                          <span className="max-w-[160px] truncate">
+                          <RichText text={task.title} />
+                        </span>
                           <span className="opacity-70">
                             {dir === 'earlier' ? '←' : '→'} {formatShortDate(date)}
                           </span>
@@ -756,10 +760,12 @@ export function GanttView({
                       <span
                         key={task.id}
                         className="inline-flex items-center gap-1 text-[11px] rounded-full px-2 py-0.5 bg-fill text-ink-muted"
-                        title={task.title}
+                        title={stripRich(task.title)}
                       >
                         <span className="tab-data">#{task.sequence}</span>
-                        <span className="max-w-[160px] truncate">{task.title}</span>
+                        <span className="max-w-[160px] truncate">
+                          <RichText text={task.title} />
+                        </span>
                         <span className="text-ink-faint">no dates</span>
                       </span>
                     ))}
@@ -849,7 +855,7 @@ function BarDetailPopover({
     >
       <div className="text-[14px] font-semibold text-ink leading-snug">
         <span className="tab-data text-ink-faint mr-1">#{task.sequence}</span>
-        {task.title}
+        <RichText text={task.title} />
       </div>
       <div className="flex items-center justify-between text-[12.5px]">
         <span className="text-ink-faint">Status</span>

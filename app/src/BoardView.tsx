@@ -18,6 +18,8 @@ import { Avatar } from './members'
 import { SprintRangeContext } from './DatePicker'
 import { StatusIcon, DatePickCell, EffortCell } from './SprintView'
 import { STATUS_META, STATUS_ORDER, derivedGroupStatus } from './sprint-logic'
+import { RichText } from './RichText'
+import { stripRich } from './rich-text'
 
 // Per-column sort (see design-docs/board-view.md). Each column carries its own
 // {mode, dir}; `manual` is the default drag order. Sort is a NON-DESTRUCTIVE view
@@ -197,8 +199,8 @@ export function BoardView({
       if (cs.mode === 'manual') return orderOf(a) - orderOf(b)
       const mul = cs.dir === 'asc' ? 1 : -1
       if (cs.mode === 'name') {
-        const ta = (a.title || '').toLowerCase()
-        const tb = (b.title || '').toLowerCase()
+        const ta = stripRich(a.title || '').toLowerCase()
+        const tb = stripRich(b.title || '').toLowerCase()
         if (ta < tb) return -1 * mul
         if (ta > tb) return 1 * mul
         return a.sequence - b.sequence
@@ -248,7 +250,10 @@ export function BoardView({
           ? { done: kids.filter((c) => c.status === 'done').length, total: kids.length, range: groupRange(kids) }
           : null
       const displayStatus: Status = group ? derivedGroupStatus(kids!) : t.status
-      const parentTitle = t.parentId ? tasksById.get(t.parentId)?.title ?? null : null
+      // Breadcrumb chip + its tooltip are plain text — strip the markers here so
+      // both read cleanly (see design-docs/task-rich-text.md).
+      const parent = t.parentId ? tasksById.get(t.parentId) : undefined
+      const parentTitle = parent ? stripRich(parent.title ?? '') : null
       m.set(t.id, { displayStatus, group, parentTitle })
     }
     return m
@@ -818,7 +823,11 @@ const DragGhost = memo(function DragGhost({ task, innerRef }: { task: Task; inne
             <StatusIcon status={task.status} />
           </span>
           <div className="flex-1 min-w-0 text-[14px] leading-snug break-words text-ink">
-            {task.title || <span className="text-ink-faint italic">Untitled</span>}
+            {task.title ? (
+              <RichText text={task.title} />
+            ) : (
+              <span className="text-ink-faint italic">Untitled</span>
+            )}
           </div>
         </div>
         <div className="mt-2.5 text-[11.5px] text-ink-faint tab-data">#{task.sequence}</div>
@@ -1117,7 +1126,11 @@ const BoardCard = memo(function BoardCard({
           }`}
         >
           {isParent && <LayersGlyph />}
-          {task.title || <span className="text-ink-faint italic">Untitled</span>}
+          {task.title ? (
+            <RichText text={task.title} />
+          ) : (
+            <span className="text-ink-faint italic">Untitled</span>
+          )}
         </div>
       </div>
       {group && (

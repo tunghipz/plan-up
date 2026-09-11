@@ -11,6 +11,7 @@ import {
 import { colorForName } from './schema'
 import type { WorkingPlan } from './scheduling'
 import type { MemberGroup } from './png-export'
+import { RichText } from './RichText'
 
 /**
  * The off-screen card that becomes the exported PNG (design-docs/export-png.md).
@@ -556,7 +557,7 @@ export const PngExportCard = forwardRef<HTMLDivElement, PngExportCardProps>(
                             }}
                           >
                             {isChild ? '↳ ' : ''}
-                            {t.title || 'Untitled'}
+                            {t.title ? <RichText text={t.title} /> : 'Untitled'}
                           </span>
                           <PriorityPill priority={t.priority} />
                           {isMilestone && <MilestoneTag />}

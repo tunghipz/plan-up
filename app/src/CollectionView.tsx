@@ -28,6 +28,8 @@ import { useDragHandle, useDragHover, type RowDrag } from './DragHandle'
 import { computeDropSlot, computeAppendSlot, resolveDropOrder, type DropSlot } from './reorder'
 import { usePinnedPopover } from './usePinnedPopover'
 import { ModalSheet } from './ModalSheet'
+import { RichText } from './RichText'
+import { stripRich, caretOffsetFromPoint, markForKey, sourceIndexFor, toggleMark } from './rich-text'
 
 /** Effective manual order for a collection item — mirrors the sprint list. */
 const effOrder = (t: Task) => t.listOrder ?? t.sequence
@@ -107,7 +109,7 @@ function compareItems(
   const mul = sort.dir === 'asc' ? 1 : -1
   const val = (t: Task): string | number =>
     sort.field === 'title'
-      ? (t.title || '').toLowerCase()
+      ? stripRich(t.title || '').toLowerCase()
       : sort.field === 'status'
         ? t.collectionStatusId
           ? (statusRank.get(t.collectionStatusId) ?? Number.POSITIVE_INFINITY)
@@ -380,7 +382,7 @@ export function CollectionView({
                 <Trash2 size={16} strokeWidth={2} />
               </span>
               <div className="min-w-0 flex-1 text-[13.5px] font-semibold text-ink truncate">
-                Deleted “{deletedToast.title.trim() || 'Untitled item'}”
+                Deleted “{stripRich(deletedToast.title).trim() || 'Untitled item'}”
               </div>
               <button
                 onClick={undoDelete}
@@ -1042,33 +1044,98 @@ function ItemTitle({ task }: { task: Task }) {
     el.style.height = 'auto'
     el.style.height = el.scrollHeight + 'px'
   }
-  useLayoutEffect(resize, [draft])
+
+  // Same read/edit swap as the sprint list: formatted at rest, raw markers while
+  // editing. See design-docs/task-rich-text.md.
+  const [editing, setEditing] = useState(false)
+  const readRef = useRef<HTMLDivElement>(null)
+  const pendingSelRef = useRef<[number, number] | null>(null)
+  useLayoutEffect(resize, [draft, editing])
+
+  const write = (v: string) => {
+    setDraft(v)
+    void db.tasks.update(task.id, { title: v })
+  }
+
+  useLayoutEffect(() => {
+    if (!editing) return
+    const el = ref.current
+    if (!el) return
+    const sel = pendingSelRef.current
+    pendingSelRef.current = null
+    el.focus({ preventScroll: true })
+    if (sel) el.setSelectionRange(sel[0], sel[1])
+    else el.setSelectionRange(el.value.length, el.value.length)
+  }, [editing])
+  // Re-apply the selection a mark toggle asked for (a value write parks the
+  // caret at the end otherwise).
+  useLayoutEffect(() => {
+    const sel = pendingSelRef.current
+    const el = ref.current
+    if (!sel || !el || !editing) return
+    pendingSelRef.current = null
+    el.setSelectionRange(sel[0], sel[1])
+  }, [draft, editing])
+
+  const boxCls =
+    'flex-1 min-w-0 editable text-ink bg-transparent leading-snug whitespace-pre-wrap break-words'
 
   return (
     <div className={`${COL.title} flex items-start`}>
-      <textarea
-        ref={ref}
-        value={draft}
-        rows={1}
-        onFocus={() => {
-          focusedRef.current = true
-        }}
-        onBlur={() => {
-          focusedRef.current = false
-        }}
-        onChange={(e) => {
-          setDraft(e.target.value)
-          void db.tasks.update(task.id, { title: e.target.value })
-        }}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' && !e.shiftKey) {
+      {editing ? (
+        <textarea
+          ref={ref}
+          value={draft}
+          rows={1}
+          onBlur={() => {
+            focusedRef.current = false
+            setEditing(false)
+          }}
+          onChange={(e) => write(e.target.value)}
+          onKeyDown={(e) => {
+            const mark = markForKey(e)
+            if (mark && !e.nativeEvent.isComposing) {
+              e.preventDefault()
+              const el = e.currentTarget
+              const r = toggleMark(el.value, el.selectionStart, el.selectionEnd, mark)
+              pendingSelRef.current = [r.start, r.end]
+              write(r.value)
+              return
+            }
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault()
+              ;(e.target as HTMLTextAreaElement).blur()
+            }
+          }}
+          className={`${boxCls} resize-none overflow-hidden`}
+          aria-label="Item title"
+        />
+      ) : (
+        <div
+          ref={readRef}
+          tabIndex={0}
+          role="textbox"
+          aria-label="Item title"
+          onMouseDown={(e) => {
+            if (e.button !== 0) return
             e.preventDefault()
-            ;(e.target as HTMLTextAreaElement).blur()
-          }
-        }}
-        className="flex-1 min-w-0 editable text-ink bg-transparent resize-none overflow-hidden leading-snug whitespace-pre-wrap break-words"
-        aria-label="Item title"
-      />
+            const at = caretOffsetFromPoint(e.clientX, e.clientY, readRef.current)
+            pendingSelRef.current =
+              at === null ? null : [sourceIndexFor(draft, at), sourceIndexFor(draft, at)]
+            focusedRef.current = true
+            setEditing(true)
+          }}
+          onFocus={() => {
+            if (!editing) {
+              focusedRef.current = true
+              setEditing(true)
+            }
+          }}
+          className={`${boxCls} cursor-text`}
+        >
+          {draft ? <RichText text={draft} /> : '\u00a0'}
+        </div>
+      )}
     </div>
   )
 }

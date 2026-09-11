@@ -1,6 +1,7 @@
 import type { Collection, Member, Section, Sprint, Task } from './types'
 import { groupTasksByMember } from './png-export'
 import { formatShortDate, formatSprintRange, STATUS_LABEL } from './lib'
+import { stripRich } from './rich-text'
 
 /**
  * Copy a sprint as plain "Tree" text for pasting straight into Telegram (or any
@@ -115,11 +116,11 @@ export function formatSprintTree(
     top.forEach((t, ti) => {
       const lastT = ti === top.length - 1
       const tPipe = lastT ? PIPE_LAST : PIPE_MID
-      L.push(`${gPipe}${lastT ? BRANCH_LAST : BRANCH_MID} #${t.sequence} ${t.title}${taskMeta(t)}`)
+      L.push(`${gPipe}${lastT ? BRANCH_LAST : BRANCH_MID} #${t.sequence} ${stripRich(t.title)}${taskMeta(t)}`)
       const kids = (childrenByParent.get(t.id) ?? []).slice().sort(byEnd)
       kids.forEach((k, ki) => {
         const lastK = ki === kids.length - 1
-        L.push(`${gPipe}${tPipe}${lastK ? BRANCH_LAST : BRANCH_MID} ${k.title}${taskMeta(k)}`)
+        L.push(`${gPipe}${tPipe}${lastK ? BRANCH_LAST : BRANCH_MID} ${stripRich(k.title)}${taskMeta(k)}`)
       })
     })
   })
@@ -202,11 +203,11 @@ export function formatCollectionTree(
     top.forEach((t, ti) => {
       const lastT = ti === top.length - 1
       const tPipe = lastT ? PIPE_LAST : PIPE_MID
-      L.push(`${sPipe}${lastT ? BRANCH_LAST : BRANCH_MID} ${t.title}${meta(t)}`)
+      L.push(`${sPipe}${lastT ? BRANCH_LAST : BRANCH_MID} ${stripRich(t.title)}${meta(t)}`)
       const kids = childrenByParent.get(t.id) ?? []
       kids.forEach((k, ki) => {
         const lastK = ki === kids.length - 1
-        L.push(`${sPipe}${tPipe}${lastK ? BRANCH_LAST : BRANCH_MID} ${k.title}${meta(k)}`)
+        L.push(`${sPipe}${tPipe}${lastK ? BRANCH_LAST : BRANCH_MID} ${stripRich(k.title)}${meta(k)}`)
       })
     })
   })

@@ -77,6 +77,8 @@ import {
   type SortField,
   type Sort,
 } from './task-sort'
+import { RichText } from './RichText'
+import { caretOffsetFromPoint, markForKey, sourceIndexFor, toggleMark } from './rich-text'
 
 // Re-exported so existing importers (BoardView) keep `from './SprintView'`.
 export { DatePickCell }
@@ -1170,6 +1172,14 @@ function TitleTextarea({
   const committedRef = useRef(value)
   const latestRef = useRef(value)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Resting state renders the title FORMATTED (markers hidden); clicking swaps
+  // in the real textarea showing the raw markers, so what you edit is what is
+  // stored. See design-docs/task-rich-text.md.
+  const [editing, setEditing] = useState(false)
+  const readRef = useRef<HTMLDivElement>(null)
+  // Selection to restore after a ⌘B-style toggle rewrites the draft — applied
+  // post-render, since React has replaced the textarea's value by then.
+  const pendingSelRef = useRef<[number, number] | null>(null)
 
   const commit = (v: string) => {
     if (timerRef.current) {
@@ -1221,7 +1231,16 @@ function TitleTextarea({
   }
   // Resize on mount + every draft change. useLayoutEffect runs sync before paint
   // so users never see the "1-line then snap to N lines" flicker.
-  useLayoutEffect(resize, [draft])
+  useLayoutEffect(resize, [draft, editing])
+  // Restore the selection a mark toggle asked for, and keep the caret where it
+  // was — assigning `value` otherwise parks it at the end of the string.
+  useLayoutEffect(() => {
+    const sel = pendingSelRef.current
+    const el = ref.current
+    if (!sel || !el) return
+    pendingSelRef.current = null
+    el.setSelectionRange(sel[0], sel[1])
+  }, [draft])
   // Re-fit height whenever the textarea's WIDTH changes (window resize, sidebar
   // drag, column changes) — otherwise wrapped lines reflow but the box keeps its
   // old taller height. Track last width so our own height writes don't re-trigger.
@@ -1238,7 +1257,39 @@ function TitleTextarea({
     })
     ro.observe(el)
     return () => ro.disconnect()
-  }, [])
+    // Re-attach when the textarea mounts (edit mode) — it doesn't exist at rest.
+  }, [editing])
+  // Same box metrics for the resting <div> and the editing <textarea> — the
+  // `.editable` 1px transparent border is part of the height math (see resize),
+  // so a mismatch would make the row jump by 2px on every click.
+  const boxCls = `flex-1 min-w-0 editable bg-transparent leading-snug whitespace-pre-wrap break-words ${
+    done ? 'line-through text-ink-faint' : ''
+  } ${welcomeHint ? 'welcome-hint' : ''} ${bold ? 'font-semibold' : ''}`
+
+  /** Enter edit mode, dropping the caret where the user clicked (if we can). */
+  const startEdit = (e?: React.MouseEvent) => {
+    let caret: number | null = null
+    if (e) {
+      const node = caretOffsetFromPoint(e.clientX, e.clientY, readRef.current)
+      // The click offset is in RENDERED text; the textarea shows raw markers.
+      if (node !== null) caret = sourceIndexFor(latestRef.current, node)
+    }
+    focusedRef.current = true
+    pendingSelRef.current = caret === null ? null : [caret, caret]
+    setEditing(true)
+  }
+  // Focus (and place the caret) once the textarea exists.
+  useLayoutEffect(() => {
+    if (!editing) return
+    const el = ref.current
+    if (!el) return
+    const sel = pendingSelRef.current
+    pendingSelRef.current = null
+    el.focus({ preventScroll: true })
+    if (sel) el.setSelectionRange(sel[0], sel[1])
+    else el.setSelectionRange(el.value.length, el.value.length)
+  }, [editing])
+
   return (
     <div
       className={`${COL.title} flex items-start gap-1.5 ${indent ? 'pl-5' : ''}`}
@@ -1248,35 +1299,66 @@ function TitleTextarea({
           hit area) stretches like the Add-task row, instead of hugging its text.
           min-w-0 lets it shrink so a `trailing` icon never overflows; trailing
           right-aligns at the column edge. Height auto-grows via resize() above. */}
-      <textarea
-        ref={ref}
-        value={draft}
-        onFocus={() => {
-          focusedRef.current = true
-        }}
-        onChange={(e) => {
-          const v = e.target.value
-          setDraft(v)
-          latestRef.current = v
-          if (timerRef.current) clearTimeout(timerRef.current)
-          timerRef.current = setTimeout(() => commit(v), 350)
-        }}
-        onBlur={() => {
-          focusedRef.current = false
-          commit(latestRef.current) // flush immediately on blur
-        }}
-        rows={1}
-        onKeyDown={(e) => {
-          // Don't blur on the Enter that commits an IME composition (Vietnamese).
-          if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
-            e.preventDefault()
-            ;(e.target as HTMLTextAreaElement).blur()
-          }
-        }}
-        className={`flex-1 min-w-0 editable bg-transparent resize-none overflow-hidden leading-snug whitespace-pre-wrap break-words ${
-          done ? 'line-through text-ink-faint' : ''
-        } ${welcomeHint ? 'welcome-hint' : ''} ${bold ? 'font-semibold' : ''}`}
-      />
+      {editing ? (
+        <textarea
+          ref={ref}
+          value={draft}
+          onChange={(e) => {
+            const v = e.target.value
+            setDraft(v)
+            latestRef.current = v
+            if (timerRef.current) clearTimeout(timerRef.current)
+            timerRef.current = setTimeout(() => commit(v), 350)
+          }}
+          onBlur={() => {
+            focusedRef.current = false
+            commit(latestRef.current) // flush immediately on blur
+            setEditing(false)
+          }}
+          rows={1}
+          onKeyDown={(e) => {
+            // ⌘B / ⌘I / ⌘⇧X / ⌘⇧H wrap (or unwrap) the selection in markers.
+            const mark = markForKey(e)
+            if (mark && !e.nativeEvent.isComposing) {
+              e.preventDefault()
+              const el = e.currentTarget
+              const r = toggleMark(el.value, el.selectionStart, el.selectionEnd, mark)
+              pendingSelRef.current = [r.start, r.end]
+              setDraft(r.value)
+              latestRef.current = r.value
+              if (timerRef.current) clearTimeout(timerRef.current)
+              timerRef.current = setTimeout(() => commit(r.value), 350)
+              return
+            }
+            // Don't blur on the Enter that commits an IME composition (Vietnamese).
+            if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+              e.preventDefault()
+              ;(e.target as HTMLTextAreaElement).blur()
+            }
+          }}
+          className={`${boxCls} resize-none overflow-hidden`}
+        />
+      ) : (
+        <div
+          ref={readRef}
+          // Read mode: formatted, markers hidden. tabIndex keeps the field
+          // reachable by keyboard — Tab lands here and flips straight to edit.
+          tabIndex={0}
+          role="textbox"
+          onMouseDown={(e) => {
+            if (e.button !== 0) return
+            e.preventDefault() // we place the caret ourselves
+            startEdit(e)
+          }}
+          onFocus={() => {
+            if (!editing) startEdit()
+          }}
+          className={`${boxCls} cursor-text`}
+        >
+          {/* An empty title would collapse the row — keep one line of height. */}
+          {draft ? <RichText text={draft} /> : '\u00a0'}
+        </div>
+      )}
       {trailing && <span className="shrink-0 self-center">{trailing}</span>}
     </div>
   )

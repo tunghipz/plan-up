@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { CalendarPlus } from 'lucide-react'
 import {
@@ -11,6 +11,8 @@ import {
 import { db, type Collection, type CollectionStatus, type Task } from './db'
 import { usePinnedPopover } from './usePinnedPopover'
 import { DatePickCell, DateRangePickCell } from './DatePicker'
+import { RichText } from './RichText'
+import { markForKey, stripRich, toggleMark } from './rich-text'
 
 const MONTHS_LONG = [
   'January',
@@ -246,7 +248,7 @@ export function CollectionCalendar({
                 const rl = seg.roundL ? r : '0'
                 const rr = seg.roundR ? r : '0'
                 const title = task
-                  ? `${task.title} · ${statusNameForTask(task)} · ${shortDate(
+                  ? `${stripRich(task.title)} · ${statusNameForTask(task)} · ${shortDate(
                       task.startDate as string
                     )} – ${shortDate(task.dueDate ?? (task.startDate as string))}`
                   : undefined
@@ -286,7 +288,7 @@ export function CollectionCalendar({
                       <span className="font-bold opacity-85 shrink-0">‹</span>
                     )}
                     <span className="overflow-hidden text-ellipsis whitespace-nowrap">
-                      {task?.title ?? ''}
+                      <RichText text={task?.title ?? ''} />
                     </span>
                     {seg.rightChev && (
                       <span className="font-bold opacity-85 shrink-0 ml-auto">
@@ -357,13 +359,15 @@ function UnscheduledChip({ task, color }: { task: Task; color: string }) {
         style={{ background: color }}
         aria-hidden
       />
-      <span className="max-w-[150px] truncate">{task.title || 'Untitled'}</span>
+      <span className="max-w-[150px] truncate">
+        {task.title ? <RichText text={task.title} /> : 'Untitled'}
+      </span>
       <CalendarPlus size={13} className="text-ink-faint shrink-0" aria-hidden />
       <span className="absolute inset-0 opacity-0">
         <DatePickCell
           value={null}
           onChange={(v) => db.tasks.update(task.id, { startDate: v })}
-          ariaLabel={`Schedule ${task.title || 'item'}`}
+          ariaLabel={`Schedule ${stripRich(task.title) || 'item'}`}
         />
       </span>
     </span>
@@ -384,11 +388,27 @@ function UnscheduledChip({ task, color }: { task: Task; color: string }) {
 function TitleInput({ task }: { task: Task }) {
   const [draft, setDraft] = useState(task.title)
   const focusedRef = useRef(false)
+  const ref = useRef<HTMLInputElement>(null)
+  const pendingSelRef = useRef<[number, number] | null>(null)
   useEffect(() => {
     if (!focusedRef.current) setDraft(task.title)
   }, [task.title])
+  // This popover field is always in edit mode, so it shows raw markers — only
+  // the shortcuts are wired up. See design-docs/task-rich-text.md.
+  useLayoutEffect(() => {
+    const sel = pendingSelRef.current
+    const el = ref.current
+    if (!sel || !el) return
+    pendingSelRef.current = null
+    el.setSelectionRange(sel[0], sel[1])
+  }, [draft])
+  const write = (v: string) => {
+    setDraft(v)
+    void db.tasks.update(task.id, { title: v })
+  }
   return (
     <input
+      ref={ref}
       value={draft}
       onFocus={() => {
         focusedRef.current = true
@@ -396,9 +416,15 @@ function TitleInput({ task }: { task: Task }) {
       onBlur={() => {
         focusedRef.current = false
       }}
-      onChange={(e) => {
-        setDraft(e.target.value)
-        void db.tasks.update(task.id, { title: e.target.value })
+      onChange={(e) => write(e.target.value)}
+      onKeyDown={(e) => {
+        const mark = markForKey(e)
+        if (!mark || e.nativeEvent.isComposing) return
+        e.preventDefault()
+        const el = e.currentTarget
+        const r = toggleMark(el.value, el.selectionStart ?? 0, el.selectionEnd ?? 0, mark)
+        pendingSelRef.current = [r.start, r.end]
+        write(r.value)
       }}
       className="w-full text-[14px] font-semibold text-ink bg-transparent border-b border-transparent focus:border-accent focus:outline-none pb-0.5"
       aria-label="Item title"

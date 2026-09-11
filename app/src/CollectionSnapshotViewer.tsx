@@ -12,6 +12,7 @@ import {
   type CalItem,
 } from './lib'
 import { CollectionImageModal } from './CollectionImageModal'
+import { RichText } from './RichText'
 
 /**
  * Recipient side of a COLLECTION share link (v3 snapshot). main.tsx renders this
@@ -268,7 +269,9 @@ function ListBoard({ data }: { data: Snap }) {
                     const st = it.statusId ? statusById.get(it.statusId) : undefined
                     return (
                       <tr key={i} className="border-t border-border-hair">
-                        <td className="px-3 py-2 text-ink font-[560] truncate">{it.title || 'Untitled'}</td>
+                        <td className="px-3 py-2 text-ink font-[560] truncate">
+                          {it.title ? <RichText text={it.title} /> : 'Untitled'}
+                        </td>
                         <td className="px-3 py-2 text-ink-muted tab-data whitespace-nowrap">{shortDate(it.startDate)}</td>
                         <td className="px-3 py-2 text-ink-muted tab-data whitespace-nowrap">{shortDate(it.dueDate)}</td>
                         <td className="px-3 py-2">
@@ -413,7 +416,9 @@ function CalBoard({ data }: { data: Snap }) {
                       <span className="absolute left-0 top-[3px] bottom-[3px] w-[3px] rounded-[3px] opacity-90" style={{ background: color }} aria-hidden />
                     )}
                     {seg.leftChev && <span className="font-bold opacity-85 shrink-0">‹</span>}
-                    <span className="overflow-hidden text-ellipsis whitespace-nowrap">{it?.title ?? ''}</span>
+                    <span className="overflow-hidden text-ellipsis whitespace-nowrap">
+                      <RichText text={it?.title ?? ''} />
+                    </span>
                     {seg.rightChev && <span className="font-bold opacity-85 shrink-0 ml-auto">›</span>}
                   </div>
                 )
@@ -433,7 +438,9 @@ function CalBoard({ data }: { data: Snap }) {
             {unscheduled.map((t) => (
               <span key={t.id} className="inline-flex items-center gap-1.5 h-8 bg-canvas border border-border-hair rounded-full px-2.5 text-[12.5px]">
                 <span className="w-2 h-2 rounded-full shrink-0" style={{ background: colorFor(t.statusId) }} aria-hidden />
-                <span className="max-w-[150px] truncate">{t.title || 'Untitled'}</span>
+                <span className="max-w-[150px] truncate">
+                  {t.title ? <RichText text={t.title} /> : 'Untitled'}
+                </span>
                 <CalendarPlus size={13} className="text-ink-faint shrink-0" aria-hidden />
               </span>
             ))}

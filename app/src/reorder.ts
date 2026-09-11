@@ -1,10 +1,23 @@
-import { orderBetween } from './db'
-
 // Pure list-reorder math shared by every pointer-drag list (sprint task rows,
 // member lanes, collection items). The event wiring differs per site (hit-test
 // attributes, lane semantics, persistence), but THIS logic — slot resolution,
 // the own-gap no-op, float-midpoint collision — is where the drag bugs lived,
 // so it is written once and unit-tested. See reorder.test.ts.
+
+/**
+ * Fractional order strictly between two displayed neighbours' effective orders,
+ * for List drag-reorder. `null` = no neighbour on that side. Both null → 0 (lone
+ * item, order untouched-equivalent). The displayed lane is sorted by effective
+ * order, so the midpoint always lands the row exactly where it was dropped.
+ * (Lives here, not in `db.ts`, so this pure module stays free of a Dexie import
+ * cycle — `db.ts` re-exports it as the public name every caller already uses.)
+ */
+export function orderBetween(before: number | null, after: number | null): number {
+  if (before == null && after == null) return 0
+  if (before == null) return after! - 1
+  if (after == null) return before + 1
+  return (before + after) / 2
+}
 
 export interface DropSlot<T> {
   /** Index in `rest` (the list without the dragged item) to insert at. */
@@ -91,4 +104,47 @@ export function resolveDropOrder<T>(
     (beforeOrder != null && order <= beforeOrder) ||
     (afterOrder != null && order >= afterOrder)
   return { order, collides }
+}
+
+/**
+ * Where a row should land when a PREREQUISITE is set on it: directly below the
+ * prereq it waits on, so a chain reads top-to-bottom instead of the dependent
+ * sitting stranded wherever it was created. Same slot math as a manual drag, so
+ * "already directly below" is the drag's own-gap no-op and float exhaustion
+ * renormalizes rather than colliding. See design-docs/dependencies.md.
+ *
+ * `lane` is the sibling list the row is displayed in (one member card, one group
+ * level), already in display order. Prereqs OUTSIDE that lane are ignored: moving
+ * across lanes would mean reassigning or reparenting the task, which is a data
+ * edit the user never asked for. With several prereqs in the lane, the LOWEST one
+ * anchors — the dependent then sits below everything it waits on.
+ */
+export type PrereqMove =
+  | { kind: 'set'; order: number }
+  | { kind: 'renormalize'; orderedIds: string[] }
+
+export function planPrereqMove<T>(
+  lane: T[],
+  idOf: (t: T) => string,
+  orderOf: (t: T) => number,
+  taskId: string,
+  prereqIds: string[]
+): PrereqMove | null {
+  const deps = new Set(prereqIds)
+  let anchorId: string | null = null
+  for (const t of lane) {
+    const id = idOf(t)
+    if (id !== taskId && deps.has(id)) anchorId = id // last match = lowest row
+  }
+  if (!anchorId) return null
+  if (!lane.some((t) => idOf(t) === taskId)) return null
+  const slot = computeDropSlot(lane, idOf, taskId, anchorId, 'after')
+  if (!slot || slot.ownGap) return null
+  const { order, collides } = resolveDropOrder(slot, orderOf)
+  if (collides) {
+    const orderedIds = lane.filter((t) => idOf(t) !== taskId).map(idOf)
+    orderedIds.splice(slot.insertAt, 0, taskId)
+    return { kind: 'renormalize', orderedIds }
+  }
+  return { kind: 'set', order }
 }

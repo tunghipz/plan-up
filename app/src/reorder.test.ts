@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest'
-import { computeDropSlot, computeAppendSlot, resolveDropOrder } from './reorder'
+import {
+  computeDropSlot,
+  computeAppendSlot,
+  resolveDropOrder,
+  planPrereqMove,
+} from './reorder'
 
 type Row = { id: string; order: number }
 const idOf = (r: Row) => r.id
@@ -112,5 +117,56 @@ describe('resolveDropOrder', () => {
     expect(resolveDropOrder(first, orderOf).collides).toBe(false)
     const end = computeAppendSlot(rows('x'), idOf, 'b')
     expect(resolveDropOrder(end, orderOf).collides).toBe(false)
+  })
+})
+
+describe('planPrereqMove', () => {
+  const plan = (lane: Row[], taskId: string, deps: string[]) =>
+    planPrereqMove(lane, idOf, orderOf, taskId, deps)
+
+  it('lands the dependent right under its prereq', () => {
+    const lane = rows('a', 'b', 'c', 'd') // orders 10,20,30,40
+    const move = plan(lane, 'd', ['a'])
+    expect(move).toEqual({ kind: 'set', order: 15 })
+  })
+
+  it('anchors on the LOWEST prereq when there are several', () => {
+    const lane = rows('a', 'b', 'c', 'd')
+    // Waits on a AND b → sits under b, i.e. between b (20) and c (30).
+    expect(plan(lane, 'd', ['a', 'b'])).toEqual({ kind: 'set', order: 25 })
+  })
+
+  it('moves a row UP when its prereq is below it', () => {
+    const lane = rows('a', 'b', 'c')
+    // a waits on c → a goes last, past c (30) with no row after it.
+    expect(plan(lane, 'a', ['c'])).toEqual({ kind: 'set', order: 31 })
+  })
+
+  it('does nothing when already directly below the prereq', () => {
+    expect(plan(rows('a', 'b', 'c'), 'b', ['a'])).toBe(null)
+    // Last row waiting on the row above it is the same no-op.
+    expect(plan(rows('a', 'b', 'c'), 'c', ['a', 'b'])).toBe(null)
+  })
+
+  it('does nothing when no prereq is in this lane', () => {
+    expect(plan(rows('a', 'b'), 'b', ['zz'])).toBe(null)
+    expect(plan(rows('a', 'b'), 'b', [])).toBe(null)
+  })
+
+  it('ignores a self-referencing id and an absent task', () => {
+    expect(plan(rows('a', 'b'), 'b', ['b'])).toBe(null)
+    expect(plan(rows('a', 'b'), 'zz', ['a'])).toBe(null)
+  })
+
+  it('renormalizes the lane when no midpoint fits', () => {
+    const lane: Row[] = [
+      { id: 'a', order: 1 },
+      { id: 'b', order: 1 + Number.EPSILON },
+      { id: 'z', order: 99 },
+    ]
+    expect(plan(lane, 'z', ['a'])).toEqual({
+      kind: 'renormalize',
+      orderedIds: ['a', 'z', 'b'],
+    })
   })
 })

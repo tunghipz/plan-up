@@ -342,18 +342,10 @@ export async function addSprintTask(input: {
   })
 }
 
-/**
- * Fractional order strictly between two displayed neighbours' effective orders,
- * for List drag-reorder. `null` = no neighbour on that side. Both null → 0 (lone
- * item, order untouched-equivalent). The displayed lane is sorted by effective
- * order, so the midpoint always lands the row exactly where it was dropped.
- */
-export function orderBetween(before: number | null, after: number | null): number {
-  if (before == null && after == null) return 0
-  if (before == null) return after! - 1
-  if (after == null) return before + 1
-  return (before + after) / 2
-}
+// The pure order math lives in `reorder.ts` (no Dexie import there, so the
+// module graph stays acyclic); `db.ts` stays its public door for callers/tests.
+export { orderBetween } from './reorder'
+import { planPrereqMove } from './reorder'
 
 /** Persist a List manual order (raw — not logged, no date recompute). */
 export async function setListOrder(taskId: string, order: number): Promise<void> {
@@ -972,6 +964,42 @@ export async function removeDependency(taskId: string, depId: string) {
   })
 }
 
+
+/**
+ * Re-order `task` to sit directly below the prereq it waits on. The lane is the
+ * sibling list it is DISPLAYED in — same sprint, same assignee, same group
+ * parent — sorted the way the List sorts it by default (`listOrder ?? sequence`,
+ * seq as tiebreak). A prereq in another lane is ignored on purpose: "moving"
+ * there would mean reassigning or regrouping the task. Raw writes (manual order
+ * is not a logged field) inside the caller's transaction.
+ */
+async function moveUnderPrereq(
+  task: Task,
+  prereqIds: string[],
+  allTasks: Task[]
+): Promise<void> {
+  // Collection fields are in the key too: a collection item lives in its own
+  // list, never in a sprint lane, so the two can't be mixed up as siblings.
+  const laneKey = (t: Task) =>
+    [t.sprintId, t.collectionId, t.sectionId, t.assigneeId, t.parentId]
+      .map((v) => v ?? '')
+      .join('|')
+  const key = laneKey(task)
+  const effOrder = (t: Task) => t.listOrder ?? t.sequence
+  const lane = allTasks
+    .filter((t) => laneKey(t) === key)
+    .sort((a, b) => effOrder(a) - effOrder(b) || a.sequence - b.sequence)
+  const move = planPrereqMove(lane, (t) => t.id, effOrder, task.id, prereqIds)
+  if (!move) return
+  if (move.kind === 'set') {
+    await db.tasks.update(task.id, { listOrder: move.order })
+  } else {
+    for (let i = 0; i < move.orderedIds.length; i++) {
+      await db.tasks.update(move.orderedIds[i], { listOrder: i })
+    }
+  }
+}
+
 /**
  * Replace the full dependency set for `taskId`. Filters out self-links and
  * any edge that would create a cycle. Returns the cleaned array that was
@@ -1014,6 +1042,11 @@ export async function setDependencies(
 
     await db.tasks.update(taskId, { dependsOn: clean })
     await recomputeDates(taskId)
+
+    // Setting a prereq pulls the row under it, so the chain reads top-to-bottom
+    // instead of the dependent staying wherever it was typed. Same slot math as
+    // a manual drag; cross-lane prereqs move nothing. See dependencies.md.
+    if (changed && clean.length) await moveUnderPrereq(task, clean, tasks)
 
     if (changed) {
       const after = await db.tasks.get(taskId)

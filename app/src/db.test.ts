@@ -844,6 +844,63 @@ describe('updateTask: clearing effort clears the computed end date', () => {
   })
 })
 
+describe('setDependencies: auto-move under the prereq', () => {
+  const mk = async (id: string, seq: number, over: Partial<Task> = {}) =>
+    db.tasks.add({
+      id, projectId: P, sequence: seq, title: id, assigneeId: 'm', sprintId: 's',
+      status: 'todo', priority: 'normal',
+      startDate: null, dueDate: null, estimate: null, createdAt: 0, dependsOn: [],
+      ...over,
+    } as Task)
+  const laneOrder = async (ids: string[]) => {
+    const rows = await Promise.all(ids.map((id) => db.tasks.get(id)))
+    return rows
+      .filter((t): t is Task => !!t)
+      .sort((a, b) => (a.listOrder ?? a.sequence) - (b.listOrder ?? b.sequence))
+      .map((t) => t.id)
+  }
+
+  it('pulls the dependent up under its prereq', async () => {
+    for (const [id, seq] of [['a', 1], ['b', 2], ['c', 3], ['d', 4]] as const) await mk(id, seq)
+    await setDependencies('d', ['a'])
+    expect(await laneOrder(['a', 'b', 'c', 'd'])).toEqual(['a', 'd', 'b', 'c'])
+  })
+
+  it('does not move when the prereq is in another lane (other member)', async () => {
+    await mk('a', 1, { assigneeId: 'other' })
+    await mk('b', 2)
+    await mk('c', 3)
+    await setDependencies('c', ['a'])
+    expect((await db.tasks.get('c'))?.listOrder).toBe(undefined)
+    expect(await laneOrder(['b', 'c'])).toEqual(['b', 'c'])
+  })
+
+  it('leaves the manual order alone when the set does not change', async () => {
+    for (const [id, seq] of [['a', 1], ['b', 2], ['c', 3]] as const) await mk(id, seq)
+    await setDependencies('c', ['a'])
+    const after = (await db.tasks.get('c'))?.listOrder
+    await db.tasks.update('c', { listOrder: 99 }) // user drags it back down
+    await setDependencies('c', ['a']) // same set again → no re-move
+    expect((await db.tasks.get('c'))?.listOrder).toBe(99)
+    expect(after).not.toBe(99)
+  })
+
+  it('clearing the prereqs never moves the row', async () => {
+    for (const [id, seq] of [['a', 1], ['b', 2], ['c', 3]] as const) await mk(id, seq)
+    await setDependencies('c', ['a'])
+    const moved = (await db.tasks.get('c'))?.listOrder
+    await setDependencies('c', [])
+    expect((await db.tasks.get('c'))?.listOrder).toBe(moved)
+  })
+
+  it('chains stay contiguous when each link is set top-to-bottom', async () => {
+    for (const [id, seq] of [['a', 1], ['b', 2], ['c', 3], ['d', 4]] as const) await mk(id, seq)
+    await setDependencies('d', ['a']) // a, d, b, c
+    await setDependencies('b', ['d']) // a, d, b, c
+    expect(await laneOrder(['a', 'b', 'c', 'd'])).toEqual(['a', 'd', 'b', 'c'])
+  })
+})
+
 describe('group (parent) task as a prerequisite', () => {
   // Parent G with two children; C2 ends latest (Wed 06-03). A dependent T anchors
   // on the group's rolled-up end. See design-docs/task-groups.md.

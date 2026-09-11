@@ -1,10 +1,10 @@
 # Dependencies (prerequisites)
 
 **Status:** Implemented
-**Last updated:** 2026-07-02 (dependency edits are now transactional — deps write +
-recompute + activity log commit atomically)
+**Last updated:** 2026-09-11 (setting a prereq auto-moves the row under its prerequisite)
 **Code:** `app/src/db.ts` (`addDependency`, `removeDependency`, `setDependencies`,
-`wouldCreateCycle`, `findCyclePath`, `isTaskBlocked`), `app/src/SprintView.tsx`
+`wouldCreateCycle`, `findCyclePath`, `isTaskBlocked`), `app/src/reorder.ts`
+(`planPrereqMove`, `orderBetween`), `app/src/SprintView.tsx`
 (`PrereqInput`, `SelectionBar`), `app/src/lib.ts` (`parsePrereqSeqs`, `formatSeqRanges`,
 `flattenDisplayOrder`), `app/src/index.css` (`.prereq-chip*` path-trace animation)
 
@@ -31,6 +31,24 @@ UI can flag blocked work.
   - `Dropped #12 — not in this sprint` — no task with that sequence in this sprint.
   The valid entries still save; only the rejected ones are dropped, and the field snaps to
   the saved (range-collapsed) set.
+- **Setting a prereq moves the row under it.** When the saved set actually changes and is
+  non-empty, the dependent is re-ordered to sit **directly below its prerequisite**, so the
+  chain reads top-to-bottom instead of the dependent staying stranded at the bottom of the
+  lane. Details:
+  - The anchor is the prereq that sits **lowest in the lane's manual order**
+    (`listOrder ?? sequence`) — with several prereqs, the row lands under the last of them
+    (everything it waits on is above it). While a **sort column** is active the rows render in
+    that sort's order instead, so the move only becomes visible once the sort is cleared —
+    exactly like a drag, which the sort also disables.
+  - Only prereqs in the **same lane** count: same sprint (or collection + section), same
+    assignee, same group parent.
+    A cross-lane prereq moves nothing, because "moving" there would mean reassigning the task
+    or pulling it into another group — a data edit the user didn't ask for.
+  - Already directly below → no write (the drag's own-gap no-op).
+  - Manual order is only touched at the moment the prereq is saved. Drag the row afterwards
+    and it stays where you put it.
+  - **Bulk "Chain prereqs"** inherits this (it calls `setDependencies` per pair, top-to-bottom),
+    so a chained selection ends up contiguous and in chain order.
 - A task waiting on an unfinished prereq is **blocked** (row tooltip: "Blocked — waiting on
   a prerequisite task"). A prereq that is a **group (parent) task** counts as done only when
   **every child** of that group is done.
@@ -55,7 +73,16 @@ chain them, remove the back-edge first (here: clear 6's dependency on 7).
 - `setDependencies(taskId, ids)` (`db.ts`) — replaces the set; filters self-links,
   duplicates, unknown IDs, and cycles with a **cumulative** check (so a batch can't sneak a
   cycle past via ordering). Returns the cleaned set; triggers `recomputeDates`.
-- `addDependency` / `removeDependency` — single-edge helpers, each recomputes.
+- `addDependency` / `removeDependency` — single-edge helpers, each recomputes. They do **not**
+  auto-move (no UI path reaches them; the List's Prereq field and the bulk actions both go
+  through `setDependencies`).
+- `planPrereqMove(lane, taskId, prereqIds, orderOf)` (`reorder.ts`) — the pure planner behind
+  the auto-move. Picks the lowest-positioned prereq in `lane`, then reuses the **same slot math
+  as drag-and-drop** (`computeDropSlot(..., 'after')` + `resolveDropOrder`): `null` when there
+  is nothing to do, `{ kind: 'set', order }` for the normal one-row write, and
+  `{ kind: 'renormalize', orderedIds }` when repeated midpoint inserts exhaust float precision.
+  `setDependencies` applies the result inside its own transaction via `setListOrder` /
+  `renormalizeListOrder`. Manual order is never logged (it isn't a `LoggableField`).
 - **All three run inside ONE transaction** (`db.transaction('rw', …)`): the cycle check,
   the `dependsOn` read-modify-write and the recompute can't interleave with another
   dependency edit (a stale-array overwrite would silently drop an edge) or split on a

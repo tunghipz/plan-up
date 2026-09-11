@@ -28,6 +28,7 @@ import {
   dedupeSprints,
   addSprintTask,
   updateTask,
+  reassignTasks,
   addCollectionItem,
   memberNameExists,
   exportAll,
@@ -898,6 +899,95 @@ describe('setDependencies: auto-move under the prereq', () => {
     await setDependencies('d', ['a']) // a, d, b, c
     await setDependencies('b', ['d']) // a, d, b, c
     expect(await laneOrder(['a', 'b', 'c', 'd'])).toEqual(['a', 'd', 'b', 'c'])
+  })
+})
+
+describe('reassignTasks (bulk move to another member)', () => {
+  const mk = async (id: string, seq: number, over: Partial<Task> = {}) =>
+    db.tasks.add({
+      id, projectId: P, sequence: seq, title: id, assigneeId: 'm1', sprintId: 's',
+      status: 'todo', priority: 'normal',
+      startDate: '2026-06-01', dueDate: null, estimate: null, createdAt: 0, dependsOn: [],
+      ...over,
+    } as Task)
+
+  beforeEach(async () => {
+    await db.members.bulkAdd([
+      { id: 'm1', projectId: P, name: 'A', color: '#000', daysOff: [] },
+      { id: 'm2', projectId: P, name: 'B', color: '#111', daysOff: [] },
+    ])
+  })
+
+  it('moves the selection into the target lane', async () => {
+    await mk('a', 1)
+    await mk('b', 2)
+    expect(await reassignTasks(['a'], 'm2')).toBe(1)
+    expect((await db.tasks.get('a'))?.assigneeId).toBe('m2')
+    expect((await db.tasks.get('b'))?.assigneeId).toBe('m1')
+  })
+
+  it('lands the task at the BOTTOM of the target lane', async () => {
+    await mk('x', 1, { assigneeId: 'm2', listOrder: 7 })
+    await mk('a', 2, { listOrder: 0 })
+    await reassignTasks(['a'], 'm2')
+    expect((await db.tasks.get('a'))?.listOrder).toBe(8)
+  })
+
+  it('takes a group head\'s children along', async () => {
+    await mk('head', 1)
+    await mk('kid1', 2, { parentId: 'head' })
+    await mk('kid2', 3, { parentId: 'head' })
+    expect(await reassignTasks(['head'], 'm2')).toBe(3)
+    for (const id of ['head', 'kid1', 'kid2']) {
+      expect((await db.tasks.get(id))?.assigneeId).toBe('m2')
+    }
+    // The group survives the move intact.
+    expect((await db.tasks.get('kid1'))?.parentId).toBe('head')
+  })
+
+  it('ungroups a child that moves on its own', async () => {
+    await mk('head', 1)
+    await mk('kid', 2, { parentId: 'head' })
+    await reassignTasks(['kid'], 'm2')
+    const kid = await db.tasks.get('kid')
+    expect(kid?.assigneeId).toBe('m2')
+    expect(kid?.parentId).toBe(null) // a group may not span members
+    expect((await db.tasks.get('head'))?.assigneeId).toBe('m1')
+  })
+
+  it('unassigns with a null target', async () => {
+    await mk('a', 1)
+    await reassignTasks(['a'], null)
+    expect((await db.tasks.get('a'))?.assigneeId).toBe(null)
+  })
+
+  it('writes nothing when the task is already in that lane', async () => {
+    await mk('a', 1, { listOrder: 3 })
+    expect(await reassignTasks(['a'], 'm1')).toBe(0)
+    expect((await db.tasks.get('a'))?.listOrder).toBe(3)
+  })
+
+  it('logs one assignee edit per moved task', async () => {
+    // Unique ids: the activity store is append-only and outlives a test case.
+    await mk('log-a', 1)
+    await mk('log-b', 2)
+    await reassignTasks(['log-a', 'log-b'], 'm2')
+    const events = await db.events.where('sprintId').equals('s').toArray()
+    const assignEdits = events.filter(
+      (e) => e.field === 'assigneeId' && (e.taskId ?? '').startsWith('log-')
+    )
+    expect(assignEdits.map((e) => e.taskId).sort()).toEqual(['log-a', 'log-b'])
+    expect(assignEdits.every((e) => e.from === 'A' && e.to === 'B')).toBe(true)
+  })
+
+  it('recomputes dates against the new member days off', async () => {
+    await db.members.update('m2', { daysOff: [{ date: '2026-06-02', half: undefined }] })
+    await mk('a', 1, { startDate: '2026-06-01', estimate: 2 })
+    await recomputeDates('a')
+    expect((await db.tasks.get('a'))?.dueDate).toBe('2026-06-02')
+    await reassignTasks(['a'], 'm2')
+    // 06-02 is off for m2 → the second day of effort slides to 06-03.
+    expect((await db.tasks.get('a'))?.dueDate).toBe('2026-06-03')
   })
 })
 

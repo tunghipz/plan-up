@@ -20,6 +20,8 @@ import {
   Ungroup,
   Link2,
   Link2Off,
+  UserRound,
+  Search,
 } from 'lucide-react'
 import { useDragHandle, useDragHover, type RowDrag } from './DragHandle'
 import { computeDropSlot, resolveDropOrder } from './reorder'
@@ -37,6 +39,7 @@ import {
   renormalizeMemberOrder,
   findCyclePath,
   recomputeDates,
+  reassignTasks,
   updateTask,
   computeWorkingPlan,
   computeAllWorkingPlans,
@@ -400,6 +403,7 @@ export function SprintView({
         selectedIds={selectedIds}
         tasksById={tasksById}
         allTasks={orderedTasks}
+        members={(members ?? []).slice().sort(compareMembersByOrder)}
         onClear={clearSelection}
       />
     </div>
@@ -421,14 +425,18 @@ function SelectionBar({
   selectedIds,
   tasksById,
   allTasks,
+  members,
   onClear,
 }: {
   selectedIds: Set<string>
   tasksById: Map<string, Task>
   allTasks: Task[]
+  members: Member[]
   onClear: () => void
 }) {
   const confirm = useConfirm()
+  const [assignOpen, setAssignOpen] = useState(false)
+  const assignBtnRef = useRef<HTMLButtonElement>(null)
   const n = selectedIds.size
   const parentIds = useMemo(() => {
     const s = new Set<string>()
@@ -485,6 +493,37 @@ function SelectionBar({
     )
     onClear()
   }
+  // The lane every selected task currently sits in — null when the selection
+  // spans lanes, which is what suppresses the ✓ in the picker.
+  const currentAssignee =
+    selected.length > 0 &&
+    selected.every((t) => t.assigneeId === selected[0].assigneeId)
+      ? selected[0].assigneeId
+      : undefined
+  const doAssign = async (memberId: string | null) => {
+    setAssignOpen(false)
+    if (n === 0) return
+    await reassignTasks(selectedInOrder.map((t) => t.id), memberId)
+    // The rows have left the lane the user was looking at, so a kept selection
+    // would point at nothing on screen.
+    onClear()
+  }
+
+  // `a` opens the picker while a selection is live — the bar's only shortcut,
+  // matching the keyboard-first picker behind it (design-docs/tasks.md).
+  useEffect(() => {
+    if (n === 0) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'a' || e.metaKey || e.ctrlKey || e.altKey) return
+      const el = e.target as HTMLElement | null
+      if (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))) return
+      e.preventDefault()
+      setAssignOpen(true)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [n])
+
   const doDelete = async () => {
     if (n === 0) return
     const hasGroup = selected.some((t) => parentIds.has(t.id))
@@ -517,6 +556,29 @@ function SelectionBar({
       <span className="text-[13.5px]">
         <b className="font-semibold tabular-nums">{n}</b> selected
       </span>
+      <button
+        ref={assignBtnRef}
+        onClick={() => setAssignOpen((x) => !x)}
+        aria-expanded={assignOpen}
+        title="Move the selection to another member (a)"
+        className={`inline-flex items-center gap-1.5 text-[13px] px-2.5 py-1.5 rounded-[9px] transition ${
+          assignOpen
+            ? 'bg-white/15 text-white'
+            : 'text-white/80 hover:text-white hover:bg-white/10'
+        }`}
+      >
+        <UserRound size={14} /> Assign
+      </button>
+      {assignOpen && (
+        <AssignPopover
+          anchorRef={assignBtnRef}
+          members={members}
+          currentAssignee={currentAssignee}
+          count={n}
+          onPick={doAssign}
+          onClose={() => setAssignOpen(false)}
+        />
+      )}
       {anyChild && (
         <button
           onClick={doUngroup}
@@ -569,6 +631,183 @@ function SelectionBar({
         Cancel
       </button>
     </div>
+  )
+}
+
+/**
+ * Member picker for the SelectionBar's **Assign** action — a portal popover that
+ * floats above the bar. Keyboard-first by design (design-docs/tasks.md): the
+ * search field takes focus on open, ↑/↓ move, Enter assigns, Esc closes. Rows
+ * are plain buttons too, so the mouse path is unchanged.
+ *
+ * Portalled to `document.body` for the same reason the bar is fixed: the List
+ * scroll container would otherwise clip it.
+ */
+function AssignPopover({
+  anchorRef,
+  members,
+  currentAssignee,
+  count,
+  onPick,
+  onClose,
+}: {
+  anchorRef: React.RefObject<HTMLButtonElement | null>
+  members: Member[]
+  /** The lane the whole selection sits in, or undefined when it spans lanes. */
+  currentAssignee: string | null | undefined
+  count: number
+  onPick: (memberId: string | null) => void
+  onClose: () => void
+}) {
+  const [query, setQuery] = useState('')
+  const [cursor, setCursor] = useState(0)
+  const boxRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  type Row = { id: string | null; name: string; sub?: string; member?: Member }
+  const rows: Row[] = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    const hit = (...parts: (string | undefined)[]) =>
+      !q || parts.some((p) => (p ?? '').toLowerCase().includes(q))
+    const out: Row[] = members
+      .filter((m) => hit(m.name, m.title))
+      .map((m) => ({ id: m.id, name: m.name, sub: m.title, member: m }))
+    if (hit('unassigned')) out.push({ id: null, name: 'Unassigned' })
+    return out
+  }, [members, query])
+
+  // Anchor above the bar button, clamped so a long roster near the window edge
+  // still lands fully on screen. Written straight onto the node (no state): the
+  // popover mounts hidden for exactly one frame otherwise, and a resize would
+  // cost a render per pixel.
+  useLayoutEffect(() => {
+    const place = () => {
+      const box = boxRef.current
+      const btn = anchorRef.current
+      if (!box || !btn) return
+      const r = btn.getBoundingClientRect()
+      const half = box.offsetWidth / 2
+      box.style.left = `${Math.min(
+        Math.max(8 + half, r.left + r.width / 2),
+        window.innerWidth - 8 - half
+      )}px`
+      box.style.bottom = `${window.innerHeight - r.top + 10}px`
+    }
+    place()
+    window.addEventListener('resize', place)
+    return () => window.removeEventListener('resize', place)
+  }, [anchorRef])
+
+  useEffect(() => {
+    inputRef.current?.focus()
+  }, [])
+  // Clamp at render rather than in an effect: filtering can shrink the list
+  // under the cursor, and a state write here would render the stale index once.
+  const active = Math.min(cursor, Math.max(0, rows.length - 1))
+
+  // Dismiss on an outside pointer press or Escape — the bar's own button
+  // toggles, so clicks on it are excluded by the ref check.
+  useEffect(() => {
+    const onDown = (e: PointerEvent) => {
+      const t = e.target as Node
+      if (boxRef.current?.contains(t) || anchorRef.current?.contains(t)) return
+      onClose()
+    }
+    window.addEventListener('pointerdown', onDown)
+    return () => window.removeEventListener('pointerdown', onDown)
+  }, [anchorRef, onClose])
+
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      setCursor((c) => Math.min(c + 1, rows.length - 1))
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      setCursor((c) => Math.max(c - 1, 0))
+    } else if (e.key === 'Enter') {
+      e.preventDefault()
+      const row = rows[active]
+      if (row) onPick(row.id)
+    } else if (e.key === 'Escape') {
+      e.preventDefault()
+      onClose()
+    }
+  }
+
+  return createPortal(
+    <div
+      ref={boxRef}
+      role="dialog"
+      aria-label={`Move ${count} task${count === 1 ? '' : 's'} to another member`}
+      className="fixed z-50 w-[272px] -translate-x-1/2 rounded-[13px] glass-popover p-1.5"
+      style={{ left: -9999, bottom: 0 }}
+      onKeyDown={onKeyDown}
+    >
+      <div className="flex items-center gap-2 px-2 pb-2 pt-1 border-b border-border-hair">
+        <Search size={14} className="text-ink-faint shrink-0" />
+        <input
+          ref={inputRef}
+          value={query}
+          onChange={(e) => {
+            setQuery(e.target.value)
+            setCursor(0)
+          }}
+          placeholder="Move to…"
+          aria-label="Find a member"
+          className="flex-1 min-w-0 bg-transparent text-[13.5px] text-ink placeholder:text-ink-faint outline-none"
+        />
+      </div>
+      <div className="max-h-[238px] overflow-y-auto pt-1" role="listbox">
+        {rows.length === 0 && (
+          <div className="px-2.5 py-3.5 text-center text-[12.5px] text-ink-faint">
+            No member matches “{query.trim()}”
+          </div>
+        )}
+        {rows.map((row, i) => {
+          const isActive = i === active
+          return (
+            <button
+              key={row.id ?? '__none__'}
+              role="option"
+              aria-selected={isActive}
+              onMouseEnter={() => setCursor(i)}
+              onClick={() => onPick(row.id)}
+              className={`w-full flex items-center gap-2.5 px-2 py-1.5 rounded-[9px] text-left transition ${
+                isActive ? 'bg-accent text-white' : 'text-ink hover:bg-canvas-sunk'
+              }`}
+            >
+              {row.member ? (
+                <Avatar member={row.member} size={22} ring={false} />
+              ) : (
+                <span className="w-[22px] h-[22px] rounded-full border border-dashed border-border-strong text-[10px] text-ink-faint grid place-items-center shrink-0">
+                  ?
+                </span>
+              )}
+              <span className="flex-1 min-w-0 leading-tight">
+                <span className="block text-[13px] truncate">{row.name}</span>
+                {row.sub && (
+                  <span
+                    className={`block text-[11.5px] truncate ${
+                      isActive ? 'text-white/70' : 'text-ink-faint'
+                    }`}
+                  >
+                    {row.sub}
+                  </span>
+                )}
+              </span>
+              {currentAssignee !== undefined && row.id === currentAssignee && (
+                <Check size={13} className="shrink-0" />
+              )}
+            </button>
+          )
+        })}
+      </div>
+      <div className="flex items-center justify-between px-2 pt-1.5 mt-1 border-t border-border-hair text-[11px] text-ink-faint">
+        <span>↑↓ pick · ↵ move</span>
+        <span>esc</span>
+      </div>
+    </div>,
+    document.body
   )
 }
 

@@ -823,6 +823,70 @@ export async function setMemberAvatar(
  * `dependsOn` array so we don't leave dangling references.
  */
 /**
+ * Move `taskIds` into another member's lane (or to Unassigned with `null`), the
+ * bulk counterpart of the per-row assignee picker. See design-docs/tasks.md.
+ *
+ * A lane change is never just a field write:
+ *   - a **group head** takes its children along — a group may not span members;
+ *   - a **group child** is ungrouped on the way out, for the same reason;
+ *   - each task lands at the **bottom** of the target lane (a carried-over
+ *     `listOrder` would drop it at a random spot in a lane it has never been in);
+ *   - dates recompute per task, since the new member's days off differ.
+ *
+ * Returns how many tasks actually moved (children included).
+ */
+export async function reassignTasks(
+  taskIds: string[],
+  assigneeId: string | null
+): Promise<number> {
+  const moved: string[] = []
+  await db.transaction('rw', db.projects, db.tasks, db.members, db.events, async () => {
+    const all = await db.tasks.toArray()
+    const byId = new Map(all.map((t) => [t.id, t]))
+    // Expand group heads into head + children, then drop tasks already in the
+    // target lane so a no-op selection writes (and logs) nothing.
+    const targets = new Map<string, Task>()
+    for (const id of taskIds) {
+      const t = byId.get(id)
+      if (!t) continue
+      targets.set(t.id, t)
+      for (const c of all) if (c.parentId === t.id) targets.set(c.id, c)
+    }
+    // Bottom of the target lane, per sprint — computed once, then walked forward
+    // so a multi-task move keeps the selection's own top-to-bottom order.
+    const laneEnd = new Map<string, number>()
+    const laneKey = (t: Task) =>
+      [t.sprintId, t.collectionId, t.sectionId, assigneeId, null].map((v) => v ?? '').join('|')
+    for (const t of all) {
+      const key = [t.sprintId, t.collectionId, t.sectionId, t.assigneeId, t.parentId]
+        .map((v) => v ?? '')
+        .join('|')
+      const order = t.listOrder ?? t.sequence
+      if (order > (laneEnd.get(key) ?? -Infinity)) laneEnd.set(key, order)
+    }
+    for (const t of targets.values()) {
+      if (t.assigneeId === assigneeId) continue
+      const key = laneKey(t)
+      const next = (laneEnd.get(key) ?? -1) + 1
+      laneEnd.set(key, next)
+      // parentId clears for a child that is moving on its own; a child moving
+      // WITH its head keeps the link (the whole group changes lane together).
+      const keepsParent = t.parentId ? targets.has(t.parentId) : false
+      await updateTask(t.id, {
+        assigneeId,
+        listOrder: next,
+        ...(t.parentId && !keepsParent ? { parentId: null } : {}),
+      })
+      moved.push(t.id)
+    }
+  })
+  // Outside the write transaction: recomputeDates opens its own, and the new
+  // member's days off can shift every moved task and its dependents.
+  for (const id of moved) await recomputeDates(id)
+  return moved.length
+}
+
+/**
  * Group `childId` under `parentId` (or pass null to ungroup). Enforces a single
  * level of nesting: the target parent must be top-level (no parent of its own),
  * and the child must not already have children. See design-docs/task-groups.md.

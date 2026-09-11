@@ -442,3 +442,69 @@ export function selectSourceRange(root: HTMLElement, src: string, from: number, 
   sel.removeAllRanges()
   sel.addRange(range)
 }
+
+/**
+ * Viewport rect of the current selection inside a <textarea>.
+ *
+ * A textarea has no DOM range to measure, so the text is mirrored into an
+ * off-screen div that copies every metric affecting layout (font, padding,
+ * border, width, wrapping) and the selected slice is wrapped in a span — the
+ * standard trick, and the only way to anchor a bubble to the actual words
+ * rather than to the whole field.
+ */
+export function textareaSelectionRect(el: HTMLTextAreaElement): DOMRect | null {
+  const a = el.selectionStart
+  const b = el.selectionEnd
+  if (a === null || b === null || a === b) return null
+  const cs = getComputedStyle(el)
+  const div = document.createElement('div')
+  const copy = [
+    'boxSizing',
+    'width',
+    'paddingTop',
+    'paddingRight',
+    'paddingBottom',
+    'paddingLeft',
+    'borderTopWidth',
+    'borderRightWidth',
+    'borderBottomWidth',
+    'borderLeftWidth',
+    'fontFamily',
+    'fontSize',
+    'fontWeight',
+    'fontStyle',
+    'fontVariant',
+    'letterSpacing',
+    'lineHeight',
+    'textIndent',
+    'textTransform',
+    'wordSpacing',
+    'tabSize',
+  ] as const
+  for (const k of copy) div.style[k] = cs[k]
+  div.style.position = 'fixed'
+  div.style.top = '0'
+  div.style.left = '0'
+  div.style.visibility = 'hidden'
+  div.style.whiteSpace = 'pre-wrap'
+  div.style.overflowWrap = 'break-word'
+  div.style.pointerEvents = 'none'
+  div.textContent = el.value.slice(0, a)
+  const span = document.createElement('span')
+  // A zero-width span has no rect — a space keeps the measurement alive for a
+  // selection that ends on a line break.
+  span.textContent = el.value.slice(a, b) || ' '
+  div.appendChild(span)
+  div.appendChild(document.createTextNode(el.value.slice(b)))
+  document.body.appendChild(div)
+  const sr = span.getBoundingClientRect()
+  const dr = div.getBoundingClientRect()
+  document.body.removeChild(div)
+  const er = el.getBoundingClientRect()
+  return new DOMRect(
+    er.left + (sr.left - dr.left) - el.scrollLeft,
+    er.top + (sr.top - dr.top) - el.scrollTop,
+    sr.width,
+    sr.height
+  )
+}

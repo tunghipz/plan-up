@@ -1264,8 +1264,9 @@ function TitleTextarea({
   }, [editing])
   // Selection toolbar on the resting title (the discoverable path — the
   // shortcuts are invisible). Writes go through the same debounced commit.
-  const { bubble, sync, toggle } = useFormatBubble(
+  const { bubble, sync, syncTextarea, toggle } = useFormatBubble(
     readRef,
+    ref,
     () => latestRef.current,
     (v: string) => {
       setDraft(v)
@@ -1325,11 +1326,18 @@ function TitleTextarea({
             if (timerRef.current) clearTimeout(timerRef.current)
             timerRef.current = setTimeout(() => commit(v), 350)
           }}
-          onBlur={() => {
+          onBlur={(e) => {
+            // Clicking a bubble button must not close the editor — the toolbar
+            // preventDefaults mousedown, but focus still leaves on some paths.
+            if (e.relatedTarget && (e.relatedTarget as HTMLElement).closest('[data-format-bubble]'))
+              return
             focusedRef.current = false
             commit(latestRef.current) // flush immediately on blur
             setEditing(false)
           }}
+          // Fires for drag-select, shift+arrows and caret moves alike — the
+          // bubble follows the selection and hides when it collapses.
+          onSelect={syncTextarea}
           rows={1}
           onKeyDown={(e) => {
             // ⌘B / ⌘I / ⌘⇧X / ⌘⇧H wrap (or unwrap) the selection in markers.

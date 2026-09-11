@@ -1,7 +1,7 @@
 # Task rich text (inline formatting in task titles)
 
 **Status:** Implemented
-**Last updated:** 2026-09-11 (v2 — selection bubble toolbar; v1 spec + implementation)
+**Last updated:** 2026-09-11 (v3 — bubble works in the editor too; v2 bubble; v1 spec)
 **Code:** `app/src/rich-text.ts` (parser, `stripRich`, `toggleMark`, `sourceIndexFor`,
 `caretOffsetFromPoint`, `rangeToSource`), `app/src/RichText.tsx` (the render component +
 `FormatBubble` toolbar — kept separate so
@@ -67,15 +67,20 @@ every existing consumer keeps working with a one-line `stripRich()` call.
 ### The selection bubble (primary, mouse-first path)
 
 Shortcuts are the fast path but they are invisible — nothing on screen says the field
-can be formatted. So **selecting text on the resting (formatted) title pops a small
-floating toolbar** above the selection: **B** · *I* · ~~S~~ · ==H==.
+can be formatted. So **selecting text in a title pops a small floating toolbar** above
+the selection: **B** · *I* · ~~S~~ · ==H==. It works on **both surfaces**:
+
+- the **resting, formatted** title (drag-select without opening the editor), and
+- **inside the editor** — the common case: you clicked in to type, then select a word.
+  Selecting there keeps the editor open and the caret alive; the bubble just appears.
 
 - Drag-select any part of a title **without entering edit mode** (a plain click still
   opens the editor with the caret where you clicked — the bubble needs a real drag,
   i.e. a non-collapsed selection).
 - Click a button → the mark is applied to the underlying **source** string and written
-  straight to the DB. The title stays in read mode, now formatted; the selection stays
-  put so a second button can stack a second mark (bold *then* highlight).
+  straight to the DB. The surface you were on stays as it was (read stays read, the
+  editor stays focused), and the selection stays put so a second button can stack a
+  second mark (bold *then* highlight).
 - A button shows **active** (filled) when the whole selection already carries that mark,
   and clicking it then removes the mark — same toggle semantics as the shortcut.
 - The bubble closes on: a click elsewhere, Escape, scroll, or a selection that collapses.
@@ -179,9 +184,10 @@ The swap (rather than a transparent-text overlay) is chosen so the resting state
 **no markers at all** — the overlay trick would force the raw `**` to stay visible to
 keep character positions aligned.
 
-**`FormatBubble`** (`RichText.tsx`) is a portal-rendered toolbar positioned from
-`range.getBoundingClientRect()` — no mirror-div measuring, because the resting title is
-real DOM, not a textarea. Flow:
+**`FormatBubble`** (`RichText.tsx`) is a portal-rendered toolbar; `useFormatBubble.ts`
+feeds it from whichever surface holds the selection.
+
+*Read mode* is positioned from `range.getBoundingClientRect()`. Flow:
 
 1. `onMouseUp` / `selectionchange` on the read-mode div: if the document selection is
    non-collapsed and lives inside this cell, `rangeToSource` walks the same text nodes
@@ -196,8 +202,20 @@ real DOM, not a textarea. Flow:
    `marksAt` decides whether a button reads as active (the whole range already marked).
 
 Read mode therefore **no longer** preventDefaults `mousedown`; the editor opens on a
-plain click (`onClick` with a collapsed selection) instead, which leaves native
-drag-selection — and normal copy — working at rest.
+plain click (a collapsed selection at mouseup) instead, which leaves native
+drag-selection — and normal copy — working at rest. A `pointerRef` guard keeps the
+div's `onFocus` from swapping in the textarea **mid-drag** (that killed the selection
+before it existed).
+
+*Edit mode* is simpler in one way and harder in another: `selectionStart/End` already
+**are** source offsets (no mapping), but a textarea exposes no range to measure. So
+`textareaSelectionRect` mirrors the value into an off-screen div that copies every
+layout-affecting metric (font, padding, border, width, wrapping), wraps the selected
+slice in a span, and reads that span's rect — the standard trick, and the only way to
+anchor the bubble to the words instead of to the whole field. React's `onSelect` drives
+it, so drag-select, ⇧+arrows and caret moves all keep the bubble in sync (it hides the
+moment the selection collapses). The textarea's `onBlur` ignores a focus loss to
+`[data-format-bubble]` so clicking a button never closes the editor.
 
 ## Rules & edge cases
 

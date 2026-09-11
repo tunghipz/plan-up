@@ -1081,7 +1081,7 @@ function ItemTitle({ task }: { task: Task }) {
   }, [draft, editing])
 
   // Selection toolbar on the resting title — same behaviour as the sprint list.
-  const { bubble, sync, toggle } = useFormatBubble(readRef, () => draft, write)
+  const { bubble, sync, syncTextarea, toggle } = useFormatBubble(readRef, ref, () => draft, write)
 
   const boxCls =
     'flex-1 min-w-0 editable text-ink bg-transparent leading-snug whitespace-pre-wrap break-words'
@@ -1093,10 +1093,13 @@ function ItemTitle({ task }: { task: Task }) {
           ref={ref}
           value={draft}
           rows={1}
-          onBlur={() => {
+          onBlur={(e) => {
+            if (e.relatedTarget && (e.relatedTarget as HTMLElement).closest('[data-format-bubble]'))
+              return
             focusedRef.current = false
             setEditing(false)
           }}
+          onSelect={syncTextarea}
           onChange={(e) => write(e.target.value)}
           onKeyDown={(e) => {
             const mark = markForKey(e)

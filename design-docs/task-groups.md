@@ -136,8 +136,11 @@ child finish), exactly as if it depended on the latest child. Mechanics:
 3. **Collapse** — local state keyed by parentId, persisted to
    `localStorage['plan-up:taskgroup-collapsed:'+parentId]`; reset semantics like the
    member-group collapse.
-4. **Selection bar** — group/ungroup/delete all live on `SelectionBar` (the floating
-   bar). There is no per-row kebab/`RowActionsMenu` and no actions column on the row.
+4. **Selection bar** — assign/group/ungroup/chain/clear-prereqs/delete all live on
+   `SelectionBar` (the floating bar). There is no per-row kebab/`RowActionsMenu` and no
+   actions column on the row. The bar keeps its buttons on one line (`whitespace-nowrap`)
+   and is capped at `100vw - 16px` with its own horizontal scroll, so on a phone the
+   actions stay reachable instead of being clipped off both edges.
 
 ## Rules & edge cases
 - **One level**: enforced in `setTaskParent`; UI hides "Group under…" on tasks that

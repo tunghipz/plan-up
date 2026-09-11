@@ -294,6 +294,16 @@ h1, h2, h3, .display-tight {
     inset 0 0 0 0.5px var(--glass-ring);
 }
 
+/* no-scrollbar: a surface that scrolls but must not show a track — the floating
+ * SelectionBar on a narrow screen, where a visible bar would sit on top of the
+ * material. The content still scrolls by wheel/trackpad/touch. */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
 /* glass-popover: floating panels — dropdown menus, pickers, date popovers.
  * Same thick material as modals (read comfort over busy content), popover-tier
  * shadow. Children never cover a popover's edges, so the rim lives here. */

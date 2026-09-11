@@ -1,7 +1,7 @@
 # Sprint activity log
 
 **Status:** Implemented
-**Last updated:** 2026-07-02 (`sprint_started` now logged inside `createSprint()` — sprint
+**Last updated:** 2026-09-11 (unassign reads `Assignee X → Unassigned`, not a bare struck name)
 row + event in one transaction; earlier: per-sprint retention cap — newest 500 events kept,
 older pruned on write; motion pass — segmented control slides a measured pill like the
 main `ViewToggle` (§6.5 #4), rows do a one-shot entrance stagger when the drawer opens —
@@ -139,11 +139,11 @@ Two calm touches (design-system §6.5 — ≤300ms, shared easings, reduced-moti
 | created | file-plus | "Tạo task" |
 | completed (→ done) | check-circle (green) | `In Progress → Done` (new = green) |
 | status (other) | circle | `To Do → In Progress` (new tinted accent) |
-| assignee | user (member color) | `An → Bình`; first assign = `+ Bình` (green) |
+| assignee | user (member color) | `An → Bình`; first assign = `+ Bình` (green); **unassign = `Assignee An → Unassigned`** (the full field grammar — a bare struck name read as "An" at a glance, and unassigning is exactly the case where the reader needs to see where the task went) |
 | priority | flag | `High → Urgent` (new tinted red/orange) |
 | start / due date | calendar | `Jun 13 → Jun 12`; prereq-caused shift annotated `↳` |
 | estimate | clock | `2d → 3d` |
-| prereq (`dependsOn`) | link | `+ 3–4` (add, green) / struck on removal |
+| prereq (`dependsOn`) | link | `+ 3–4` (add, green) / struck on removal — the `+`/struck shorthand stays here, where the value really is a **set** |
 | rolled over | rotate | "Chuyển sang từ Sprint N-1" |
 | sprint started | rocket | "Sprint N bắt đầu" (sprint-level, no task ref) |
 

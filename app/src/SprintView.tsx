@@ -545,7 +545,11 @@ function SelectionBar({
     <div
       // Bar is dark in both themes, so the specular rim is hardcoded white
       // (the light-theme tokens use a dark ring, which would vanish here).
-      className={`fixed left-1/2 bottom-6 z-40 -translate-x-1/2 flex items-center gap-3 whitespace-nowrap rounded-[14px] bg-ink dark:bg-surface text-white pl-4 pr-2 py-2 shadow-[0_8px_30px_rgba(0,0,0,0.22),0_0_0_0.5px_rgba(0,0,0,0.06),inset_0_1px_0_rgba(255,255,255,0.14),inset_0_0_0_0.5px_rgba(255,255,255,0.10)] transition-[opacity,transform] duration-200 ${
+      // max-w + its own x-scroll: the bar is one nowrap line, so on a phone it
+      // used to run off BOTH edges and take Group/Delete with it. Capping it to
+      // the viewport keeps every action reachable (scroll-fade, page never
+      // scrolls sideways). See design-docs/task-groups.md.
+      className={`fixed left-1/2 bottom-6 z-40 -translate-x-1/2 flex items-center gap-3 whitespace-nowrap max-w-[calc(100vw-16px)] overflow-x-auto no-scrollbar rounded-[14px] bg-ink dark:bg-surface text-white pl-4 pr-2 py-2 shadow-[0_8px_30px_rgba(0,0,0,0.22),0_0_0_0.5px_rgba(0,0,0,0.06),inset_0_1px_0_rgba(255,255,255,0.14),inset_0_0_0_0.5px_rgba(255,255,255,0.10)] transition-[opacity,transform] duration-200 ${
         n > 0
           ? 'opacity-100 translate-y-0'
           : 'opacity-0 translate-y-3 pointer-events-none'
@@ -691,7 +695,12 @@ function AssignPopover({
         Math.max(8 + half, r.left + r.width / 2),
         window.innerWidth - 8 - half
       )}px`
-      box.style.bottom = `${window.innerHeight - r.top + 10}px`
+      // Clear the BAR's top edge, not the button's — the button sits inside the
+      // bar's padding, so measuring from it left the two dark surfaces 2px apart
+      // and they read as one lumpy shape.
+      const bar = btn.closest('[role="toolbar"]') as HTMLElement | null
+      const top = (bar ?? btn).getBoundingClientRect().top
+      box.style.bottom = `${window.innerHeight - top + 10}px`
     }
     place()
     window.addEventListener('resize', place)

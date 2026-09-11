@@ -81,7 +81,9 @@ function visuals(e: ActivityEvent): { Icon: LucideIcon; color: string } {
 
 /** Display text for a raw edit value (assignee/dependsOn are already labels). */
 function formatValue(field: LoggableField, v: string | null): string {
-  if (v === null) return '—'
+  // An empty assignee has a name of its own everywhere else in the app, so the
+  // log says it too rather than showing the generic em dash.
+  if (v === null) return field === 'assigneeId' ? 'Unassigned' : '—'
   switch (field) {
     case 'status':
       return STATUS_LABEL[v as keyof typeof STATUS_LABEL] ?? v
@@ -121,15 +123,20 @@ function ChangePhrase({ e }: { e: ActivityEvent }) {
         Rolled over from <span className="font-medium text-ink">{e.from}</span>
       </span>
     )
-  // edit — lean on add/remove when one side is the empty set
-  if ((e.field === 'dependsOn' || e.field === 'assigneeId')) {
+  // edit — lean on add/remove when one side is the empty set. Only the FIRST
+  // assign takes the `+` shorthand: un-assigning falls through to the full
+  // `Assignee An → Unassigned` grammar below, because a bare struck name reads
+  // as "An" at a glance and this is exactly the entry where the reader needs to
+  // see where the task went. Prereqs keep both shorthands — there the value
+  // really is a set. See design-docs/sprint-activity-log.md.
+  if (e.field === 'dependsOn' || e.field === 'assigneeId') {
     if (e.from === null && e.to !== null)
       return (
         <span className="font-medium" style={{ color: 'var(--color-status-done)' }}>
           + {e.to}
         </span>
       )
-    if (e.to === null && e.from !== null)
+    if (e.to === null && e.from !== null && e.field === 'dependsOn')
       return <span className="text-ink-faint line-through">{e.from}</span>
   }
   const noun = e.field ? FIELD_LABEL[e.field] : ''

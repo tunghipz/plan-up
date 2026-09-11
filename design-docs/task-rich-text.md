@@ -1,7 +1,7 @@
 # Task rich text (inline formatting in task titles)
 
 **Status:** Implemented
-**Last updated:** 2026-09-11 (v3 — bubble works in the editor too; v2 bubble; v1 spec)
+**Last updated:** 2026-09-11 (v3 — bubble in the editor; QA findings recorded under *Rules & edge cases*)
 **Code:** `app/src/rich-text.ts` (parser, `stripRich`, `toggleMark`, `sourceIndexFor`,
 `caretOffsetFromPoint`, `rangeToSource`), `app/src/RichText.tsx` (the render component +
 `FormatBubble` toolbar — kept separate so
@@ -223,6 +223,13 @@ moment the selection collapses). The textarea's `onBlur` ignores a focus loss to
   inner `~~…~~` is then visually redundant but harmless — no special-casing.
 - **Group/parent rows** render bold (`bold` prop). Inner `**…**` is a no-op there;
   italic/strike/highlight still apply.
+- **KNOWN ISSUE (found in QA 2026-09-11, unfixed):** a *pair* of stray delimiters in
+  ordinary prose is consumed. `rate 3 * 5 and 2 * 4 tasks` renders as
+  `rate 3  5 and 2  4 tasks` with the middle italicised, and `a==b and c==d` renders
+  as `ab and cd` highlighted. The raw string keeps the characters, but every rendered
+  surface (List, Board, Timeline, PNG, share link) and every stripped sink (Telegram
+  copy, search) drops them. A single unpaired marker is safe (`C++ 5*3` is fine).
+  See `.gstack/qa-reports/qa-report-localhost-5173-2026-09-11.md` (ISSUE-001).
 - **Unmatched markers stay literal.** A title like `3*4*5` renders `3` *4* `5` (that is
   the documented cost of the syntax); `\*` escapes it.
 - **PNG export** renders through the DOM (`PngExportCard` / `CollectionPngCard`), so
@@ -243,6 +250,16 @@ moment the selection collapses). The textarea's `onBlur` ignores a focus loss to
   keeps the shortcut path, no bubble (a textarea has no DOM range to anchor to).
 - **A selection spanning several rows** (drag down the list) shows no bubble — the range
   has to sit inside one title cell.
+- **The activity log still prints raw markers** in title-change rows (QA ISSUE-002,
+  unfixed) — every other surface is clean.
+- **Row height jumps on click** for a wrapped title (the markers re-wrap the text):
+  87px read → 106px edit in the QA sample (ISSUE-003).
+- **Drag-select fails below ~430px viewport** — the task table is ≥820px wide and
+  scrolls horizontally; the drag loses the text when the table snaps back to the left,
+  so the bubble can only be reached by double-click there (ISSUE-004).
+- **The resting title is `role="textbox"` with no accessible name** and is not actually
+  editable until activated (ISSUE-005); the collection variant does carry an
+  `aria-label`. **Highlight on a done (faded) task** is ~3.8:1, under AA (ISSUE-006).
 - **The calendar popover's title field** (`CollectionCalendar.TitleInput`) is always in
   edit mode, so it shows raw markers permanently; only the shortcuts are wired there.
 - **IME:** the shortcut handler ignores events while `isComposing` (same guard the Enter

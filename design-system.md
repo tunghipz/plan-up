@@ -68,6 +68,7 @@ Greyscale theo **hệ xám Apple** (lệch nhẹ cool, gần neutral). CSS varia
 | `--color-warn-ink` | `#A06600` | `#FF9F0A` | Text cảnh báo (`⚠ N not estimated`). Amber tối để **label** đạt AA trên white (~4.78:1); tách khỏi `--color-priority-high` (dùng làm fill/dot, không cần 4.5:1). |
 | `--color-overdue` | `#FF3B30` | `#FF453A` | Semantic đỏ (overdue text, destructive) — thay mọi `red-500/600` Tailwind (2026-07-07). |
 | `--color-status-none` | `#C7C7CC` | `#636366` | Neutral "chưa có status" (collection dot/bar fallback) — thay hex `#C7C7CC` hardcode. |
+| `--color-highlight` | `rgba(255,214,10,0.45)` | `rgba(255,214,10,0.30)` | Nền marker-pen cho `==highlight==` trong task title (2026-09-11). Apple yellow alpha thấp — **không** dùng accent blue hay `--color-priority-high` (hai màu đó đã mang nghĩa khác trong 1 row). Alpha dark thấp hơn vì nền tối làm vàng chói. |
 
 **Pill foreground formula (2026-07-07):** chữ trên nền soft-tint derive bằng
 `color-mix(in srgb, <màu> 78%, var(--color-ink))` — mix về **ink** (theme-aware),
@@ -248,6 +249,25 @@ Hành động **thêm một group-card mới** vào list card-per-group — Coll
 - **Radius = `rounded-[14px]`** (radius của *group card*, không phải button 8px ở §4.5) — vì nó là **placeholder cho một card sắp tạo**, không phải nút toolbar.
 - Icon lucide `size={14}`; glyph theo ngữ cảnh (`Plus` cho table, `UserPlus` cho member) nhưng *treatment* (size/màu/vị trí) đồng nhất.
 - Đây cũng là việc gỡ **trùng affordance** (§8.3): trước đây Add table = accent dashed loud, Add member = ghost xám quiet — cùng một việc mà hai kiểu.
+
+
+### 5.12 Inline text formatting trong title *(2026-09-11)*
+
+Title task/collection-item format được bằng **markdown-lite marker nằm trong chính
+chuỗi** (`**bold**`, `*italic*`, `~~strike~~`, `==highlight==`) — không đổi schema,
+không HTML, share link không cần sanitise. Quy tắc UI:
+
+- **Lúc nghỉ** render formatted, marker ẩn. **Click** mới đổi sang textarea hiện
+  marker thô (what you edit is what is stored), caret rơi đúng ký tự vừa bấm.
+- **Bôi đen** → bubble toolbar nổi (B · I · S · H) ngay trên vùng chọn — chạy ở
+  **cả** read mode lẫn trong editor. Nút nào đang bật thì filled; bấm lại = gỡ.
+  Selection giữ nguyên sau mỗi lần bấm để chồng mark bằng cú bấm thứ hai.
+- Phím tắt: `⌘B` / `⌘I` / `⌘⇧X` / `⌘⇧H` (Ctrl trên Windows/Linux).
+- Highlight dùng token `--color-highlight` (§2.2), **không** hardcode vàng.
+- Mọi sink plain-text (`title=`, Telegram copy, search, sort, activity log) phải
+  `stripRich()` — marker không bao giờ lọt ra text thô.
+
+Chi tiết: [`design-docs/task-rich-text.md`](./design-docs/task-rich-text.md).
 
 ## 6. Interaction rules *(giữ nguyên)*
 

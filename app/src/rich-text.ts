@@ -157,62 +157,119 @@ export interface ToggleResult {
   end: number
 }
 
-/** Length of the run of `*` immediately before (dir -1) or after (dir 1) `pos`. */
-function starRun(value: string, pos: number, dir: -1 | 1): number {
-  let n = 0
-  let i = dir === -1 ? pos - 1 : pos
-  while (i >= 0 && i < value.length && value[i] === '*') {
-    n++
-    i += dir
-  }
-  return n
+/** Nesting order when a run carries several marks — outermost first. */
+const ORDER: Mark[] = ['bold', 'italic', 'strike', 'mark']
+
+function sortMarks(marks: Mark[]): Mark[] {
+  return ORDER.filter((m) => marks.includes(m))
+}
+
+/** Escape the characters that could be read back as a delimiter. */
+function escapeText(text: string): string {
+  return text.replace(/[*~=]/g, (c) => '\\' + c)
 }
 
 /**
- * Wrap (or unwrap) `value[start..end]` in `mark`'s delimiter. Returns the new
- * string plus the selection to restore — always around the *inner* text, so
- * ⌘B then ⌘I nests into `***text***` instead of losing the selection.
+ * Render segments back to a marker string. Marks nest in `ORDER`, so a run that
+ * is bold + highlighted always serialises as `**==x==**` — one canonical form,
+ * which is what keeps repeated toggles from growing stray markers.
+ */
+function serializeRich(segs: RichSeg[], escape: boolean): string {
+  let out = ''
+  let open: Mark[] = []
+  for (const seg of segs) {
+    if (!seg.text) continue
+    const want = sortMarks(seg.marks)
+    // Close from the inside out until what stays open is a prefix of `want`.
+    let keep = 0
+    while (keep < open.length && keep < want.length && open[keep] === want[keep]) keep++
+    for (let i = open.length - 1; i >= keep; i--) out += MARK_DELIM[open[i]]
+    for (let i = keep; i < want.length; i++) out += MARK_DELIM[want[i]]
+    open = want
+    out += escape ? escapeText(seg.text) : seg.text
+  }
+  for (let i = open.length - 1; i >= 0; i--) out += MARK_DELIM[open[i]]
+  return out
+}
+
+/** Do two segment lists render identically (same text, same marks)? */
+function sameShape(a: RichSeg[], b: RichSeg[]): boolean {
+  const norm = (segs: RichSeg[]) =>
+    segs
+      .filter((s) => s.text)
+      .map((s) => s.text + '\u0000' + sortMarks(s.marks).join(','))
+      .join('\u0001')
+  return norm(a) === norm(b)
+}
+
+/**
+ * Add or remove `mark` over `[start, end)` (SOURCE offsets) and re-serialise the
+ * whole title canonically.
+ *
+ * Splicing delimiters in place looked simpler but cannot survive the cases the
+ * bubble toolbar produces every day — a selection that crosses a mark boundary,
+ * or a mark nested two deep — where a local splice leaves stray `**` that then
+ * read as literal text. Rebuilding from the parse tree makes those impossible:
+ * the VISIBLE text is invariant by construction.
+ */
+export function setMark(
+  src: string,
+  start: number,
+  end: number,
+  mark: Mark,
+  on: boolean
+): ToggleResult {
+  const next: RichSeg[] = []
+  for (const seg of parseRich(src)) {
+    const a = seg.from
+    const b = seg.from + seg.text.length
+    // Split the segment at the selection bounds, then re-mark only the middle.
+    const cuts = [a, Math.min(Math.max(start, a), b), Math.min(Math.max(end, a), b), b]
+    for (let i = 0; i < 3; i++) {
+      const from = cuts[i]
+      const to = cuts[i + 1]
+      if (to <= from) continue
+      const inside = i === 1
+      const marks = inside
+        ? on
+          ? sortMarks([...seg.marks, mark])
+          : seg.marks.filter((m) => m !== mark)
+        : seg.marks
+      next.push({ text: src.slice(from, to), marks, from })
+    }
+  }
+  // The visible text never changes, so the selection is mapped through RENDERED
+  // offsets — they are the one thing both strings agree on.
+  const renderedStart = renderedIndexFor(src, start)
+  const renderedEnd = renderedIndexFor(src, end)
+  let value = serializeRich(next, false)
+  // Literal `*` / `~~` / `==` already in the text could pair up with the markers
+  // we just emitted; if the result doesn't parse back to the same thing, escape.
+  if (!sameShape(parseRich(value), next)) value = serializeRich(next, true)
+  return {
+    value,
+    start: sourceIndexFor(value, renderedStart),
+    end: renderedEnd > renderedStart ? sourceIndexFor(value, renderedEnd - 1) + 1 : sourceIndexFor(value, renderedEnd),
+  }
+}
+
+/**
+ * Wrap (or unwrap) `value[start..end]` in `mark`. Returns the new string plus
+ * the selection to restore — always around the *inner* text, so ⌘B then ⌘I
+ * nests into `***text***` instead of losing the selection.
  *
  * With an empty selection it inserts the empty pair and parks the caret inside.
  */
 export function toggleMark(value: string, start: number, end: number, mark: Mark): ToggleResult {
-  const d = MARK_DELIM[mark]
-  const n = d.length
-  const sel = value.slice(start, end)
-
-  // Markers *inside* the selection (the user dragged across them): `[**text**]`.
-  if (sel.length >= 2 * n && sel.startsWith(d) && sel.endsWith(d)) {
-    const inner = sel.slice(n, sel.length - n)
+  if (start === end) {
+    const d = MARK_DELIM[mark]
     return {
-      value: value.slice(0, start) + inner + value.slice(end),
-      start,
-      end: start + inner.length,
+      value: value.slice(0, start) + d + d + value.slice(end),
+      start: start + d.length,
+      end: start + d.length,
     }
   }
-
-  // Markers *outside* the selection: `**[text]**`. For the two star marks the
-  // run has to be read as a whole — `*` and `**` share a prefix, so a naive
-  // prefix test would strip one star off a bold pair and leave `*text*` behind.
-  // Run of 1 = italic, 2 = bold, 3+ = both; unwrap only the mark that is there.
-  let wrapped: boolean
-  if (mark === 'bold' || mark === 'italic') {
-    const run = Math.min(starRun(value, start, -1), starRun(value, end, 1))
-    wrapped = mark === 'bold' ? run >= 2 : run === 1 || run >= 3
-  } else {
-    wrapped = value.slice(start - n, start) === d && value.slice(end, end + n) === d
-  }
-  if (wrapped) {
-    return {
-      value: value.slice(0, start - n) + sel + value.slice(end + n),
-      start: start - n,
-      end: end - n,
-    }
-  }
-  return {
-    value: value.slice(0, start) + d + sel + d + value.slice(end),
-    start: start + n,
-    end: start + n + sel.length,
-  }
+  return setMark(value, start, end, mark, !marksAt(value, start, end).includes(mark))
 }
 
 /**
@@ -272,4 +329,116 @@ export function caretOffsetFromPoint(x: number, y: number, root: HTMLElement | n
     total += n.textContent?.length ?? 0
   }
   return null
+}
+
+/**
+ * Marks that cover the WHOLE of `[start, end)` in the source — what the bubble
+ * toolbar shows as "active" (and therefore what a click will REMOVE).
+ */
+export function marksAt(src: string, start: number, end: number): Mark[] {
+  if (end <= start) return []
+  let common: Mark[] | null = null
+  for (const seg of parseRich(src)) {
+    const a = seg.from
+    const b = seg.from + seg.text.length
+    if (b <= start || a >= end) continue // no overlap
+    common = common === null ? seg.marks : common.filter((m) => seg.marks.includes(m))
+    if (!common.length) return []
+  }
+  return common ?? []
+}
+
+/**
+ * Turn a DOM selection inside a rendered title into source offsets. Walks the
+ * same text nodes `caretOffsetFromPoint` does, so both agree on what "rendered
+ * offset N" means, then maps through `sourceIndexFor`.
+ *
+ * Returns null when either end of the range falls outside `root` — e.g. the user
+ * dragged across several rows.
+ */
+export function rangeToSource(
+  src: string,
+  root: HTMLElement,
+  range: { startContainer: Node; startOffset: number; endContainer: Node; endOffset: number }
+): [number, number] | null {
+  const offsetOf = (node: Node, offset: number): number | null => {
+    if (!root.contains(node)) return null
+    // A range end can land on an ELEMENT (offset = child index) rather than a
+    // text node — normalise by summing the text before that child.
+    if (node.nodeType !== Node.TEXT_NODE) {
+      let seen = 0
+      for (let i = 0; i < offset && i < node.childNodes.length; i++) {
+        seen += node.childNodes[i].textContent?.length ?? 0
+      }
+      return textBefore(root, node) + seen
+    }
+    return textBefore(root, node) + offset
+  }
+  const a = offsetOf(range.startContainer, range.startOffset)
+  const b = offsetOf(range.endContainer, range.endOffset)
+  if (a === null || b === null) return null
+  const [lo, hi] = a <= b ? [a, b] : [b, a]
+  if (lo === hi) return null
+  // `sourceIndexFor` maps a caret; the END of a selection wants the position
+  // just AFTER the last selected character, so map hi-1 and step past it.
+  return [sourceIndexFor(src, lo), sourceIndexFor(src, hi - 1) + 1]
+}
+
+/** Total length of the text nodes preceding `node` inside `root`. */
+function textBefore(root: HTMLElement, node: Node): number {
+  let total = 0
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+  let n: Node | null
+  while ((n = walker.nextNode())) {
+    if (n === node) return total
+    if (node.contains(n)) return total // element node: stop at its first text child
+    total += n.textContent?.length ?? 0
+  }
+  return total
+}
+
+/**
+ * Inverse of `sourceIndexFor`: where a raw offset lands in the rendered text.
+ * Used to restore a selection after a mark toggle rewrites the markers around it.
+ */
+export function renderedIndexFor(src: string, sourceIdx: number): number {
+  let seen = 0
+  for (const seg of parseRich(src)) {
+    if (sourceIdx < seg.from) return seen // inside a marker — snap to the text after it
+    if (sourceIdx < seg.from + seg.text.length) return seen + (sourceIdx - seg.from)
+    seen += seg.text.length
+  }
+  return seen
+}
+
+/** The text node (and offset into it) holding rendered offset `idx` inside `root`. */
+function nodeAt(root: HTMLElement, idx: number): { node: Node; offset: number } | null {
+  let seen = 0
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+  let n: Node | null
+  let last: { node: Node; offset: number } | null = null
+  while ((n = walker.nextNode())) {
+    const len = n.textContent?.length ?? 0
+    last = { node: n, offset: len }
+    if (idx <= seen + len) return { node: n, offset: idx - seen }
+    seen += len
+  }
+  return last
+}
+
+/**
+ * Re-select `[from, to)` (SOURCE offsets) on the rendered title — the bubble
+ * toolbar keeps its selection across a toggle this way, so marks can be stacked
+ * with two clicks instead of re-dragging.
+ */
+export function selectSourceRange(root: HTMLElement, src: string, from: number, to: number) {
+  const a = nodeAt(root, renderedIndexFor(src, from))
+  const b = nodeAt(root, renderedIndexFor(src, to))
+  const sel = window.getSelection()
+  if (!a || !b || !sel) return
+  const range = document.createRange()
+  range.setStart(a.node, a.offset)
+  range.setEnd(b.node, b.offset)
+  sel.removeAllRanges()
+  sel.addRange(range)
 }

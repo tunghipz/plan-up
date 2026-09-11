@@ -77,7 +77,8 @@ import {
   type SortField,
   type Sort,
 } from './task-sort'
-import { RichText } from './RichText'
+import { FormatBubble, RichText } from './RichText'
+import { useFormatBubble } from './useFormatBubble'
 import { caretOffsetFromPoint, markForKey, sourceIndexFor, toggleMark } from './rich-text'
 
 // Re-exported so existing importers (BoardView) keep `from './SprintView'`.
@@ -1180,6 +1181,8 @@ function TitleTextarea({
   // Selection to restore after a ⌘B-style toggle rewrites the draft — applied
   // post-render, since React has replaced the textarea's value by then.
   const pendingSelRef = useRef<[number, number] | null>(null)
+  /** True between mousedown and mouseup on the resting title. */
+  const pointerRef = useRef(false)
 
   const commit = (v: string) => {
     if (timerRef.current) {
@@ -1259,6 +1262,18 @@ function TitleTextarea({
     return () => ro.disconnect()
     // Re-attach when the textarea mounts (edit mode) — it doesn't exist at rest.
   }, [editing])
+  // Selection toolbar on the resting title (the discoverable path — the
+  // shortcuts are invisible). Writes go through the same debounced commit.
+  const { bubble, sync, toggle } = useFormatBubble(
+    readRef,
+    () => latestRef.current,
+    (v: string) => {
+      setDraft(v)
+      latestRef.current = v
+      commit(v)
+    }
+  )
+
   // Same box metrics for the resting <div> and the editing <textarea> — the
   // `.editable` 1px transparent border is part of the height math (see resize),
   // so a mismatch would make the row jump by 2px on every click.
@@ -1345,19 +1360,41 @@ function TitleTextarea({
           // reachable by keyboard — Tab lands here and flips straight to edit.
           tabIndex={0}
           role="textbox"
-          onMouseDown={(e) => {
-            if (e.button !== 0) return
-            e.preventDefault() // we place the caret ourselves
-            startEdit(e)
+          onMouseDown={() => {
+            // The div is focusable (Tab reachability), and focusing it would
+            // swap in the textarea mid-drag — killing the selection the user is
+            // making. Let the pointer gesture finish and decide in onMouseUp.
+            pointerRef.current = true
+          }}
+          onMouseUp={(e) => {
+            pointerRef.current = false
+            // A drag leaves a real selection → show the toolbar and stay in read
+            // mode. A plain click (collapsed) opens the editor at that point.
+            const sel = window.getSelection()
+            if (sel && !sel.isCollapsed) {
+              sync()
+              return
+            }
+            if (e.button === 0) startEdit(e)
           }}
           onFocus={() => {
-            if (!editing) startEdit()
+            // Keyboard focus only — a mouse gesture is handled above.
+            if (!editing && !pointerRef.current) startEdit()
           }}
           className={`${boxCls} cursor-text`}
         >
           {/* An empty title would collapse the row — keep one line of height. */}
           {draft ? <RichText text={draft} /> : '\u00a0'}
         </div>
+      )}
+      {bubble && (
+        <FormatBubble
+          rect={bubble.rect}
+          active={bubble.active}
+          onToggle={(m) => {
+            toggle(m)
+          }}
+        />
       )}
       {trailing && <span className="shrink-0 self-center">{trailing}</span>}
     </div>

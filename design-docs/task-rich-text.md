@@ -1,9 +1,10 @@
 # Task rich text (inline formatting in task titles)
 
 **Status:** Implemented
-**Last updated:** 2026-09-11 (initial spec + implementation)
+**Last updated:** 2026-09-11 (v2 — selection bubble toolbar; v1 spec + implementation)
 **Code:** `app/src/rich-text.ts` (parser, `stripRich`, `toggleMark`, `sourceIndexFor`,
-`caretOffsetFromPoint`), `app/src/RichText.tsx` (the render component — kept separate so
+`caretOffsetFromPoint`, `rangeToSource`), `app/src/RichText.tsx` (the render component +
+`FormatBubble` toolbar — kept separate so
 `react-refresh/only-export-components` stays happy), `app/src/SprintView.tsx`
 (`TitleTextarea`), `app/src/CollectionView.tsx` (`ItemTitle`),
 `app/src/CollectionCalendar.tsx` (`TitleInput`, shortcuts only), read-only renderers in
@@ -63,6 +64,27 @@ every existing consumer keeps working with a one-line `stripRich()` call.
 - Typing markers by hand works identically — nothing is auto-corrected.
 - **Blur** (Enter / click away) → the cell renders formatted, markers hidden.
 
+### The selection bubble (primary, mouse-first path)
+
+Shortcuts are the fast path but they are invisible — nothing on screen says the field
+can be formatted. So **selecting text on the resting (formatted) title pops a small
+floating toolbar** above the selection: **B** · *I* · ~~S~~ · ==H==.
+
+- Drag-select any part of a title **without entering edit mode** (a plain click still
+  opens the editor with the caret where you clicked — the bubble needs a real drag,
+  i.e. a non-collapsed selection).
+- Click a button → the mark is applied to the underlying **source** string and written
+  straight to the DB. The title stays in read mode, now formatted; the selection stays
+  put so a second button can stack a second mark (bold *then* highlight).
+- A button shows **active** (filled) when the whole selection already carries that mark,
+  and clicking it then removes the mark — same toggle semantics as the shortcut.
+- The bubble closes on: a click elsewhere, Escape, scroll, or a selection that collapses.
+- The shortcuts keep working inside the editor, and also work **while the bubble is
+  open** — same `toggleMark`, one code path.
+
+This also fixes v1's known gap: read mode used to swallow drag-selection entirely
+(`onMouseDown` preventDefault), so a title could not be selected or copied at rest.
+
 ### Reading (everywhere else)
 
 Board cards, Gantt bars/labels, PNG export, both snapshot viewers, the hosted viewer
@@ -94,9 +116,15 @@ stripRich(src): string                          // parseRich → join text
 isBlankRich(src): boolean                       // nothing visible after stripping
 sourceIndexFor(src, renderedIdx): number        // rendered offset → raw offset
 caretOffsetFromPoint(x, y, root): number | null // click point → rendered offset
+rangeToSource(src, root, range): [number, number] | null  // DOM selection → raw offsets
+renderedIndexFor(src, srcIdx): number           // inverse of sourceIndexFor
+selectSourceRange(root, src, from, to)          // put a source range back on screen
+marksAt(src, start, end): Mark[]                // marks covering the WHOLE range
+setMark(src, start, end, mark, on): { value, start, end }
 toggleMark(value, start, end, mark): { value, start, end }
 markForKey(e): Mark | null
 <RichText text={s} />                           // <>…<span class=…>…</span>…</>
+<FormatBubble … />                              // the floating B/I/S/H toolbar
 ```
 
 **Parser** — one pass, no regex backtracking, no dependency:
@@ -111,13 +139,27 @@ markForKey(e): Mark | null
 6. Each segment records `from`, its start index in the source — that is what makes the
    click-to-caret mapping exact.
 
-**`toggleMark`** takes the value + `selectionStart/End`, decides whether the selection
-is already wrapped (markers inside the selection, or immediately outside it), then
-splices in or out and returns the new string plus the selection to restore. For the two
-star marks the *run* of `*` on each side is measured rather than a prefix match — `*`
-and `**` share a prefix, so a naive test would shave one star off a bold pair and leave
-`*text*` behind. Run of 1 = italic, 2 = bold, 3+ = both; a toggle removes only the mark
-asked for.
+**`toggleMark` → `setMark`** does not splice delimiters in place. It re-marks the parse
+tree and **re-serialises the whole title canonically**:
+
+1. `marksAt` decides the direction (already marked → remove, else add).
+2. Every segment is split at the selection bounds and the middle part gets (or loses)
+   the mark.
+3. `serializeRich` writes the segments back with marks nested in a fixed order
+   (`bold → italic → strike → mark`), so bold + highlight is always `**==x==**`.
+4. If the result doesn't parse back to the same segments — a literal `*` in the text
+   pairing up with a marker we just emitted — it is re-serialised with those characters
+   backslash-escaped.
+
+Splicing was tried first and cannot survive what the bubble produces daily: a selection
+crossing a mark boundary, or a mark nested two deep (`**==x==**` un-bolded has to reach
+*past* the `==`). Rebuilding from the parse tree makes stray markers structurally
+impossible — **the visible text is invariant by construction**, which is also how the
+selection is carried across the rewrite (mapped through rendered offsets, the one thing
+the old and new strings agree on).
+
+An **empty** selection is the one splice left: it inserts the bare pair and parks the
+caret between the markers.
 
 **`TitleTextarea`** (`app/src/SprintView.tsx`) keeps its existing draft/debounce/auto-size
 machinery untouched; two additions:
@@ -137,6 +179,26 @@ The swap (rather than a transparent-text overlay) is chosen so the resting state
 **no markers at all** — the overlay trick would force the raw `**` to stay visible to
 keep character positions aligned.
 
+**`FormatBubble`** (`RichText.tsx`) is a portal-rendered toolbar positioned from
+`range.getBoundingClientRect()` — no mirror-div measuring, because the resting title is
+real DOM, not a textarea. Flow:
+
+1. `onMouseUp` / `selectionchange` on the read-mode div: if the document selection is
+   non-collapsed and lives inside this cell, `rangeToSource` walks the same text nodes
+   `caretOffsetFromPoint` does, turning the range's start/end into **rendered** offsets
+   and then into **source** offsets via `sourceIndexFor`.
+2. The bubble renders above the rect (flipped below when it would clip the viewport top),
+   `position: fixed`, in a portal so a row's `overflow` can't clip it.
+3. `onMouseDown` on a button preventDefaults — otherwise the click collapses the
+   selection before the handler runs.
+4. A button calls `toggleMark(source, from, to, mark)` and writes the result; the parent
+   re-renders formatted, and the bubble re-maps its range so the selection survives.
+   `marksAt` decides whether a button reads as active (the whole range already marked).
+
+Read mode therefore **no longer** preventDefaults `mousedown`; the editor opens on a
+plain click (`onClick` with a collapsed selection) instead, which leaves native
+drag-selection — and normal copy — working at rest.
+
 ## Rules & edge cases
 
 - **Done tasks** already render `line-through text-ink-faint` on the whole title; an
@@ -153,8 +215,16 @@ keep character positions aligned.
 - **Highlight token:** `--color-highlight` in `index.css` — Apple yellow at 45 % (light)
   / 30 % (dark). Deliberately not the accent blue or `--color-priority-high`, both of
   which already carry meaning in a row.
-- **Read mode swallows text selection.** `onMouseDown` preventDefaults to place the
-  caret, so a title can't be drag-selected at rest — select it inside the editor instead.
+- **Toggling can rewrite markers elsewhere in the title** (canonical re-serialisation) —
+  e.g. `*a*` becomes `*a*` but `***a***` normalises to a fixed order. Visible text and
+  marks are preserved exactly; only the raw spelling is normalised.
+- **A literal `*` may gain a backslash** (`3 \* 5`) when a toggle would otherwise make it
+  pair with an emitted marker. Only visible in the editor, and only when needed.
+- **Bubble needs a drag, not a click.** A collapsed selection (plain click) opens the
+  editor; only a real range pops the toolbar. Clicking then dragging inside the editor
+  keeps the shortcut path, no bubble (a textarea has no DOM range to anchor to).
+- **A selection spanning several rows** (drag down the list) shows no bubble — the range
+  has to sit inside one title cell.
 - **The calendar popover's title field** (`CollectionCalendar.TitleInput`) is always in
   edit mode, so it shows raw markers permanently; only the shortcuts are wired there.
 - **IME:** the shortcut handler ignores events while `isComposing` (same guard the Enter

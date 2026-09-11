@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
+  marksAt,
   parseRich,
   stripRich,
   isBlankRich,
@@ -72,6 +73,15 @@ describe('stripRich / isBlankRich', () => {
   })
 })
 
+describe('marksAt', () => {
+  it('reports only the marks covering the WHOLE range', () => {
+    const src = 'a **b** c'
+    expect(marksAt(src, 4, 5)).toEqual(['bold']) // exactly "b"
+    expect(marksAt(src, 0, src.length)).toEqual([]) // spans unmarked text too
+    expect(marksAt(src, 4, 4)).toEqual([]) // collapsed
+  })
+})
+
 describe('sourceIndexFor', () => {
   // Clicking the rendered title must land the caret on the same character once
   // the markers come back.
@@ -131,6 +141,43 @@ describe('toggleMark', () => {
     expect(r.value).toBe('abc====')
     expect(r.start).toBe(5)
     expect(r.end).toBe(5)
+  })
+
+  it('removes a mark nested inside other marks', () => {
+    // Bold, then highlight stacked on the same word: `alpha **==beta==** gamma`.
+    const src = 'alpha **==beta==** gamma'
+    const inner = [src.indexOf('beta'), src.indexOf('beta') + 4]
+    expect(marksAt(src, inner[0], inner[1]).sort()).toEqual(['bold', 'mark'])
+    const unbold = toggleMark(src, inner[0], inner[1], 'bold')
+    expect(unbold.value).toBe('alpha ==beta== gamma')
+    expect(unbold.value.slice(unbold.start, unbold.end)).toBe('beta')
+    const unmark = toggleMark(src, inner[0], inner[1], 'mark')
+    expect(unmark.value).toBe('alpha **beta** gamma')
+  })
+
+  it('extends the mark (never removes it) when only PART of the range has it', () => {
+    const src = 'a **b** c' // "b" bold, " c" plain
+    const r = toggleMark(src, 4, 9, 'bold') // range covers both
+    expect(r.value).toBe('a **b c**')
+    expect(stripRich(r.value)).toBe(stripRich(src)) // visible text never changes
+    expect(marksAt(r.value, r.start, r.end)).toEqual(['bold'])
+  })
+
+  it('re-serialises canonically instead of splicing stray markers', () => {
+    // Bold a range that crosses a highlight boundary — the naive splice used to
+    // emit markers that parsed back as literal text.
+    const src = 'a ==b== c'
+    const r = toggleMark(src, 0, src.length, 'bold')
+    expect(stripRich(r.value)).toBe('a b c')
+    expect(r.value).toBe('**a ==b== c**')
+  })
+
+  it('escapes a literal delimiter that would pair with an emitted one', () => {
+    const src = 'a*' // a trailing star, literal today
+    const r = toggleMark(src, 0, src.length, 'bold')
+    expect(stripRich(r.value)).toBe('a*') // it must STAY literal…
+    expect(marksAt(r.value, r.start, r.end)).toEqual(['bold']) // …and the text is bold
+    expect(r.value).toBe('**a\\***')
   })
 
   it('toggles strike and highlight independently', () => {

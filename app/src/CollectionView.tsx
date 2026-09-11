@@ -28,7 +28,8 @@ import { useDragHandle, useDragHover, type RowDrag } from './DragHandle'
 import { computeDropSlot, computeAppendSlot, resolveDropOrder, type DropSlot } from './reorder'
 import { usePinnedPopover } from './usePinnedPopover'
 import { ModalSheet } from './ModalSheet'
-import { RichText } from './RichText'
+import { FormatBubble, RichText } from './RichText'
+import { useFormatBubble } from './useFormatBubble'
 import { stripRich, caretOffsetFromPoint, markForKey, sourceIndexFor, toggleMark } from './rich-text'
 
 /** Effective manual order for a collection item — mirrors the sprint list. */
@@ -1050,6 +1051,8 @@ function ItemTitle({ task }: { task: Task }) {
   const [editing, setEditing] = useState(false)
   const readRef = useRef<HTMLDivElement>(null)
   const pendingSelRef = useRef<[number, number] | null>(null)
+  /** True between mousedown and mouseup on the resting title. */
+  const pointerRef = useRef(false)
   useLayoutEffect(resize, [draft, editing])
 
   const write = (v: string) => {
@@ -1076,6 +1079,9 @@ function ItemTitle({ task }: { task: Task }) {
     pendingSelRef.current = null
     el.setSelectionRange(sel[0], sel[1])
   }, [draft, editing])
+
+  // Selection toolbar on the resting title — same behaviour as the sprint list.
+  const { bubble, sync, toggle } = useFormatBubble(readRef, () => draft, write)
 
   const boxCls =
     'flex-1 min-w-0 editable text-ink bg-transparent leading-snug whitespace-pre-wrap break-words'
@@ -1116,9 +1122,19 @@ function ItemTitle({ task }: { task: Task }) {
           tabIndex={0}
           role="textbox"
           aria-label="Item title"
-          onMouseDown={(e) => {
+          onMouseDown={() => {
+            // Focusing the div would swap in the textarea mid-drag; decide on mouseup.
+            pointerRef.current = true
+          }}
+          onMouseUp={(e) => {
+            pointerRef.current = false
+            // Drag = select + show the toolbar; plain click = open the editor.
+            const sel = window.getSelection()
+            if (sel && !sel.isCollapsed) {
+              sync()
+              return
+            }
             if (e.button !== 0) return
-            e.preventDefault()
             const at = caretOffsetFromPoint(e.clientX, e.clientY, readRef.current)
             pendingSelRef.current =
               at === null ? null : [sourceIndexFor(draft, at), sourceIndexFor(draft, at)]
@@ -1126,7 +1142,7 @@ function ItemTitle({ task }: { task: Task }) {
             setEditing(true)
           }}
           onFocus={() => {
-            if (!editing) {
+            if (!editing && !pointerRef.current) {
               focusedRef.current = true
               setEditing(true)
             }
@@ -1136,6 +1152,7 @@ function ItemTitle({ task }: { task: Task }) {
           {draft ? <RichText text={draft} /> : '\u00a0'}
         </div>
       )}
+      {bubble && <FormatBubble rect={bubble.rect} active={bubble.active} onToggle={toggle} />}
     </div>
   )
 }

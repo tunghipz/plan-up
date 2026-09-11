@@ -27,6 +27,7 @@ import {
   nextSequence,
   dedupeSprints,
   addSprintTask,
+  updateTask,
   addCollectionItem,
   memberNameExists,
   exportAll,
@@ -789,6 +790,57 @@ describe('date computation', () => {
     // Cycle attempt: b depends on a, but a already depends on b.
     const saved = await setDependencies('b', ['a'])
     expect(saved).toEqual([])
+  })
+})
+
+describe('updateTask: clearing effort clears the computed end date', () => {
+  const mkTask = async (over: Partial<Task> = {}) =>
+    db.tasks.add({
+      id: 'a', projectId: P, sequence: 1, title: 'x', assigneeId: null, sprintId: 's',
+      status: 'todo', priority: 'normal',
+      startDate: '2026-06-01', dueDate: null, estimate: null, createdAt: 0, dependsOn: [],
+      ...over,
+    } as Task)
+
+  it('drops the end date when the effort field is emptied', async () => {
+    await mkTask()
+    // Sprint start seeds the start date; setting effort computes + stores an end.
+    await updateTask('a', { estimate: 3 })
+    await recomputeDates('a')
+    expect((await db.tasks.get('a'))?.dueDate).toBe('2026-06-03')
+    // Clearing effort must take the computed end with it (the reported bug: it stuck).
+    await updateTask('a', { estimate: null })
+    await recomputeDates('a')
+    expect((await db.tasks.get('a'))?.dueDate).toBe(null)
+  })
+
+  it('logs the cleared end date as its own change entry', async () => {
+    await mkTask()
+    await updateTask('a', { estimate: 2 })
+    await recomputeDates('a')
+    await updateTask('a', { estimate: null })
+    const events = await db.events.where('sprintId').equals('s').toArray()
+    expect(
+      events.some((e) => e.taskId === 'a' && e.field === 'dueDate' && e.to === null)
+    ).toBe(true)
+  })
+
+  it('keeps a manual end date on a task that never had effort', async () => {
+    await mkTask({ dueDate: '2026-06-10' })
+    await updateTask('a', { estimate: null })
+    expect((await db.tasks.get('a'))?.dueDate).toBe('2026-06-10')
+  })
+
+  it('never overrides an end date written in the same patch', async () => {
+    await mkTask({ estimate: 3, dueDate: '2026-06-03' })
+    await updateTask('a', { estimate: null, dueDate: '2026-06-12' })
+    expect((await db.tasks.get('a'))?.dueDate).toBe('2026-06-12')
+  })
+
+  it('clears the stale end when the task becomes a milestone (effort 0)', async () => {
+    await mkTask({ estimate: 3, dueDate: '2026-06-03' })
+    await updateTask('a', { estimate: 0 })
+    expect((await db.tasks.get('a'))?.dueDate).toBe(null)
   })
 })
 

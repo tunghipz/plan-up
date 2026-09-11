@@ -1,8 +1,7 @@
 # Auto-scheduling engine
 
 **Status:** Implemented
-**Last updated:** 2026-08-18 (project holidays union into `leafPlan`; shared expansion +
-merge helpers)
+**Last updated:** 2026-09-11 (clearing effort clears the computed end date)
 **Code:** `app/src/scheduling.ts` (`planFor`, `computeStartEnd`, `computeWorkingPlan`,
 `computeWorkingTimes`, `recomputeDates`, `recomputeAllDates`, `expandHolidaysNamed`,
 `expandHolidays`, `mergeOffPart`, `normalizeHolidays`, `projectHolidayMap`, `addDays`)
@@ -94,3 +93,10 @@ Shared helpers, so the same rule can't be re-written three ways:
   cell — clear the prereqs/effort to edit manually.
 - Computations always derive from fresh state, never trusting a possibly-stale stored
   `dueDate`, so they're order-independent and safe to re-run.
+- **Clearing effort clears the end date.** While effort > 0 the End cell is locked, so the
+  stored `dueDate` under it is always a value the *engine* wrote — never something the user
+  typed. Emptying the effort field therefore also nulls `dueDate` (in `updateTask`, so the
+  clear is one logged edit), instead of leaving the last computed end frozen on the row: with
+  no effort left to walk, `leafPlan` hands the stored value straight back and it would stick
+  forever. A `dueDate` explicitly present in the same patch wins (nothing is overwritten
+  behind an intentional write), and a task that never had effort keeps its manual end date.

@@ -518,11 +518,25 @@ function changeLogValue(
  */
 export async function updateTask(
   id: string,
-  patch: Partial<Task>
+  rawPatch: Partial<Task>
 ): Promise<void> {
   await db.transaction('rw', db.projects, db.tasks, db.members, db.events, async () => {
     const task = await db.tasks.get(id)
     if (!task) return
+    // Clearing effort clears the end date. While effort > 0 the End cell is
+    // locked, so a stored `dueDate` under it is always engine-written, never
+    // typed by the user — and with no effort left to walk, `leafPlan` hands the
+    // stored value straight back, freezing the last computed end on the row
+    // forever. An explicit `dueDate` in the same patch wins, and a task that
+    // never had effort keeps its manual end. See design-docs/scheduling.md.
+    const clearsEffort =
+      'estimate' in rawPatch &&
+      !('dueDate' in rawPatch) &&
+      (rawPatch.estimate == null || rawPatch.estimate <= 0) &&
+      task.estimate != null &&
+      task.estimate > 0 &&
+      task.dueDate !== null
+    const patch: Partial<Task> = clearsEffort ? { ...rawPatch, dueDate: null } : rawPatch
     // Only load members when an assignee label needs freezing (title fires per
     // keystroke — don't scan members on every character).
     const members: Member[] | null =

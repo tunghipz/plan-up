@@ -1,7 +1,9 @@
 # Dependencies (prerequisites)
 
 **Status:** Implemented
-**Last updated:** 2026-09-11 (setting a prereq auto-moves the row under its prerequisite)
+**Last updated:** 2026-09-21 (a dependent now renders **directly under its prerequisite in
+every sort**, not only in the manual order — see *Dependents stick to their prerequisite*)
+**Previously:** 2026-09-11 (setting a prereq auto-moves the row under its prerequisite)
 **Code:** `app/src/db.ts` (`addDependency`, `removeDependency`, `setDependencies`,
 `wouldCreateCycle`, `findCyclePath`, `isTaskBlocked`), `app/src/reorder.ts`
 (`planPrereqMove`, `orderBetween`), `app/src/SprintView.tsx`
@@ -37,9 +39,8 @@ UI can flag blocked work.
   lane. Details:
   - The anchor is the prereq that sits **lowest in the lane's manual order**
     (`listOrder ?? sequence`) — with several prereqs, the row lands under the last of them
-    (everything it waits on is above it). While a **sort column** is active the rows render in
-    that sort's order instead, so the move only becomes visible once the sort is cleared —
-    exactly like a drag, which the sort also disables.
+    (everything it waits on is above it). This is the **stored** move; the display rule below
+    keeps the pairing visible while a sort column is active.
   - Only prereqs in the **same lane** count: same sprint (or collection + section), same
     assignee, same group parent.
     A cross-lane prereq moves nothing, because "moving" there would mean reassigning the task
@@ -49,6 +50,29 @@ UI can flag blocked work.
     and it stays where you put it.
   - **Bulk "Chain prereqs"** inherits this (it calls `setDependencies` per pair, top-to-bottom),
     so a chained selection ends up contiguous and in chain order.
+- **Dependents stick to their prerequisite — in every sort.** Writing `listOrder` only fixes
+  the *manual* order; the moment a sort column is on, the lane renders by that column and the
+  dependent drifts back to wherever its End/Status/Title puts it (an unscheduled dependent
+  with an empty End lands at the bottom, the exact thing the move was meant to fix). So the
+  pairing is also applied **at display time**, after sorting:
+
+  `orderLane()` (`task-sort.ts`) sorts the lane as before, then **pulls each dependent to sit
+  immediately after its prerequisite**. Rules:
+  - The anchor is the prereq that ends up **lowest in the sorted lane**, so a row with several
+    prereqs still sits below all of them.
+  - Only prereqs in the **same lane and the same group scope** (same `parentId`) count —
+    identical to the stored move, and for the same reason: pulling across scopes would mean
+    re-parenting a row nobody asked to re-parent.
+  - Chains nest: `A → B → C` renders A, B, C contiguous. Several dependents on one prereq keep
+    the sort's order among themselves.
+  - This is the same contract group children already have (`flattenDisplayOrder` + `TaskTable`
+    nest a child under its parent no matter which column is sorted), so the List has one rule,
+    not two.
+  - **Accepted cost:** with a sort on, the sorted column is no longer monotonic down the lane —
+    a dependent with an empty End can sit between two dated rows. Adjacency to the prerequisite
+    is the thing being asked for; a purely topological order ("somewhere after the prereq")
+    would leave that dependent at the bottom and change nothing on screen.
+  - The PNG export reuses `orderLane()`, so the image matches the screen row for row.
 - A task waiting on an unfinished prereq is **blocked** (row tooltip: "Blocked — waiting on
   a prerequisite task"). A prereq that is a **group (parent) task** counts as done only when
   **every child** of that group is done.

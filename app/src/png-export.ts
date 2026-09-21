@@ -1,7 +1,7 @@
 import type { Member, Task } from './types'
 import type { WorkingPlan } from './scheduling'
 import { flattenDisplayOrder } from './lib'
-import { compareTasks, buildDateSortKeys, DEFAULT_SORT, type Sort } from './task-sort'
+import { orderLane as orderLaneShared, DEFAULT_SORT, type Sort } from './task-sort'
 
 /**
  * Export the current view's tasks as one shareable PNG, grouped by assignee.
@@ -72,14 +72,10 @@ export function groupTasksByMember(
   }
 
   const orderLane = (lane: Task[]): Task[] => {
-    const dateKeys =
-      sort.field === 'startDate' || sort.field === 'dueDate'
-        ? buildDateSortKeys(lane, planById)
-        : undefined
-    const sorted = [...lane].sort((a, b) =>
-      compareTasks(a, b, sort.field ?? 'seq', sort.field ? sort.dir : 'asc', dateKeys)
-    )
-    return opts.nestChildren ? flattenDisplayOrder([sorted]) : sorted
+    // Same ordering the List renders (sort + dependents pulled under their
+    // prereqs) so the image matches the screen row for row.
+    const ordered = orderLaneShared(lane, sort, planById)
+    return opts.nestChildren ? flattenDisplayOrder([ordered]) : ordered
   }
 
   const groups: MemberGroup[] = []

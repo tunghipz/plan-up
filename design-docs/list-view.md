@@ -1,7 +1,10 @@
 # List view
 
 **Status:** Implemented
-**Last updated:** 2026-08-17 (**title 2+ dòng bị xén 2px ở đáy — fixed**, xem v5 dưới; prior:
+**Last updated:** 2026-09-21 (sau khi sort, mỗi row có prereq bị **kéo sát ngay dưới prereq
+của nó** — `orderLane()`, xem [dependencies.md](./dependencies.md) *Dependents stick to their
+prerequisite*)
+**Previously:** 2026-08-17 (**title 2+ dòng bị xén 2px ở đáy — fixed**, xem v5 dưới; prior:
 2026-07-08 column header → floating glass capsule; sprint note → inline description in the merged Notion-style page header, see app-shell v4; prior: calm refinements — time-on-hover dates, quiet empty cells, sticky-light group headers, compact rows, `#`-prefixed prereq)
 **Code:** `app/src/SprintView.tsx` (`MemberCard`, `UnassignedCard`, `GroupHeader`,
 `TaskColumnHeader`, `SortHeader`, `COL`, `TaskRows` drag state, `TaskRow` grip),
@@ -81,6 +84,12 @@ inset-grouped cards, fully editable inline.
   the same composite `date+time` keys the cells render, so a parent lands where its End cell says
   it should. (Before this, a parent sorted by its often-empty raw `dueDate` → jumped to the bottom
   even when its rolled-up End was early.) Empty dates sort last ascending.
+- **Sau khi sort, dependent bị kéo sát prereq.** Sort xong, lane chạy thêm một pass kéo mỗi
+  row có prereq lên **ngay dưới prereq của nó** (prereq cùng lane + cùng group scope). Cùng
+  hợp đồng mà group children đã có: nesting được áp **sau** khi sort, nên List chỉ có một luật
+  chứ không phải hai. Hệ quả có chủ đích: cột đang sort **không còn đơn điệu** từ trên xuống —
+  một dependent End trống có thể nằm giữa hai row có ngày. Chi tiết + lý do ở
+  [dependencies.md](./dependencies.md).
 - Member cards omit the **Assignee** column (everyone in the group is the same person);
   the Unassigned card keeps it.
 - A task with **Effort = 0** renders as a **milestone**: a `◆ Milestone` pill after the

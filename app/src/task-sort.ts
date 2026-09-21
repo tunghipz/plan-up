@@ -169,3 +169,95 @@ export function saveSort(sort: Sort) {
     // localStorage unavailable, swallow
   }
 }
+
+/**
+ * Pull every dependent to sit **immediately after its prerequisite**, keeping
+ * the incoming order otherwise. Runs AFTER the column sort.
+ *
+ * Writing `listOrder` when a prereq is saved only fixes the manual order — turn
+ * a sort column on and the dependent drifts back to wherever its End/Status
+ * puts it, which for an unscheduled dependent (empty End) is the bottom of the
+ * lane: precisely the stranding the auto-move exists to prevent. So the pairing
+ * is re-applied at display time, in every sort.
+ *
+ * This is the contract group children already have — `flattenDisplayOrder` and
+ * `TaskTable` nest a child under its parent whatever the sort — so the List has
+ * one rule, not two.
+ *
+ * Scope: only a prereq inside the SAME lane and the same group (`parentId`)
+ * anchors anything; pulling across scopes would silently re-parent a row. With
+ * several prereqs the anchor is the one sitting LOWEST here, so the dependent
+ * lands below all of them. See design-docs/dependencies.md.
+ */
+export function pullDependentsUnderPrereqs(lane: Task[]): Task[] {
+  if (lane.length < 2) return lane
+  const pos = new Map<string, number>()
+  lane.forEach((t, i) => pos.set(t.id, i))
+  const scope = (t: Task) => t.parentId ?? null
+
+  const anchorOf = (t: Task): string | null => {
+    let best: string | null = null
+    let bestPos = -1
+    for (const id of t.dependsOn ?? []) {
+      const p = pos.get(id)
+      if (p === undefined) continue // prereq lives in another lane
+      if (scope(lane[p]) !== scope(t)) continue // another group
+      if (p > bestPos) {
+        bestPos = p
+        best = id
+      }
+    }
+    return best
+  }
+
+  const dependents = new Map<string, Task[]>()
+  const roots: Task[] = []
+  let anyAnchor = false
+  for (const t of lane) {
+    const a = anchorOf(t)
+    if (!a) {
+      roots.push(t)
+      continue
+    }
+    anyAnchor = true
+    const arr = dependents.get(a)
+    if (arr) arr.push(t)
+    else dependents.set(a, [t])
+  }
+  if (!anyAnchor) return lane
+
+  const out: Task[] = []
+  const seen = new Set<string>()
+  const emit = (t: Task) => {
+    if (seen.has(t.id)) return
+    seen.add(t.id)
+    out.push(t)
+    for (const d of dependents.get(t.id) ?? []) emit(d)
+  }
+  for (const t of roots) emit(t)
+  // `dependsOn` is kept acyclic on write, but a hand-edited import could still
+  // hand us a loop — those rows would never be emitted above. Append them in
+  // their sorted position rather than dropping rows off the screen.
+  for (const t of lane) if (!seen.has(t.id)) out.push(t)
+  return out
+}
+
+/**
+ * The ONE lane-ordering entry point: sort by the active column, then pull
+ * dependents under their prerequisites. The List renders this and the PNG
+ * export reuses it, so the image matches the screen row for row.
+ */
+export function orderLane(
+  lane: Task[],
+  sort: Sort,
+  planById: Map<string, WorkingPlan>
+): Task[] {
+  const dateKeys =
+    sort.field === 'startDate' || sort.field === 'dueDate'
+      ? buildDateSortKeys(lane, planById)
+      : undefined
+  const sorted = [...lane].sort((a, b) =>
+    compareTasks(a, b, sort.field ?? 'seq', sort.field ? sort.dir : 'asc', dateKeys)
+  )
+  return pullDependentsUnderPrereqs(sorted)
+}

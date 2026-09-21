@@ -74,6 +74,7 @@ import {
 import {
   compareTasks,
   buildDateSortKeys,
+  orderLane,
   loadSort,
   saveSort,
   DEFAULT_SORT,
@@ -222,26 +223,18 @@ export function SprintView({
       if (owner) byMember.get(owner)!.push(t)
       else orphan.push(t)
     }
-    // Sort each member's tasks by the user-selected field. Neutral (field null)
-    // falls back to the manual order — same as `seq asc`. Start/End sort by the
-    // displayed computed/rollup date via per-lane dateKeys (see buildDateSortKeys).
-    const sortLane = (arr: Task[]) => {
-      const dateKeys =
-        sort.field === 'startDate' || sort.field === 'dueDate'
-          ? buildDateSortKeys(arr, planById)
-          : undefined
-      arr.sort((a, b) =>
-        compareTasks(a, b, sort.field ?? 'seq', sort.field ? sort.dir : 'asc', dateKeys)
-      )
-    }
-    for (const arr of byMember.values()) sortLane(arr)
-    sortLane(orphan)
+    // Order each member's tasks: the user-selected field (neutral → the manual
+    // order, same as `seq asc`; Start/End by the DISPLAYED computed/rollup date),
+    // then dependents pulled under their prerequisites. `orderLane` owns both
+    // halves so the PNG export can reproduce this exactly. See task-sort.ts.
+    for (const [id, arr] of byMember) byMember.set(id, orderLane(arr, sort, planById))
+    const orphanOrdered = orderLane(orphan, sort, planById)
     const filled = ms.filter((m) => (byMember.get(m.id) ?? []).length > 0)
     const empty = ms.filter((m) => (byMember.get(m.id) ?? []).length === 0)
     return {
       groups: filled.map((m) => ({ member: m, tasks: byMember.get(m.id)! })),
       emptyMembers: empty,
-      unassigned: orphan,
+      unassigned: orphanOrdered,
     }
   }, [members, tasks, sort, planById])
 

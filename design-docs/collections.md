@@ -1,7 +1,9 @@
 # Collections (task ngoài sprint)
 
 **Status:** Implemented
-**Last updated:** 2026-07-15 (collection **Share link** on the top bar next to Export —
+**Last updated:** 2026-09-21 (scheduler exemption: `planFor` + cả hai vòng recompute bỏ qua
+item có `collectionId` — xem "Cách ly khỏi sprint engine")
+**Previously:** 2026-07-15 (collection **Share link** on the top bar next to Export —
 see [share-link-snapshot.md](./share-link-snapshot.md) "Collections (v3)"; the old **Export as
 image…** menu item was removed — a collection PNG is now reached via its Share link viewer)
 **Code:** `app/src/db.ts` (schema v9 + collection/section/status/item CRUD, export v3),
@@ -174,8 +176,18 @@ Thêm 3 field optional (xem [data-model.md](./data-model.md)):
 (đã có) + `collectionStatusId`.
 
 ### Cách ly khỏi sprint engine
-Scheduler, capacity banner, rollover, per-sprint `sequence` — đều **query theo `sprintId`** nên
-collection-item (`sprintId = null`) tự động không bị đụng tới. Không cần sửa logic scheduling.
+Capacity banner, rollover, per-sprint `sequence` — đều **query theo `sprintId`** nên
+collection-item (`sprintId = null`) tự động không bị đụng tới.
+
+**Scheduler thì KHÔNG** — đây là ngoại lệ phải code tay. `recomputeAllDates()` (chạy mỗi lần
+mở app) duyệt `db.tasks.toArray()`, tức **mọi** task bất kể `sprintId`, rồi **ghi đè** ngày
+tính được xuống IndexedDB. Nên `planFor` có guard riêng: task có `collectionId` trả về
+`startDate`/`dueDate` **nguyên xi** và hai vòng recompute bỏ qua nó. Không có guard này thì
+cuối tuần / project holiday bị áp lên item collection — vốn không phải working time của ai.
+Chi tiết ở [scheduling.md](./scheduling.md) "Collection items are outside the engine".
+
+*(Bug 2026-09-21: trước khi có guard, event đặt tay ngày Sat Sep 5 tự nhảy sang Mon Sep 7
+ngay lần mở app kế tiếp — cột End giữ nguyên, ngày gốc mất luôn.)*
 
 ### Schema versioning (v9)
 - Thêm table `collections` (index `id, projectId, order`); `sections` nhúng.

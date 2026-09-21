@@ -229,6 +229,16 @@ function planFor(
   }
   const cached = cache.get(task.id)
   if (cached) return cached
+  // A COLLECTION ITEM is a dated row, not work: a collection has no scheduling
+  // by design (collections.md) — no assignee, no effort, no prereq columns, and
+  // its Start/End come from one range picker. Hand its stored dates straight
+  // back, above the roll-up and above every off-day rule: weekends and project
+  // holidays are working-TIME concepts, and a live-ops event runs on a Sunday
+  // just fine. Without this, `recomputeAllDates` (every app load) persisted a
+  // weekend-normalized start over what the user typed. See scheduling.md.
+  if (task.collectionId) {
+    return { startDate: task.startDate, dueDate: task.dueDate, startOffset: 0, dueFraction: 1 }
+  }
   if (c.inProgress.has(task.id)) return NULL_PLAN
   c.inProgress.add(task.id)
   let plan: TaskPlan
@@ -383,13 +393,23 @@ function leafPlan(
     return { startDate: null, dueDate: task.dueDate, startOffset: 0, dueFraction: 1 }
   }
 
-  // Step 2: normalize start past off days when caller set it on one.
-  while (dayContrib(start) <= 0) {
-    start = addDays(start, 1)
-    startOffset = 0
+  // Step 2: normalize start past off days — but ONLY for a start the engine
+  // OWNS: one derived from a prereq above, or a manual one on a task with
+  // effort to walk. A manual start with no effort is exactly what the user
+  // typed, and the date picker renders weekends dimmed-but-SELECTABLE, so
+  // picking Saturday is a legal choice. Normalizing it anyway meant
+  // `recomputeAllDates` silently rewrote the row to Monday on the next app
+  // load — no undo, original date gone. See scheduling.md "The engine only
+  // rewrites dates it owns".
+  const engineOwnsStart = task.dependsOn?.length > 0 || (task.estimate ?? 0) > 0
+  if (engineOwnsStart) {
+    while (dayContrib(start) <= 0) {
+      start = addDays(start, 1)
+      startOffset = 0
+    }
+    // If the day naturally starts later (AM-off), lift offset to match.
+    startOffset = Math.max(startOffset, naturalWallStart(start))
   }
-  // If the day naturally starts later (AM-off), lift offset to match.
-  startOffset = Math.max(startOffset, naturalWallStart(start))
 
   // No effort → end stays manual.
   if (!task.estimate || task.estimate <= 0) {
@@ -514,10 +534,13 @@ export function computeAllWorkingPlans(
  *     half-off days as 0.5 and skipping weekends + full-off days.
  *     Otherwise end = task.dueDate (manual).
  *   - If start lands on a non-working day (weekend or full-off), it's
- *     pushed forward to the next working day.
+ *     pushed forward to the next working day — but ONLY when the engine owns
+ *     the start (prereqs, or effort > 0). A manual start under no effort is
+ *     the user's own pick and stays put, weekend or not.
  *
  * Returns task.startDate / task.dueDate unchanged when there's nothing to
- * compute (no prereqs AND no effort).
+ * compute (no prereqs AND no effort), and for any COLLECTION item (those are
+ * outside the engine entirely — see planFor).
  */
 export function computeStartEnd(
   task: Task,
@@ -554,6 +577,7 @@ export async function recomputeDates(taskId: string): Promise<void> {
       visited.add(id)
       const task = byId.get(id)
       if (!task) continue
+      if (task.collectionId) continue // outside the engine — see planFor
       const next = computeStartEnd(task, byId, memberById, holidays)
       if (
         next.startDate !== task.startDate ||
@@ -602,6 +626,7 @@ export async function recomputeAllDates(): Promise<number> {
     const byId = new Map(all.map((t) => [t.id, t]))
     let changed = 0
     for (const task of all) {
+      if (task.collectionId) continue // outside the engine — see planFor
       const next = computeStartEnd(task, byId, memberById, holidays)
       if (next.startDate !== task.startDate || next.dueDate !== task.dueDate) {
         await db.tasks.update(task.id, {

@@ -114,3 +114,99 @@ describe('milestone display time (computeWorkingPlan)', () => {
     expect(plan.startTime).toBe('08:00')
   })
 })
+
+// The engine must only rewrite dates it OWNS. `recomputeAllDates()` persists
+// whatever `planFor` returns on every app load, so a "normalization" applied to
+// a hand-typed date overwrites the user's own value with no undo. Regression
+// from the 2026-09-21 bug: a collection event set to Sat Sep 5 → Sep 7 came back
+// as Mon Sep 7 → Sep 7 after nothing but opening the app.
+// See design-docs/scheduling.md "Rules & edge cases".
+describe('manual dates the engine does not own', () => {
+  it('keeps a manual weekend start when there is no effort and no prereq', () => {
+    // Sat 2026-09-05 → Mon 2026-09-07, exactly as typed in the range picker.
+    const t = task('ev', { startDate: '2026-09-05', dueDate: '2026-09-07' })
+    expect(computeStartEnd(t, byId(t))).toEqual({
+      startDate: '2026-09-05',
+      dueDate: '2026-09-07',
+    })
+  })
+
+  it('keeps a manual Sunday start too (the other half of the weekend)', () => {
+    const t = task('ev2', { startDate: '2026-09-20', dueDate: '2026-09-22' })
+    expect(computeStartEnd(t, byId(t))).toEqual({
+      startDate: '2026-09-20',
+      dueDate: '2026-09-22',
+    })
+  })
+
+  it('leaves a manual off-day start alone as well, not just weekends', () => {
+    const m = { id: 'mm', name: 'mm', daysOff: [{ date: '2026-09-08' }] }
+    const t = task('ev3', { assigneeId: 'mm', startDate: '2026-09-08', dueDate: '2026-09-10' })
+    const plan = computeStartEnd(t, byId(t), new Map([['mm', m as never]]))
+    expect(plan.startDate).toBe('2026-09-08')
+  })
+
+  it('STILL normalizes a weekend start once the task has effort (engine owns it)', () => {
+    // Sat 2026-09-05 + 2 days effort → Mon Sep 7, Tue Sep 8.
+    const t = task('w', { startDate: '2026-09-05', estimate: 2 })
+    expect(computeStartEnd(t, byId(t))).toEqual({
+      startDate: '2026-09-07',
+      dueDate: '2026-09-08',
+    })
+  })
+
+  it('STILL normalizes a prereq-derived start off a weekend', () => {
+    // Prereq ends Fri Sep 4 at 17:00 → dependent starts Mon Sep 7, not Sat.
+    const p = task('pw', { estimate: 1, startDate: '2026-09-04' })
+    const d = task('dw', { estimate: 1, dependsOn: ['pw'] })
+    expect(computeStartEnd(d, byId(p, d)).startDate).toBe('2026-09-07')
+  })
+})
+
+// A collection item is a dated row, not work: no assignee/effort/prereq columns
+// exist for it, and weekends/holidays are working-time concepts that must not
+// touch it. See design-docs/collections.md "Cách ly khỏi sprint engine".
+describe('collection items are outside the engine', () => {
+  it('returns a collection item’s stored dates verbatim, weekend or not', () => {
+    const t = task('c1', {
+      sprintId: null,
+      collectionId: 'coll',
+      startDate: '2026-09-05', // Saturday
+      dueDate: '2026-09-07',
+    })
+    expect(computeStartEnd(t, byId(t))).toEqual({
+      startDate: '2026-09-05',
+      dueDate: '2026-09-07',
+    })
+  })
+
+  it('ignores effort and prereqs on a collection item (stale data from an import)', () => {
+    const p = task('cp', { estimate: 1, startDate: '2026-09-04' })
+    const t = task('c2', {
+      sprintId: null,
+      collectionId: 'coll',
+      estimate: 3,
+      dependsOn: ['cp'],
+      startDate: '2026-09-05',
+      dueDate: '2026-09-07',
+    })
+    expect(computeStartEnd(t, byId(p, t))).toEqual({
+      startDate: '2026-09-05',
+      dueDate: '2026-09-07',
+    })
+  })
+
+  it('ignores a project holiday covering a collection item', () => {
+    const t = task('c3', {
+      sprintId: null,
+      collectionId: 'coll',
+      startDate: '2026-09-08',
+      dueDate: '2026-09-09',
+    })
+    const hol = new Map([['p', [{ date: '2026-09-08' }, { date: '2026-09-09' }]]])
+    expect(computeStartEnd(t, byId(t), undefined, hol)).toEqual({
+      startDate: '2026-09-08',
+      dueDate: '2026-09-09',
+    })
+  })
+})

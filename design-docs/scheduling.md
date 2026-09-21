@@ -1,7 +1,8 @@
 # Auto-scheduling engine
 
 **Status:** Implemented
-**Last updated:** 2026-09-11 (clearing effort clears the computed end date)
+**Last updated:** 2026-09-21 (the engine no longer rewrites dates it does not own: a manual
+start is never pushed off a weekend, and collection items are exempt entirely)
 **Code:** `app/src/scheduling.ts` (`planFor`, `computeStartEnd`, `computeWorkingPlan`,
 `computeWorkingTimes`, `recomputeDates`, `recomputeAllDates`, `expandHolidaysNamed`,
 `expandHolidays`, `mergeOffPart`, `normalizeHolidays`, `projectHolidayMap`, `addDays`)
@@ -39,10 +40,13 @@ times) automatically, so the plan stays correct as inputs change — no manual d
    **If no prereq has a usable finish yet** (e.g. you re-link to an unscheduled task) there's no
    anchor, so the start **clears to `null`** rather than lingering at the value a *previous*
    prereq produced; it fills back in once a prereq is scheduled (the BFS cascade re-runs).
-2. **Normalize** start past weekends/off-days (and to the day's natural start if AM is off).
+2. **Normalize** start past weekends/off-days (and to the day's natural start if AM is off) —
+   **only for a start the engine owns**, i.e. one derived from a prereq, or a manual start on a
+   task that has effort to walk. A **manual start with no effort** is returned exactly as typed.
 3. **Consume effort** day by day, taking `min(remaining, available)` until the estimate is
    spent; the final day's wall position becomes the due fraction.
-- No effort and no prereqs → dates stay **manual** (whatever the user set).
+- No effort and no prereqs → dates stay **manual** (whatever the user set) — *both* ends,
+  start included. See "The engine only rewrites dates it owns" below.
 - **Parent (group) tasks**: a task that has children is scheduled as the **rolled-up span** of
   its children — `startDate` = earliest child start, `dueDate`/`dueFraction` = the latest child
   finish. Its own estimate/start/`dependsOn` are ignored. This makes a group a valid **prereq
@@ -89,6 +93,26 @@ Shared helpers, so the same rule can't be re-written three ways:
 > containing `db.tasks` also declares `db.projects`.
 
 ## Rules & edge cases
+- **The engine only rewrites dates it owns.** `recomputeAllDates()` runs on every app load and
+  **persists** whatever `planFor` returns, so anything the engine "normalizes" is written to
+  IndexedDB over the user's own value — silently, with no undo. The line between owned and
+  manual is therefore load-bearing:
+  - **Owned** — a start derived from a prereq, and an end computed from effort. Normalize
+    these freely (skip weekends / off-days, lift to the day's natural start).
+  - **Manual** — a start the user typed on a task with no effort, and an end on a task with
+    no effort. Hand these back untouched, *even when they fall on a Sat/Sun or an off-day*.
+    The date picker renders weekends **dimmed-but-selectable** ([date-picker.md](./date-picker.md)),
+    so picking one is a deliberate, legal choice — not an error to correct.
+
+  *(2026-09-21 bug: step 2 normalized unconditionally, above the `estimate <= 0` early return.
+  A hand-set event on Sat Sep 5 silently became Mon Sep 7 on the next app open, with the End
+  column left alone — the row looked half-edited by nobody. The original dates were gone.)*
+- **Collection items are outside the engine.** A task with a `collectionId` is a dated row, not
+  work — a collection has "**không scheduling**" by design ([collections.md](./collections.md)):
+  its UI has no Assignee / Effort / Prereq column, and its Start/End come from one range
+  picker. `planFor` returns such a task's stored dates verbatim (before the parent roll-up and
+  before any off-day math), and the two recompute walks skip it. Weekends and project holidays
+  are working-time concepts; a live-ops event runs on a Sunday just fine.
 - A task whose end is engine-driven (has prereqs, or effort > 0) shows a **locked** date
   cell — clear the prereqs/effort to edit manually.
 - Computations always derive from fresh state, never trusting a possibly-stale stored

@@ -89,7 +89,11 @@ function ExemptStrip({
             aria-label={action}
             title={action}
             onClick={() => onToggle(m.id)}
-            className={`relative rounded-full transition focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2 ${
+            // `inline-flex` (not the button default inline-block): the box then
+            // wraps the avatar exactly instead of sitting on a text line box,
+            // whose baseline differs between a PHOTO avatar (an <img>) and a
+            // letter one — which is what made the strip look wavy.
+            className={`relative inline-flex rounded-full transition focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2 ${
               exempt ? 'opacity-35 grayscale' : 'hover:opacity-80'
             }`}
           >

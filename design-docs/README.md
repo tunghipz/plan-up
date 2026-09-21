@@ -71,7 +71,7 @@ Non-obvious behaviors, defaults, persistence keys.
 | [collections.md](./collections.md) | Task ngoài sprint — collection tự đặt tên, nhiều bảng (sections), view List (giống sprint, tap-to-edit, **sortable columns** + **date-range picker**) + Calendar liền mạch, status do user tự tạo per-collection |
 | [sprint-rollover.md](./sprint-rollover.md) | Move unfinished tasks to next sprint — preview popover |
 | [members-and-days-off.md](./members-and-days-off.md) | Member labels, colors, off-days |
-| [project-holidays.md](./project-holidays.md) | Project-wide days off (Tết, lễ, offsite) — two-tap range picker over a 2-month calendar, unioned into every task by the scheduler, `Nd holiday` chip on member cards that a period actually overlaps, hatched in the Timeline |
+| [project-holidays.md](./project-holidays.md) | Project-wide days off (Tết, lễ, offsite) — two-tap range picker over a 2-month calendar, unioned into every task by the scheduler, **per-member exemptions** (`exceptMemberIds`, one click on an avatar in the holiday row), `Nd holiday` chip on member cards that a period actually overlaps, hatched in the Timeline |
 | [member-title.md](./member-title.md) | Optional per-member role label (free-text), shown in settings + sprint header |
 | [member-avatars.md](./member-avatars.md) | Custom member avatar — upload photo (resized) or pick emoji; edited in Project Settings; falls back to colored initial |
 | [member-lane-order.md](./member-lane-order.md) | Drag-to-reorder member lanes (per project); drives List card order + Board `member` sort |
@@ -80,10 +80,10 @@ Non-obvious behaviors, defaults, persistence keys.
 | [sprint-activity-log.md](./sprint-activity-log.md) | Sprint-wide activity log — 🕒 toolbar entry opens a right-side drawer (timeline + by-member); append-only `events` store, the app's sole edit-history surface |
 | [task-groups.md](./task-groups.md) | Group tasks under a parent task (nested, roll-up + collapse) |
 | [task-rich-text.md](./task-rich-text.md) | Inline formatting inside a task title (**bold**, *italic*, ~~strike~~, ==highlight==) via markdown-lite markers + ⌘B/⌘I shortcuts |
-| [scheduling.md](./scheduling.md) | Auto-scheduling engine (effort, prereqs, workdays) |
+| [scheduling.md](./scheduling.md) | Auto-scheduling engine (effort, prereqs, workdays); the engine only rewrites dates it owns, and never touches collection items |
 | [milestones.md](./milestones.md) | Effort-0 tasks shown as milestones — `◆ Milestone` pill + single collapsed date (List view) |
 | [conflict-warning.md](./conflict-warning.md) | Warn when a member is double-booked (same start/end/prereq) |
-| [dependencies.md](./dependencies.md) | Prerequisites, cycle prevention, blocked state |
+| [dependencies.md](./dependencies.md) | Prerequisites, cycle prevention, blocked state, dependents rendered under their prereq in every sort |
 | [status-and-priority.md](./status-and-priority.md) | Status circle/pill, priority chip |
 | [date-picker.md](./date-picker.md) | Custom Cupertino calendar picker (sprint-aware, days-off dots + list; **range mode** for collection items) |
 | [list-view.md](./list-view.md) | Grouped cards, sortable columns, column widths, drag-to-reorder |

@@ -8,7 +8,10 @@ import {
   mergeOffPart,
   normalizeHolidays,
   expandHolidays,
+  expandHolidaysFor,
   projectHolidayMap,
+  deleteMember,
+  computeStartEnd,
   setProjectHolidays,
   recomputeDates,
   uid,
@@ -69,7 +72,11 @@ describe('projectHolidayMap', () => {
       proj('p1', [{ id: 'h', name: 'Quốc khánh', from: '2026-09-02', to: '2026-09-03' }]),
       proj('p2'),
     ])
-    expect(m.get('p1')).toHaveLength(2)
+    // The map carries the ROWS now, not pre-expanded dates — the expansion is
+    // per member (exempt lists), so it happens in `leafPlan`. One 2-day period
+    // is therefore one entry, not two.
+    expect(m.get('p1')).toHaveLength(1)
+    expect(m.get('p1')?.[0].name).toBe('Quốc khánh')
     expect(m.has('p2')).toBe(false)
   })
 
@@ -486,5 +493,119 @@ describe('setProjectHolidays', () => {
       { id: uid(), name: 'x', from: '2026-09-02', to: '2026-09-03' },
     ])
     expect((await db.tasks.get('t2'))!.dueDate).toBe('2026-09-03')
+  })
+})
+
+// ── per-member exemptions (`Holiday.exceptMemberIds`) ─────────────────────
+// A project holiday applies to everyone by default; `exceptMemberIds` lists the
+// people it does NOT apply to (team abroad, someone on call). Exempt-list rather
+// than applies-to-list on purpose, so a member who joins later is off by default.
+// See design-docs/project-holidays.md "Miễn cho từng member".
+
+describe('normalizeHolidays — exempt list', () => {
+  const base = { id: 'h', name: 'Tết', from: '2027-02-15', to: '2027-02-19' }
+
+  it('keeps a clean list and de-duplicates it', () => {
+    const [h] = normalizeHolidays([{ ...base, exceptMemberIds: ['m1', 'm2', 'm1'] }])
+    expect(h.exceptMemberIds).toEqual(['m1', 'm2'])
+  })
+
+  it('drops the field entirely when it ends up empty — one shape for "applies to all"', () => {
+    expect(normalizeHolidays([{ ...base, exceptMemberIds: [] }])[0].exceptMemberIds).toBeUndefined()
+    const junk = [null, 5, '', undefined] as unknown as string[]
+    expect(
+      normalizeHolidays([{ ...base, exceptMemberIds: junk }])[0].exceptMemberIds
+    ).toBeUndefined()
+    expect(
+      normalizeHolidays([{ ...base, exceptMemberIds: 'm1' as unknown as string[] }])[0]
+        .exceptMemberIds
+    ).toBeUndefined()
+  })
+})
+
+describe('expandHolidaysFor', () => {
+  const tet: Holiday = {
+    id: 'tet', name: 'Tết', from: '2027-02-15', to: '2027-02-17', exceptMemberIds: ['m2'],
+  }
+  const offsite: Holiday = { id: 'os', name: 'Offsite', from: '2027-02-17', to: '2027-02-18' }
+
+  it('drops the periods this member is exempt from', () => {
+    expect(expandHolidaysFor([tet], 'm1').map((d) => d.date)).toEqual([
+      '2027-02-15', '2027-02-16', '2027-02-17',
+    ])
+    expect(expandHolidaysFor([tet], 'm2')).toEqual([])
+  })
+
+  it('keeps a date covered by a SECOND period the member is not exempt from', () => {
+    // Feb 17 is inside both. Exempt from Tết only → still off that day. A
+    // subtract-after-expanding implementation would wrongly hand it back.
+    expect(expandHolidaysFor([tet, offsite], 'm2').map((d) => d.date)).toEqual([
+      '2027-02-17', '2027-02-18',
+    ])
+  })
+
+  it('applies every holiday to an unassigned task (no member to exempt)', () => {
+    expect(expandHolidaysFor([tet], null)).toHaveLength(3)
+    expect(expandHolidaysFor([tet], undefined)).toHaveLength(3)
+  })
+})
+
+describe('scheduling around an exempt member', () => {
+  // Mon 2027-02-15 → Wed 2027-02-17 off for everyone except m2.
+  const hol = new Map([
+    [PID, [{ id: 'h', name: 'Tết', from: '2027-02-15', to: '2027-02-17', exceptMemberIds: ['m2'] }]],
+  ])
+  const member = (id: string): Member => ({
+    id, name: id, projectId: PID, color: '#0071E3', daysOff: [],
+  })
+  const members = new Map([['m1', member('m1')], ['m2', member('m2')]])
+  const t = (assigneeId: string): Task =>
+    task({ id: 't-' + assigneeId, assigneeId, startDate: '2027-02-15', estimate: 3 })
+
+  it('pushes the member the holiday applies to', () => {
+    // Mon–Wed off → Thu, Fri, then Mon 2027-02-22 (weekend skipped).
+    const a = t('m1')
+    expect(computeStartEnd(a, new Map([[a.id, a]]), members, hol)).toEqual({
+      startDate: '2027-02-18',
+      dueDate: '2027-02-22',
+    })
+  })
+
+  it('leaves the exempt member working straight through', () => {
+    const b = t('m2')
+    expect(computeStartEnd(b, new Map([[b.id, b]]), members, hol)).toEqual({
+      startDate: '2027-02-15',
+      dueDate: '2027-02-17',
+    })
+  })
+})
+
+describe('deleteMember — holiday exempt lists', () => {
+  beforeEach(async () => {
+    await db.delete()
+    await db.open()
+  })
+
+  it('removes the deleted member from every exempt list, dropping the field when it empties', async () => {
+    await db.projects.add({
+      id: PID,
+      name: 'P',
+      createdAt: 0,
+      holidays: [
+        { id: 'h1', name: 'Tết', from: '2027-02-15', to: '2027-02-16', exceptMemberIds: ['m1', 'm2'] },
+        { id: 'h2', name: 'Offsite', from: '2027-03-01', to: '2027-03-02', exceptMemberIds: ['m1'] },
+        { id: 'h3', name: 'Giỗ Tổ', from: '2027-04-26', to: '2027-04-26' },
+      ],
+    })
+    await db.members.add({
+      id: 'm1', name: 'Khoa', projectId: PID, color: '#FF9500', daysOff: [],
+    })
+    await deleteMember('m1')
+
+    const saved = (await db.projects.get(PID))!.holidays!
+    expect(saved[0].exceptMemberIds).toEqual(['m2'])
+    // h2's list held only the deleted member → the field goes away entirely.
+    expect(saved[1].exceptMemberIds).toBeUndefined()
+    expect(saved[2].exceptMemberIds).toBeUndefined()
   })
 })

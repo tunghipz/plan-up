@@ -105,7 +105,28 @@ export function remapBundle(
   }
   for (const t of bundle.tasks) taskMap.set(t.id, newId())
 
-  const project: Project = { ...bundle.project, id: projectId }
+  const project: Project = {
+    ...bundle.project,
+    id: projectId,
+    // A holiday's exempt list points at member ids, which are being renumbered
+    // right here — carry it across, dropping ids that didn't come with the
+    // bundle. Left alone it would exempt nobody (best case) or a stranger in
+    // the destination app (worst). See design-docs/project-holidays.md.
+    ...(bundle.project.holidays
+      ? {
+          holidays: bundle.project.holidays.map((h) =>
+            h.exceptMemberIds?.length
+              ? {
+                  ...h,
+                  exceptMemberIds: h.exceptMemberIds
+                    .map((id) => memberMap.get(id))
+                    .filter((id): id is string => !!id),
+                }
+              : h
+          ),
+        }
+      : {}),
+  }
 
   const members: Member[] = bundle.members.map((m) => ({
     ...m,

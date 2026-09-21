@@ -1179,6 +1179,24 @@ export async function deleteMember(memberId: string) {
       .equals(memberId)
       .modify({ assigneeId: null })
     await db.members.delete(memberId)
+    // Drop the member from every holiday exempt list: a stale id exempts nobody
+    // today, but it would silently hand its exemption to whoever inherits the id
+    // through an import. See design-docs/project-holidays.md.
+    const projects = await db.projects.toArray()
+    for (const p of projects) {
+      if (!p.holidays?.some((h) => h.exceptMemberIds?.includes(memberId))) continue
+      await db.projects.update(p.id, {
+        holidays: p.holidays.map((h) =>
+          h.exceptMemberIds?.includes(memberId)
+            ? (() => {
+                const rest = h.exceptMemberIds.filter((i) => i !== memberId)
+                const { exceptMemberIds: _drop, ...bare } = h
+                return rest.length ? { ...bare, exceptMemberIds: rest } : bare
+              })()
+            : h
+        ),
+      })
+    }
   })
   for (const id of affected) await recomputeDates(id)
 }

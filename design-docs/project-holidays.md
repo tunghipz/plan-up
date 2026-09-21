@@ -1,7 +1,10 @@
 # Project holidays — ngày nghỉ chung toàn project
 
 **Status:** Implemented
-**Last updated:** 2026-08-18 (bản đầu; + fix popover tràn đáy màn hình và popover không
+**Last updated:** 2026-09-21 (**miễn kỳ nghỉ cho từng member** — `Holiday.exceptMemberIds`,
+dải avatar bấm được ngay trong hàng kỳ nghỉ; phương án A chốt qua
+`demo/holiday-member-exception.html`. Xem mục *Miễn cho từng member* bên dưới)
+**Previously:** 2026-08-18 (bản đầu; + fix popover tràn đáy màn hình và popover không
 tự đóng khi đóng drawer settings; + **bỏ pill khỏi top bar, chuyển xuống hàng `Holidays`
 riêng trong sprint header card, hiện TÊN kỳ nghỉ + nút `+`** — phương án D, chốt qua
 `demo/holiday-in-sprint-header.html`; + **chip `Nd holiday` trên header member card, chỉ
@@ -28,6 +31,81 @@ nên khớp app do cấu tạo — chi tiết ở
 `app/src/ProjectHolidays.tsx` (`ProjectHolidaysButton`),
 `app/src/usePinnedPopover.ts` (tự đóng khi trigger bị ẩn),
 `app/src/App.tsx` (`SprintPageHeader` — hàng `Holidays`) + `app/src/ProjectSettingsView.tsx` (2 chỗ mount)
+
+## Miễn cho từng member (`exceptMemberIds`)
+
+Ngày lễ là thuộc tính của project, nhưng **không phải ai cũng nghỉ đúng lịch đó**: team
+nước ngoài không nghỉ Tết ta, một người trực ca lễ, contractor tính công riêng. Trước
+2026-09-21 không có đường nào diễn đạt việc này — off-day là phép **union** của
+`member.daysOff` và `project.holidays`, mà union chỉ cộng thêm ngày nghỉ, không trừ được.
+
+### Data
+
+`Holiday.exceptMemberIds?: string[]` — **danh sách người được miễn**, không phải danh sách
+người được áp. Chọn chiều này (phương án A, không phải `memberIds`) vì hai lý do:
+
+1. **Member mới join tự động nghỉ.** Danh sách "được áp" sẽ không có người mới ⇒ tái sinh
+   đúng cái bug mà feature này sinh ra để sửa (xem *Purpose*).
+2. Ngoại lệ là **thiểu số**. Miễn 2 trong 10 người thì lưu 2 id, không phải tick 8 ô.
+
+Vắng mặt / mảng rỗng = áp cho cả project. `normalizeHolidays` là write gate: bỏ phần tử
+không phải string, khử trùng lặp, và **drop hẳn field khi mảng rỗng** để không đẻ ra hai
+cách biểu diễn cùng một ý.
+
+### UI — dải avatar trong hàng (phương án A)
+
+Trong popover **Holidays**, mỗi hàng kỳ nghỉ mang thêm **một dải avatar của mọi member
+trong project**. Click avatar = bật/tắt miễn cho người đó: người bị miễn hiện **mờ +
+grayscale + gạch chéo**. Không popover con, không điều hướng — **1 click**, đúng DNA
+"speed > breadth".
+
+Đánh đổi đã biết, chốt qua `demo/holiday-member-exception.html` (so 3 phương án):
+- Team đông (>10) thì dải avatar xuống nhiều dòng. Chấp nhận được với quy mô app nhắm tới;
+  nếu sau này chật thì đổi sang **phương án B** (pill `4 of 6` mở popover con có checkbox) —
+  demo đã dựng sẵn.
+- Avatar nhỏ, không nhãn ⇒ dễ bấm nhầm. Bù bằng `title` ghi rõ hành động ("Miễn Khoa khỏi
+  Tết 2027" / "Cho Khoa nghỉ lại") và trạng thái đọc được qua `aria-pressed`.
+
+Project **chưa có member nào** → không render dải (không có gì để miễn).
+
+### Scheduler
+
+`ProjectHolidayMap` đổi từ `Map<projectId, DayOff[]>` (đã nở phẳng, mù member) sang
+`Map<projectId, Holiday[]>` (**rows thô**). Không thể nở sẵn nữa vì kết quả **phụ thuộc
+member**: cùng một ngày, người này nghỉ người kia làm.
+
+Không dùng phép trừ trên tập đã nở — hai kỳ nghỉ chồng nhau cùng một ngày, một kỳ miễn một
+kỳ không, thì ngày đó **vẫn nghỉ**. Nên `leafPlan` nở lại theo từng member:
+`expandHolidaysFor(holidays, memberId)` lọc bỏ row có `memberId` trong `exceptMemberIds`
+rồi mới gọi `expandHolidays`. Kết quả cache trong `PlanCtx` theo khoá `projectId|memberId`
+nên một lần recompute cả bảng chỉ nở mỗi (project, member) một lần.
+
+Task **chưa assign**: không có member để đối chiếu ⇒ ăn **đủ** kỳ nghỉ, giữ nguyên luật cũ
+("Holidays apply to unassigned tasks too").
+
+### Những chỗ đọc phải biết chuyện này
+
+Con số nào nói về **một người** thì phải lọc, nếu không nó nói dối:
+- **Chip `Nd holiday`** trên header member card (`members.tsx`) — người được miễn không hiện
+  chip, hoặc hiện số nhỏ hơn nếu chỉ miễn một trong nhiều kỳ.
+- **Block "Project holidays"** (read-only) trong popover days-off của member — chỉ liệt kê
+  kỳ nghỉ thật sự áp lên họ.
+- **Hatch ngày lễ trong Timeline** (`GanttView`) — lane của người được miễn không hatch.
+
+Con số **toàn project** (badge trong popover Holidays, pill ở sprint header, share page) vẫn
+đếm theo cả project, không trừ ngoại lệ — nó trả lời "kỳ nghỉ này dài bao nhiêu", không phải
+"người X mất mấy ngày".
+
+### Edge cases
+
+- **Xoá member** → `deleteMember` gỡ id đó khỏi mọi `exceptMemberIds` trong cùng transaction.
+  Không gỡ thì id rác nằm lại, và một member mới trùng id (không xảy ra với uuid, nhưng
+  import thì có) sẽ thừa hưởng suất miễn của người đã xoá.
+- **Import / export** — field đi kèm project row như mọi field khác của `Holiday`; import
+  remap member id thì phải remap luôn trong `exceptMemberIds`, nếu không danh sách trỏ vào
+  member không tồn tại.
+- Id trỏ vào member đã biến mất **không gây lỗi** — lọc theo id, không tìm thấy thì coi như
+  không ai được miễn.
 
 ## Purpose
 

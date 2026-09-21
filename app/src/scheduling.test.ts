@@ -203,7 +203,9 @@ describe('collection items are outside the engine', () => {
       startDate: '2026-09-08',
       dueDate: '2026-09-09',
     })
-    const hol = new Map([['p', [{ date: '2026-09-08' }, { date: '2026-09-09' }]]])
+    const hol = new Map([
+      ['p', [{ id: 'h', name: 'Lễ', from: '2026-09-08', to: '2026-09-09' }]],
+    ])
     expect(computeStartEnd(t, byId(t), undefined, hol)).toEqual({
       startDate: '2026-09-08',
       dueDate: '2026-09-09',

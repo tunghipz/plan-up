@@ -1,7 +1,7 @@
 # Data model
 
 **Status:** Implemented
-**Last updated:** 2026-08-18 (`Project.holidays` write gate)
+**Last updated:** 2026-09-21 (`Holiday.exceptMemberIds` — miễn kỳ nghỉ cho từng member)
 **Code:** `app/src/types.ts` (entity types) + `app/src/schema.ts` (Dexie schema & migrations); `app/src/db.ts` is the facade re-exporting both
 
 ## Purpose
@@ -17,10 +17,13 @@ Seven IndexedDB tables (Dexie database name **`plan-up`**): `projects`, `members
 `id` · `name` · `createdAt` (number) · `description?` (string) · `color?` (hex) · `icon?` (emoji)
 · `holidays?` (`Holiday[]`)
 
-`Holiday = { id, name, from, to, half? }` — một **dải** ngày nghỉ chung cho cả project
-(Tết, Quốc khánh, offsite), `from`/`to` là `yyyy-mm-dd` inclusive; `half` chỉ hợp lệ khi
-`from === to`. Scheduler union vào `Member.daysOff` cho **mọi** task trong project, kể cả
-task chưa assign. Optional + **non-indexed** ⇒ **không bump Dexie version** (cùng pattern
+`Holiday = { id, name, from, to, half?, exceptMemberIds? }` — một **dải** ngày nghỉ chung cho
+cả project (Tết, Quốc khánh, offsite), `from`/`to` là `yyyy-mm-dd` inclusive; `half` chỉ hợp lệ
+khi `from === to`. Scheduler union vào `Member.daysOff` cho **mọi** task trong project, kể cả
+task chưa assign. `exceptMemberIds?: string[]` là **danh sách member được miễn** kỳ nghỉ này
+(mặc định vắng mặt = áp cho tất cả, nên **member mới join tự động nghỉ**); task của member nằm
+trong danh sách vẫn tính ngày đó là ngày công. Task **chưa assign** không có member để đối
+chiếu nên luôn ăn đủ kỳ nghỉ. Optional + **non-indexed** ⇒ **không bump Dexie version** (cùng pattern
 `description`/`color`/`icon`). **Mọi đường ghi đi qua `normalizeHolidays`** (`scheduling.ts`)
 — cả `setProjectHolidays` lẫn hai đường import: ngày sai `yyyy-mm-dd`, dải dài hơn 366 ngày,
 hay ngày không tồn tại trên lịch bị **drop**, vì các vòng lặp ngày ở downstream không sống nổi

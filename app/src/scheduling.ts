@@ -31,13 +31,16 @@ export function isWeekend(dateStr: string): boolean {
 const EPS = 1e-9
 
 /**
- * Project-wide off-days, keyed by `projectId` and already expanded to one entry
- * per date. Keyed (rather than a flat array) because `recomputeDates` walks a
- * dependency chain that can, in principle, cross into another project — each
- * task must read ITS OWN project's holidays.
+ * Project-wide holidays, keyed by `projectId`. Keyed (rather than a flat array)
+ * because `recomputeDates` walks a dependency chain that can, in principle,
+ * cross into another project — each task must read ITS OWN project's holidays.
+ *
+ * Carries the ROWS, not a pre-expanded date list: a holiday can exempt
+ * individual members (`exceptMemberIds`), so which dates are off depends on WHO
+ * the task is assigned to. `leafPlan` expands per member and caches the result.
  * See design-docs/project-holidays.md.
  */
-export type ProjectHolidayMap = Map<string, DayOff[]>
+export type ProjectHolidayMap = Map<string, Holiday[]>
 
 /**
  * Expand `Holiday` ranges into one `DayOff` per date. `half` is only honoured on
@@ -72,12 +75,19 @@ export function normalizeHolidays(holidays: Holiday[] | undefined): Holiday[] {
     // NaN (a shape-valid but non-calendar date like 2027-99-99) fails this too.
     if (!(span >= 0 && span < MAX_HOLIDAY_SPAN_DAYS)) continue
     const single = from === to
+    // Exempt list: keep strings only, de-duplicate, and DROP the field when it
+    // ends up empty — "applies to everyone" must have exactly one representation
+    // (absent), never also `[]`. See design-docs/project-holidays.md.
+    const except = Array.isArray(h.exceptMemberIds)
+      ? [...new Set(h.exceptMemberIds.filter((id): id is string => typeof id === 'string' && !!id))]
+      : []
     clean.push({
       id: h.id,
       name: (h.name ?? '').trim() || 'Untitled',
       from,
       to,
       ...(single && h.half ? { half: h.half } : {}),
+      ...(except.length ? { exceptMemberIds: except } : {}),
     })
   }
   clean.sort((a, b) => a.from.localeCompare(b.from) || a.to.localeCompare(b.to))
@@ -155,6 +165,28 @@ export function expandHolidays(holidays: Holiday[] | undefined): DayOff[] {
   return out.sort((a, b) => a.date.localeCompare(b.date))
 }
 
+/**
+ * The scheduler's per-MEMBER view: drop the periods this member is exempt from,
+ * then expand what's left.
+ *
+ * Filter-then-expand, never subtract-after-expanding: two periods can cover the
+ * same date with only one of them exempting this member, and that date is still
+ * a day off. Subtraction would wrongly hand it back.
+ *
+ * `memberId` undefined (an unassigned task) → every holiday applies, which is
+ * the pre-existing rule: holidays hang off the project, not off a member.
+ */
+export function expandHolidaysFor(
+  holidays: Holiday[] | undefined,
+  memberId: string | null | undefined
+): DayOff[] {
+  if (!holidays?.length) return []
+  const mine = memberId
+    ? holidays.filter((h) => !h.exceptMemberIds?.includes(memberId))
+    : holidays
+  return mine.length === holidays.length ? expandHolidays(holidays) : expandHolidays(mine)
+}
+
 /** Build the scheduler's holiday map from one project or a list of them. */
 export function projectHolidayMap(
   projects: Project | Project[] | undefined | null
@@ -162,8 +194,7 @@ export function projectHolidayMap(
   const list = !projects ? [] : Array.isArray(projects) ? projects : [projects]
   const m: ProjectHolidayMap = new Map()
   for (const p of list) {
-    const days = expandHolidays(p.holidays)
-    if (days.length) m.set(p.id, days)
+    if (p.holidays?.length) m.set(p.id, p.holidays)
   }
   return m
 }
@@ -188,8 +219,14 @@ interface TaskPlan {
 type PlanCtx = {
   children: Map<string, string[]>
   inProgress: Set<string>
-  /** Project-wide off-days; rides on the ctx so it threads the whole recursion. */
+  /** Project-wide holidays; rides on the ctx so it threads the whole recursion. */
   holidays?: ProjectHolidayMap
+  /**
+   * Expanded off-days per `projectId|memberId`. The expansion is member-specific
+   * (exempt lists) and every leaf would otherwise redo it — one full-table
+   * recompute expands each (project, member) pair exactly once.
+   */
+  holidayDays: Map<string, DayOff[]>
 }
 const NULL_PLAN: TaskPlan = { startDate: null, dueDate: null, startOffset: 0, dueFraction: 1 }
 
@@ -226,6 +263,7 @@ function planFor(
     children: childrenByParent(byId),
     inProgress: new Set<string>(),
     holidays,
+    holidayDays: new Map<string, DayOff[]>(),
   }
   const cached = cache.get(task.id)
   if (cached) return cached
@@ -300,7 +338,15 @@ function leafPlan(
     }
   }
   markOff(member?.daysOff)
-  markOff(ctx.holidays?.get(task.projectId))
+  // Project holidays, minus the periods THIS member is exempt from. Cached per
+  // (project, member) on the ctx — see PlanCtx.holidayDays.
+  const holKey = task.projectId + '|' + (task.assigneeId ?? '')
+  let holDays = ctx.holidayDays.get(holKey)
+  if (!holDays) {
+    holDays = expandHolidaysFor(ctx.holidays?.get(task.projectId), task.assigneeId)
+    ctx.holidayDays.set(holKey, holDays)
+  }
+  markOff(holDays)
 
   const dayContrib = (date: string): number => {
     if (isWeekend(date)) return 0
@@ -510,6 +556,7 @@ export function computeAllWorkingPlans(
     children: childrenByParent(byId),
     inProgress: new Set<string>(),
     holidays,
+    holidayDays: new Map<string, DayOff[]>(),
   }
   const out = new Map<string, WorkingPlan>()
   for (const t of tasks) {

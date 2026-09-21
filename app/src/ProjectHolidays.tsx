@@ -1,13 +1,15 @@
 import { useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { useLiveQuery } from 'dexie-react-hooks'
 import { CalendarDays, Plus, X } from 'lucide-react'
 import type { DateRange } from './DatePicker'
 import { CalendarGrid } from './DatePicker'
 import { usePinnedPopover } from './usePinnedPopover'
-import { setProjectHolidays, uid } from './db'
+import { db, setProjectHolidays, uid } from './db'
+import { Avatar } from './members'
 import { expandHolidays } from './scheduling'
 import { formatShortDate, fmtDays, holidayWorkDays, holidayLoadInSpan } from './lib'
-import type { Holiday, Project } from './types'
+import type { Holiday, Member, Project } from './types'
 
 /**
  * Project-wide days off (Tết, national holidays, a team offsite) — see
@@ -49,6 +51,62 @@ function holidaysInRange(holidays: Holiday[], range: DateRange): Holiday[] {
     }))
 }
 
+/**
+ * Who this holiday does NOT apply to — one tappable avatar per project member.
+ *
+ * Exemptions live on the holiday row itself (option A, settled in
+ * `demo/holiday-member-exception.html`) rather than behind a sub-popover: the
+ * whole point of a project holiday is that it is set once for everyone, so the
+ * exception must cost ONE click and be readable without opening anything. A
+ * greyed, struck-through avatar says "Khoa works that week" at a glance.
+ *
+ * The avatar is small and unlabelled, so the accessible name and the tooltip
+ * carry the action, and `aria-pressed` carries the state.
+ */
+function ExemptStrip({
+  holiday,
+  members,
+  onToggle,
+}: {
+  holiday: Holiday
+  members: Member[]
+  onToggle: (memberId: string) => void
+}) {
+  if (!members.length) return null
+  return (
+    <div className="flex items-center gap-1 flex-wrap pl-1.5 pb-1">
+      <span className="text-[10px] text-ink-faint mr-0.5">Applies to</span>
+      {members.map((m) => {
+        const exempt = !!holiday.exceptMemberIds?.includes(m.id)
+        const action = exempt
+          ? `${m.name} is exempt from ${holiday.name} — click to put them back on holiday`
+          : `Exempt ${m.name} from ${holiday.name}`
+        return (
+          <button
+            key={m.id}
+            type="button"
+            aria-pressed={exempt}
+            aria-label={action}
+            title={action}
+            onClick={() => onToggle(m.id)}
+            className={`relative rounded-full transition focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2 ${
+              exempt ? 'opacity-35 grayscale' : 'hover:opacity-80'
+            }`}
+          >
+            <Avatar member={m} size={20} ring={false} />
+            {exempt && (
+              <span
+                aria-hidden
+                className="absolute left-[-1px] right-[-1px] top-1/2 h-[1.5px] rounded-full bg-ink -rotate-12"
+              />
+            )}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
 const spanLabel = (h: Pick<Holiday, 'from' | 'to' | 'half'>) =>
   h.from === h.to
     ? `${formatShortDate(h.from)}${h.half ? (h.half === 'am' ? ' · AM' : ' · PM') : ''}`
@@ -86,6 +144,13 @@ export function ProjectHolidaysButton({
     () => [...(project.holidays ?? [])].sort((a, b) => a.from.localeCompare(b.from)),
     [project.holidays]
   )
+  // Only needed while the popover is open — the exempt strip is the one thing
+  // in here that reads members, and the trigger pill never does.
+  const members =
+    useLiveQuery(
+      () => (open ? db.members.where('projectId').equals(project.id).toArray() : []),
+      [open, project.id]
+    ) ?? []
   const visible = range ? holidaysInRange(holidays, range) : holidays
   // Union by date, not a per-period sum: two overlapping periods share days, and
   // this badge is a TOTAL. Summing gave "6d holidays" beside a member chip
@@ -177,6 +242,23 @@ export function ProjectHolidaysButton({
     ]
     clearDraft()
     await setProjectHolidays(project.id, next)
+  }
+  /** Flip one member's exemption on one holiday. Empty list → field dropped by
+   *  `normalizeHolidays`, so "applies to all" has a single representation. */
+  const toggleExempt = async (holidayId: string, memberId: string) => {
+    await setProjectHolidays(
+      project.id,
+      holidays.map((h) => {
+        if (h.id !== holidayId) return h
+        const cur = h.exceptMemberIds ?? []
+        return {
+          ...h,
+          exceptMemberIds: cur.includes(memberId)
+            ? cur.filter((i) => i !== memberId)
+            : [...cur, memberId],
+        }
+      })
+    )
   }
   const remove = async (id: string) => {
     await setProjectHolidays(
@@ -368,8 +450,8 @@ export function ProjectHolidaysButton({
               ) : (
                 <div className="max-h-40 overflow-auto -mx-1">
                   {holidays.map((h) => (
+                    <div key={h.id}>
                     <div
-                      key={h.id}
                       className="flex items-center gap-2 px-1.5 py-1 rounded-[8px] hover:bg-surface-hover group/hol"
                     >
                       <span className="text-sm text-ink flex-1 min-w-0 truncate">
@@ -390,11 +472,18 @@ export function ProjectHolidaysButton({
                         <X size={14} />
                       </button>
                     </div>
+                    <ExemptStrip
+                      holiday={h}
+                      members={members}
+                      onToggle={(mid) => void toggleExempt(h.id, mid)}
+                    />
+                    </div>
                   ))}
                 </div>
               )}
               <div className="text-[10px] text-ink-faint px-1 pt-1.5">
                 Counted in working days — weekends inside a holiday are already off.
+                {members.length > 0 && ' Click an avatar to exempt that member.'}
               </div>
             </div>
           </div>,

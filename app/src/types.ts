@@ -140,6 +140,16 @@ export interface Holiday {
   to: string
   /** Half-day off — only meaningful (and only kept) when `from === to`. */
   half?: 'am' | 'pm'
+  /**
+   * Members this holiday does NOT apply to (team abroad that doesn't take Tết,
+   * whoever is on call, a contractor billing their own calendar).
+   *
+   * An EXEMPT list, not an "applies to" list, on purpose: absent/empty means
+   * everyone, so a member who joins later is off by default — the very thing
+   * project holidays exist to fix. Dropped entirely when empty so there is one
+   * representation of "applies to all". See design-docs/project-holidays.md.
+   */
+  exceptMemberIds?: string[]
 }
 
 /**

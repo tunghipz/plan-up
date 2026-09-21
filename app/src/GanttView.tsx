@@ -163,6 +163,32 @@ export function GanttView({
     for (const [date, v] of named) out.set(date, { part: v.part, name: v.names.join(' · ') })
     return out
   }, [projectHolidays, workdays])
+  /**
+   * The same map, minus the periods a given member is exempt from — their lane
+   * must not be hatched on a day they are working. Built lazily and cached per
+   * member: with no exemptions anywhere (the common case) every lane shares the
+   * one map above. See design-docs/project-holidays.md.
+   */
+  const holidayByDateFor = useMemo(() => {
+    const anyExempt = projectHolidays.some((h) => h.exceptMemberIds?.length)
+    const cache = new Map<string, Map<string, { part: OffPart; name: string }>>()
+    return (memberId: string) => {
+      if (!anyExempt) return holidayByDate
+      const hit = cache.get(memberId)
+      if (hit) return hit
+      const mine = projectHolidays.filter((h) => !h.exceptMemberIds?.includes(memberId))
+      const first = workdays[0]
+      const last = workdays[workdays.length - 1]
+      const out = new Map<string, { part: OffPart; name: string }>()
+      if (first && last) {
+        for (const [date, v] of expandHolidaysNamed(mine, { start: first, end: last })) {
+          out.set(date, { part: v.part, name: v.names.join(' · ') })
+        }
+      }
+      cache.set(memberId, out)
+      return out
+    }
+  }, [projectHolidays, holidayByDate, workdays])
   // Distinct period names hatched in the current window, in date order — the
   // screen-reader equivalent of the bands' tooltips.
   const holidayNames = useMemo(() => {
@@ -416,7 +442,7 @@ export function GanttView({
         // Off half-columns within the window: this member's own days off UNIONED
         // with the project's holidays. Geometry + union rule live in lib.ts so
         // they are testable — see design-docs/gantt-view.md.
-        const offBands = offBandsFor(m.daysOff, holidayByDate, workdays, dayW)
+        const offBands = offBandsFor(m.daysOff, holidayByDateFor(m.id), workdays, dayW)
         // earlier chips first, then later — each sorted by their shown date
         offWindow.sort((a, b) =>
           a.dir !== b.dir ? (a.dir === 'earlier' ? -1 : 1) : a.date < b.date ? -1 : 1
@@ -425,7 +451,7 @@ export function GanttView({
         const laterN = offWindow.length - earlierN
         return { member: m, evs, rows, offWindow, earlierN, laterN, noDates, offBands }
       })
-  }, [members, tasks, workdays, planById, childrenByParent, holidayByDate, N, firstDay, lastDay, dayW, sprintStartDate, sprintEndDate])
+  }, [members, tasks, workdays, planById, childrenByParent, holidayByDateFor, N, firstDay, lastDay, dayW, sprintStartDate, sprintEndDate])
 
   if (!members) return <p className="text-ink-muted py-12 text-center">Loading…</p>
   if (N === 0)

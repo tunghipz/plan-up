@@ -668,7 +668,14 @@ export function MemberDaysOffButton({
   // as the personal list so a sprint view stays about this sprint.
   // One subscription for the whole app (App provides it from `currentProject`),
   // not one `db.projects.get` per member card. See design-docs/project-holidays.md.
-  const projectHolidays = useProjectHolidayList()
+  const projectHolidaysAll = useProjectHolidayList()
+  // Everything below answers a question about THIS member, so it must drop the
+  // periods they're exempt from — otherwise the card claims days off they are
+  // actually working. See design-docs/project-holidays.md "Miễn cho từng member".
+  const projectHolidays = useMemo(
+    () => projectHolidaysAll.filter((h) => !h.exceptMemberIds?.includes(member.id)),
+    [projectHolidaysAll, member.id]
+  )
   const holidayDays = useMemo(() => {
     // Same shared expansion the scheduler and the Timeline use, clipped to this
     // sprint. Names come along because this list is the read-only project block.

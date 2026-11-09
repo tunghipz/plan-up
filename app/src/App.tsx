@@ -1329,9 +1329,9 @@ function App() {
     // popovers show project holidays as read-only rows and need the same map.
     <ProjectHolidaysContext value={holidayMap}>
     <ProjectHolidayListContext value={currentProject?.holidays ?? EMPTY_HOLIDAYS}>
-    // Native vibrancy: the root stays transparent so the window's sidebar
-    // material shows through; the main column carries the canvas instead
-    // (desktop-native-feel.md §4). Home has no sidebar, so it keeps the canvas.
+    {/* Native vibrancy: the root stays transparent so the window's sidebar
+        material shows through; the main column carries the canvas instead
+        (desktop-native-feel.md §4). Home has no sidebar, so it keeps the canvas. */}
     <div
       className={`h-screen flex text-ink overflow-hidden ${
         NATIVE_VIBRANCY && !(HOME_ENABLED && screen === 'home') ? '' : 'ambient-canvas'

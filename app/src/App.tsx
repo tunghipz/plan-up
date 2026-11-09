@@ -1512,8 +1512,10 @@ function App() {
                         if (
                           !(await confirm({
                             title: 'Delete collection?',
-                            message: `“${c.name}” and all its items will be permanently deleted. This can’t be undone.`,
+                            subject: `“${c.name}”`,
+                            message: 'All its items will be permanently deleted. This can’t be undone.',
                             confirmLabel: 'Delete',
+                            icon: 'trash',
                           }))
                         )
                           return

@@ -1,6 +1,6 @@
 # Liquid Glass material (Tempered) — iOS 26 DNA, phase 1
 
-*Last updated: 2026-07-08*
+*Last updated: 2026-11-09 (`ConfirmDialog` rời kính: alert trắng đặc, xem design-system.md §6.4)*
 
 ## What & why
 
@@ -83,7 +83,9 @@ card + drag ghost nhận rim (`inset var(--glass-edge)/var(--glass-ring)`) nhưn
 nền vẫn solid; `PngExportCard` group box có **rim tĩnh inline hex** (PNG
 pipeline không render được backdrop-filter, card cố tình token-free);
 **3 dlg-sheet tự dựng ngoài ModalSheet** — search palette ⌘K (App.tsx),
-rollover popover (App.tsx), `ConfirmDialog` — cũng sang `.glass-modal`;
+rollover popover (App.tsx), `ConfirmDialog` — cũng sang `.glass-modal`
+(*2026-11-09:* `ConfirmDialog` rời kính, thành alert trắng đặc 284px trên scrim không blur —
+xem design-system.md §6.4);
 selection bar (SprintView) nhận rim trắng hardcode (bar tối cả 2 theme,
 token light là ring đen sẽ chìm); **sticky column header của List** đổi
 từ dải `ambient-canvas` đục full-bleed sang **capsule kính nổi**

@@ -92,7 +92,7 @@ import {
 } from './task-sort'
 import { FormatBubble, RichText } from './RichText'
 import { useFormatBubble } from './useFormatBubble'
-import { caretOffsetFromPoint, markForKey, sourceIndexFor, toggleMark } from './rich-text'
+import { caretOffsetFromPoint, markForKey, sourceIndexFor, stripRich, toggleMark } from './rich-text'
 
 // Re-exported so existing importers (BoardView) keep `from './SprintView'`.
 export { DatePickCell }
@@ -725,12 +725,16 @@ function SelectionBar({
   const doDelete = async () => {
     if (n === 0) return
     const hasGroup = selected.some((t) => parentIds.has(t.id))
+    // Say WHAT goes, not just how many (design-system §6.4).
+    const first = stripRich(selected[0].title).trim() || `#${selected[0].sequence}`
     const ok = await confirm({
       title: `Delete ${n} task${n === 1 ? '' : 's'}?`,
+      subject: n === 1 ? `“${first}”` : `“${first}” and ${n - 1} more`,
       message: hasGroup
         ? 'Group children will be ungrouped, not deleted.'
-        : undefined,
+        : 'This can’t be undone.',
       confirmLabel: 'Delete',
+      icon: 'trash',
     })
     if (!ok) return
     // Sequential: deleting a parent promotes its children to top-level, so a

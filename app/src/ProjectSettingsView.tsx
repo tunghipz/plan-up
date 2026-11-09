@@ -134,8 +134,10 @@ export function ProjectSettingsView({
     if (
       !(await confirm({
         title: 'Delete project?',
-        message: `“${project.name}” and all its sprints, tasks, and members will be permanently deleted. This can’t be undone.`,
+        subject: `“${project.name}”`,
+        message: 'All its sprints, tasks, and members will be permanently deleted. This can’t be undone.',
         confirmLabel: 'Delete',
+        icon: 'trash',
       }))
     )
       return
@@ -314,7 +316,8 @@ function MemberRow({ member }: { member: Member }) {
     if (
       !(await confirm({
         title: 'Remove member?',
-        message: `“${member.name}” will be removed. Their tasks become Unassigned (not deleted).`,
+        subject: `“${member.name}”`,
+        message: 'Their tasks become Unassigned (not deleted).',
         confirmLabel: 'Remove',
       }))
     )

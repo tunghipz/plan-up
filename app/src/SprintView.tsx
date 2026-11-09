@@ -18,6 +18,7 @@ import {
   Check,
   FolderPlus,
   Ungroup,
+  FolderInput,
   Link2,
   Link2Off,
   UserRound,
@@ -535,10 +536,9 @@ const selectedInOrderOf = (allTasks: Task[], selectedIds: Set<string>) =>
 
 /**
  * Floating action bar shown while ≥1 task is selected (group-via-selection flow).
- * "Group" creates a new group parent from the selection (same member, ≥2, none a
- * group head) — or, when the selection holds a child of ONE existing group plus
- * loose tasks, becomes "Add to #N" and nests the loose tasks there; "Ungroup"
- * ungroups any selected children; "Chain prereqs" links the
+ * "Group" creates a new group parent from the selection (≥2 loose tasks of one
+ * member); "Add to group" nests the loose selected tasks into an EXISTING group
+ * picked from a popover; "Ungroup" ungroups any selected children; "Chain prereqs" links the
  * selection top-to-bottom (each depends on the one above, keeping existing prereqs,
  * ≥2 needed); "Clear prereqs" wipes dependsOn on the selection; "Delete" deletes the
  * selection (confirm first; deleting a group head ungroups its children, doesn't
@@ -576,31 +576,54 @@ function SelectionBar({
     selected.length >= 2 &&
     selected.every((t) => t.assigneeId === selected[0].assigneeId)
   const noneParent = selected.every((t) => !parentIds.has(t.id))
-  const canGroup = sameMember && noneParent
+  // Only LOOSE tasks can form a new group (createGroupFromSelection skips
+  // children), so count those — a selection with a child no longer enables a
+  // button that would silently do nothing.
+  const canGroup =
+    sameMember &&
+    noneParent &&
+    selected.filter((t) => !t.parentId).length >= 2
   const anyChild = selected.some((t) => !!t.parentId)
-  // Add to an EXISTING group: the selection holds children of exactly one group
-  // (the head itself has no checkbox) plus ≥1 loose task. Loose tasks must share
-  // the head's assignee and sprint — groups never span members. When a group is
-  // targeted the Group button becomes "Add to #N" (disabled if the people don't
-  // match). See design-docs/task-groups.md "Add to #N".
-  const groupIds = new Set(selected.filter((t) => t.parentId).map((t) => t.parentId!))
-  const targetGroup =
-    groupIds.size === 1 ? tasksById.get([...groupIds][0]) : undefined
-  const looseInOrder = selectedInOrderOf(allTasks, selectedIds).filter(
+  // Add to an EXISTING group (picked in a popover — the group may be collapsed,
+  // so nothing inside it has to be ticked). Only LOOSE tasks move: a child of
+  // another group or a group head is skipped. Offered groups share the loose
+  // tasks' person and sprint — groups never span members.
+  // See design-docs/task-groups.md "Add to group".
+  const [groupPickOpen, setGroupPickOpen] = useState(false)
+  const groupBtnRef = useRef<HTMLButtonElement>(null)
+  const loose = selectedInOrderOf(allTasks, selectedIds).filter(
     (t) => !t.parentId && !parentIds.has(t.id)
   )
-  const canAddToGroup =
-    !!targetGroup &&
-    noneParent &&
-    looseInOrder.length > 0 &&
-    looseInOrder.every(
-      (t) =>
-        (t.assigneeId ?? null) === (targetGroup.assigneeId ?? null) &&
-        t.sprintId === targetGroup.sprintId
-    )
-  const groupOwner = targetGroup
-    ? (members.find((m) => m.id === targetGroup.assigneeId)?.name ?? 'Unassigned')
-    : ''
+  const looseOwners = new Set(loose.map((t) => t.assigneeId ?? null))
+  const looseOwner = looseOwners.size === 1 ? [...looseOwners][0] : undefined
+  // Every group head of the sprint — from tasksById (the whole sprint), not the
+  // displayed rows, so a group hidden by the All table's member filter still counts.
+  const groupHeads = useMemo(() => {
+    const kids = new Map<string, number>()
+    for (const t of tasksById.values()) {
+      if (t.parentId) kids.set(t.parentId, (kids.get(t.parentId) ?? 0) + 1)
+    }
+    return [...kids.entries()]
+      .map(([id, count]) => ({ head: tasksById.get(id), count }))
+      .filter((g): g is { head: Task; count: number } => !!g.head && !g.head.parentId)
+      .sort((a, b) => a.head.sequence - b.head.sequence)
+  }, [tasksById])
+  const eligibleGroups =
+    looseOwner === undefined
+      ? []
+      : groupHeads.filter(
+          (g) =>
+            (g.head.assigneeId ?? null) === looseOwner &&
+            g.head.sprintId === loose[0]?.sprintId
+        )
+  const ownerName =
+    looseOwner === undefined
+      ? ''
+      : looseOwner === null
+        ? 'Unassigned'
+        : (members.find((m) => m.id === looseOwner)?.name ?? 'this person')
+  const showAddToGroup = loose.length > 0 && groupHeads.length > 0
+  const canAddToGroup = eligibleGroups.length > 0
 
   // Chain follows the displayed top-to-bottom order: `allTasks` arrives already
   // flattened in render order (flattenDisplayOrder), so filtering it keeps that
@@ -614,11 +637,12 @@ function SelectionBar({
     await createGroupFromSelection(selected.map((t) => t.id))
     onClear()
   }
-  const doAddToGroup = async () => {
-    if (!canAddToGroup || !targetGroup) return
+  const doAddToGroup = async (groupId: string) => {
+    setGroupPickOpen(false)
+    if (loose.length === 0) return
     await addTasksToGroup(
-      targetGroup.id,
-      looseInOrder.map((t) => t.id)
+      groupId,
+      loose.map((t) => t.id)
     )
     onClear()
   }
@@ -762,37 +786,54 @@ function SelectionBar({
       >
         <Link2Off size={14} /> Clear prereqs
       </button>
-      {targetGroup ? (
+      {showAddToGroup && (
         <button
-          onClick={doAddToGroup}
+          ref={groupBtnRef}
+          onClick={() => setGroupPickOpen((x) => !x)}
           disabled={!canAddToGroup}
+          aria-expanded={groupPickOpen}
           title={
             canAddToGroup
-              ? `Add ${looseInOrder.length} task${looseInOrder.length === 1 ? '' : 's'} to #${targetGroup.sequence} ${targetGroup.title}`
-              : looseInOrder.length === 0
-                ? `Also tick the task(s) to add to #${targetGroup.sequence}`
-                : `Only ${groupOwner}'s tasks in this sprint can join #${targetGroup.sequence}`
+              ? 'Put the selected task(s) into an existing group'
+              : looseOwner === undefined
+                ? 'The selected tasks belong to different people — a group holds one person\'s tasks'
+                : looseOwner === null
+                  ? 'No group of unassigned tasks in this sprint'
+                  : `No group of ${ownerName}'s tasks in this sprint`
           }
-          className="inline-flex items-center gap-1.5 text-[13px] font-semibold rounded-[9px] px-3 py-1.5 transition disabled:opacity-40 disabled:cursor-not-allowed bg-white text-[#1d1d1f] hover:bg-white/90"
+          className={`inline-flex items-center gap-1.5 text-[13px] px-2.5 py-1.5 rounded-[9px] transition disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent ${
+            groupPickOpen
+              ? 'bg-white/15 text-white'
+              : 'text-white/80 hover:text-white hover:bg-white/10'
+          }`}
         >
-          <FolderPlus size={14} /> Add to #{targetGroup.sequence}
-        </button>
-      ) : (
-        <button
-          onClick={doGroup}
-          disabled={!canGroup}
-          title={
-            canGroup
-              ? undefined
-              : 'Select ≥2 tasks with the same assignee (not a group) to group'
-          }
-          // Button is always-white on the dark floating bar (both themes), so the
-          // label stays hardcoded near-black — text-ink would flip to white in dark.
-          className="inline-flex items-center gap-1.5 text-[13px] font-semibold rounded-[9px] px-3 py-1.5 transition disabled:opacity-40 disabled:cursor-not-allowed bg-white text-[#1d1d1f] hover:bg-white/90"
-        >
-          <FolderPlus size={14} /> Group
+          <FolderInput size={14} /> Add to group
         </button>
       )}
+      {groupPickOpen && (
+        <GroupPickPopover
+          anchorRef={groupBtnRef}
+          groups={eligibleGroups}
+          owner={members.find((m) => m.id === looseOwner) ?? null}
+          count={loose.length}
+          onPick={doAddToGroup}
+          onClose={() => setGroupPickOpen(false)}
+        />
+      )}
+      <button
+        onClick={doGroup}
+        disabled={!canGroup}
+        title={
+          canGroup
+            ? undefined
+            : 'Select ≥2 tasks with the same assignee (not in a group) to group'
+        }
+        // Button is always-white on the dark floating bar (both themes), so the
+        // label stays hardcoded near-black — text-ink would flip to white in dark.
+        className="inline-flex items-center gap-1.5 text-[13px] font-semibold rounded-[9px] px-3 py-1.5 transition disabled:opacity-40 disabled:cursor-not-allowed bg-white text-[#1d1d1f] hover:bg-white/90"
+      >
+        <FolderPlus size={14} /> Group
+      </button>
       <button
         onClick={doDelete}
         className="inline-flex items-center gap-1.5 text-[13px] text-red-300 hover:text-white hover:bg-red-500/80 px-2.5 py-1.5 rounded-[9px] transition"
@@ -807,6 +848,169 @@ function SelectionBar({
         Cancel
       </button>
     </div>
+  )
+}
+
+/**
+ * Placement + dismissal shared by the SelectionBar's popovers (Assign, Add to
+ * group). Anchored above the bar button, clamped so a long list near the window
+ * edge still lands fully on screen. Written straight onto the node (no state):
+ * the popover mounts hidden for exactly one frame otherwise, and a resize would
+ * cost a render per pixel. An outside pointer press closes it; the bar's own
+ * button toggles, so presses on it are excluded.
+ */
+function useBarPopover(
+  boxRef: React.RefObject<HTMLDivElement | null>,
+  anchorRef: React.RefObject<HTMLButtonElement | null>,
+  onClose: () => void
+) {
+  useLayoutEffect(() => {
+    const place = () => {
+      const box = boxRef.current
+      const btn = anchorRef.current
+      if (!box || !btn) return
+      const r = btn.getBoundingClientRect()
+      const half = box.offsetWidth / 2
+      box.style.left = `${Math.min(
+        Math.max(8 + half, r.left + r.width / 2),
+        window.innerWidth - 8 - half
+      )}px`
+      // Clear the BAR's top edge, not the button's — the button sits inside the
+      // bar's padding, so measuring from it left the two dark surfaces 2px apart
+      // and they read as one lumpy shape.
+      const bar = btn.closest('[role="toolbar"]') as HTMLElement | null
+      const top = (bar ?? btn).getBoundingClientRect().top
+      box.style.bottom = `${window.innerHeight - top + 10}px`
+    }
+    place()
+    window.addEventListener('resize', place)
+    return () => window.removeEventListener('resize', place)
+  }, [boxRef, anchorRef])
+
+  useEffect(() => {
+    const onDown = (e: PointerEvent) => {
+      const t = e.target as Node
+      if (boxRef.current?.contains(t) || anchorRef.current?.contains(t)) return
+      onClose()
+    }
+    window.addEventListener('pointerdown', onDown)
+    return () => window.removeEventListener('pointerdown', onDown)
+  }, [boxRef, anchorRef, onClose])
+}
+
+/**
+ * Group picker for the SelectionBar's **Add to group** action. Lists only the
+ * groups the selection may join (same person + sprint, filtered by the caller);
+ * same keyboard model as AssignPopover: type to filter by `#N` or title, ↑/↓,
+ * Enter, Esc. See design-docs/task-groups.md "Add to group".
+ */
+function GroupPickPopover({
+  anchorRef,
+  groups,
+  owner,
+  count,
+  onPick,
+  onClose,
+}: {
+  anchorRef: React.RefObject<HTMLButtonElement | null>
+  groups: { head: Task; count: number }[]
+  owner: Member | null
+  count: number
+  onPick: (groupId: string) => void
+  onClose: () => void
+}) {
+  const [query, setQuery] = useState('')
+  const [cursor, setCursor] = useState(0)
+  const boxRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const rows = useMemo(() => {
+    const q = query.trim().toLowerCase().replace(/^#/, '')
+    return groups.filter(
+      (g) => !q || String(g.head.sequence).startsWith(q) || g.head.title.toLowerCase().includes(q)
+    )
+  }, [groups, query])
+  useBarPopover(boxRef, anchorRef, onClose)
+  useEffect(() => {
+    inputRef.current?.focus()
+  }, [])
+  const active = Math.min(cursor, Math.max(0, rows.length - 1))
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      setCursor((c) => Math.min(c + 1, rows.length - 1))
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      setCursor((c) => Math.max(c - 1, 0))
+    } else if (e.key === 'Enter') {
+      e.preventDefault()
+      const row = rows[active]
+      if (row) onPick(row.head.id)
+    } else if (e.key === 'Escape') {
+      e.preventDefault()
+      onClose()
+    }
+  }
+  return createPortal(
+    <div
+      ref={boxRef}
+      role="dialog"
+      aria-label={`Add ${count} task${count === 1 ? '' : 's'} to a group`}
+      className="fixed z-50 w-[300px] -translate-x-1/2 rounded-[13px] glass-popover p-1.5"
+      style={{ left: -9999, bottom: 0 }}
+      onKeyDown={onKeyDown}
+    >
+      <div className="flex items-center gap-2 px-2 pb-2 pt-1 border-b border-border-hair">
+        <Search size={14} className="text-ink-faint shrink-0" />
+        <input
+          ref={inputRef}
+          value={query}
+          onChange={(e) => {
+            setQuery(e.target.value)
+            setCursor(0)
+          }}
+          placeholder={`Add ${count} task${count === 1 ? '' : 's'} to…`}
+          aria-label="Find a group"
+          className="flex-1 min-w-0 bg-transparent text-[13.5px] text-ink placeholder:text-ink-faint outline-none"
+        />
+      </div>
+      <div className="max-h-[238px] overflow-y-auto pt-1" role="listbox">
+        {rows.length === 0 && (
+          <div className="px-2.5 py-3.5 text-center text-[12.5px] text-ink-faint">
+            No group matches “{query.trim()}”
+          </div>
+        )}
+        {rows.map(({ head, count: kids }, i) => {
+          const isActive = i === active
+          return (
+            <button
+              key={head.id}
+              role="option"
+              aria-selected={isActive}
+              onMouseEnter={() => setCursor(i)}
+              onClick={() => onPick(head.id)}
+              className={`w-full flex items-center gap-2.5 px-2 py-1.5 rounded-[9px] text-left transition ${
+                isActive ? 'bg-accent text-white' : 'text-ink hover:bg-canvas-sunk'
+              }`}
+            >
+              <span
+                className={`w-8 shrink-0 text-center font-mono text-[12px] ${
+                  isActive ? 'text-white/80' : 'text-ink-faint'
+                }`}
+              >
+                #{head.sequence}
+              </span>
+              <span className="flex-1 min-w-0 leading-tight">
+                <span className="block text-[13px] font-medium truncate">{head.title}</span>
+                <span className={`block text-[11.5px] truncate ${isActive ? 'text-white/70' : 'text-ink-faint'}`}>
+                  {owner?.name ?? 'Unassigned'} · {kids} task{kids === 1 ? '' : 's'}
+                </span>
+              </span>
+            </button>
+          )
+        })}
+      </div>
+    </div>,
+    document.body
   )
 }
 
@@ -852,32 +1056,7 @@ function AssignPopover({
     return out
   }, [members, query])
 
-  // Anchor above the bar button, clamped so a long roster near the window edge
-  // still lands fully on screen. Written straight onto the node (no state): the
-  // popover mounts hidden for exactly one frame otherwise, and a resize would
-  // cost a render per pixel.
-  useLayoutEffect(() => {
-    const place = () => {
-      const box = boxRef.current
-      const btn = anchorRef.current
-      if (!box || !btn) return
-      const r = btn.getBoundingClientRect()
-      const half = box.offsetWidth / 2
-      box.style.left = `${Math.min(
-        Math.max(8 + half, r.left + r.width / 2),
-        window.innerWidth - 8 - half
-      )}px`
-      // Clear the BAR's top edge, not the button's — the button sits inside the
-      // bar's padding, so measuring from it left the two dark surfaces 2px apart
-      // and they read as one lumpy shape.
-      const bar = btn.closest('[role="toolbar"]') as HTMLElement | null
-      const top = (bar ?? btn).getBoundingClientRect().top
-      box.style.bottom = `${window.innerHeight - top + 10}px`
-    }
-    place()
-    window.addEventListener('resize', place)
-    return () => window.removeEventListener('resize', place)
-  }, [anchorRef])
+  useBarPopover(boxRef, anchorRef, onClose)
 
   useEffect(() => {
     inputRef.current?.focus()
@@ -885,18 +1064,6 @@ function AssignPopover({
   // Clamp at render rather than in an effect: filtering can shrink the list
   // under the cursor, and a state write here would render the stale index once.
   const active = Math.min(cursor, Math.max(0, rows.length - 1))
-
-  // Dismiss on an outside pointer press or Escape — the bar's own button
-  // toggles, so clicks on it are excluded by the ref check.
-  useEffect(() => {
-    const onDown = (e: PointerEvent) => {
-      const t = e.target as Node
-      if (boxRef.current?.contains(t) || anchorRef.current?.contains(t)) return
-      onClose()
-    }
-    window.addEventListener('pointerdown', onDown)
-    return () => window.removeEventListener('pointerdown', onDown)
-  }, [anchorRef, onClose])
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'ArrowDown') {

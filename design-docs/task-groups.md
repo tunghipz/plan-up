@@ -1,13 +1,13 @@
 # Task groups (parent task with nested children)
 
 **Status:** Implemented
-**Last updated:** 2026-11-09 (**Add to group** — đưa task lẻ vào group đã có từ selection
-bar; ô Assignee từng dòng cũng gỡ task con khỏi group khi đổi người, xem tasks.md)
+**Last updated:** 2026-11-09 (**Add to group** — tick task lẻ, chọn group trong popover của
+selection bar; ô Assignee từng dòng cũng gỡ task con khỏi group khi đổi người, xem tasks.md)
 **Previously:** 2026-09-11 (bulk Assign obeys the no-cross-member rule; see tasks.md)
 **Code:** `app/src/db.ts` (`Task.parentId`, `createGroupFromSelection`, `addTasksToGroup`,
 `setTaskParent`),
 `app/src/SprintView.tsx` (`MemberCard` task tree render, `TaskGroupRow` parent roll-up,
-`SelectionBar` group/ungroup/delete), collapse persisted in `localStorage`
+`SelectionBar` group/ungroup/delete, `GroupPickPopover` add-to-group), collapse persisted in `localStorage`
 
 ## Purpose
 Inside a member's task list, let related tasks be **gathered under a parent task**
@@ -25,17 +25,26 @@ separate epic/tag system. Approach **B** chosen 2026-06-04 (see
   - **Group** creates a **new parent task** titled `New group` (rename inline) and
     nests the selected tasks under it. Enabled only when ≥2 are selected, all share the
     same assignee, and none is already a group head (one level).
-  - **Add to #N** (2026-11-09) đưa task lẻ vào một **group đã có**. Tick task lẻ cùng **một
-    task con bất kỳ** của group đó (group head không có checkbox), nút **Group** đổi thành
-    **Add to #N** (N = số của group head, tên group ở tooltip). Bật khi: lựa chọn có task con của
-    **đúng một** group, có ≥1 task lẻ, task lẻ **cùng người làm và cùng sprint với group head**,
-    không task nào là group head. Sai người thì nút vẫn hiện nhưng tắt, tooltip nói phải là task
-    của ai. Task mới vào nằm **cuối group** (`listOrder` = max của các con + 1), rồi
-    `recomputeDates` để task phụ thuộc vào group dời theo span mới. Trước đó không có đường nào:
-    Group chỉ tạo group mới, và một lựa chọn lẫn task con thì Group âm thầm không làm gì (task
-    con bị loại khỏi `createGroupFromSelection`). User hỏi: *"tao có task này muốn cho vào group
-    đang có thì như nào"*; chọn selection bar thay vì kéo thả vì kéo thả chỉ đổi thứ tự trong
-    cùng cấp ([list-view.md](./list-view.md)).
+  - **Add to group** (2026-11-09) đưa task lẻ vào một **group đã có**. Chỉ cần tick task lẻ
+    (không cần tick gì trong group, group thu gọn cũng được) rồi bấm **Add to group** trên
+    selection bar: một popover (cùng kiểu với Assign: ô tìm, ↑/↓, Enter, Esc) liệt kê các
+    group của sprint mà task được phép vào, mỗi dòng `#N tên group` + người làm + số task con.
+    Chọn một group thì các task lẻ vào **cuối group** (`listOrder` = max của các con + 1, theo
+    thứ tự hiển thị), rồi `recomputeDates` để task phụ thuộc vào group dời theo span mới.
+    - Chỉ liệt kê group **cùng người làm và cùng sprint** với task lẻ (group không trải qua
+      nhiều người). Task lẻ thuộc nhiều người khác nhau, hoặc người đó chưa có group nào, thì
+      nút tắt kèm tooltip nói lý do.
+    - Task đã nằm trong group khác hoặc group head trong lựa chọn thì bị bỏ qua (chuyển task
+      giữa hai group: Ungroup trước).
+    - Nút chỉ hiện khi sprint có ít nhất một group và lựa chọn có ít nhất một task lẻ.
+    - Lịch sử: bản đầu (cùng ngày) bắt tick thêm một task con của group để nút Group đổi thành
+      "Add to #N". User bác: *"tao muốn add 1 task vào group có sẵn, như hình là add 8 vào 6,
+      chứ không phải task trong group rồi add làm gì nữa"* — group thường đang thu gọn, phải mở
+      ra tick một task con là thừa. Câu hỏi gốc: *"tao có task này muốn cho vào group đang có thì
+      như nào"*. Không dùng kéo thả vì kéo thả chỉ đổi thứ tự trong cùng cấp
+      ([list-view.md](./list-view.md)).
+  - **Group** chỉ đếm task lẻ: cần ≥2 task lẻ cùng người. Trước đây lựa chọn lẫn task con vẫn bật
+    Group nhưng bấm không làm gì (task con bị loại trong `createGroupFromSelection`).
   - **Ungroup** ungroups any selected children (clears their `parentId`); shown when the
     selection contains ≥1 grouped task.
   - **Chain prereqs** / **Clear prereqs** set or clear prerequisites across the selection —

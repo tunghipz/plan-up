@@ -1,7 +1,7 @@
 # Board view
 
 **Status:** Implemented
-**Last updated:** 2026-11-09 (**perf**: `planById` dùng `computeAllWorkingPlans` một pass thay vì `computeWorkingPlan` từng card). Trước đó: 2026-07-02 (boardOrder midpoint collision → whole-column renormalize)
+**Last updated:** 2026-11-09 (**fix**: popover Schedule hiện đúng plan của card, có tính project holidays). Trước đó cùng ngày (**perf**: `planById` dùng `computeAllWorkingPlans` một pass thay vì `computeWorkingPlan` từng card). Trước đó: 2026-07-02 (boardOrder midpoint collision → whole-column renormalize)
 **Code:** `app/src/BoardView.tsx`
 
 ## Purpose
@@ -40,6 +40,10 @@ Read-mostly; deep editing stays in the list view.
     End is locked when it has prerequisites *or* effort > 0 (those are scheduler-derived, so
     setting Effort auto-fills End). Effort and Start changes call `recomputeDates`; all write
     through the same inputs the List edits, so the Board never overrides auto-scheduling.
+    Start/End shown in the popover are the **card's own plan** (`planById`, project holidays
+    included), so the popover and the card's due chip always agree. Before 2026-11-09 the
+    popover re-ran the scheduler without holidays, so a task spanning Tết showed an End days
+    earlier than its card.
     Group cards get no toolbar (their dates are derived, they're containers).
 - **Drag to reorder / change status** — drag a leaf card to a position in any column.
   ClickUp-style feedback: the card is **lifted out** of its slot and **rides the cursor as a

@@ -538,7 +538,6 @@ export function BoardView({
                         t.assigneeId ? membersById.get(t.assigneeId) ?? null : null
                       }
                       members={members}
-                      tasksById={tasksById}
                       membersById={membersById}
                       plan={planById.get(t.id) ?? null}
                       displayStatus={m?.displayStatus ?? t.status}
@@ -893,14 +892,15 @@ function MemberMenu({
  * its exact lock rules so the Board can't override the auto-scheduler. */
 function DatePopover({
   task,
-  tasksById,
+  plan,
   membersById,
 }: {
   task: Task
-  tasksById: Map<string, Task>
+  /** The card's own plan from the board-wide `planById` (project holidays
+   * included), so the popover can never disagree with the card's due chip. */
+  plan: ReturnType<typeof computeWorkingPlan>
   membersById: Map<string, Member>
 }) {
-  const plan = computeWorkingPlan(task, tasksById, membersById)
   const startLocked = task.dependsOn.length > 0
   const endLocked = task.dependsOn.length > 0 || (task.estimate !== null && task.estimate > 0)
   const assigneeDaysOff = task.assigneeId ? membersById.get(task.assigneeId)?.daysOff : undefined
@@ -962,6 +962,15 @@ function DatePopover({
   )
 }
 
+// Fallback for a card missing from planById (never expected — the pass covers
+// every board task): no dates, default day-part times, as in the List.
+const NULL_PLAN: ReturnType<typeof computeWorkingPlan> = {
+  startDate: null,
+  dueDate: null,
+  startTime: '08:00',
+  endTime: '12:00',
+}
+
 const PRIO_TAG: Record<string, { label: string; bg: string; fg: string }> = {
   urgent: { label: 'Urgent', bg: 'color-mix(in srgb, var(--color-priority-urgent) 12%, transparent)', fg: 'color-mix(in srgb, var(--color-priority-urgent) 78%, var(--color-ink))' },
   high: { label: 'High', bg: 'color-mix(in srgb, var(--color-priority-high) 15%, transparent)', fg: 'color-mix(in srgb, var(--color-priority-high) 78%, var(--color-ink))' },
@@ -975,7 +984,6 @@ const BoardCard = memo(function BoardCard({
   task,
   member,
   members,
-  tasksById,
   membersById,
   plan,
   displayStatus,
@@ -992,7 +1000,6 @@ const BoardCard = memo(function BoardCard({
   task: Task
   member: Member | null
   members: Member[]
-  tasksById: Map<string, Task>
   membersById: Map<string, Member>
   plan: ReturnType<typeof computeWorkingPlan> | null
   displayStatus: Status
@@ -1098,7 +1105,7 @@ const BoardCard = memo(function BoardCard({
             aria-hidden
             onClick={() => setDateOpen(false)}
           />
-          <DatePopover task={task} tasksById={tasksById} membersById={membersById} />
+          <DatePopover task={task} plan={plan ?? NULL_PLAN} membersById={membersById} />
         </>
       )}
       <div className="flex items-start gap-2.5">

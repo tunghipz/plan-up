@@ -57,6 +57,7 @@ Non-obvious behaviors, defaults, persistence keys.
 | [restore-versions.md](./restore-versions.md) | Desktop-only: in-app version picker over `versions/` snapshots — preview + full-DB restore via `importAll` (auto-snapshots current state first) |
 | [desktop-app-tauri.md](./desktop-app-tauri.md) | macOS desktop app — Tauri 2 shell in `app/src-tauri/`, universal DMG via GitHub Actions on `v*` tag |
 | [desktop-auto-update.md](./desktop-auto-update.md) | Desktop-only: in-app auto update via Tauri updater — signed artifacts on GitHub Releases, update pill in the footer |
+| [desktop-native-feel.md](./desktop-native-feel.md) | Desktop-only: menu bar thật, ⌘W ẩn cửa sổ, bỏ dấu hiệu web (cursor/select/overscroll/context menu), nhớ kích thước cửa sổ, vibrancy native cho sidebar, menu chuột phải trên task |
 | [project-export-import.md](./project-export-import.md) | Per-project export to a portable file + non-destructive "add as new project" import (auto-detected alongside full backup) |
 | [app-shell-and-navigation.md](./app-shell-and-navigation.md) | Layout, project switcher dropdown, resizable sprint panel, capacity stats |
 | [liquid-glass-material.md](./liquid-glass-material.md) | Material v2.1 (iOS 26 Tempered): glass cards 18px + capsule toolbar + ambient accent tint, tokens `--color-glass`/`.glass-card` |

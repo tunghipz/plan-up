@@ -146,9 +146,53 @@ fn read_backup(dir: String, file_name: String, subdir: Option<String>) -> Result
     Ok(out)
 }
 
+/// Largest file File ▸ Import… will read — far above any real export, low enough
+/// that a mis-pick can't balloon the webview.
+const IMPORT_MAX_BYTES: u64 = 200 * 1024 * 1024;
+
+/// Read a `.json` the user just picked in the native open panel (menu
+/// File ▸ Import…, desktop-native-feel.md). A menu action reaches the page over
+/// IPC with no user gesture, and WebKit only opens `<input type=file>` inside
+/// one — so the panel comes from the dialog plugin and the bytes from here.
+/// Regular `.json` files only, size-capped; still no general fs access.
+#[tauri::command]
+fn read_import_file(path: String) -> Result<String, String> {
+    let p = Path::new(&path);
+    let is_json = p
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("json"));
+    if !is_json {
+        return Err("only .json files can be imported".into());
+    }
+    let meta = fs::metadata(p).map_err(|e| e.to_string())?;
+    if !meta.is_file() {
+        return Err(format!("not a file: {}", p.display()));
+    }
+    if meta.len() > IMPORT_MAX_BYTES {
+        return Err("file is too large to import".into());
+    }
+    fs::read_to_string(p).map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    use tauri_plugin_window_state::StateFlags;
+
+    let app = tauri::Builder::default()
+        // Remember size/position across launches (desktop-native-feel.md §3).
+        // DECORATIONS is left out — restoring it could undo the overlay title bar —
+        // and so is VISIBLE: ⌘W only hides the window, which must not be "restored".
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_state_flags(
+                    StateFlags::SIZE
+                        | StateFlags::POSITION
+                        | StateFlags::MAXIMIZED
+                        | StateFlags::FULLSCREEN,
+                )
+                .build(),
+        )
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
@@ -157,16 +201,63 @@ pub fn run() {
             write_backup,
             prune_backups,
             list_backups,
-            read_backup
+            read_backup,
+            read_import_file
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        // macOS single-window idiom (Notes, Reminders): closing the window only
+        // hides it — the app and auto backup keep running; ⌘Q quits.
+        .on_window_event(|window, event| {
+            #[cfg(target_os = "macos")]
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.hide();
+            }
+            #[cfg(not(target_os = "macos"))]
+            let _ = (window, event);
+        })
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    app.run(|_app, _event| {
+        // Dock icon click with the window hidden → bring it back.
+        #[cfg(target_os = "macos")]
+        if let tauri::RunEvent::Reopen {
+            has_visible_windows: false,
+            ..
+        } = _event
+        {
+            use tauri::Manager;
+            if let Some(w) = _app.get_webview_window("main") {
+                let _ = w.show();
+                let _ = w.set_focus();
+            }
+        }
+    });
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{is_backup_filename, list_backups, prune_backups, read_backup, write_backup};
+    use super::{
+        is_backup_filename, list_backups, prune_backups, read_backup, read_import_file,
+        write_backup,
+    };
     use std::fs;
+
+    #[test]
+    fn read_import_file_reads_json_only() {
+        let dir = temp_dir("import");
+        let ok = dir.join("export.JSON");
+        fs::write(&ok, "{\"v\":1}").unwrap();
+        fs::write(dir.join("notes.txt"), "secret").unwrap();
+        let s = |p: std::path::PathBuf| p.to_string_lossy().to_string();
+        assert_eq!(read_import_file(s(ok)).unwrap(), "{\"v\":1}");
+        // wrong extension, missing file, a directory named *.json
+        assert!(read_import_file(s(dir.join("notes.txt"))).is_err());
+        assert!(read_import_file(s(dir.join("missing.json"))).is_err());
+        fs::create_dir_all(dir.join("folder.json")).unwrap();
+        assert!(read_import_file(s(dir.join("folder.json"))).is_err());
+        fs::remove_dir_all(&dir).unwrap();
+    }
 
     fn temp_dir(tag: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("plan-up-test-{tag}-{}", std::process::id()));

@@ -243,6 +243,46 @@ h1, h2, h3, .display-tight {
   backdrop-filter: blur(24px) saturate(180%);
 }
 
+/* Desktop native feel — design-docs/desktop-native-feel.md. Unlayered on purpose
+ * so these beat Tailwind's layered utilities (e.g. `.cursor-pointer`). */
+
+/* §4 Real Tauri window: the page is transparent and the window's
+ * NSVisualEffectView (sidebar material) shows through the sidebar + icon rail.
+ * The main column carries .ambient-canvas instead of the root (App.tsx). */
+html.native-vibrancy,
+html.native-vibrancy body {
+  background: transparent;
+}
+html.native-vibrancy .vibrancy {
+  background: transparent;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+/* §2 No web tells (desktop chrome, incl. the ?desktop=1 preview). */
+html.desktop,
+html.desktop body {
+  overscroll-behavior: none; /* the whole page never rubber-bands; inner scrollers still do */
+}
+html.desktop body {
+  -webkit-user-select: none;
+  user-select: none;
+}
+html.desktop :is(input, textarea, select, [contenteditable]:not([contenteditable='false']), .editable) {
+  -webkit-user-select: text;
+  user-select: text;
+}
+/* Native controls use the arrow, not the hand. Real links keep the hand. */
+html.desktop .cursor-pointer {
+  cursor: default;
+}
+html.desktop a[href] {
+  cursor: pointer;
+}
+html.desktop :is(img, a) {
+  -webkit-user-drag: none;
+}
+
 /* Liquid Glass (Tempered) — design-docs/liquid-glass-material.md.
  * glass-card: content surfaces (group cards, page sections). Same drop shadow
  * tier as the old solid card, plus the material: translucency, blur, and a

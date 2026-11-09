@@ -79,6 +79,17 @@ import { GanttView } from './GanttView'
 import { ActivityLog } from './ActivityLog'
 import { VersionFooter } from './VersionFooter'
 import { IS_TAURI } from './backup'
+import {
+  applyShellClasses,
+  buildAppMenu,
+  dialogOpen,
+  installContextMenus,
+  pickImportText,
+  shouldRun,
+  syncWindowTheme,
+  type MenuCommand,
+  type MenuState,
+} from './native-shell'
 import { startAutoBackup } from './backup-tauri'
 import { BackupSettingsModal } from './BackupSettingsModal'
 import { ShareLinkModal } from './ShareLinkModal'
@@ -137,6 +148,10 @@ const FORCE_DESKTOP_CHROME =
   (new URLSearchParams(window.location.search).has('desktop') ||
     window.localStorage?.getItem('plan-up:forceDesktopChrome') === '1')
 const DESKTOP_CHROME = IS_TAURI || FORCE_DESKTOP_CHROME
+// Real Tauri window: transparent page over an NSVisualEffectView sidebar
+// (desktop-native-feel.md §4). Never in the browser preview — nothing behind it.
+const NATIVE_VIBRANCY = IS_TAURI
+applyShellClasses(DESKTOP_CHROME, NATIVE_VIBRANCY)
 type ViewMode = 'list' | 'board' | 'timeline'
 type CollectionViewMode = 'list' | 'calendar'
 
@@ -826,7 +841,9 @@ function App() {
       // Global: works even while typing, like ⌘K.
       if ((e.metaKey || e.ctrlKey) && e.key === '\\') {
         e.preventDefault()
-        setSidebarCollapsed((c) => !c)
+        // shouldRun: the menu bar's ⌘\ key equivalent may fire for the same press
+        // (desktop-native-feel.md) — one toggle, not two.
+        if (shouldRun('toggleSidebar')) setSidebarCollapsed((c) => !c)
         return
       }
 
@@ -854,9 +871,9 @@ function App() {
         if (settingsOpen || screen === 'home' || selKind !== 'sprint') return
         e.preventDefault()
         setShowNewSprint(true)
-      } else if (e.key === 'd' && (e.metaKey || e.ctrlKey) && e.shiftKey) {
+      } else if (e.key.toLowerCase() === 'd' && (e.metaKey || e.ctrlKey) && e.shiftKey) {
         e.preventDefault()
-        setDark(!dark)
+        if (shouldRun('toggleDark')) setDark(!dark)
       }
     }
     window.addEventListener('keydown', handler)
@@ -883,9 +900,29 @@ function App() {
     const file = e.target.files?.[0]
     e.target.value = ''
     if (!file) return
+    await importText(await file.text())
+  }
+  // Desktop File ▸ Import…: native open panel + the app's own read command (a
+  // menu action has no user gesture, so `<input type=file>.click()` would be
+  // refused by WebKit). See desktop-native-feel.md.
+  const handleImportNative = async () => {
+    let text: string | null
+    try {
+      text = await pickImportText()
+    } catch (err) {
+      showToast({
+        kind: 'error',
+        title: 'Import failed',
+        detail: err instanceof Error ? err.message : String(err),
+      })
+      return
+    }
+    if (text !== null) await importText(text)
+  }
+  const importText = async (text: string) => {
     let data: unknown
     try {
-      data = JSON.parse(await file.text())
+      data = JSON.parse(text)
     } catch {
       showToast({ kind: 'error', title: 'Import failed', detail: 'Not a valid JSON file.' })
       return
@@ -1156,6 +1193,114 @@ function App() {
     }
   }, [tasks])
 
+  // ── Desktop native feel (design-docs/desktop-native-feel.md) ─────────────
+  // Menu bar: built once; every click/key equivalent goes through this ref,
+  // re-pointed after each render so a command always sees current state.
+  const [menuTick, setMenuTick] = useState(0)
+  const runMenuCommand = useRef<(c: MenuCommand) => void>(() => {})
+  const applyMenuState = useRef<((s: MenuState) => void) | null>(null)
+  const sprintOnScreen = selKind === 'sprint' && !!currentSprint && screen !== 'home'
+  const collectionOnScreen = selKind === 'collection' && !!currentCollection && screen !== 'home'
+  const menuView: MenuState['view'] = selKind === 'collection' ? collectionView : view
+  useLayoutEffect(() => {
+    runMenuCommand.current = (c) => {
+      // Re-sync after every command — a CheckMenuItem flips its own tick natively.
+      setMenuTick((t) => t + 1)
+      // Same contract as the keyboard shortcuts: a dialog owns the app (§6.5).
+      if (dialogOpen()) return
+      switch (c) {
+        case 'settings':
+          if (currentProject) setSettingsOpen(true)
+          break
+        case 'newSprint':
+          if (!settingsOpen && screen !== 'home' && selKind === 'sprint') setShowNewSprint(true)
+          break
+        case 'newProject':
+          setShowNewProject(true)
+          break
+        case 'import':
+          void handleImportNative()
+          break
+        case 'exportProject':
+          if (currentProject) void handleExportProject(currentProject.id, currentProject.name)
+          break
+        case 'exportAll':
+          void handleExportAll()
+          break
+        case 'autoBackup':
+          setBackupSettingsOpen(true)
+          break
+        case 'find':
+          if (!settingsOpen && sprintOnScreen) setPaletteOpen(true)
+          break
+        case 'viewList':
+          if (collectionOnScreen) setCollectionView('list')
+          else if (sprintOnScreen) setView('list')
+          break
+        case 'viewBoard':
+          if (sprintOnScreen) setView('board')
+          break
+        case 'viewTimeline':
+          if (sprintOnScreen) setView('timeline')
+          break
+        case 'viewCalendar':
+          if (collectionOnScreen) setCollectionView('calendar')
+          break
+        case 'toggleSidebar':
+          if (shouldRun('toggleSidebar')) setSidebarCollapsed((v) => !v)
+          break
+        case 'activity':
+          if (!settingsOpen && sprintOnScreen) setShowActivity((v) => !v)
+          break
+        case 'toggleDark':
+          if (shouldRun('toggleDark')) setDark(!dark)
+          break
+      }
+    }
+  })
+  useEffect(() => {
+    if (!IS_TAURI) return
+    let live = true
+    buildAppMenu((c) => runMenuCommand.current(c))
+      .then(async ({ install, apply }) => {
+        if (!live) return // StrictMode's first mount — the second one installs
+        await install()
+        applyMenuState.current = apply
+        setMenuTick((t) => t + 1)
+      })
+      .catch(() => {}) // keep Tauri's default menu rather than none
+    return () => {
+      live = false
+    }
+  }, [])
+  const hasProject = !!currentProject
+  useEffect(() => {
+    applyMenuState.current?.({
+      hasProject,
+      inSprint: sprintOnScreen,
+      inCollection: collectionOnScreen,
+      settingsOpen,
+      view: menuView,
+      sidebarCollapsed,
+      dark,
+    })
+  }, [menuTick, hasProject, sprintOnScreen, collectionOnScreen, settingsOpen, menuView, sidebarCollapsed, dark])
+  // NSWindow appearance follows the app's dark mode, not macOS's — the native
+  // sidebar material, menus and system dialogs then match the page.
+  useEffect(() => {
+    if (IS_TAURI) void syncWindowTheme(dark)
+  }, [dark])
+  // Right-click: native task menu on List rows / Board cards, no WebKit menu
+  // elsewhere (fields being edited keep Cut/Copy/Paste).
+  const confirmRef = useRef(confirm)
+  useLayoutEffect(() => {
+    confirmRef.current = confirm
+  })
+  useEffect(() => {
+    if (!IS_TAURI) return
+    return installContextMenus({ confirm: (o) => confirmRef.current(o) })
+  }, [])
+
   // This early return MUST stay below every hook: seedError flips from null to
   // set on a later render (the seeding effect's catch), and an early return
   // above the hooks would change the hook count mid-lifecycle — React throws
@@ -1184,7 +1329,14 @@ function App() {
     // popovers show project holidays as read-only rows and need the same map.
     <ProjectHolidaysContext value={holidayMap}>
     <ProjectHolidayListContext value={currentProject?.holidays ?? EMPTY_HOLIDAYS}>
-    <div className="h-screen flex ambient-canvas text-ink overflow-hidden">
+    // Native vibrancy: the root stays transparent so the window's sidebar
+    // material shows through; the main column carries the canvas instead
+    // (desktop-native-feel.md §4). Home has no sidebar, so it keeps the canvas.
+    <div
+      className={`h-screen flex text-ink overflow-hidden ${
+        NATIVE_VIBRANCY && !(HOME_ENABLED && screen === 'home') ? '' : 'ambient-canvas'
+      }`}
+    >
       {/* Browser-only preview: paint fake macOS traffic lights so `?desktop=1`
           shows the real desktop layout. Real Tauri draws OS lights instead. */}
       {FORCE_DESKTOP_CHROME && !IS_TAURI && (
@@ -1646,7 +1798,7 @@ function App() {
           {/* Dark-mode toggle pinned at the bottom, mirroring the sidebar footer. */}
           <button
             onClick={() => setDark(!dark)}
-            title="Toggle dark mode (⌘⇧L)"
+            title="Toggle dark mode (⌘⇧D)"
             aria-label="Toggle dark mode"
             className="mt-auto mb-3 w-9 h-9 rounded-lg inline-flex items-center justify-center text-ink-faint hover:text-ink hover:bg-surface-hover transition"
           >
@@ -1657,7 +1809,7 @@ function App() {
 
       {/* Main column: thin header + capacity + sprint view. Always rendered;
           settings opens as a right-side drawer overlay (below), not a takeover. */}
-      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+      <div className={`flex-1 flex flex-col min-w-0 overflow-hidden ${NATIVE_VIBRANCY ? 'ambient-canvas' : ''}`}>
         {/* Liquid Glass capsule toolbar (design-docs/liquid-glass-material.md) —
             floats with a margin instead of a full-bleed bar + border-b. */}
         {/* relative z-30: glass surfaces below create stacking contexts

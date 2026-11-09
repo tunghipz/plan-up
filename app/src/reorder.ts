@@ -88,6 +88,39 @@ export function computeAppendSlot<T>(
 }
 
 /**
+ * Neighbours to compute a drop's `listOrder` from, skipping rows that are only
+ * displayed where they are because the List pulls them under a prerequisite
+ * (`pinned`). Such a row's own `listOrder` can sit anywhere, so a midpoint taken
+ * against it lands somewhere unrelated to the drop — the row "flies off". The
+ * nearest un-pinned row on each side is a real position in the manual order.
+ * Consequence (intended): dropping between a prereq and its pulled dependent
+ * lands after the dependent, since that pair never splits on screen anyway.
+ * `rest` is the displayed list WITHOUT the dragged row; `insertAt` indexes it.
+ * See design-docs/list-view.md "Drag-to-reorder".
+ */
+export function anchorNeighbours<T>(
+  rest: T[],
+  insertAt: number,
+  pinned: (t: T) => boolean
+): { before: T | null; after: T | null } {
+  let before: T | null = null
+  for (let i = insertAt - 1; i >= 0; i--) {
+    if (!pinned(rest[i])) {
+      before = rest[i]
+      break
+    }
+  }
+  let after: T | null = null
+  for (let i = insertAt; i < rest.length; i++) {
+    if (!pinned(rest[i])) {
+      after = rest[i]
+      break
+    }
+  }
+  return { before, after }
+}
+
+/**
  * New fractional order for the slot, flagging float-precision exhaustion:
  * when the midpoint can't separate from a neighbour (many inserts into the
  * same gap), the caller must renormalize the whole list to clean integers

@@ -1,9 +1,12 @@
 # Dependencies (prerequisites)
 
 **Status:** Implemented
-**Last updated:** 2026-09-21 (a dependent now renders **directly under its prerequisite in
-every sort**, not only in the manual order — see *Dependents stick to their prerequisite*)
-**Previously:** 2026-09-11 (setting a prereq auto-moves the row under its prerequisite)
+**Last updated:** 2026-11-09 (List chế độ **All**: lane là cả sprint nên prereq khác người cũng
+kéo dependent; **sort theo Assignee** chỉ kéo trong cùng một người — see *Dependents stick to
+their prerequisite*)
+**Previously:** 2026-09-21 (a dependent now renders **directly under its prerequisite in
+every sort**, not only in the manual order); 2026-09-11 (setting a prereq auto-moves the row
+under its prerequisite)
 **Code:** `app/src/db.ts` (`addDependency`, `removeDependency`, `setDependencies`,
 `wouldCreateCycle`, `findCyclePath`, `isTaskBlocked`), `app/src/reorder.ts`
 (`planPrereqMove`, `orderBetween`), `app/src/SprintView.tsx`
@@ -73,6 +76,13 @@ UI can flag blocked work.
     is the thing being asked for; a purely topological order ("somewhere after the prereq")
     would leave that dependent at the bottom and change nothing on screen.
   - The PNG export reuses `orderLane()`, so the image matches the screen row for row.
+  - **List chế độ All (2026-11-09):** lane là **cả sprint** (một bảng, xem
+    [list-view.md](./list-view.md) *Chế độ All*), nên prereq của **người khác** cũng kéo
+    dependent xuống ngay dưới nó. Đây là chỗ All đọc chuỗi prereq tốt hơn By member.
+  - **Ngoại lệ: sort theo Assignee.** Khi đó scope của pull thêm điều kiện **cùng
+    `assigneeId`**: prereq khác người không kéo, để mỗi người là một khối liền (user chọn,
+    2026-11-09: *"bỏ pull khi sort Assignee"*). Prereq cùng người vẫn kéo, nên khối của một người
+    giống hệt card của họ ở By member. Mọi sort khác giữ nguyên luật.
 - A task waiting on an unfinished prereq is **blocked** (row tooltip: "Blocked — waiting on
   a prerequisite task"). A prereq that is a **group (parent) task** counts as done only when
   **every child** of that group is done.

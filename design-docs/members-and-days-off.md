@@ -1,7 +1,9 @@
 # Members & days off
 
 **Status:** Implemented
-**Last updated:** 2026-08-18 (days-off window widens to cover a member's task-date
+**Last updated:** 2026-11-09 (`MemberDaysOffButton variant="compact"` — nút lịch gọn cho chip
+member ở List chế độ All, cùng popover; xem [list-view.md](./list-view.md) *Chế độ All*)
+**Previously:** 2026-08-18 (days-off window widens to cover a member's task-date
 span, so off-days on overdue dates before the sprint start are pickable; + sibling
 `Nd holiday` chip driven by `taskSpan`)
 **Code:** `app/src/members.tsx` (`MemberDaysOffButton`, `DateField`, `daysOffInRange`,

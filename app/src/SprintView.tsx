@@ -24,7 +24,7 @@ import {
   Search,
 } from 'lucide-react'
 import { useDragHandle, useDragHover, type RowDrag } from './DragHandle'
-import { computeDropSlot, resolveDropOrder } from './reorder'
+import { anchorNeighbours, computeDropSlot, resolveDropOrder } from './reorder'
 import {
   db,
   addMember,
@@ -51,6 +51,7 @@ import {
   type WorkingPlan,
 } from './db'
 import { useProjectHolidays } from './scheduling-context'
+import type { ProjectHolidayMap } from './scheduling'
 import { Avatar, MemberDaysOffButton } from './members'
 import {
   STATUS_META,
@@ -104,6 +105,28 @@ const NULL_WORKING_PLAN: WorkingPlan = {
 }
 
 
+/**
+ * How the List lays out a sprint: one card per member (`member`, the original) or
+ * every task in ONE table with an Assignee column (`all`). Chosen on the top bar
+ * and persisted by App (`plan-up:list-grouping`). See design-docs/list-view.md
+ * "Chế độ All".
+ */
+export type ListGrouping = 'member' | 'all'
+
+/** Member-filter value for "tasks with no (known) assignee" in the All table. */
+const UNASSIGNED_FILTER = '__unassigned__'
+
+/** Rows render in the manual order (`listOrder ?? sequence`), so drag can write it. */
+const isManualOrder = (sort: Sort) =>
+  sort.field == null || (sort.field === 'seq' && sort.dir === 'asc')
+
+/**
+ * Inside ONE member card an `assignee` sort is a no-op (every row is the same
+ * person, so it falls through to the manual order) — drag stays available there
+ * even though the sort is technically on. See design-docs/list-view.md.
+ */
+const isLaneManualOrder = (sort: Sort) => isManualOrder(sort) || sort.field === 'assignee'
+
 const COLLAPSE_KEY = (sprintId: string) => `plan-up:collapsed:${sprintId}`
 const GROUP_COLLAPSE_KEY = (parentId: string) =>
   `plan-up:taskgroup-collapsed:${parentId}`
@@ -135,12 +158,15 @@ export function SprintView({
   sprintStartDate,
   sprintEndDate,
   tasks,
+  grouping = 'member',
 }: {
   projectId: string
   sprintId: string
   sprintStartDate: string
   sprintEndDate: string
   tasks: Task[]
+  /** `all` = one table for the whole sprint instead of a card per member. */
+  grouping?: ListGrouping
 }) {
   const members = useLiveQuery(
     () => db.members.where('projectId').equals(projectId).toArray(),
@@ -166,11 +192,15 @@ export function SprintView({
       return next
     })
   const clearSelection = () => setSelectedIds(new Set())
+  // All table only: a member id, UNASSIGNED_FILTER, or null (everyone). Transient —
+  // not persisted, reset on sprint switch. See design-docs/list-view.md "Chế độ All".
+  const [memberFilter, setMemberFilter] = useState<string | null>(null)
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- sprint switch swaps the persisted collapse set + clears selection
     setCollapsed(loadCollapsed(sprintId))
     setSelectedIds(new Set())
+    setMemberFilter(null)
   }, [sprintId])
 
   // Persist the (shared) sort on every change so it survives remounts — switching
@@ -211,10 +241,15 @@ export function SprintView({
   const [dragMemberId, setDragMemberId] = useState<string | null>(null)
   const laneHover = useDragHover()
 
+  // Lanes follow the manual per-project order (drag-to-reorder); the filled lanes,
+  // the empty-members section, the All table's chips and its Assignee sort all
+  // derive from this one sorted list.
+  const sortedMembers = useMemo(
+    () => (members ?? []).slice().sort(compareMembersByOrder),
+    [members]
+  )
   const { groups, emptyMembers, unassigned } = useMemo(() => {
-    // Lanes follow the manual per-project order (drag-to-reorder); both the
-    // filled lanes and the empty-members section derive from this sorted list.
-    const ms = (members ?? []).slice().sort(compareMembersByOrder)
+    const ms = sortedMembers
     const byMember = new Map<string, Task[]>()
     for (const m of ms) byMember.set(m.id, [])
     const orphan: Task[] = []
@@ -236,14 +271,58 @@ export function SprintView({
       emptyMembers: empty,
       unassigned: orphanOrdered,
     }
-  }, [members, tasks, sort, planById])
+  }, [sortedMembers, tasks, sort, planById])
+
+  // ── All table (grouping === 'all') ──────────────────────────────────────
+  // ONE lane for the whole sprint, so `orderLane` pulls a dependent under a prereq
+  // owned by someone else too; the Assignee sort narrows that pull to one person
+  // (task-sort.ts). Member stats cover the whole sprint regardless of the filter —
+  // they're the chips' numbers, and conflicts are per member. See list-view.md.
+  const allTable = useMemo(() => {
+    if (grouping !== 'all') return null
+    const known = new Set(sortedMembers.map((m) => m.id))
+    const ownerOf = (t: Task) =>
+      t.assigneeId && known.has(t.assigneeId) ? t.assigneeId : null
+    const filter =
+      memberFilter === UNASSIGNED_FILTER || (memberFilter && known.has(memberFilter))
+        ? memberFilter
+        : null
+    const visible =
+      filter == null
+        ? tasks
+        : tasks.filter((t) =>
+            filter === UNASSIGNED_FILTER ? ownerOf(t) === null : ownerOf(t) === filter
+          )
+    const assigneeRank = new Map(sortedMembers.map((m, i) => [m.id, i]))
+    const rows = orderLane(visible, sort, planById, assigneeRank)
+    const byMember = new Map<string, Task[]>(sortedMembers.map((m) => [m.id, []]))
+    let unassignedCount = 0
+    for (const t of tasks) {
+      const o = ownerOf(t)
+      if (o) byMember.get(o)!.push(t)
+      else unassignedCount++
+    }
+    const stats = new Map(
+      sortedMembers.map((m) => [
+        m.id,
+        memberHeaderStats(byMember.get(m.id)!, tasksById, memberById, planById, holidays),
+      ])
+    )
+    const conflictTips = new Map<string, string>()
+    for (const st of stats.values()) for (const [k, v] of st.conflictTips) conflictTips.set(k, v)
+    return { filter, rows, stats, unassignedCount, conflictTips }
+  }, [grouping, sortedMembers, memberFilter, tasks, sort, planById, tasksById, memberById, holidays])
 
   // Flat top-to-bottom order exactly as rendered (lanes in order, group children
-  // nested, Unassigned last). The selection bar's "Chain prereqs" links tasks in
-  // this order — NOT the raw `tasks` DB array, which is unsorted. See design-docs/dependencies.md.
+  // nested, Unassigned last — or the All table's single order). The selection bar's
+  // "Chain prereqs" links tasks in this order — NOT the raw `tasks` DB array, which
+  // is unsorted. See design-docs/dependencies.md.
   const orderedTasks = useMemo(
-    () => flattenDisplayOrder([...groups.map((g) => g.tasks), unassigned]),
-    [groups, unassigned]
+    () =>
+      allTable
+        ? flattenDisplayOrder([allTable.rows])
+        : flattenDisplayOrder([...groups.map((g) => g.tasks), unassigned]),
+    [allTable, groups, unassigned]
   )
 
   if (!members) return <p className="text-ink-muted py-12 text-center">Loading…</p>
@@ -325,7 +404,52 @@ export function SprintView({
           layout (no Assignee column); the Unassigned card keeps its own header
           since it adds that column. Matches the member cards' overflow-x-auto/
           min-w so columns line up on wide screens. See design-docs/list-view.md v4. */}
-      {groups.length > 0 && (
+      {allTable && (
+        <>
+          <MemberFilterStrip
+            members={sortedMembers}
+            stats={allTable.stats}
+            total={tasks.length}
+            unassignedCount={allTable.unassignedCount}
+            filter={allTable.filter}
+            onFilter={setMemberFilter}
+            sprintStartDate={sprintStartDate}
+            sprintEndDate={sprintEndDate}
+          />
+          {/* Same sticky glass capsule as the member layout, plus the (sortable)
+              wide Assignee column — mirrors the card's min-w so columns align. */}
+          <div className="sticky top-2 z-20">
+            <div className="glass-toolbar rounded-full overflow-hidden">
+              <div className="overflow-x-auto">
+                <div className="min-w-[960px]">
+                  <TaskColumnHeader sort={sort} setSort={setSort} assigneeWide bare />
+                </div>
+              </div>
+            </div>
+          </div>
+          <AllTasksCard
+            projectId={projectId}
+            sprintId={sprintId}
+            sprintStartDate={sprintStartDate}
+            rows={allTable.rows}
+            members={members}
+            allTasks={tasks}
+            tasksById={tasksById}
+            planById={planById}
+            conflictTips={allTable.conflictTips}
+            canReorder={isManualOrder(sort)}
+            selectedIds={selectedIds}
+            onToggleSelect={toggleSelect}
+            addFor={
+              allTable.filter && allTable.filter !== UNASSIGNED_FILTER
+                ? (memberById.get(allTable.filter) ?? null)
+                : null
+            }
+          />
+        </>
+      )}
+
+      {!allTable && groups.length > 0 && (
         <div className="sticky top-2 z-20">
           <div className="glass-toolbar rounded-full overflow-hidden">
             <div className="overflow-x-auto">
@@ -337,7 +461,7 @@ export function SprintView({
         </div>
       )}
 
-      {groups.map(({ member, tasks: t }) => (
+      {!allTable && groups.map(({ member, tasks: t }) => (
         <MemberCard
           key={member.id}
           projectId={projectId}
@@ -359,7 +483,7 @@ export function SprintView({
         />
       ))}
 
-      {unassigned.length > 0 && (
+      {!allTable && unassigned.length > 0 && (
         <UnassignedCard
           tasks={unassigned}
           members={members}
@@ -373,7 +497,7 @@ export function SprintView({
         />
       )}
 
-      {emptyMembers.length > 0 && (
+      {!allTable && emptyMembers.length > 0 && (
         <CollapsedMembers
           projectId={projectId}
           members={emptyMembers}
@@ -396,7 +520,7 @@ export function SprintView({
         selectedIds={selectedIds}
         tasksById={tasksById}
         allTasks={orderedTasks}
-        members={(members ?? []).slice().sort(compareMembersByOrder)}
+        members={sortedMembers}
         onClear={clearSelection}
       />
     </div>
@@ -875,57 +999,16 @@ function MemberCard({
   /** Lane drag-to-reorder wiring (absent → card is not draggable). */
   drag?: RowDrag
 }) {
-  // Leaf-based counting: a parent (a task with children in this list) is a
-  // container, excluded from done/total/overdue so its work isn't double-counted
-  // with its children. See design-docs/task-groups.md.
-  const parentIds = useMemo(() => {
-    const s = new Set<string>()
-    for (const t of tasks) if (t.parentId) s.add(t.parentId)
-    return s
-  }, [tasks])
   const memberById = useMemo(() => new Map(members.map((m) => [m.id, m])), [members])
   const holidays = useProjectHolidays()
   // All header stats derive from the same inputs — memoize them as one block so
   // they don't recompute (incl. the O(n²) conflict scan + a computeWorkingPlan
   // per task) on every unrelated re-render of this card (e.g. a selection toggle
   // elsewhere). Recomputes only when this member's tasks/members actually change.
-  const { total, done, pct, overdue, nextDue, conflictTips, earliestDate, latestDate } = useMemo(() => {
-    const leafTasks = tasks.filter((t) => !parentIds.has(t.id))
-    const total = leafTasks.length
-    const done = leafTasks.filter((t) => t.status === 'done').length
-    const pct = total ? Math.round((done / total) * 100) : 0
-    // Use each task's COMPUTED end (same plan the End column shows) so the header
-    // never disagrees with the rows. overdue = past-due unfinished; nextDue =
-    // earliest unfinished end that is today-or-later (the next upcoming deadline).
-    let overdue = 0
-    let nextDue: string | null = null
-    for (const t of leafTasks) {
-      if (t.status === 'done') continue
-      const plan = planById.get(t.id) ?? computeWorkingPlan(t, tasksById, memberById, holidays)
-      // Milestones (effort 0) have no due span — their deadline is the milestone
-      // date (start), so they count toward overdue / next-due like any task.
-      const due = t.estimate === 0 ? plan.startDate : plan.dueDate
-      if (!due) continue
-      if (isOverdue(due, false)) overdue++
-      else if (!nextDue || due < nextDue) nextDue = due
-    }
-    // Double-booking warnings among this member's leaf tasks (see
-    // design-docs/conflict-warning.md). Cheap O(n²) over a member's tasks.
-    const conflictTips = computeMemberConflicts(leafTasks, tasksById, memberById, holidays)
-    // Date span this member's tasks actually touch — see `memberTaskSpan`.
-    const span = memberTaskSpan(
-      tasks,
-      new Map(
-        tasks.map((t) => [
-          t.id,
-          planById.get(t.id) ?? computeWorkingPlan(t, tasksById, memberById, holidays),
-        ])
-      )
-    )
-    const earliestDate = span?.start ?? null
-    const latestDate = span?.end ?? null
-    return { total, done, pct, overdue, nextDue, conflictTips, earliestDate, latestDate }
-  }, [tasks, parentIds, tasksById, memberById, planById, holidays])
+  const { total, done, pct, overdue, nextDue, conflictTips, earliestDate, latestDate } = useMemo(
+    () => memberHeaderStats(tasks, tasksById, memberById, planById, holidays),
+    [tasks, tasksById, memberById, planById, holidays]
+  )
   // Widen the sprint window to cover this member's task span (overdue tasks can
   // sit before the sprint start), so those dates are pickable in the days-off popover.
   const daysOffRange = useMemo(
@@ -984,7 +1067,7 @@ function MemberCard({
                 conflictTips={conflictTips}
                 selectedIds={selectedIds}
                 onToggleSelect={onToggleSelect}
-                canReorder={sort.field == null || (sort.field === 'seq' && sort.dir === 'asc')}
+                canReorder={isLaneManualOrder(sort)}
               />
               <AddTaskRow
                 projectId={projectId}
@@ -999,6 +1082,71 @@ function MemberCard({
       )}
     </Card>
   )
+}
+
+type MemberHeaderStats = {
+  total: number
+  done: number
+  pct: number
+  overdue: number
+  nextDue: string | null
+  conflictTips: Map<string, string>
+  earliestDate: string | null
+  latestDate: string | null
+}
+
+/**
+ * Everything a member's summary shows — the card header (MemberCard) and the
+ * All table's member chip read this ONE function, so the two can never disagree.
+ * `tasks` = that member's tasks in the sprint. See design-docs/member-header-summary.md.
+ */
+function memberHeaderStats(
+  tasks: Task[],
+  tasksById: Map<string, Task>,
+  memberById: Map<string, Member>,
+  planById: Map<string, WorkingPlan>,
+  holidays: ProjectHolidayMap | undefined
+): MemberHeaderStats {
+  // Leaf-based counting: a parent (a task with children in this list) is a
+  // container, excluded from done/total/overdue so its work isn't double-counted
+  // with its children. See design-docs/task-groups.md.
+  const parentIds = new Set<string>()
+  for (const t of tasks) if (t.parentId) parentIds.add(t.parentId)
+  const leafTasks = tasks.filter((t) => !parentIds.has(t.id))
+  const total = leafTasks.length
+  const done = leafTasks.filter((t) => t.status === 'done').length
+  const pct = total ? Math.round((done / total) * 100) : 0
+  // Use each task's COMPUTED end (same plan the End column shows) so the header
+  // never disagrees with the rows. overdue = past-due unfinished; nextDue =
+  // earliest unfinished end that is today-or-later (the next upcoming deadline).
+  let overdue = 0
+  let nextDue: string | null = null
+  for (const t of leafTasks) {
+    if (t.status === 'done') continue
+    const plan = planById.get(t.id) ?? computeWorkingPlan(t, tasksById, memberById, holidays)
+    // Milestones (effort 0) have no due span — their deadline is the milestone
+    // date (start), so they count toward overdue / next-due like any task.
+    const due = t.estimate === 0 ? plan.startDate : plan.dueDate
+    if (!due) continue
+    if (isOverdue(due, false)) overdue++
+    else if (!nextDue || due < nextDue) nextDue = due
+  }
+  // Double-booking warnings among this member's leaf tasks (see
+  // design-docs/conflict-warning.md). Cheap O(n²) over a member's tasks.
+  const conflictTips = computeMemberConflicts(leafTasks, tasksById, memberById, holidays)
+  // Date span this member's tasks actually touch — see `memberTaskSpan`.
+  const span = memberTaskSpan(
+    tasks,
+    new Map(
+      tasks.map((t) => [
+        t.id,
+        planById.get(t.id) ?? computeWorkingPlan(t, tasksById, memberById, holidays),
+      ])
+    )
+  )
+  const earliestDate = span?.start ?? null
+  const latestDate = span?.end ?? null
+  return { total, done, pct, overdue, nextDue, conflictTips, earliestDate, latestDate }
 }
 
 function UnassignedCard({
@@ -1048,12 +1196,229 @@ function UnassignedCard({
               planById={planById}
               selectedIds={selectedIds}
               onToggleSelect={onToggleSelect}
-              canReorder={sort.field == null || (sort.field === 'seq' && sort.dir === 'asc')}
+              canReorder={isLaneManualOrder(sort)}
             />
           </div>
         </div>
       </div>
     </Card>
+  )
+}
+
+/**
+ * The All table: every task of the sprint in ONE card, with a wide Assignee
+ * column. Same rows, editing, selection and drag as a member card — the lane is
+ * just the whole (optionally member-filtered) sprint. Add-task assigns to the
+ * filtered member, else leaves the task unassigned. See list-view.md "Chế độ All".
+ */
+function AllTasksCard({
+  projectId,
+  sprintId,
+  sprintStartDate,
+  rows,
+  members,
+  allTasks,
+  tasksById,
+  planById,
+  conflictTips,
+  canReorder,
+  selectedIds,
+  onToggleSelect,
+  addFor,
+}: {
+  projectId: string
+  sprintId: string
+  sprintStartDate: string
+  rows: Task[]
+  members: Member[]
+  allTasks: Task[]
+  tasksById: Map<string, Task>
+  planById: Map<string, WorkingPlan>
+  conflictTips: Map<string, string>
+  canReorder: boolean
+  selectedIds: Set<string>
+  onToggleSelect: (id: string) => void
+  /** Member the table is filtered to — new tasks go to them. Null = unassigned. */
+  addFor: Member | null
+}) {
+  return (
+    <Card>
+      <div className="overflow-x-auto">
+        <div className="min-w-[960px]">
+          <div className="divide-y divide-border">
+            {rows.length === 0 && (
+              <div className="px-4 py-6 text-center text-sm text-ink-faint">No tasks</div>
+            )}
+            <TaskRows
+              tasks={rows}
+              members={members}
+              allTasks={allTasks}
+              tasksById={tasksById}
+              planById={planById}
+              assigneeWide
+              conflictTips={conflictTips}
+              selectedIds={selectedIds}
+              onToggleSelect={onToggleSelect}
+              canReorder={canReorder}
+            />
+            <AddTaskRow
+              projectId={projectId}
+              sprintId={sprintId}
+              sprintStartDate={sprintStartDate}
+              assigneeId={addFor?.id ?? null}
+              assigneeWide
+              placeholder={addFor ? `Add task for ${addFor.name}` : 'Add task (unassigned)'}
+            />
+          </div>
+        </div>
+      </div>
+    </Card>
+  )
+}
+
+/**
+ * Chips above the All table: `All N`, one per member (lane order) carrying the
+ * same summary as a member card header — done/total, overdue, conflicts, next
+ * due, days off — and `Unassigned N`. Clicking a chip filters the table to that
+ * person; clicking it again (or `All`) clears. Members with no tasks still get a
+ * (dimmed) chip so their days off stay reachable. See list-view.md "Chế độ All".
+ */
+function MemberFilterStrip({
+  members,
+  stats,
+  total,
+  unassignedCount,
+  filter,
+  onFilter,
+  sprintStartDate,
+  sprintEndDate,
+}: {
+  members: Member[]
+  stats: Map<string, MemberHeaderStats>
+  total: number
+  unassignedCount: number
+  filter: string | null
+  onFilter: (f: string | null) => void
+  sprintStartDate: string
+  sprintEndDate: string
+}) {
+  const toggle = (f: string) => onFilter(filter === f ? null : f)
+  return (
+    <div className="flex flex-wrap items-center gap-2" role="toolbar" aria-label="Filter by member">
+      <FilterChip active={filter == null} onActivate={() => onFilter(null)} label="All tasks">
+        <span className="px-1.5 font-medium text-ink">All</span>
+        <span className="pr-1.5 text-xs text-ink-faint font-mono">{total}</span>
+      </FilterChip>
+      {members.map((m) => {
+        const st = stats.get(m.id)
+        if (!st) return null
+        return (
+          <FilterChip
+            key={m.id}
+            active={filter === m.id}
+            onActivate={() => toggle(m.id)}
+            label={`Filter by ${m.name}`}
+          >
+            <Avatar member={m} size={22} ring={false} />
+            <span className={`font-medium whitespace-nowrap ${st.total ? 'text-ink' : 'text-ink-muted'}`}>
+              {m.name}
+            </span>
+            <span className="text-xs text-ink-faint font-mono">
+              {st.done}/{st.total}
+            </span>
+            {st.overdue > 0 && (
+              <span
+                className="inline-flex items-center text-[11px] font-semibold px-1.5 py-px rounded-full"
+                style={{
+                  background: 'color-mix(in srgb, var(--color-priority-urgent) 14%, transparent)',
+                  color: 'color-mix(in srgb, var(--color-priority-urgent) 78%, var(--color-ink) 22%)',
+                }}
+                title={`${st.overdue} task${st.overdue === 1 ? '' : 's'} overdue`}
+              >
+                {st.overdue} overdue
+              </span>
+            )}
+            {st.conflictTips.size > 0 && (
+              <span
+                className="inline-flex items-center gap-0.5 text-[11px] font-semibold text-priority-high"
+                title={`${st.conflictTips.size} task trùng lịch`}
+              >
+                <AlertTriangle size={12} />
+                {st.conflictTips.size}
+              </span>
+            )}
+            {st.nextDue && (
+              <span className="text-[11px] font-medium text-ink-faint whitespace-nowrap" title="Next upcoming deadline">
+                due {formatShortDate(st.nextDue)}
+              </span>
+            )}
+            <MemberDaysOffButton
+              member={m}
+              variant="compact"
+              range={daysOffWindow(sprintStartDate, sprintEndDate, [st.earliestDate, st.latestDate])}
+              taskSpan={
+                st.earliestDate && st.latestDate
+                  ? { start: st.earliestDate, end: st.latestDate }
+                  : null
+              }
+            />
+          </FilterChip>
+        )
+      })}
+      {unassignedCount > 0 && (
+        <FilterChip
+          active={filter === UNASSIGNED_FILTER}
+          onActivate={() => toggle(UNASSIGNED_FILTER)}
+          label="Filter unassigned tasks"
+        >
+          <span className="w-[22px] h-[22px] rounded-full flex items-center justify-center text-[10px] text-ink-faint border border-dashed border-border-strong">
+            —
+          </span>
+          <span className="font-medium text-ink-muted">Unassigned</span>
+          <span className="pr-1.5 text-xs text-ink-faint font-mono">{unassignedCount}</span>
+        </FilterChip>
+      )}
+    </div>
+  )
+}
+
+/**
+ * One chip of the member strip. A div with role=button (not a <button>) because
+ * it holds the Days off button, and buttons can't nest. Keys only fire when the
+ * chip itself has focus, so Enter on the inner Days off button doesn't filter.
+ */
+function FilterChip({
+  active,
+  onActivate,
+  label,
+  children,
+}: {
+  active: boolean
+  onActivate: () => void
+  label: string
+  children: React.ReactNode
+}) {
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      aria-pressed={active}
+      aria-label={label}
+      title={label}
+      onClick={onActivate}
+      onKeyDown={(e) => {
+        if (e.target !== e.currentTarget) return
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onActivate()
+        }
+      }}
+      className={`inline-flex items-center gap-2 h-9 pl-1.5 pr-1.5 rounded-full text-sm cursor-pointer select-none transition outline-none focus-visible:ring-2 focus-visible:ring-accent/50 ${
+        active ? 'bg-accent-soft ring-[1.5px] ring-accent' : 'glass-toolbar hover:bg-surface-hover'
+      }`}
+    >
+      {children}
+    </div>
   )
 }
 
@@ -1276,12 +1641,17 @@ function AddTaskRow({
   sprintStartDate,
   assigneeId,
   showAssignee = true,
+  assigneeWide = false,
+  placeholder = 'Add task',
 }: {
   projectId: string
   sprintId: string
   sprintStartDate: string
   assigneeId: string | null
   showAssignee?: boolean
+  /** All table: wide Assignee column (implies showAssignee). */
+  assigneeWide?: boolean
+  placeholder?: string
 }) {
   const [title, setTitle] = useState('')
   const add = async () => {
@@ -1315,10 +1685,14 @@ function AddTaskRow({
         // shouldn't be lost. `add()` no-ops on empty and clears synchronously,
         // so an Enter-then-blur can't double-submit.
         onBlur={() => void add()}
-        placeholder="Add task"
+        placeholder={placeholder}
         className={`${COL.title} editable placeholder:text-ink-faint bg-transparent`}
       />
-      {showAssignee && <div className={COL.assignee} />}
+      {assigneeWide ? (
+        <div className={COL.assigneeWide} />
+      ) : (
+        showAssignee && <div className={COL.assignee} />
+      )}
       <div className={COL.effort} />
       <div className={COL.start} />
       <div className={COL.due} />
@@ -1340,6 +1714,8 @@ const COL = {
   seq: 'w-8 text-sm text-ink-faint tabular-nums text-center shrink-0 font-mono',
   title: 'flex-1 min-w-[150px]',
   assignee: 'w-16 flex justify-center shrink-0',
+  // All table: avatar + name. See design-docs/list-view.md "Chế độ All".
+  assigneeWide: 'w-32 flex justify-start items-center shrink-0 min-w-0',
   effort: 'w-20 flex justify-center shrink-0',
   start: 'w-28 flex justify-end shrink-0',
   due: 'w-28 flex justify-end shrink-0',
@@ -1703,6 +2079,8 @@ function TaskGroupRow({
   collapsed,
   onToggle,
   drag,
+  showAssignee = false,
+  assigneeWide = false,
 }: {
   task: Task
   childrenTasks: Task[]
@@ -1712,6 +2090,9 @@ function TaskGroupRow({
   collapsed: boolean
   onToggle: () => void
   drag?: RowDrag
+  /** Render the Assignee column (read-only here: reassigning a parent ungroups). */
+  showAssignee?: boolean
+  assigneeWide?: boolean
 }) {
   const { grip, indicator, rowProps, dragging } = useDragHandle(drag)
   const memberById = useMemo(
@@ -1797,6 +2178,20 @@ function TaskGroupRow({
           {done}/{total}
         </span>
       </div>
+      {(showAssignee || assigneeWide) && (
+        <div className={assigneeWide ? COL.assigneeWide : COL.assignee}>
+          {(() => {
+            const a = task.assigneeId ? memberById.get(task.assigneeId) : undefined
+            if (!a) return <span className="text-ink-faint opacity-40">—</span>
+            return (
+              <span className="inline-flex items-center gap-1.5 min-w-0" title={a.name}>
+                <Avatar member={a} size={22} ring={false} />
+                {assigneeWide && <span className="truncate text-sm text-ink-muted">{a.name}</span>}
+              </span>
+            )
+          })()}
+        </div>
+      )}
       <div className={COL.effort}>
         <span className="text-sm text-ink-muted tabular-nums">
           {hasEffort ? effortSum : <span className="text-ink-faint opacity-40">—</span>}
@@ -1847,6 +2242,7 @@ function TaskRows({
   tasksById,
   planById,
   showAssignee = true,
+  assigneeWide = false,
   conflictTips,
   selectedIds,
   onToggleSelect,
@@ -1858,6 +2254,8 @@ function TaskRows({
   tasksById: Map<string, Task>
   planById: Map<string, WorkingPlan>
   showAssignee?: boolean
+  /** All table: wide Assignee column (avatar + name). */
+  assigneeWide?: boolean
   /** taskId → conflict tooltip (member double-booking); absent map = no warnings. */
   conflictTips?: Map<string, string>
   /** Multi-select state for the group-via-selection flow. */
@@ -1966,7 +2364,16 @@ function TaskRows({
     const arr = laneArray(lane)
     const slot = computeDropSlot(arr, (x) => x.id, id, targetId, pos)
     if (!slot || slot.ownGap) return
-    const { order, collides } = resolveDropOrder(slot, effOrder)
+    // A row pulled under its prerequisite shows THERE but keeps its own listOrder
+    // elsewhere — never take the midpoint against it, or the drop lands somewhere
+    // unrelated. Use the nearest un-pinned row on each side. See list-view.md.
+    const laneIds = new Set(arr.map((x) => x.id))
+    const pinned = (x: Task) => x.dependsOn.some((d) => d !== x.id && laneIds.has(d))
+    const rest = arr.filter((x) => x.id !== id)
+    const { order, collides } = resolveDropOrder(
+      { ...slot, ...anchorNeighbours(rest, slot.insertAt, pinned) },
+      effOrder
+    )
     if (collides) {
       // Float precision exhausted — a one-row write would make two rows share
       // an order; renormalize the whole lane to clean integers instead.
@@ -2010,6 +2417,8 @@ function TaskRows({
                 collapsed={isCollapsed}
                 onToggle={() => toggle(t.id)}
                 drag={dragFor(t)}
+                showAssignee={showAssignee}
+                assigneeWide={assigneeWide}
               />
               {!isCollapsed &&
                 kids.map((c) => (
@@ -2021,6 +2430,7 @@ function TaskRows({
                     tasksById={tasksById}
                     planById={planById}
                     showAssignee={showAssignee}
+                    assigneeWide={assigneeWide}
                     isChild
                     warn={conflictTips?.get(c.id)}
                     selected={selectedIds?.has(c.id)}
@@ -2042,6 +2452,7 @@ function TaskRows({
             tasksById={tasksById}
             planById={planById}
             showAssignee={showAssignee}
+            assigneeWide={assigneeWide}
             warn={conflictTips?.get(t.id)}
             selected={selectedIds?.has(t.id)}
             onToggleSelect={
@@ -2062,6 +2473,8 @@ type TaskRowProps = {
   tasksById: Map<string, Task>
   planById: Map<string, WorkingPlan>
   showAssignee?: boolean
+  /** All table: wide Assignee column (avatar + name); implies showAssignee. */
+  assigneeWide?: boolean
   isChild?: boolean
   /** Conflict tooltip — renders an amber warning triangle in the lead gutter. */
   warn?: string
@@ -2089,6 +2502,7 @@ function taskRowPropsEqual(prev: TaskRowProps, next: TaskRowProps): boolean {
     prev.tasksById === next.tasksById &&
     prev.planById === next.planById &&
     prev.showAssignee === next.showAssignee &&
+    prev.assigneeWide === next.assigneeWide &&
     prev.isChild === next.isChild &&
     prev.warn === next.warn &&
     prev.selected === next.selected &&
@@ -2106,6 +2520,7 @@ const TaskRow = memo(function TaskRow({
   tasksById,
   planById,
   showAssignee = true,
+  assigneeWide = false,
   isChild = false,
   warn,
   selected = false,
@@ -2214,10 +2629,16 @@ const TaskRow = memo(function TaskRow({
         trailing={isMilestone ? <MilestoneTag /> : undefined}
       />
 
-      {showAssignee && (
-        <div className={COL.assignee}>
-          <AssigneePicker task={task} members={members} assignee={assignee} update={update} />
+      {assigneeWide ? (
+        <div className={COL.assigneeWide}>
+          <AssigneePicker task={task} members={members} assignee={assignee} update={update} wide />
         </div>
+      ) : (
+        showAssignee && (
+          <div className={COL.assignee}>
+            <AssigneePicker task={task} members={members} assignee={assignee} update={update} />
+          </div>
+        )
       )}
 
       <div className={COL.effort}>
@@ -2319,6 +2740,7 @@ function TaskColumnHeader({
   sort,
   setSort,
   showAssignee = true,
+  assigneeWide = false,
   bare = false,
 }: {
   sort: Sort
@@ -2326,6 +2748,8 @@ function TaskColumnHeader({
     React.SetStateAction<Sort>
   >
   showAssignee?: boolean
+  /** All table: wide, SORTABLE Assignee column. */
+  assigneeWide?: boolean
   /** Inside the floating capsule: the capsule's rim is the edge, so no border-b. */
   bare?: boolean
 }) {
@@ -2363,10 +2787,20 @@ function TaskColumnHeader({
         sort={sort}
         onSort={onSort}
       />
-      {showAssignee && (
-        <div className={`${COL.assignee} text-[11px] tracking-normal text-ink-faint font-medium text-center`}>
-          Assignee
-        </div>
+      {assigneeWide ? (
+        <SortHeader
+          className={COL.assigneeWide}
+          field="assignee"
+          label="Assignee"
+          sort={sort}
+          onSort={onSort}
+        />
+      ) : (
+        showAssignee && (
+          <div className={`${COL.assignee} text-[11px] tracking-normal text-ink-faint font-medium text-center`}>
+            Assignee
+          </div>
+        )
       )}
       <SortHeader
         className={COL.effort}
@@ -2597,16 +3031,34 @@ function AssigneePicker({
   members,
   assignee,
   update,
+  wide = false,
 }: {
   task: Task
   members: Member[]
   assignee: Member | null
   update: (p: Partial<Task>) => void
+  /** All table: show the name next to the avatar; unassigned reads "Assign". */
+  wide?: boolean
 }) {
   const ref = useRef<HTMLSelectElement>(null)
   return (
-    <label className="relative inline-flex" title={assignee?.name ?? 'Unassigned'}>
-      {assignee ? (
+    <label
+      className={`relative inline-flex ${wide ? 'max-w-full min-w-0' : ''}`}
+      title={assignee?.name ?? 'Unassigned'}
+    >
+      {wide ? (
+        assignee ? (
+          <span className="inline-flex items-center gap-1.5 min-w-0 max-w-full rounded-full py-0.5 pl-0.5 pr-2 cursor-pointer hover:bg-surface-hover transition">
+            <Avatar member={assignee} size={22} ring={false} />
+            <span className="truncate text-sm text-ink">{assignee.name}</span>
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs text-ink-faint border border-dashed border-border-strong cursor-pointer hover:border-accent hover:text-accent transition">
+            <UserPlus size={12} />
+            Assign
+          </span>
+        )
+      ) : assignee ? (
         <Avatar
           member={assignee}
           size={24}

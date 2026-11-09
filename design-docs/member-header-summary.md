@@ -1,8 +1,11 @@
 # Member header summary
 
 **Status:** Implemented
-**Last updated:** 2026-08-18 (+ chip `Nd holiday`)
-**Code:** `app/src/SprintView.tsx` (`MemberCard`, `AvatarRing`, `MemberStatsBar`),
+**Last updated:** 2026-11-09 (số liệu tách ra `memberHeaderStats`, dùng chung cho header card
+và chip member ở List chế độ All — xem [list-view.md](./list-view.md) *Chế độ All*)
+**Previously:** 2026-08-18 (+ chip `Nd holiday`)
+**Code:** `app/src/SprintView.tsx` (`MemberCard`, `memberHeaderStats`, `MemberFilterStrip`,
+`AvatarRing`, `MemberStatsBar`),
 `app/src/members.tsx` (`MemberDaysOffButton`),
 `app/src/lib.ts` (`effectiveDaysOff`, `holidayLoadInSpan`, `memberTaskSpan`)
 

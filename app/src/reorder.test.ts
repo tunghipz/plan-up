@@ -4,6 +4,7 @@ import {
   computeAppendSlot,
   resolveDropOrder,
   planPrereqMove,
+  anchorNeighbours,
 } from './reorder'
 
 type Row = { id: string; order: number }
@@ -168,5 +169,50 @@ describe('planPrereqMove', () => {
       kind: 'renormalize',
       orderedIds: ['a', 'z', 'b'],
     })
+  })
+})
+
+// A row pulled under its prerequisite is displayed there but keeps its own
+// listOrder elsewhere — a midpoint against it lands the drop somewhere else.
+// See design-docs/list-view.md "Drag-to-reorder".
+describe('anchorNeighbours', () => {
+  // Display: a(10), d(90, pulled under a), b(20), c(30). Dragged row already removed.
+  const rest: Row[] = [
+    { id: 'a', order: 10 },
+    { id: 'd', order: 90 },
+    { id: 'b', order: 20 },
+    { id: 'c', order: 30 },
+  ]
+  const pinned = (r: Row) => r.id === 'd'
+
+  it('skips a pulled row on either side', () => {
+    // Drop between d and b: before = a (not d), after = b.
+    const nb = anchorNeighbours(rest, 2, pinned)
+    expect([nb.before?.id, nb.after?.id]).toEqual(['a', 'b'])
+    // Drop between a and d: before = a, after = b (not d) → lands after d, pair intact.
+    const nb2 = anchorNeighbours(rest, 1, pinned)
+    expect([nb2.before?.id, nb2.after?.id]).toEqual(['a', 'b'])
+  })
+
+  it('gives an order that sorts back into the dropped spot', () => {
+    const nb = anchorNeighbours(rest, 2, pinned)
+    const { order, collides } = resolveDropOrder(
+      { insertAt: 2, before: nb.before, after: nb.after, ownGap: false },
+      orderOf
+    )
+    expect(collides).toBe(false)
+    expect(order).toBe(15) // between a (10) and b (20) — not between d (90) and b (20)
+  })
+
+  it('returns null sides at the edges and when every row is pulled', () => {
+    expect(anchorNeighbours(rest, 0, pinned).before).toBe(null)
+    expect(anchorNeighbours(rest, 4, pinned).after).toBe(null)
+    const all = anchorNeighbours(rest, 2, () => true)
+    expect([all.before, all.after]).toEqual([null, null])
+  })
+
+  it('is the plain neighbours when nothing is pulled', () => {
+    const nb = anchorNeighbours(rest, 2, () => false)
+    expect([nb.before?.id, nb.after?.id]).toEqual(['d', 'b'])
   })
 })

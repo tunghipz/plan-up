@@ -142,3 +142,50 @@ describe('orderLane — sort then pull', () => {
     expect(out.map((x) => x.id)).toEqual(['one', 'dep', 'two'])
   })
 })
+
+// List "All" table: one lane for the whole sprint. See design-docs/list-view.md
+// "Chế độ All" and dependencies.md (Assignee-sort exception).
+describe('All table — one lane, Assignee sort', () => {
+  const ids = (list: Task[]) => list.map((x) => x.id)
+  // phongnd (rank 0): p19, p14 · minhvq (rank 1): m15, m21 (waits on p19), m16 (waits on m15)
+  const p19 = mkTask('p19', { sequence: 19, assigneeId: 'p', listOrder: 10.25, dependsOn: [] })
+  const p14 = mkTask('p14', { sequence: 14, assigneeId: 'p', listOrder: 10.5, dependsOn: [] })
+  const m15 = mkTask('m15', { sequence: 15, assigneeId: 'm', dependsOn: [] })
+  const m16 = mkTask('m16', { sequence: 16, assigneeId: 'm', dependsOn: ['m15'] })
+  const m21 = mkTask('m21', { sequence: 21, assigneeId: 'm', dependsOn: ['p19'] })
+  const u24 = mkTask('u24', { sequence: 24, assigneeId: null, dependsOn: [] })
+  const lane = [m21, u24, m16, p14, m15, p19]
+  const rank = new Map([
+    ['p', 0],
+    ['m', 1],
+  ])
+
+  it('neutral order pulls a dependent under a prereq owned by someone else', () => {
+    const out = orderLane(lane, { field: null, dir: 'asc' }, new Map(), rank)
+    expect(ids(out)).toEqual(['p19', 'm21', 'p14', 'm15', 'm16', 'u24'])
+  })
+
+  it('Assignee sort keeps each member one block, manual order inside, unassigned last', () => {
+    const out = orderLane(lane, { field: 'assignee', dir: 'asc' }, new Map(), rank)
+    // m21's prereq p19 belongs to phongnd → no pull across blocks; m16 still under m15.
+    expect(ids(out)).toEqual(['p19', 'p14', 'm15', 'm16', 'm21', 'u24'])
+  })
+
+  it('descending flips the blocks, not the rows inside a block', () => {
+    const out = orderLane(lane, { field: 'assignee', dir: 'desc' }, new Map(), rank)
+    expect(ids(out)).toEqual(['u24', 'm15', 'm16', 'm21', 'p19', 'p14'])
+  })
+
+  it('inside one member card the Assignee sort equals the manual order', () => {
+    const card = [m21, m16, m15]
+    const neutral = orderLane(card, { field: null, dir: 'asc' }, new Map(), rank)
+    const byAssignee = orderLane(card, { field: 'assignee', dir: 'desc' }, new Map(), rank)
+    expect(ids(byAssignee)).toEqual(ids(neutral))
+  })
+
+  it('a member unknown to the rank sorts with the unassigned', () => {
+    const ghost = mkTask('g', { sequence: 1, assigneeId: 'deleted', dependsOn: [] })
+    const out = orderLane([ghost, p14], { field: 'assignee', dir: 'asc' }, new Map(), rank)
+    expect(ids(out)).toEqual(['p14', 'g'])
+  })
+})

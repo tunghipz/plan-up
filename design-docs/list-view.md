@@ -1,14 +1,20 @@
 # List view
 
 **Status:** Implemented
-**Last updated:** 2026-09-21 (sau khi sort, mỗi row có prereq bị **kéo sát ngay dưới prereq
+**Last updated:** 2026-11-09 (**chế độ All**: toggle `By member · All` gộp mọi task của sprint
+vào một bảng có cột Assignee + dải chip member để lọc; sort theo **Assignee**; hàng xóm khi
+kéo thả bỏ qua dòng bị pull — xem *Chế độ All* và *Drag-to-reorder* dưới)
+**Previously:** 2026-09-21 (sau khi sort, mỗi row có prereq bị **kéo sát ngay dưới prereq
 của nó** — `orderLane()`, xem [dependencies.md](./dependencies.md) *Dependents stick to their
-prerequisite*)
-**Previously:** 2026-08-17 (**title 2+ dòng bị xén 2px ở đáy — fixed**, xem v5 dưới; prior:
+prerequisite*); 2026-08-17 (**title 2+ dòng bị xén 2px ở đáy — fixed**, xem v5 dưới; prior:
 2026-07-08 column header → floating glass capsule; sprint note → inline description in the merged Notion-style page header, see app-shell v4; prior: calm refinements — time-on-hover dates, quiet empty cells, sticky-light group headers, compact rows, `#`-prefixed prereq)
-**Code:** `app/src/SprintView.tsx` (`MemberCard`, `UnassignedCard`, `GroupHeader`,
-`TaskColumnHeader`, `SortHeader`, `COL`, `TaskRows` drag state, `TaskRow` grip),
-`app/src/DatePicker.tsx` (`DatePickCell` time-on-hover), `app/src/db.ts` (`orderBetween`, `setListOrder`)
+**Code:** `app/src/SprintView.tsx` (`MemberCard`, `UnassignedCard`, `AllTasksCard`,
+`MemberFilterStrip`, `memberHeaderStats`, `GroupHeader`, `TaskColumnHeader`, `SortHeader`,
+`COL`, `TaskRows` drag state, `TaskRow` grip), `app/src/App.tsx` (grouping toggle,
+`plan-up:list-grouping`), `app/src/task-sort.ts` (`assignee` sort, `orderLane`),
+`app/src/reorder.ts` (`anchorNeighbours`), `app/src/members.tsx`
+(`MemberDaysOffButton variant="compact"`), `app/src/DatePicker.tsx` (`DatePickCell`
+time-on-hover), `app/src/db.ts` (`orderBetween`, `setListOrder`)
 
 > **v5 · title auto-grow không xén chữ (2026-08-17)** — task title trong List là một
 > `<textarea>` tự cao lên (`whitespace-pre-wrap break-words`, `overflow-hidden`, `rows={1}`),
@@ -96,6 +102,56 @@ inset-grouped cards, fully editable inline.
   title and a single collapsed milestone date (instead of a `Start → End` span). This is
   distinct from Effort `—` (*not estimated*, ⚠). See [milestones.md](./milestones.md).
 
+## Chế độ All — một bảng cho cả sprint (2026-11-09)
+
+Card theo member chia sprint thành nhiều mảnh: muốn xem cả team theo thời gian, hay đọc một
+chuỗi prereq đi qua nhiều người, phải nhảy giữa các card. Chế độ **All** đổ mọi task của sprint
+vào **một bảng liền**. Kiểu bảng task của MS Project / OmniPlan, nhưng không có Gantt.
+
+Chọn qua demo `demo/list-all-tasks.html` (hướng A "dải member phía trên", không chọn B "bảng
+trần, member trong nút People"). Nguyên văn user: *"tao không cần gantt, tao chỉ cần là list
+toàn bộ task trên 1 trang liền nhau, thay vì chia theo member như hiện tại"*, rồi *"chọn A, bỏ
+pull khi sort Assignee, làm đi"*.
+
+- **Toggle `By member · All`** trên top bar, ngay trước `List · Board · Timeline`; chỉ hiện khi
+  đang xem List của một sprint. Lưu ở `localStorage['plan-up:list-grouping']`
+  (`'member' | 'all'`, mặc định `member`), dùng chung mọi project như sort.
+- **Một card duy nhất** chứa mọi task của sprint, kể cả task chưa giao. Thêm cột **Assignee
+  rộng** (avatar + tên, 128px), bấm để đổi người (cùng `<select>` ẩn như card Unassigned). Group
+  row hiện avatar + tên của cha, chỉ đọc (đổi assignee của cha thì ungroup, xem
+  [task-groups.md](./task-groups.md)). Header cột vẫn là capsule glass dính trên cùng, thêm cột
+  **Assignee sort được**.
+- **Dải chip member** phía trên bảng: `All N`, rồi mỗi member một chip theo thứ tự lane
+  ([member-lane-order.md](./member-lane-order.md)), rồi `Unassigned N` nếu có. Chip member gồm
+  avatar, tên, `done/total` (đếm leaf như header card), badge overdue nếu > 0, badge trùng lịch
+  nếu có, `due <ngày>` gần nhất, và nút Days off gọn (`MemberDaysOffButton variant="compact"`,
+  cùng popover với header card). Số liệu lấy từ `memberHeaderStats`, chung với `MemberCard`, nên
+  chip và card không bao giờ lệch nhau. Member chưa có task vẫn có chip (mờ) để vào Days off.
+- **Bấm chip = lọc** bảng theo người đó; bấm lại chip đang chọn, hoặc bấm `All`, để bỏ lọc. Lọc
+  là state tạm, không lưu, reset khi đổi sprint.
+- **Thứ tự tay dùng chung `listOrder`.** Thứ tự neutral của All là `listOrder ?? sequence` trên cả
+  sprint; mỗi card ở By member chỉ là thứ tự đó lọc theo người. Kéo một dòng ở All ghi `listOrder`
+  giữa hai dòng kề, nên về By member, thứ tự trong card từng người vẫn khớp. Không thêm field,
+  không đổi schema.
+- **Prereq khác người:** ở All, lane là cả sprint, nên `orderLane` kéo dependent xuống ngay dưới
+  prereq **kể cả khi prereq thuộc người khác**. By member không làm được vì hai dòng ở hai card.
+- **Sort theo Assignee:** nhóm task theo thứ tự lane của member (Unassigned cuối khi tăng dần),
+  trong mỗi người theo thứ tự tay. **Pull chỉ áp trong cùng một người**: prereq của người khác
+  không kéo dòng ra khỏi khối, nên mỗi người là một khối liền. Prereq cùng người vẫn kéo như
+  thường, nên khối của một người đọc y như card của họ ở By member. Xem
+  [dependencies.md](./dependencies.md).
+- **Add task** cuối bảng: đang lọc theo một member thì task mới giao cho người đó (placeholder
+  `Add task for <name>`); không lọc, hoặc lọc Unassigned, thì task chưa giao (placeholder
+  `Add task (unassigned)`).
+- **Cảnh báo trùng lịch** (tam giác vàng ở gutter) vẫn tính theo từng member rồi gộp lại, nên hiện
+  y như ở By member.
+- Ở All không có: collapse card, kéo đổi thứ tự lane member (chip đi theo thứ tự lane, đổi ở By
+  member), mục "N members with no tasks" (member không task đã có chip).
+- **Không đổi:** Export PNG, Copy to Telegram, share link vẫn chia theo member. Board và Timeline
+  không đổi.
+- Ở **By member**, nếu sort đang là `assignee` (chọn từ All), mỗi card có đúng một người nên thứ
+  tự = thứ tự tay; kéo thả vẫn bật. Header By member không có cột Assignee nên không hiện mũi tên.
+
 ## Drag-to-reorder
 A hover-revealed **grip** (`GripVertical`, leftmost gutter, `cursor-grab`) lets you drag a
 task to a new position — like ClickUp. Manual order is stored in `Task.listOrder` (fractional;
@@ -112,7 +168,14 @@ is never touched, so task-numbers and prereq references stay stable.
   and a drop just writes a fractional value **between the two displayed neighbours** (e.g.
   between 2 and 3 → 2.5); no global reindex needed.
 - **Within a member card only.** Dropping onto a different card is a no-op (snap back) —
-  reassigning still goes through the assignee picker, not drag.
+  reassigning still goes through the assignee picker, not drag. Ở **All** chỉ có một card nên
+  kéo được trong cả bảng (kể cả khi đang lọc theo member); kéo không bao giờ đổi assignee.
+- **Hàng xóm để tính order bỏ qua dòng bị pull (2026-11-09).** Một dependent hiện ngay dưới prereq
+  vì luật pull, nhưng `listOrder` của nó có thể nằm chỗ khác hẳn. Lấy nó làm hàng xóm thì trung
+  điểm rơi sai (thả giữa A và dependent D của A, row bay đi xa). Nên `anchorNeighbours`
+  (`reorder.ts`) bỏ qua dòng "pinned" (có prereq trong cùng lane) và lấy dòng gốc gần nhất hai
+  bên. Hệ quả: thả giữa A và D thì row nằm sau D; cặp prereq–dependent không tách được, đúng với
+  luật pull. Lỗi này có sẵn ở By member nhưng hiếm; ở All prereq khác người làm nó thường gặp.
 - **Only a genuine drop repositions.** Releasing the grip **without moving** (or dropping
   back onto the dragged row / into its own gap — same neighbours before and after) is a
   **no-op**: nothing is written, so grabbing a grip and letting go never perturbs
@@ -147,11 +210,11 @@ Fixed widths sized to measured content + a small buffer; **Task** is `flex-1` an
 slack:
 `dot 16 · ID 32 · Task flex(min 150) · Assignee 64 · Effort 80 · Start 112 · End 112 ·
 Status 112 · Prereq 56 · actions 16`. Header & rows share the same `COL` constants so
-they stay aligned.
+they stay aligned. Chế độ All dùng `COL.assigneeWide` (128px, avatar + tên) thay cho Assignee 64.
 
 ## Horizontal scroll
 Each group wraps its rows in `overflow-x-auto` with a `min-w` floor (**member 820px**,
-**unassigned 896px**) ≥ true content width; the **single sticky header** mirrors the member
+**unassigned 896px**, **All 960px**) ≥ true content width; the **single sticky header** mirrors the member
 `overflow-x-auto` / `min-w-[820px]` so it aligns. On narrow screens the table scrolls instead
 of crushing the Task column. *(Caveat: the pinned header doesn't track a card's independent
 horizontal scroll on very narrow viewports — see v4 note.)*
@@ -161,7 +224,10 @@ horizontal scroll on very narrow viewports — see v4 note.)*
 - Collapse state key: `localStorage['plan-up:collapsed:<sprintId>']`.
 - Sort state key: `localStorage['plan-up:sort']` — a single global `{field, dir}` (not
   per-sprint, since the sort is one shared preference). Seeded into state on mount and
-  re-written on every change; a missing/corrupt value falls back to `seq asc`.
+  re-written on every change; a missing/corrupt value falls back to `seq asc`. Field
+  `assignee` hợp lệ từ 2026-11-09 (chỉ sort được ở chế độ All).
+- Grouping key: `localStorage['plan-up:list-grouping']` — `'member' | 'all'`, global; giá trị
+  lạ hoặc thiếu thì về `member`.
 - Group header right side surfaces the member summary — see
   [member-header-summary.md](./member-header-summary.md).
 - Drag-reorder writes `listOrder` raw (no change-log entry) and never recomputes dates or

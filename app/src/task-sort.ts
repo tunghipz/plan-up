@@ -17,6 +17,9 @@ export type SortField =
   | 'dueDate'
   | 'status'
   | 'dependsOn'
+  // Only sortable in the List's "All" table (one card, Assignee column). Groups by
+  // member lane order, manual order inside each person. See list-view.md "Chế độ All".
+  | 'assignee'
 
 const STATUS_RANK: Record<Status, number> = {
   todo: 0,
@@ -86,14 +89,34 @@ export function buildDateSortKeys(
   return keys
 }
 
+/** memberId → lane position (`compareMembersByOrder`). Drives the `assignee` sort. */
+export type AssigneeRank = Map<string, number>
+
 export function compareTasks(
   a: Task,
   b: Task,
   field: SortField,
   dir: 'asc' | 'desc',
-  dateKeys?: DateSortKeys
+  dateKeys?: DateSortKeys,
+  assigneeRank?: AssigneeRank
 ): number {
   const mul = dir === 'asc' ? 1 : -1
+  if (field === 'assignee') {
+    // Unknown / unassigned → after every member ascending (same "empty sorts last"
+    // convention as the other columns). Inside one person the order is the MANUAL
+    // order in both directions — the direction flips the member blocks, not the
+    // rows within a block — so a block reads exactly like that member's card.
+    const rank = (t: Task) =>
+      (t.assigneeId != null ? assigneeRank?.get(t.assigneeId) : undefined) ??
+      Number.POSITIVE_INFINITY
+    const ra = rank(a)
+    const rb = rank(b)
+    if (ra !== rb) return ra < rb ? -1 * mul : 1 * mul
+    const oa = a.listOrder ?? a.sequence
+    const ob = b.listOrder ?? b.sequence
+    if (oa !== ob) return oa - ob
+    return a.sequence - b.sequence
+  }
   const valueOf = (t: Task): string | number =>
     field === 'seq'
       ? (t.listOrder ?? t.sequence)
@@ -134,6 +157,7 @@ export const SORT_FIELDS: SortField[] = [
   'dueDate',
   'status',
   'dependsOn',
+  'assignee',
 ]
 
 export function loadSort(): Sort {
@@ -187,13 +211,22 @@ export function saveSort(sort: Sort) {
  * Scope: only a prereq inside the SAME lane and the same group (`parentId`)
  * anchors anything; pulling across scopes would silently re-parent a row. With
  * several prereqs the anchor is the one sitting LOWEST here, so the dependent
- * lands below all of them. See design-docs/dependencies.md.
+ * lands below all of them. `sameAssignee` narrows the scope further to one
+ * person — the List's Assignee sort uses it so each member stays one contiguous
+ * block (a prereq owned by someone else no longer drags a row out of its block).
+ * See design-docs/dependencies.md.
  */
-export function pullDependentsUnderPrereqs(lane: Task[]): Task[] {
+export function pullDependentsUnderPrereqs(
+  lane: Task[],
+  opts: { sameAssignee?: boolean } = {}
+): Task[] {
   if (lane.length < 2) return lane
   const pos = new Map<string, number>()
   lane.forEach((t, i) => pos.set(t.id, i))
-  const scope = (t: Task) => t.parentId ?? null
+  const scope = (t: Task) =>
+    opts.sameAssignee
+      ? `${t.parentId ?? ''}|${t.assigneeId ?? ''}`
+      : (t.parentId ?? null)
 
   const anchorOf = (t: Task): string | null => {
     let best: string | null = null
@@ -250,14 +283,23 @@ export function pullDependentsUnderPrereqs(lane: Task[]): Task[] {
 export function orderLane(
   lane: Task[],
   sort: Sort,
-  planById: Map<string, WorkingPlan>
+  planById: Map<string, WorkingPlan>,
+  assigneeRank?: AssigneeRank
 ): Task[] {
   const dateKeys =
     sort.field === 'startDate' || sort.field === 'dueDate'
       ? buildDateSortKeys(lane, planById)
       : undefined
   const sorted = [...lane].sort((a, b) =>
-    compareTasks(a, b, sort.field ?? 'seq', sort.field ? sort.dir : 'asc', dateKeys)
+    compareTasks(
+      a,
+      b,
+      sort.field ?? 'seq',
+      sort.field ? sort.dir : 'asc',
+      dateKeys,
+      assigneeRank
+    )
   )
-  return pullDependentsUnderPrereqs(sorted)
+  // Assignee sort: pull only within one person, so every member stays one block.
+  return pullDependentsUnderPrereqs(sorted, { sameAssignee: sort.field === 'assignee' })
 }

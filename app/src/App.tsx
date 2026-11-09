@@ -35,6 +35,8 @@ import {
   Check,
   Link2,
   TriangleAlert,
+  Users,
+  Rows3,
 } from 'lucide-react'
 import {
   db,
@@ -67,7 +69,7 @@ import { isProjectBundle, looksLikeProjectBundle } from './project-io'
 import { CollectionView, CollectionBarIdentity, StatusEditor } from './CollectionView'
 import { useConfirm } from './confirm-context'
 import { ModalSheet } from './ModalSheet'
-import { SprintView } from './SprintView'
+import { SprintView, type ListGrouping } from './SprintView'
 import { ProjectHolidaysContext, ProjectHolidayListContext } from './scheduling-context'
 import { projectHolidayMap } from './scheduling'
 import { ProjectHolidaysButton } from './ProjectHolidays'
@@ -116,6 +118,9 @@ import { stripRich } from './rich-text'
 const CURRENT_PROJECT_KEY = 'plan-up:currentProjectId'
 const CURRENT_SPRINT_KEY = 'plan-up:currentSprintId'
 const VIEW_KEY = 'plan-up:view'
+// List layout: a card per member, or every task in one table. Global (like the
+// sort), not per project. See design-docs/list-view.md "Chế độ All".
+const LIST_GROUPING_KEY = 'plan-up:list-grouping'
 
 // Desktop window chrome (overlay title bar + traffic-light icon rail) is normally
 // gated on the real Tauri runtime. FORCE_DESKTOP_CHROME lets the browser dev server
@@ -308,6 +313,13 @@ function App() {
   const setView = (v: ViewMode) => {
     setViewState(v)
     safeStorage.set(VIEW_KEY, v)
+  }
+  const [listGrouping, setListGroupingState] = useState<ListGrouping>(() =>
+    safeStorage.get(LIST_GROUPING_KEY) === 'all' ? 'all' : 'member'
+  )
+  const setListGrouping = (g: ListGrouping) => {
+    setListGroupingState(g)
+    safeStorage.set(LIST_GROUPING_KEY, g)
   }
   // Top-level screen: the Home overview vs a single project. Persisted so a
   // reload lands back where you were (Home is never force-shown over a project).
@@ -1733,7 +1745,17 @@ function App() {
                 />
               </>
             ) : (
-              <ViewToggle value={view} options={SPRINT_VIEWS} onChange={setView} />
+              <>
+                {/* List only: card per member vs one All table. */}
+                {view === 'list' && selKind === 'sprint' && currentSprint && (
+                  <ViewToggle
+                    value={listGrouping}
+                    options={LIST_GROUPINGS}
+                    onChange={setListGrouping}
+                  />
+                )}
+                <ViewToggle value={view} options={SPRINT_VIEWS} onChange={setView} />
+              </>
             )}
             <div className="w-px h-5 bg-border-hair mx-1" />
             {/* Search = command palette (Spotlight). Sprint-only (search never
@@ -1973,6 +1995,7 @@ function App() {
                   sprintStartDate={currentSprint.startDate}
                   sprintEndDate={currentSprint.endDate}
                   tasks={tasks}
+                  grouping={listGrouping}
                 />
               )
             ) : (
@@ -3098,7 +3121,7 @@ function ViewToggle<T extends string>({
   onChange,
 }: {
   value: T
-  options: { value: T; label: string; Icon: typeof List }[]
+  options: { value: T; label: string; Icon: typeof List; title?: string }[]
   onChange: (v: T) => void
 }) {
   // Sliding white indicator (macOS segmented control): measure the active
@@ -3122,7 +3145,7 @@ function ViewToggle<T extends string>({
           style={{ left: ind.left, width: ind.width }}
         />
       )}
-      {options.map(({ value: v, label, Icon }) => {
+      {options.map(({ value: v, label, Icon, title }) => {
         const active = value === v
         return (
           <button
@@ -3132,7 +3155,7 @@ function ViewToggle<T extends string>({
             className={`relative z-10 flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded-[7px] transition-colors ${
               active ? 'text-ink' : 'text-ink-muted hover:text-ink'
             }`}
-            title={`${label} view`}
+            title={title ?? `${label} view`}
             aria-pressed={active}
           >
             <Icon size={13} strokeWidth={active ? 2 : 1.75} />
@@ -3148,6 +3171,10 @@ const SPRINT_VIEWS: { value: ViewMode; label: string; Icon: typeof List }[] = [
   { value: 'list', label: 'List', Icon: List },
   { value: 'board', label: 'Board', Icon: LayoutGrid },
   { value: 'timeline', label: 'Timeline', Icon: GanttChartSquare },
+]
+const LIST_GROUPINGS: { value: ListGrouping; label: string; Icon: typeof List; title: string }[] = [
+  { value: 'member', label: 'By member', Icon: Users, title: 'One card per member' },
+  { value: 'all', label: 'All', Icon: Rows3, title: 'Every task in one table' },
 ]
 const COLLECTION_VIEWS: { value: CollectionViewMode; label: string; Icon: typeof List }[] = [
   { value: 'list', label: 'List', Icon: List },

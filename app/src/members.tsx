@@ -616,8 +616,12 @@ export function MemberDaysOffButton({
   taskSpan,
 }: {
   member: Member
-  /** 'header' = Sprint group-header chip; 'metric' = always-visible settings line. */
-  variant?: 'header' | 'metric'
+  /**
+   * 'header' = Sprint group-header chip; 'metric' = always-visible settings line;
+   * 'compact' = small calendar button inside a member chip of the List's All
+   * table (same popover, no holiday chip). See design-docs/list-view.md "Chế độ All".
+   */
+  variant?: 'header' | 'metric' | 'compact'
   /**
    * When set (sprint view), scope the list + chip + entry to this sprint's
    * inclusive date range. Settings passes no range and sees the full aggregate.
@@ -770,7 +774,30 @@ export function MemberDaysOffButton({
 
   return (
     <>
-      {variant === 'metric' ? (
+      {variant === 'compact' ? (
+        <button
+          ref={btnRef as React.RefObject<HTMLButtonElement>}
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation()
+            setOpen((v) => !v)
+          }}
+          className={
+            count > 0
+              ? 'inline-flex items-center gap-1 h-6 rounded-full px-2 text-[11px] font-medium text-ink hover:bg-surface-hover transition whitespace-nowrap'
+              : 'inline-flex items-center justify-center w-6 h-6 rounded-full border border-dashed border-border-strong text-ink-muted hover:text-accent hover:border-accent hover:bg-accent-soft transition'
+          }
+          title={
+            count > 0
+              ? `${fmtDays(effDays)} day${effDays === 1 ? '' : 's'} off — click to edit`
+              : 'Set days off'
+          }
+          aria-label="Days off"
+        >
+          <Calendar size={12} />
+          {count > 0 && <span>{fmtDays(effDays)}d off</span>}
+        </button>
+      ) : variant === 'metric' ? (
         <button
           ref={btnRef as React.RefObject<HTMLButtonElement>}
           type="button"

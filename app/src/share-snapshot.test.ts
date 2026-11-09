@@ -539,8 +539,10 @@ describe('hostile links: size caps and colors', () => {
   })
 
   it('stops a decompression bomb before it expands (bounded decompress)', () => {
-    const bomb = encodeRaw('['.repeat(20_000_000)) // 20 M chars from a ~12 KB blob
-    expect(bomb.length).toBeLessThan(20_000)
+    // 4 M chars (over the 3 M ceiling) from a ~5 KB blob. Kept modest: compressing
+    // the fixture itself is the slow part, and 20 M timed out on a busy machine.
+    const bomb = encodeRaw('['.repeat(4_000_000))
+    expect(bomb.length).toBeLessThan(10_000)
     expect(decodeSnapshot(bomb)).toBeNull()
     expect(decodeCollectionSnapshot(bomb)).toBeNull()
   })

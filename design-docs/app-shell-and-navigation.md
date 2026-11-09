@@ -1,7 +1,10 @@
 # App shell & navigation
 
 **Status:** Implemented
-**Last updated:** 2026-07-16 (v4.3 · desktop collapse = 74px icon rail)
+**Last updated:** 2026-11-09 (top bar: segmented **`By member · All`** before `List · Board ·
+Timeline`, only on a sprint's List — see [list-view.md](./list-view.md) *Chế độ All*; key
+`plan-up:list-grouping`)
+**Previously:** 2026-07-16 (v4.3 · desktop collapse = 74px icon rail)
 **Code:** `app/src/App.tsx` (`SprintPageHeader`, `SprintNoteBanner`, `LegendDot`)
 
 > **v3 · Project switcher + compact sprint rows (2026-07-06)** — the always-on
@@ -233,7 +236,8 @@ computed from the current sprint's **leaf** tasks (parents excluded — see task
 
 ## Rules & edge cases
 - **localStorage keys:** `plan-up:screen`, `plan-up:currentProjectId`, `plan-up:currentSprintId`,
-  `plan-up:selKind`, `plan-up:selCollectionId`, `plan-up:view`, `plan-up:collectionView`,
+  `plan-up:selKind`, `plan-up:selCollectionId`, `plan-up:view`, `plan-up:list-grouping`,
+  `plan-up:collectionView`,
   `plan-up:sidebarWidth`, `plan-up:dark`, `plan-up:collapsed:<sprintId>`,
   `plan-up:sidebarSprintsCollapsed`, `plan-up:sidebarCollectionsCollapsed`.
 - **Restore the last screen on reload/relaunch:** project, sprint, container kind

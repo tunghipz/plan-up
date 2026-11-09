@@ -78,7 +78,7 @@ Non-obvious behaviors, defaults, persistence keys.
 | [tasks.md](./tasks.md) | Task CRUD, fields, inline editing |
 | [task-change-log.md](./task-change-log.md) | **Removed (2026-06-16)** — per-task 🕒 change-log tooltip, superseded by the sprint activity log |
 | [sprint-activity-log.md](./sprint-activity-log.md) | Sprint-wide activity log — 🕒 toolbar entry opens a right-side drawer (timeline + by-member); append-only `events` store, the app's sole edit-history surface |
-| [task-groups.md](./task-groups.md) | Group tasks under a parent task (nested, roll-up + collapse) |
+| [task-groups.md](./task-groups.md) | Group tasks under a parent task (nested, roll-up + collapse); **Add to group** puts loose tasks into an existing group from a picker |
 | [task-rich-text.md](./task-rich-text.md) | Inline formatting inside a task title (**bold**, *italic*, ~~strike~~, ==highlight==) via markdown-lite markers + ⌘B/⌘I shortcuts |
 | [scheduling.md](./scheduling.md) | Auto-scheduling engine (effort, prereqs, workdays); the engine only rewrites dates it owns, and never touches collection items |
 | [milestones.md](./milestones.md) | Effort-0 tasks shown as milestones — `◆ Milestone` pill + single collapsed date (List view) |

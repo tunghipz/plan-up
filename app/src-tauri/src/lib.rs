@@ -1,3 +1,5 @@
+mod claude;
+
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use flate2::Compression;
@@ -318,6 +320,8 @@ pub fn run() {
         .setup(|app| {
             let dir = load_backup_dir(app.handle());
             app.manage(BackupDir(Mutex::new(dir)));
+            // Resolve `claude` + its profile now, not on the first question (claude-assistant.md).
+            claude::warm_claude_env();
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -327,7 +331,11 @@ pub fn run() {
             prune_backups,
             list_backups,
             read_backup,
-            pick_import_file
+            pick_import_file,
+            claude::claude_stream,
+            claude::claude_cancel,
+            claude::open_deck,
+            claude::save_deck
         ])
         // macOS single-window idiom (Notes, Reminders): closing the window only
         // hides it — the app and auto backup keep running; ⌘Q quits.

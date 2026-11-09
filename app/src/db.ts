@@ -11,6 +11,7 @@ import { formatSeqRanges, todayLocalISO } from './lib'
 import { normalizePersonName } from './people'
 import {
   LOGGABLE_FIELDS,
+  type ActivityEvent,
   type ChangeLogEntry,
   type Collection,
   type CollectionStatus,
@@ -22,6 +23,7 @@ import {
   type Priority,
   type Project,
   type ShareRecord,
+  type Sprint,
   type Status,
   type Task,
 } from './types'
@@ -763,6 +765,113 @@ export async function moveUnfinishedToNextSprint(
     const movedCount = toMove.filter((t) => !parentIds.has(t.id)).length
     return { movedCount, targetSprintId: target.id }
   })
+}
+
+/**
+ * Move chosen sprint tasks into another sprint of the same project — the Claude
+ * assistant's Move action (design-docs/claude-assistant.md). Same rules as the
+ * rollover (sprint-rollover.md): renumbered into the target (sequence is
+ * per-sprint), dates kept, a moving group head takes its subtasks along, a
+ * subtask moving alone leaves its group, and prereq links that would cross
+ * sprints are dropped in both directions. Logs `rolled_over` on the target.
+ *
+ * Returns how many leaf tasks moved (group heads tag along uncounted).
+ */
+export async function moveTasksToSprint(taskIds: string[], targetSprintId: string): Promise<number> {
+  return db.transaction('rw', [db.projects, db.tasks, db.members, db.sprints, db.events], async () => {
+    const target = await db.sprints.get(targetSprintId)
+    if (!target) throw new Error('Target sprint not found')
+    const picked = (await db.tasks.bulkGet(taskIds)).filter(
+      (t): t is Task =>
+        !!t && !!t.sprintId && t.sprintId !== target.id && t.projectId === target.projectId
+    )
+    if (!picked.length) return 0
+
+    const sourceIds = [...new Set(picked.map((t) => t.sprintId!))]
+    const sourceTasks = await db.tasks.where('sprintId').anyOf(sourceIds).toArray()
+    const moveIds = new Set(picked.map((t) => t.id))
+    for (const t of sourceTasks) if (t.parentId && moveIds.has(t.parentId)) moveIds.add(t.id)
+    const toMove = sourceTasks.filter((t) => moveIds.has(t.id)).sort((a, b) => a.sequence - b.sequence)
+    const parentIds = new Set(toMove.filter((t) => t.parentId).map((t) => t.parentId!))
+    const targetIds = new Set(
+      (await db.tasks.where('sprintId').equals(target.id).primaryKeys()).map(String)
+    )
+    const sourceName = new Map(
+      (await db.sprints.bulkGet(sourceIds)).filter((s) => !!s).map((s) => [s!.id, s!.name])
+    )
+
+    const ts = Date.now()
+    for (const t of toMove) {
+      const patch: Partial<Task> = {
+        sprintId: target.id,
+        sequence: await nextSequence(target.id),
+      }
+      if (t.parentId && !moveIds.has(t.parentId)) patch.parentId = null
+      const keptDeps = t.dependsOn.filter((id) => moveIds.has(id) || targetIds.has(id))
+      if (keptDeps.length !== t.dependsOn.length) patch.dependsOn = keptDeps
+      await db.tasks.update(t.id, patch)
+      if (parentIds.has(t.id)) continue
+      await logEvent({
+        projectId: t.projectId,
+        sprintId: target.id,
+        taskId: t.id,
+        taskSeq: patch.sequence ?? null,
+        taskTitle: t.title,
+        kind: 'rolled_over',
+        from: sourceName.get(t.sprintId!) ?? null,
+        to: target.name,
+        ts,
+      })
+    }
+    // Tasks left behind lose their links to the moved ones.
+    const touched = toMove.map((t) => t.id)
+    for (const t of sourceTasks) {
+      if (moveIds.has(t.id) || !t.dependsOn?.some((id) => moveIds.has(id))) continue
+      await db.tasks.update(t.id, { dependsOn: t.dependsOn.filter((id) => !moveIds.has(id)) })
+      touched.push(t.id)
+    }
+    await recomputeDates(touched)
+    return toMove.filter((t) => !parentIds.has(t.id)).length
+  })
+}
+
+/** Everything the Claude assistant's Apply can touch in one project (its Undo point). */
+export interface ProjectPlanSnapshot {
+  projectId: string
+  tasks: Task[]
+  sprints: Sprint[]
+  events: ActivityEvent[]
+}
+
+export async function snapshotProjectPlan(projectId: string): Promise<ProjectPlanSnapshot> {
+  return db.transaction('r', db.tasks, db.sprints, db.events, async () => ({
+    projectId,
+    tasks: await db.tasks.where('projectId').equals(projectId).toArray(),
+    sprints: await db.sprints.where('projectId').equals(projectId).toArray(),
+    events: await db.events.where('projectId').equals(projectId).toArray(),
+  }))
+}
+
+/** Put a project's tasks, sprints and activity back exactly as snapshotted. */
+export async function restoreProjectPlan(snap: ProjectPlanSnapshot): Promise<void> {
+  await db.transaction('rw', db.tasks, db.sprints, db.events, async () => {
+    await db.tasks.where('projectId').equals(snap.projectId).delete()
+    await db.sprints.where('projectId').equals(snap.projectId).delete()
+    await db.events.where('projectId').equals(snap.projectId).delete()
+    await db.tasks.bulkAdd(snap.tasks)
+    await db.sprints.bulkAdd(snap.sprints)
+    await db.events.bulkAdd(snap.events)
+  })
+}
+
+/**
+ * Content signature of a project's tasks + sprints, to tell whether anything
+ * changed since a snapshot (the Undo warning).
+ */
+export async function projectPlanSignature(projectId: string): Promise<string> {
+  const { tasks, sprints } = await snapshotProjectPlan(projectId)
+  const byId = (a: { id: string }, b: { id: string }) => a.id.localeCompare(b.id)
+  return JSON.stringify([tasks.sort(byId), sprints.sort(byId)])
 }
 
 /**

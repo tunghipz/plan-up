@@ -27,6 +27,7 @@ export type MenuCommand =
   | 'viewCalendar'
   | 'toggleSidebar'
   | 'activity'
+  | 'claude'
   | 'toggleDark'
 
 /** What the menu bar needs to know to enable/check its items. */
@@ -103,6 +104,8 @@ export async function buildAppMenu(run: (c: MenuCommand) => void) {
   const viewCalendar = await check('viewCalendar', 'Calendar', 'CmdOrCtrl+4')
   const sidebar = await item('toggleSidebar', 'Hide Sidebar', 'CmdOrCtrl+\\')
   const activity = await item('activity', 'Sprint Activity')
+  // Claude assistant (claude-assistant.md) — desktop only, like this whole menu.
+  const claude = await item('claude', 'Ask Claude', 'CmdOrCtrl+J')
   const dark = await check('toggleDark', 'Dark Mode', 'CmdOrCtrl+Shift+D')
   const github = await MenuItem.new({
     id: 'github',
@@ -178,6 +181,7 @@ export async function buildAppMenu(run: (c: MenuCommand) => void) {
           await sep(),
           sidebar,
           activity,
+          claude,
           await sep(),
           dark,
           await sep(),
@@ -207,6 +211,7 @@ export async function buildAppMenu(run: (c: MenuCommand) => void) {
       exportProject.setEnabled(s.hasProject),
       find.setEnabled(sprintCmds),
       activity.setEnabled(sprintCmds),
+      claude.setEnabled(s.hasProject && !s.settingsOpen),
       viewList.setEnabled(onView),
       viewBoard.setEnabled(s.inSprint),
       viewTimeline.setEnabled(s.inSprint),

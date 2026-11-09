@@ -25,6 +25,7 @@ import {
   ChevronDown,
   ChevronRight,
   History,
+  Sparkles,
   Archive,
   ArchiveRestore,
   FolderSync,
@@ -77,6 +78,7 @@ import type { Holiday } from './types'
 import { BoardView } from './BoardView'
 import { GanttView } from './GanttView'
 import { ActivityLog } from './ActivityLog'
+import { ClaudePanel } from './ClaudePanel'
 import { VersionFooter } from './VersionFooter'
 import { IS_TAURI } from './backup'
 import {
@@ -368,6 +370,9 @@ function App() {
   // view mode — it's a transient drill-in, reset when the sprint changes). See
   // design-docs/sprint-activity-log.md.
   const [showActivity, setShowActivity] = useState(false)
+  // Claude assistant inspector (design-docs/claude-assistant.md) — desktop only,
+  // not persisted: opens closed every launch, stays open across sprint switches.
+  const [claudeOpen, setClaudeOpen] = useState(false)
   // Collection view (List/Calendar) — lifted here so the single adaptive top-bar
   // toggle can drive it; persisted separately from the sprint view.
   const COLLVIEW_KEY = 'plan-up:collectionView'
@@ -837,6 +842,15 @@ function App() {
         return
       }
 
+      // ⌘J — toggle the Claude panel (desktop only). Global, like ⌘K.
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'j') {
+        if (!IS_TAURI || settingsOpen || screen === 'home') return
+        e.preventDefault()
+        // The menu's ⌘J key equivalent may fire for the same press — one toggle.
+        if (shouldRun('claude')) setClaudeOpen((o) => !o)
+        return
+      }
+
       // ⌘\ / Ctrl+\ — toggle the sidebar (macOS sidebar idiom, app-shell v4.2).
       // Global: works even while typing, like ⌘K.
       if ((e.metaKey || e.ctrlKey) && e.key === '\\') {
@@ -856,7 +870,11 @@ function App() {
           setShowActivity(false)
           return
         }
-        if (settingsOpen) setSettingsOpen(false)
+        if (settingsOpen) {
+          setSettingsOpen(false)
+          return
+        }
+        if (claudeOpen) setClaudeOpen(false)
         return
       }
       if (inField) return
@@ -878,7 +896,7 @@ function App() {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [paletteOpen, dark, setDark, settingsOpen, showActivity, selKind, currentSprintId, screen])
+  }, [paletteOpen, dark, setDark, settingsOpen, showActivity, claudeOpen, selKind, currentSprintId, screen])
 
   // Full-DB backup (every project) — restore-on-a-new-machine file.
   const handleExportAll = async () => {
@@ -1251,6 +1269,11 @@ function App() {
           break
         case 'activity':
           if (!settingsOpen && sprintOnScreen) setShowActivity((v) => !v)
+          break
+        case 'claude':
+          if (!settingsOpen && currentProject && screen !== 'home' && shouldRun('claude')) {
+            setClaudeOpen((v) => !v)
+          }
           break
         case 'toggleDark':
           if (shouldRun('toggleDark')) setDark(!dark)
@@ -1949,6 +1972,23 @@ function App() {
                 <History size={15} strokeWidth={1.9} />
               </button>
             )}
+            {/* Claude assistant — desktop only (claude-assistant.md). Same calm
+                grey idiom as Activity; accent only while the panel is open. */}
+            {IS_TAURI && currentProject && (
+              <button
+                onClick={() => setClaudeOpen((o) => !o)}
+                aria-pressed={claudeOpen}
+                title="Ask Claude (⌘J)"
+                aria-label="Ask Claude"
+                className={`inline-flex items-center justify-center w-8 h-8 rounded-md transition ${
+                  claudeOpen
+                    ? 'text-accent bg-accent-soft'
+                    : 'text-ink-faint hover:text-ink hover:bg-surface-hover'
+                }`}
+              >
+                <Sparkles size={15} strokeWidth={1.9} />
+              </button>
+            )}
             {/* Collection share link — sits on the top bar next to Export (the
                 collection has no page-header to hold a Share button like sprints
                 do). See design-docs/share-link-snapshot.md "Collections (v3)". */}
@@ -2168,6 +2208,31 @@ function App() {
           </main>
         </div>
       </div>
+      {/* Claude inspector column — pushes the board aside rather than covering it,
+          so applied changes show beside the chat. Width-animates like the sidebar;
+          the panel keeps its fixed width inside so nothing reflows mid-slide.
+          Stays mounted while a project exists: an answer keeps streaming in.
+          ambient-canvas is viewport-anchored, so it lines up with the main column's. */}
+      {IS_TAURI && currentProject && (
+        <aside
+          aria-label="Claude"
+          aria-hidden={!claudeOpen}
+          inert={!claudeOpen}
+          className={`shrink-0 overflow-hidden transition-[width] duration-300 ease-[cubic-bezier(.32,.72,0,1)] motion-reduce:transition-none ${
+            NATIVE_VIBRANCY ? 'ambient-canvas' : ''
+          }`}
+          style={{ width: claudeOpen ? 412 : 0 }}
+        >
+          <div className="w-[412px] h-full pt-3 pb-3 pr-3">
+            <ClaudePanel
+              open={claudeOpen}
+              project={currentProject}
+              currentSprintId={selKind === 'sprint' ? currentSprintId : null}
+              onClose={() => setClaudeOpen(false)}
+            />
+          </div>
+        </aside>
+      )}
       </>
       )}
 

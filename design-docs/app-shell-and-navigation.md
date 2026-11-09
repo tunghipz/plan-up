@@ -1,9 +1,10 @@
 # App shell & navigation
 
 **Status:** Implemented
-**Last updated:** 2026-11-09 (top bar: segmented **`By member · All`** before `List · Board ·
-Timeline`, only on a sprint's List — see [list-view.md](./list-view.md) *Chế độ All*; key
-`plan-up:list-grouping`)
+**Last updated:** 2026-11-09 (the List-only **`By member · All`** toggle left the top bar for a
+`Group by` row at the top of the List — see [list-view.md](./list-view.md) *Chỗ đặt toggle*; the
+top bar keeps only `List · Board · Timeline` and sprint-wide tools, so it has one shape in every
+view. Key `plan-up:list-grouping` unchanged)
 **Previously:** 2026-07-16 (v4.3 · desktop collapse = 74px icon rail)
 **Code:** `app/src/App.tsx` (`SprintPageHeader`, `SprintNoteBanner`, `LegendDot`)
 

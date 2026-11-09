@@ -24,7 +24,10 @@ import {
   Link2Off,
   UserRound,
   Search,
+  Users,
+  Rows3,
 } from 'lucide-react'
+import { ViewToggle } from './ViewToggle'
 import { useDragHandle, useDragHover, type RowDrag } from './DragHandle'
 import { anchorNeighbours, computeDropSlot, resolveDropOrder } from './reorder'
 import {
@@ -111,11 +114,16 @@ const NULL_WORKING_PLAN: WorkingPlan = {
 
 /**
  * How the List lays out a sprint: one card per member (`member`, the original) or
- * every task in ONE table with an Assignee column (`all`). Chosen on the top bar
- * and persisted by App (`plan-up:list-grouping`). See design-docs/list-view.md
- * "Chế độ All".
+ * every task in ONE table with an Assignee column (`all`). Chosen on the List's
+ * own `Group by` row (`ListViewBar`) and persisted by App (`plan-up:list-grouping`).
+ * See design-docs/list-view.md "Chế độ All" and "Chỗ đặt toggle".
  */
 export type ListGrouping = 'member' | 'all'
+
+const LIST_GROUPINGS: { value: ListGrouping; label: string; Icon: typeof Users; title: string }[] = [
+  { value: 'member', label: 'By member', Icon: Users, title: 'One card per member' },
+  { value: 'all', label: 'All', Icon: Rows3, title: 'Every task in one table' },
+]
 
 /** Member-filter value for "tasks with no (known) assignee" in the All table. */
 const UNASSIGNED_FILTER = '__unassigned__'
@@ -163,6 +171,7 @@ export function SprintView({
   sprintEndDate,
   tasks,
   grouping = 'member',
+  onGroupingChange,
 }: {
   projectId: string
   sprintId: string
@@ -171,6 +180,8 @@ export function SprintView({
   tasks: Task[]
   /** `all` = one table for the whole sprint instead of a card per member. */
   grouping?: ListGrouping
+  /** Absent = no `Group by` row (the toggle lives with the List, not the top bar). */
+  onGroupingChange?: (g: ListGrouping) => void
 }) {
   const members = useLiveQuery(
     () => db.members.where('projectId').equals(projectId).toArray(),
@@ -400,6 +411,26 @@ export function SprintView({
     <div className="space-y-4">
       {isEmpty && <EmptyState onAddMember={() => setShowAddMember(true)} />}
 
+      {/* The List's own control row: `Group by` toggle, and in All the member
+          chips on the same row. It sits here, not on the top bar, because only
+          the List has it. See design-docs/list-view.md "Chỗ đặt toggle". */}
+      {!isEmpty && onGroupingChange && (
+        <ListViewBar grouping={grouping} onGroupingChange={onGroupingChange}>
+          {allTable && (
+            <MemberFilterStrip
+              members={sortedMembers}
+              stats={allTable.stats}
+              total={tasks.length}
+              unassignedCount={allTable.unassignedCount}
+              filter={allTable.filter}
+              onFilter={setMemberFilter}
+              sprintStartDate={sprintStartDate}
+              sprintEndDate={sprintEndDate}
+            />
+          )}
+        </ListViewBar>
+      )}
+
       {/* One column header for the whole list — pinned to the top of the scroll
           area (sticks because nothing between here and the scroller is an overflow
           box; the per-card overflow-x-auto that trapped the old per-group headers
@@ -411,16 +442,19 @@ export function SprintView({
           min-w so columns line up on wide screens. See design-docs/list-view.md v4. */}
       {allTable && (
         <>
-          <MemberFilterStrip
-            members={sortedMembers}
-            stats={allTable.stats}
-            total={tasks.length}
-            unassignedCount={allTable.unassignedCount}
-            filter={allTable.filter}
-            onFilter={setMemberFilter}
-            sprintStartDate={sprintStartDate}
-            sprintEndDate={sprintEndDate}
-          />
+          {/* Member chips render in the ListViewBar above (no toggle row → none). */}
+          {!onGroupingChange && (
+            <MemberFilterStrip
+              members={sortedMembers}
+              stats={allTable.stats}
+              total={tasks.length}
+              unassignedCount={allTable.unassignedCount}
+              filter={allTable.filter}
+              onFilter={setMemberFilter}
+              sprintStartDate={sprintStartDate}
+              sprintEndDate={sprintEndDate}
+            />
+          )}
           {/* Same sticky glass capsule as the member layout, plus the (sortable)
               wide Assignee column — mirrors the card's min-w so columns align. */}
           <div className="sticky top-2 z-20">
@@ -1492,6 +1526,39 @@ function AllTasksCard({
  * person; clicking it again (or `All`) clears. Members with no tasks still get a
  * (dimmed) chip so their days off stay reachable. See list-view.md "Chế độ All".
  */
+/**
+ * First row of the sprint List: `Group by [By member | All]`, then — in All — the
+ * member chips after a hairline. Chips wrap inside their own column so the toggle
+ * never moves. Not sticky (the column header below it is). See
+ * design-docs/list-view.md "Chỗ đặt toggle" (direction C of
+ * demo/list-grouping-placement.html).
+ */
+function ListViewBar({
+  grouping,
+  onGroupingChange,
+  children,
+}: {
+  grouping: ListGrouping
+  onGroupingChange: (g: ListGrouping) => void
+  children?: React.ReactNode
+}) {
+  return (
+    <div className="flex items-start gap-3">
+      {/* h-9 = FilterChip height, so the toggle centres on the first chip line. */}
+      <div className="flex h-9 shrink-0 items-center gap-2">
+        <span className="text-[12px] font-medium text-ink-faint">Group by</span>
+        <ViewToggle value={grouping} options={LIST_GROUPINGS} onChange={onGroupingChange} />
+      </div>
+      {children && (
+        <>
+          <div className="mt-2 h-5 w-px shrink-0 bg-border-hair" aria-hidden />
+          <div className="min-w-0 flex-1">{children}</div>
+        </>
+      )}
+    </div>
+  )
+}
+
 function MemberFilterStrip({
   members,
   stats,

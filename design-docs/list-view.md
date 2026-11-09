@@ -1,17 +1,19 @@
 # List view
 
 **Status:** Implemented
-**Last updated:** 2026-11-09 (**chế độ All**: toggle `By member · All` gộp mọi task của sprint
-vào một bảng có cột Assignee + dải chip member để lọc; sort theo **Assignee**; hàng xóm khi
-kéo thả bỏ qua dòng bị pull — xem *Chế độ All* và *Drag-to-reorder* dưới)
+**Last updated:** 2026-11-09 (toggle `By member · All` **rời top bar** xuống hàng **`Group by`**
+đầu List, chung hàng với dải chip member của All — xem *Chỗ đặt toggle*; trước đó cùng ngày:
+**chế độ All** gộp mọi task của sprint vào một bảng có cột Assignee + dải chip member để lọc;
+sort theo **Assignee**; hàng xóm khi kéo thả bỏ qua dòng bị pull — xem *Chế độ All* và
+*Drag-to-reorder* dưới)
 **Previously:** 2026-09-21 (sau khi sort, mỗi row có prereq bị **kéo sát ngay dưới prereq
 của nó** — `orderLane()`, xem [dependencies.md](./dependencies.md) *Dependents stick to their
 prerequisite*); 2026-08-17 (**title 2+ dòng bị xén 2px ở đáy — fixed**, xem v5 dưới; prior:
 2026-07-08 column header → floating glass capsule; sprint note → inline description in the merged Notion-style page header, see app-shell v4; prior: calm refinements — time-on-hover dates, quiet empty cells, sticky-light group headers, compact rows, `#`-prefixed prereq)
 **Code:** `app/src/SprintView.tsx` (`MemberCard`, `UnassignedCard`, `AllTasksCard`,
-`MemberFilterStrip`, `memberHeaderStats`, `GroupHeader`, `TaskColumnHeader`, `SortHeader`,
-`COL`, `TaskRows` drag state, `TaskRow` grip), `app/src/App.tsx` (grouping toggle,
-`plan-up:list-grouping`), `app/src/task-sort.ts` (`assignee` sort, `orderLane`),
+`ListViewBar`, `MemberFilterStrip`, `memberHeaderStats`, `GroupHeader`, `TaskColumnHeader`,
+`SortHeader`, `COL`, `TaskRows` drag state, `TaskRow` grip), `app/src/ViewToggle.tsx`
+(segmented control), `app/src/App.tsx` (grouping state, `plan-up:list-grouping`), `app/src/task-sort.ts` (`assignee` sort, `orderLane`),
 `app/src/reorder.ts` (`anchorNeighbours`), `app/src/members.tsx`
 (`MemberDaysOffButton variant="compact"`), `app/src/DatePicker.tsx` (`DatePickCell`
 time-on-hover), `app/src/db.ts` (`orderBetween`, `setListOrder`)
@@ -120,9 +122,25 @@ trần, member trong nút People"). Nguyên văn user: *"tao không cần gantt,
 toàn bộ task trên 1 trang liền nhau, thay vì chia theo member như hiện tại"*, rồi *"chọn A, bỏ
 pull khi sort Assignee, làm đi"*.
 
-- **Toggle `By member · All`** trên top bar, ngay trước `List · Board · Timeline`; chỉ hiện khi
-  đang xem List của một sprint. Lưu ở `localStorage['plan-up:list-grouping']`
-  (`'member' | 'all'`, mặc định `member`), dùng chung mọi project như sort.
+- **Toggle `By member · All`** nằm ở hàng **`Group by`** đầu List (xem *Chỗ đặt toggle* ngay
+  dưới). Lưu ở `localStorage['plan-up:list-grouping']` (`'member' | 'all'`, mặc định `member`),
+  dùng chung mọi project như sort.
+- **Chỗ đặt toggle** (đổi cùng ngày). Bản đầu đặt toggle trên top bar, ngay trước
+  `List · Board · Timeline`, chỉ hiện khi đang ở List. User: *"cái này chỉ thuộc phần list, đặt
+  ở đây không phù hợp, có chỗ nào khác không"*. Đứng ngang hàng List/Board/Timeline nó đọc như
+  lựa chọn chung của sprint, và sang Board/Timeline thì biến mất làm top bar đổi hình. Ba hướng
+  trong `demo/list-grouping-placement.html`: **A** gộp vào nút List thành menu `List ▾`, **B**
+  segmented nhỏ trên thanh tên cột, **C** hàng điều khiển riêng của List. User chọn: *"C"*.
+  - Hàng **`Group by [By member | All]`** là hàng đầu tiên của List, trên thanh tên cột, dưới thẻ
+    sprint. Nhãn `Group by` chữ nhỏ mờ, segmented giống hệt `List · Board · Timeline` (cùng
+    component `ViewToggle`).
+  - Ở **All**, dải chip member nằm **cùng hàng**, bên phải toggle sau một vạch dọc mảnh; chip
+    nhiều thì xuống dòng trong phần của chip, toggle đứng yên. Ở **By member** hàng chỉ có toggle.
+    Toggle vì vậy ở đúng một chỗ cho cả hai chế độ.
+  - Hàng này không dính khi cuộn (thanh tên cột vẫn dính). Đã biết khi chọn: cuộn sâu thì phải
+    cuộn lên mới đổi chế độ.
+  - Top bar còn lại `List · Board · Timeline` và các công cụ toàn sprint, giữ một hình ở mọi view.
+  - Sprint trống (chưa có member, chưa có task) không hiện hàng này, chỉ hiện empty state.
 - **Một card duy nhất** chứa mọi task của sprint, kể cả task chưa giao. Thêm cột **Assignee
   rộng** (avatar + tên, 128px), bấm để đổi người (cùng `<select>` ẩn như card Unassigned). Group
   row hiện avatar + tên của cha, chỉ đọc (đổi assignee của cha thì ungroup, xem

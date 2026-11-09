@@ -334,15 +334,7 @@ h1, h2, h3, .display-tight {
 .task-group-card > .task-row > [aria-label='Drag to reorder'] {
   left: -8px;
 }
-/* The group's own Add task row: quiet until the card is hovered or in use. */
-.task-group-card > .task-group-add {
-  opacity: 0.55;
-  transition: opacity 0.15s;
-}
-.task-group-card:hover > .task-group-add,
-.task-group-card > .task-group-add:focus-within {
-  opacity: 1;
-}
+
 .task-group-card > .task-group-head {
   background: color-mix(in srgb, var(--owner, var(--color-ink)) var(--group-head-tint), transparent);
 }

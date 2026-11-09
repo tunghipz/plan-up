@@ -48,9 +48,11 @@ nhuộm theo màu người giữ group. User chọn: *"B nhưng màu theo C"*.
 User: *"tao muốn add task vào group đang có thì có cách nào làm nhanh không"*; trong 3 cách đề xuất
 (dòng thêm trong thẻ group / kéo thả vào thẻ / phím `g` cho Add to group) user chọn: *"làm 1"*.
 
-- Cuối mỗi thẻ group (khi không thu gọn) có dòng **`+ Add task`**, mờ khi nghỉ, rõ khi rê chuột vào
-  thẻ hoặc khi đang gõ. Gõ tên, Enter: task mới nằm **cuối group** (`listOrder` = max các con + 1),
-  ô vẫn mở để gõ tiếp. Bấm ra ngoài cũng lưu, như Add task thường.
+- Cuối mỗi thẻ group (khi không thu gọn) có dòng **`+ Add task to #N`** (N = số của group head),
+  hiện rõ như dòng Add task cuối card. Gõ tên, Enter: task mới nằm **cuối group** (`listOrder` =
+  max các con + 1), ô vẫn mở để gõ tiếp. Bấm ra ngoài cũng lưu, như Add task thường.
+  - Bản đầu làm dòng này mờ 55% khi không rê chuột; cộng với placeholder vốn nhạt, user không thấy
+    (*"không thấy thẻ add task"*). Giờ không làm mờ, và placeholder ghi rõ group đích.
 - Task mới: cùng sprint, ngày bắt đầu = đầu sprint, log `created` như mọi task mới, rồi
   `recomputeDates` để task phụ thuộc vào group dời theo span mới.
 - **Người làm**: ở By member là người của card đó (card Unassigned → chưa giao); ở All là người

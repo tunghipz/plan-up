@@ -2711,6 +2711,7 @@ function TaskRows({
                   showAssignee={showAssignee}
                   assigneeWide={assigneeWide}
                   parentId={t.id}
+                  placeholder={`Add task to #${t.sequence}`}
                 />
               )}
             </div>

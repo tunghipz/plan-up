@@ -137,6 +137,13 @@ Avatar = **vòng tròn đặc** màu trên, chữ trắng first-letter.
 
 **Sai**: bọc tất cả trong 1 thẻ lớn rồi `divide-y`; hoặc thẻ có viền đậm + không shadow (đó là ledger/flat, không phải Cupertino).
 
+**Cấp con — task group** (2026-11-09): trong card, mỗi task group là **thẻ lồng** bo 12px
+(`.task-group-card`, margin 6px 8px, viền 0.5px `--color-border-hair`), nền pha màu avatar của
+người giữ group 5% (head 10%; dark 8%/14%), group không có người giữ thì pha `--color-ink` ra
+xám. Cùng ngôn ngữ inset grouped ở cấp nhỏ hơn; tách bằng khoảng trống, không kẻ đường. Màu
+người giữ là thông tin "khối này của ai", không phải trang trí — không dùng accent. Xem
+[design-docs/task-groups.md](design-docs/task-groups.md) *Nền group*.
+
 ### 4.2 Depth tokens (shadow)
 
 | Cấp | Shadow | Dùng cho |

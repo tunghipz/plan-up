@@ -4,6 +4,9 @@ use flate2::Compression;
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use tauri::{AppHandle, Manager, State};
+use tauri_plugin_dialog::DialogExt;
 
 /// A `.gz` name means the bytes on disk are gzipped — `write_backup` compresses
 /// and `read_backup` inflates, so the extension alone describes the encoding and
@@ -62,8 +65,111 @@ fn resolve_dir(dir: &str, subdir: Option<&str>) -> Result<PathBuf, String> {
     }
 }
 
+// ── The backup folder lives on the Rust side ──────────────────────────────
+// The file commands used to take `dir` from the webview, so any script running
+// in it could write, list, read or prune plan-up backup files in ANY folder.
+// Now the folder is chosen in a native panel opened from Rust
+// (`pick_backup_dir`), persisted next to the app config, and the file commands
+// only ever touch that folder (+ `versions/`). See design-docs/auto-backup.md.
+
+/// The folder the user picked in the native panel; `None` until one is chosen.
+struct BackupDir(Mutex<Option<PathBuf>>);
+
+const BACKUP_DIR_FILE: &str = "backup-dir.txt";
+
+fn backup_dir_store(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(app
+        .path()
+        .app_config_dir()
+        .map_err(|e| e.to_string())?
+        .join(BACKUP_DIR_FILE))
+}
+
+fn load_backup_dir(app: &AppHandle) -> Option<PathBuf> {
+    let raw = fs::read_to_string(backup_dir_store(app).ok()?).ok()?;
+    let p = PathBuf::from(raw.trim());
+    (!p.as_os_str().is_empty()).then_some(p)
+}
+
+fn save_backup_dir(app: &AppHandle, state: &BackupDir, dir: PathBuf) -> Result<(), String> {
+    let store = backup_dir_store(app)?;
+    if let Some(parent) = store.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    fs::write(&store, dir.to_string_lossy().as_bytes()).map_err(|e| e.to_string())?;
+    *state.0.lock().map_err(|e| e.to_string())? = Some(dir);
+    Ok(())
+}
+
+fn chosen_dir(state: &BackupDir) -> Result<String, String> {
+    let guard = state.0.lock().map_err(|e| e.to_string())?;
+    guard
+        .as_ref()
+        .map(|p| p.to_string_lossy().into_owned())
+        .ok_or_else(|| "No backup folder chosen.".to_string())
+}
+
+/// Native folder panel, opened from Rust; the pick becomes THE backup folder.
+/// Returns the path for display, or None when the user cancels.
+#[tauri::command]
+async fn pick_backup_dir(app: AppHandle, state: State<'_, BackupDir>) -> Result<Option<String>, String> {
+    let Some(picked) = app
+        .dialog()
+        .file()
+        .set_title("Choose backup folder")
+        .blocking_pick_folder()
+    else {
+        return Ok(None);
+    };
+    let dir = picked.into_path().map_err(|e| e.to_string())?;
+    save_backup_dir(&app, &state, dir.clone())?;
+    Ok(Some(dir.to_string_lossy().into_owned()))
+}
+
+/// One-time migration for a folder picked before the folder moved to Rust (it
+/// lives only in the webview's localStorage). Accepted ONLY while Rust has no
+/// folder yet; once one is stored this returns the stored path and ignores the
+/// argument, so the webview can't redirect backups afterwards.
+#[tauri::command]
+fn adopt_backup_dir(app: AppHandle, state: State<'_, BackupDir>, dir: String) -> Result<String, String> {
+    let existing = state.0.lock().map_err(|e| e.to_string())?.clone();
+    if let Some(cur) = existing {
+        return Ok(cur.to_string_lossy().into_owned());
+    }
+    let p = PathBuf::from(&dir);
+    if !p.is_dir() {
+        return Err(format!("backup folder not found: {dir}"));
+    }
+    save_backup_dir(&app, &state, p)?;
+    Ok(dir)
+}
+
 #[tauri::command]
 fn write_backup(
+    state: State<'_, BackupDir>,
+    file_name: String,
+    contents: String,
+    subdir: Option<String>,
+) -> Result<(), String> {
+    write_backup_at(chosen_dir(&state)?, file_name, contents, subdir)
+}
+
+#[tauri::command]
+fn prune_backups(state: State<'_, BackupDir>, keep: usize, subdir: Option<String>) -> Result<Vec<String>, String> {
+    prune_backups_at(chosen_dir(&state)?, keep, subdir)
+}
+
+#[tauri::command]
+fn list_backups(state: State<'_, BackupDir>, subdir: Option<String>) -> Result<Vec<String>, String> {
+    list_backups_at(chosen_dir(&state)?, subdir)
+}
+
+#[tauri::command]
+fn read_backup(state: State<'_, BackupDir>, file_name: String, subdir: Option<String>) -> Result<String, String> {
+    read_backup_at(chosen_dir(&state)?, file_name, subdir)
+}
+
+fn write_backup_at(
     dir: String,
     file_name: String,
     contents: String,
@@ -85,8 +191,7 @@ fn write_backup(
     fs::write(path, bytes).map_err(|e| e.to_string())
 }
 
-#[tauri::command]
-fn prune_backups(dir: String, keep: usize, subdir: Option<String>) -> Result<Vec<String>, String> {
+fn prune_backups_at(dir: String, keep: usize, subdir: Option<String>) -> Result<Vec<String>, String> {
     let target = resolve_dir(&dir, subdir.as_deref())?;
     if !target.is_dir() {
         // e.g. versions/ not created yet — nothing to prune.
@@ -109,8 +214,7 @@ fn prune_backups(dir: String, keep: usize, subdir: Option<String>) -> Result<Vec
     Ok(deleted)
 }
 
-#[tauri::command]
-fn list_backups(dir: String, subdir: Option<String>) -> Result<Vec<String>, String> {
+fn list_backups_at(dir: String, subdir: Option<String>) -> Result<Vec<String>, String> {
     let target = resolve_dir(&dir, subdir.as_deref())?;
     if !target.is_dir() {
         // versions/ not created yet — nothing to list.
@@ -128,8 +232,7 @@ fn list_backups(dir: String, subdir: Option<String>) -> Result<Vec<String>, Stri
     Ok(names)
 }
 
-#[tauri::command]
-fn read_backup(dir: String, file_name: String, subdir: Option<String>) -> Result<String, String> {
+fn read_backup_at(dir: String, file_name: String, subdir: Option<String>) -> Result<String, String> {
     if !is_backup_filename(&file_name) {
         return Err(format!("invalid backup filename: {file_name}"));
     }
@@ -150,13 +253,28 @@ fn read_backup(dir: String, file_name: String, subdir: Option<String>) -> Result
 /// that a mis-pick can't balloon the webview.
 const IMPORT_MAX_BYTES: u64 = 200 * 1024 * 1024;
 
-/// Read a `.json` the user just picked in the native open panel (menu
-/// File ▸ Import…, desktop-native-feel.md). A menu action reaches the page over
+/// Menu File ▸ Import… (desktop-native-feel.md): open the native panel FROM
+/// RUST and read the file the user picked. A menu action reaches the page over
 /// IPC with no user gesture, and WebKit only opens `<input type=file>` inside
-/// one — so the panel comes from the dialog plugin and the bytes from here.
-/// Regular `.json` files only, size-capped; still no general fs access.
+/// one, so the page can't pick by itself. The page never hands Rust a path:
+/// a command that read any path it was given would let a script in the webview
+/// read any `.json` on the machine. Returns None when the user cancels.
 #[tauri::command]
-fn read_import_file(path: String) -> Result<String, String> {
+async fn pick_import_file(app: AppHandle) -> Result<Option<String>, String> {
+    let Some(picked) = app
+        .dialog()
+        .file()
+        .add_filter("plan-up backup", &["json"])
+        .blocking_pick_file()
+    else {
+        return Ok(None);
+    };
+    let path = picked.into_path().map_err(|e| e.to_string())?;
+    read_import_file_at(path.to_string_lossy().into_owned()).map(Some)
+}
+
+/// Regular `.json` files only, size-capped.
+fn read_import_file_at(path: String) -> Result<String, String> {
     let p = Path::new(&path);
     let is_json = p
         .extension()
@@ -197,12 +315,19 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_opener::init())
+        .setup(|app| {
+            let dir = load_backup_dir(app.handle());
+            app.manage(BackupDir(Mutex::new(dir)));
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
+            pick_backup_dir,
+            adopt_backup_dir,
             write_backup,
             prune_backups,
             list_backups,
             read_backup,
-            read_import_file
+            pick_import_file
         ])
         // macOS single-window idiom (Notes, Reminders): closing the window only
         // hides it — the app and auto backup keep running; ⌘Q quits.
@@ -238,8 +363,9 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        is_backup_filename, list_backups, prune_backups, read_backup, read_import_file,
-        write_backup,
+        is_backup_filename, list_backups_at as list_backups, prune_backups_at as prune_backups,
+        read_backup_at as read_backup, read_import_file_at as read_import_file,
+        write_backup_at as write_backup,
     };
     use std::fs;
 

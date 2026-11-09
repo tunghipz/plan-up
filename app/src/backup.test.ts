@@ -234,46 +234,59 @@ describe('runBackupNow', () => {
   })
 
   it('writes both tiers then prunes both, and persists an ok status', async () => {
-    const invoke = vi.fn().mockResolvedValue(undefined)
+    // Rust owns the folder: adopt_backup_dir answers with the folder it keeps.
+    const invoke = vi.fn((cmd: string, args?: { dir?: string }) =>
+      Promise.resolve(cmd === 'adopt_backup_dir' ? args?.dir : undefined),
+    )
     vi.doMock('@tauri-apps/api/core', () => ({ invoke }))
     store.set('plan-up:backupDir', '/tmp/backups')
     const { runBackupNow } = await import('./backup-tauri')
     const status = await runBackupNow()
     expect(status.ok).toBe(true)
     expect(status.file).toMatch(/^plan-up-\d{4}-\d{2}-\d{2}\.json$/)
-    // daily write + prune, then version write + prune (first run has no prior hash)
-    expect(invoke).toHaveBeenCalledTimes(4)
-    // 1. daily rolling file (no subdir)
-    expect(invoke.mock.calls[0][0]).toBe('write_backup')
-    const daily = invoke.mock.calls[0][1] as {
-      dir: string
+    // adopt once, then daily write + prune, then version write + prune
+    expect(invoke).toHaveBeenCalledTimes(5)
+    expect(invoke.mock.calls[0]).toEqual(['adopt_backup_dir', { dir: '/tmp/backups' }])
+    // 1. daily rolling file (no subdir) — and NO dir: the webview can't name one
+    expect(invoke.mock.calls[1][0]).toBe('write_backup')
+    const daily = invoke.mock.calls[1][1] as unknown as {
+      dir?: string
       fileName: string
       contents: string
       subdir?: string
     }
-    expect(daily.dir).toBe('/tmp/backups')
+    expect(daily.dir).toBeUndefined()
     expect(daily.subdir).toBeUndefined()
     expect(JSON.parse(daily.contents).version).toBe(6)
-    expect(invoke.mock.calls[1]).toEqual(['prune_backups', { dir: '/tmp/backups', keep: 30 }])
+    expect(invoke.mock.calls[2]).toEqual(['prune_backups', { keep: 30 }])
     // 2. immutable version into versions/ + its own prune (keep 50)
-    expect(invoke.mock.calls[2][0]).toBe('write_backup')
-    const ver = invoke.mock.calls[2][1] as { fileName: string; subdir: string }
+    expect(invoke.mock.calls[3][0]).toBe('write_backup')
+    const ver = invoke.mock.calls[3][1] as unknown as { fileName: string; subdir: string }
     expect(ver.fileName).toMatch(/^plan-up-\d{4}-\d{2}-\d{2}-\d{6}\.json\.gz$/)
     expect(ver.subdir).toBe('versions')
-    expect(invoke.mock.calls[3]).toEqual([
-      'prune_backups',
-      { dir: '/tmp/backups', keep: 50, subdir: 'versions' },
-    ])
+    expect(invoke.mock.calls[4]).toEqual(['prune_backups', { keep: 50, subdir: 'versions' }])
     expect(JSON.parse(store.get('plan-up:backupLast')!).ok).toBe(true)
     expect(store.get('plan-up:backupHash')).toBeTruthy()
   })
 
+  it('mirrors the folder Rust keeps when it differs from localStorage', async () => {
+    const invoke = vi.fn((cmd: string) =>
+      Promise.resolve(cmd === 'adopt_backup_dir' ? '/picked/in/rust' : undefined),
+    )
+    vi.doMock('@tauri-apps/api/core', () => ({ invoke }))
+    store.set('plan-up:backupDir', '/stale/local')
+    const { runBackupNow } = await import('./backup-tauri')
+    expect((await runBackupNow()).ok).toBe(true)
+    expect(store.get('plan-up:backupDir')).toBe('/picked/in/rust')
+  })
+
   it('skips the version write when the payload is unchanged (dedup)', async () => {
     const invoke = vi.fn().mockResolvedValue(undefined)
+    // (adopt_backup_dir answering undefined = keep the localStorage folder)
     vi.doMock('@tauri-apps/api/core', () => ({ invoke }))
     store.set('plan-up:backupDir', '/tmp/backups')
     const { runBackupNow } = await import('./backup-tauri')
-    await runBackupNow() // 4 invokes, records the hash
+    await runBackupNow() // adopt + 4 invokes, records the hash
     invoke.mockClear()
     const status = await runBackupNow() // same (empty) DB → hash matches
     expect(status.ok).toBe(true)

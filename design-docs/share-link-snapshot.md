@@ -7,7 +7,7 @@
 > verbatim by the hosted mode.
 
 **Status:** Implemented
-**Last updated:** 2026-08-18 (+ **fix từ `/review`**: chặn vòng lặp vô hạn khi span
+**Last updated:** 2026-11-09 (**security**: decompress có trần, trần số dòng sau giải nén, màu chỉ nhận hex — xem *Rules & edge cases*). Trước đó: 2026-08-18 (+ **fix từ `/review`**: chặn vòng lặp vô hạn khi span
 đi quá 9999-12-31 — `hd` là thứ đầu tiên đẩy ngày do người ngoài kiểm soát vào
 `holidayLoadInSpan`, và một link 168 ký tự khoá cứng tab; `decodeSnapshot` giờ không
 throw nữa; `hd` **clip** theo range nên nhãn và số khớp nhau; bỏ `half` thừa; sort;
@@ -461,7 +461,18 @@ ngày nghỉ bám vào.
   đó. Vượt → thẻ cảnh báo (không hiển thị số KB), Copy vẫn cho phép; `.html` không giới
   hạn size là fallback (Future).
 - **Untrusted input**: `decodeSnapshot` bọc `try/catch`, chặn payload quá dài
-  (chống decompress bomb), validate shape trước khi render. Title/nội dung render
+  (chống decompress bomb), validate shape trước khi render.
+  - **Decompress có trần** (2026-11-09): output của LZ tăng theo bình phương input. Blob 22 KB
+    bung ra 300 nghìn task và làm treo tab người nhận hơn một phút; blob 39 KB bung ra 160 triệu
+    ký tự. `lz-bounded.ts` giải nén cùng thuật toán với lz-string nhưng dừng ngay khi output vượt
+    `MAX_JSON_LEN` (3 triệu ký tự), nên một quả bom tốn tối đa chừng đó bộ nhớ.
+  - **Trần sau khi giải nén**: tối đa 3000 task, 500 member, 400 ngày nghỉ mỗi member, 200
+    section và 200 status. Vượt trần thì link coi là không hợp lệ. Các trần này cao hơn rất nhiều
+    so với sprint hay collection thật.
+  - **Màu chỉ nhận dạng hex** (`#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa`). Màu đi vào inline style
+    (`background`, `color-mix`), nên `url(https://…)` sẽ khiến trình duyệt người nhận gọi tới URL
+    của kẻ gửi khi mở link (lộ IP và thời điểm mở). Màu sai dạng: member/status về xám
+    `#8e8e93`, section thì không có màu. Title/nội dung render
   bằng React như **text thuần** (React tự escape) — không `dangerouslySetInnerHTML`,
   không eval → không XSS từ nội dung link.
 - **Read-only nghĩa đen**: viewer không mở Dexie, không import `db`/`io`; **không

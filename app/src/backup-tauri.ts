@@ -12,6 +12,7 @@ import {
   IS_TAURI,
   isBackupEnabled,
   parseVersionFilename,
+  setBackupDir,
   setLastBackupHash,
   setLastBackupStatus,
   versionFilename,
@@ -26,12 +27,32 @@ import {
  * every entry point no-ops outside the desktop shell.
  */
 
-/** Native directory picker. Returns the chosen path, or null if dismissed. */
+/**
+ * Native directory picker, opened by RUST: the pick becomes the only folder the
+ * file commands will touch (the webview no longer passes a `dir`). Returns the
+ * chosen path for display, or null if dismissed. See auto-backup.md "Security".
+ */
 export async function pickBackupDir(): Promise<string | null> {
   if (!IS_TAURI) return null
-  const { open } = await import('@tauri-apps/plugin-dialog')
-  const picked = await open({ directory: true, title: 'Choose backup folder' })
-  return typeof picked === 'string' ? picked : null
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<string | null>('pick_backup_dir')
+}
+
+/**
+ * Make sure Rust holds the backup folder. A folder picked before it moved to
+ * Rust lives only in localStorage: hand it over ONCE (Rust accepts it only while
+ * it has none and ignores it afterwards). Rust's answer is the folder it will
+ * actually use, mirrored back into localStorage so the settings modal shows it.
+ */
+let adopted = false
+async function ensureRustBackupDir(
+  invoke: (cmd: string, args?: Record<string, unknown>) => Promise<unknown>,
+  dir: string,
+): Promise<void> {
+  if (adopted) return
+  const actual = (await invoke('adopt_backup_dir', { dir })) as string
+  if (actual && actual !== dir) setBackupDir(actual)
+  adopted = true
 }
 
 /**
@@ -51,6 +72,7 @@ export async function runBackupNow(): Promise<BackupStatus> {
   }
   try {
     const { invoke } = await import('@tauri-apps/api/core')
+    await ensureRustBackupDir(invoke, dir)
     const now = new Date()
     const payload = await exportAll()
     const contents = JSON.stringify(payload)
@@ -58,20 +80,19 @@ export async function runBackupNow(): Promise<BackupStatus> {
     // 1. Daily rolling file — overwrite the same-day file, prune to 30 days.
     // Deliberately uncompressed: this is the "app is gone, open it by hand" copy.
     const fileName = backupFilename(now)
-    await invoke('write_backup', { dir, fileName, contents })
-    await invoke('prune_backups', { dir, keep: BACKUP_KEEP })
+    await invoke('write_backup', { fileName, contents })
+    await invoke('prune_backups', { keep: BACKUP_KEEP })
 
     // 2. Immutable version — dedup on the payload with `exportedAt` neutralised
     // (that field changes every export, so hashing raw contents never matches).
     const hash = hashString(JSON.stringify({ ...payload, exportedAt: '' }))
     if (hash !== getLastBackupHash()) {
       await invoke('write_backup', {
-        dir,
         fileName: versionFilename(now),
         contents,
         subdir: VERSIONS_DIR,
       })
-      await invoke('prune_backups', { dir, keep: VERSIONS_KEEP, subdir: VERSIONS_DIR })
+      await invoke('prune_backups', { keep: VERSIONS_KEEP, subdir: VERSIONS_DIR })
       setLastBackupHash(hash)
     }
 
@@ -142,7 +163,8 @@ export async function listVersions(): Promise<VersionEntry[]> {
   const dir = getBackupDir()
   if (!IS_TAURI || !dir) return []
   const { invoke } = await import('@tauri-apps/api/core')
-  const names = await invoke<string[]>('list_backups', { dir, subdir: VERSIONS_DIR })
+  await ensureRustBackupDir(invoke, dir)
+  const names = await invoke<string[]>('list_backups', { subdir: VERSIONS_DIR })
   return names
     .map((file) => ({ file, at: parseVersionFilename(file) }))
     .filter((e): e is VersionEntry => e.at !== null)
@@ -154,7 +176,8 @@ export async function readVersion(file: string): Promise<ExportPayload> {
   const dir = getBackupDir()
   if (!IS_TAURI || !dir) throw new Error('No backup folder chosen.')
   const { invoke } = await import('@tauri-apps/api/core')
-  const contents = await invoke<string>('read_backup', { dir, fileName: file, subdir: VERSIONS_DIR })
+  await ensureRustBackupDir(invoke, dir)
+  const contents = await invoke<string>('read_backup', { fileName: file, subdir: VERSIONS_DIR })
   return JSON.parse(contents) as ExportPayload
 }
 

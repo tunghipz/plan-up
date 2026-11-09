@@ -1,7 +1,7 @@
 # Project export / import (shareable project files)
 
 **Status:** Implemented
-**Last updated:** 2026-07-08 (drawer's inline "Share this project" row removed — header Export menu is the single entry point)
+**Last updated:** 2026-11-09 (**security**: import bỏ ảnh từ xa và dựng lại url của share — xem *Rules & edge cases*). Trước đó: 2026-07-08 (drawer's inline "Share this project" row removed — header Export menu is the single entry point)
 **Code:** `app/src/project-io.ts` (`ProjectBundle`, `isProjectBundle`, `remapBundle`),
 `app/src/io.ts` (`exportProject`, `importProject`; re-exported by the `db.ts` facade), `app/src/App.tsx` (header split-menu,
 `handleImportFile`, import toast, `downloadJson`), `app/src/ProjectSettingsView.tsx`
@@ -128,6 +128,14 @@ Rules:
   names in the switcher (ids differ, data correct). Auto-rename ("(imported)") deferred.
 - **Reject-whole-file validation.** A single malformed row rejects the file; nothing is added.
 - **Full backup unchanged.** The replace-all path and its confirm are untouched.
+- **File của người khác là input không tin được** (2026-11-09, áp dụng cho cả import project lẫn
+  full backup trong `io.ts`):
+  - `avatarImage` và `project.icon` dạng `data:` chỉ được giữ khi là `data:image/…` và không quá
+    512 KB. URL từ xa sẽ thành `<img src>` gọi về server của người tạo file mỗi lần render
+    (pixel theo dõi), nên bị bỏ. Icon emoji/chữ vẫn giữ nguyên.
+  - Share record (chỉ có trong full backup): `id` phải khớp `[a-z0-9]{1,16}`, `slug` được
+    slugify lại, và `url` dựng lại từ slug + id. Không tin `url` trong file, vì một url giả sẽ
+    hiện, được copy và được mở như link của mình (phishing).
 
 ## Future / open questions
 - Import-with-preview dialog ("Add 'Marketing' — 3 sprints, 41 tasks?") before commit.

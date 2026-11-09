@@ -46,6 +46,8 @@ async function copyText(text: string): Promise<void> {
 }
 
 function errMsg(e: unknown): string {
+  if (e instanceof HostedError && e.status === 429)
+    return 'Bạn vừa tạo/cập nhật link quá nhiều lần. Đợi một lát rồi thử lại, hoặc dùng link dài bên dưới.'
   if (e instanceof HostedError) return `Store trả lỗi (${e.status}). Thử lại hoặc dùng link dài bên dưới.`
   return 'Không kết nối được store — dùng link dài bên dưới để chia sẻ tạm (không update được).'
 }

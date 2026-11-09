@@ -1,7 +1,7 @@
 # Auto backup (desktop only)
 
 **Status:** Implemented
-**Last updated:** 2026-08-18 (**disk-footprint pass** — `versions/` snapshots are now
+**Last updated:** 2026-11-09 (**security**: folder backup do Rust chọn và giữ; command không còn nhận `dir` từ webview — xem *Security model*). Trước đó: 2026-08-18 (**disk-footprint pass** — `versions/` snapshots are now
 **gzipped** (`…-HHMMSS.json.gz`, ≈3.5× smaller, compressed in Rust so the tier stays
 self-describing and old `.json` snapshots keep working) and the tier's retention drops
 **200 → 50**. Together ≈10× less disk. The daily tier is untouched: still plain,
@@ -98,6 +98,26 @@ Writes nothing to the DB. Settings live in localStorage:
   delete beyond `keep`.
 
 ## Security model (why Rust commands, not the fs plugin)
+
+**Folder nằm ở phía Rust (2026-11-09).** Trước đây mọi command nhận `dir` từ webview, nên
+script nào chạy trong webview cũng ghi, liệt kê, đọc hay prune được file backup của plan-up
+ở **bất kỳ** folder nào. Nay:
+- `pick_backup_dir` mở panel chọn folder **từ Rust**, lưu đường dẫn vào
+  `<app_config_dir>/backup-dir.txt` và vào state của app. Webview chỉ nhận lại đường dẫn để
+  hiển thị.
+- `write_backup` / `prune_backups` / `list_backups` / `read_backup` **không còn nhận `dir`**:
+  chúng chỉ làm việc trên folder đã lưu (cùng `versions/`). Chưa có folder thì trả lỗi
+  "No backup folder chosen.".
+- **Chuyển đổi một lần:** folder chọn trước bản này chỉ nằm trong localStorage.
+  `adopt_backup_dir(dir)` nhận nó **chỉ khi Rust chưa có folder nào**. Khi đã có, lệnh này bỏ
+  qua tham số và trả về folder đang lưu, nên webview không chuyển hướng backup được nữa.
+  `runBackupNow`, `listVersions`, `readVersion` gọi lệnh này một lần mỗi phiên trước khi chạm
+  tới file, rồi ghi folder Rust trả về vào localStorage để modal hiển thị đúng.
+- Không còn quyền `dialog:allow-open` trong capabilities: cả hai panel đều do Rust mở.
+
+Mô tả các command bên dưới vẫn đúng về luật tên file và `subdir`. Chỉ khác là `dir` giờ là
+folder Rust đang lưu, không phải tham số từ webview.
+
 The Tauri fs plugin scopes paths statically; a dialog-picked folder is only granted
 at runtime and the grant is lost on restart (fixable only via the persisted-scope
 plugin + broad fs permissions). Instead the shell exposes exactly two commands

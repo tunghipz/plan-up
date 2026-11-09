@@ -234,6 +234,49 @@ describe('exportAll/importAll shares round-trip', () => {
     const evil = { ...data, shares: 'nope' } as unknown as ExportPayload
     await expect(importAll(evil)).rejects.toThrow('Not a valid plan-up backup')
   })
+
+  it('a crafted share url is rebuilt from id + slug; a bad id is dropped', async () => {
+    await db.projects.add({ id: 'pA', name: 'Alpha', createdAt: 1 })
+    await db.shares.add(shareRec())
+    const data = await exportAll()
+    const crafted = {
+      ...data,
+      shares: [
+        shareRec({ url: 'https://evil.example/login', slug: 'Alpha <x>' }),
+        shareRec({ id: '../../admin', refId: 'other' }),
+      ],
+    } as ExportPayload
+    await importAll(crafted)
+    const rows = await db.shares.toArray()
+    expect(rows.map((r) => r.id)).toEqual(['abc123'])
+    expect(rows[0].slug).toBe('alpha-x')
+    expect(rows[0].url.endsWith('/view/alpha-x-abc123')).toBe(true)
+    expect(rows[0].url).not.toContain('evil.example')
+    expect(rows[0].writeToken).toBe('tok-secret') // the token still survives
+  })
+})
+
+describe('import keeps only inline images', () => {
+  beforeEach(clearAll)
+
+  it('drops remote avatar / icon URLs, keeps data:image and emoji', async () => {
+    const { pidA, memA, memB } = await seedTwoProjects()
+    await db.members.update(memA, { avatarImage: 'data:image/webp;base64,AAAA' })
+    await db.projects.update(pidA, { icon: '🚀' })
+    const data = await exportAll()
+    data.members = data.members.map((m) =>
+      m.id === memB ? { ...m, avatarImage: 'http://attacker.example/pixel.png' } : m
+    )
+    data.projects = data.projects!.map((p) =>
+      p.id === pidA ? p : { ...p, icon: 'data:text/html,<script>1</script>' }
+    )
+    await importAll(data)
+    expect((await db.members.get(memA))?.avatarImage).toBe('data:image/webp;base64,AAAA')
+    expect((await db.members.get(memB))?.avatarImage).toBeUndefined()
+    const projects = await db.projects.toArray()
+    expect(projects.find((p) => p.id === pidA)?.icon).toBe('🚀')
+    expect(projects.find((p) => p.id !== pidA)?.icon).toBeUndefined()
+  })
 })
 
 describe('addCollectionItem input integrity', () => {

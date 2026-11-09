@@ -236,18 +236,13 @@ export async function syncWindowTheme(dark: boolean) {
 
 // ── Native open panel for File ▸ Import… ────────────────────────────────────
 // A menu action arrives over IPC with no user gesture, and WebKit only opens a
-// file chooser from `<input type=file>.click()` inside one — so the menu path
-// picks with the dialog plugin and reads through the app's own Rust command.
+// file chooser from `<input type=file>.click()` inside one — so Rust opens the
+// panel AND reads the picked file (`pick_import_file`). The page never sends a
+// path: a command that read any path it was given would let a script in the
+// webview read any .json on the machine. null = cancelled.
 export async function pickImportText(): Promise<string | null> {
-  const { open } = await import('@tauri-apps/plugin-dialog')
-  const path = await open({
-    multiple: false,
-    directory: false,
-    filters: [{ name: 'plan-up backup', extensions: ['json'] }],
-  })
-  if (typeof path !== 'string') return null
   const { invoke } = await import('@tauri-apps/api/core')
-  return invoke<string>('read_import_file', { path })
+  return invoke<string | null>('pick_import_file')
 }
 
 // ── Context menus ───────────────────────────────────────────────────────────

@@ -14,6 +14,49 @@ import { normalizeHolidays } from './scheduling'
 import { buildPersonBackfill, normalizePersonName } from './people'
 import { defaultSprintDates, todayLocalISO } from './lib'
 import { remapBundle, type ProjectBundle } from './project-io'
+import { slugify, viewUrl } from './share-hosted'
+
+// ── Untrusted-file hygiene ────────────────────────────────────────────────
+// A backup or project file can come from someone else ("here's the plan"). Two
+// fields would otherwise render or open whatever the file says:
+//  - images (`avatarImage`, `project.icon`) end up in <img src>: a remote URL
+//    makes every render a request to whoever crafted the file (a tracking
+//    beacon). The upload path only ever produces `data:image/…`, so import
+//    accepts exactly that.
+//  - a share record's `url` is shown, copied and opened: rebuild it from the
+//    id and slug instead of trusting it (a crafted url = phishing link that
+//    looks like ours).
+
+/** Matches what the avatar upload produces; ~4x the real 128px size. */
+const MAX_IMAGE_DATA_URL = 512 * 1024
+const SHARE_ID_RE = /^[a-z0-9]{1,16}$/
+
+function safeImage(x: unknown): string | undefined {
+  return typeof x === 'string' && x.startsWith('data:image/') && x.length <= MAX_IMAGE_DATA_URL
+    ? x
+    : undefined
+}
+
+/** Member as imported: avatar kept only when it is an inline image. */
+function cleanMember<M extends { avatarImage?: string }>(m: M): M {
+  return m.avatarImage === undefined ? m : { ...m, avatarImage: safeImage(m.avatarImage) }
+}
+
+/** Project icon: an emoji/letter passes; a `data:` value must be an inline image. */
+function cleanProject<P extends { icon?: string }>(p: P): P {
+  if (typeof p.icon !== 'string' || !p.icon.startsWith('data:')) return p
+  return { ...p, icon: safeImage(p.icon) }
+}
+
+/** Share records with a valid id only; slug and url rebuilt, never trusted. */
+function cleanShares(rows: ShareRecord[]): ShareRecord[] {
+  return rows
+    .filter((r) => r && typeof r.id === 'string' && SHARE_ID_RE.test(r.id))
+    .map((r) => {
+      const slug = slugify(typeof r.slug === 'string' ? r.slug : '')
+      return { ...r, slug, url: viewUrl(slug, r.id) }
+    })
+}
 
 export interface ExportPayload {
   version: 1 | 2 | 3 | 4 | 5 | 6
@@ -112,7 +155,7 @@ export async function importAll(data: ExportPayload) {
         // hand-edited backup could plant a non-ISO or decade-long holiday that
         // hangs every day-walk downstream. See design-docs/project-holidays.md.
         projects = data.projects.map((p) =>
-          p.holidays ? { ...p, holidays: normalizeHolidays(p.holidays) } : p
+          cleanProject(p.holidays ? { ...p, holidays: normalizeHolidays(p.holidays) } : p)
         )
       } else {
         defaultId = uid()
@@ -129,7 +172,7 @@ export async function importAll(data: ExportPayload) {
         const daysOff: DayOff[] = raw.map((d) =>
           typeof d === 'string' ? { date: d } : d
         )
-        return { ...m, projectId: pidOf(m), daysOff }
+        return cleanMember({ ...m, projectId: pidOf(m), daysOff })
       })
       if (data.version >= 5 && Array.isArray(data.people)) {
         // v5+: People travel with the backup — restore them verbatim so
@@ -225,7 +268,8 @@ export async function importAll(data: ExportPayload) {
       // refId points at a sprint/collection id (or projectId for a project-scope sprint
       // link), all preserved above for v2+ payloads.
       if (data.version >= 6 && Array.isArray(data.shares) && data.shares.length) {
-        await db.shares.bulkAdd(data.shares)
+        const shares = cleanShares(data.shares)
+        if (shares.length) await db.shares.bulkAdd(shares)
       }
     }
    )
@@ -293,9 +337,11 @@ export async function importProject(
       [db.projects, db.members, db.sprints, db.collections, db.tasks, db.events, db.people],
       async () => {
         await db.projects.add(
-          remapped.project.holidays
-            ? { ...remapped.project, holidays: normalizeHolidays(remapped.project.holidays) }
-            : remapped.project
+          cleanProject(
+            remapped.project.holidays
+              ? { ...remapped.project, holidays: normalizeHolidays(remapped.project.holidays) }
+              : remapped.project
+          )
         )
         // Link each imported member to a Person in THIS db by normalized name
         // (reuse an existing same-name person, else create) — the bundle's
@@ -316,7 +362,7 @@ export async function importProject(
           m.personId = pid
         }
         if (newPeople.length) await db.people.bulkAdd(newPeople)
-        if (remapped.members.length) await db.members.bulkAdd(remapped.members)
+        if (remapped.members.length) await db.members.bulkAdd(remapped.members.map(cleanMember))
         if (remapped.sprints.length) await db.sprints.bulkAdd(remapped.sprints)
         if (remapped.collections.length)
           await db.collections.bulkAdd(remapped.collections)

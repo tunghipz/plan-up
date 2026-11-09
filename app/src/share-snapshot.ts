@@ -1,4 +1,5 @@
 import LZString from 'lz-string'
+import { decompressUriBounded } from './lz-bounded'
 import type { Collection, DayOff, Holiday, Member, Priority, Project, Sprint, Status, Task } from './types'
 import { byEnd } from './telegram-export'
 
@@ -51,6 +52,28 @@ const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/
  * sprint day, but decode reads attacker-supplied arrays, and every surviving row
  * becomes a rendered span (and a day-walk). 64 is far above any real sprint. */
 const MAX_HOLIDAYS = 64
+
+/** Caps on the DECODED payload. MAX_BLOB_LEN bounds only the compressed input,
+ * and LZ output grows quadratically: a 22 KB blob decoded to 300k tasks and froze
+ * the recipient's tab for over a minute, and a 39 KB one expands to 160 M chars.
+ * Decompression itself stops at MAX_JSON_LEN (lz-bounded.ts), and every decoded
+ * row becomes rendered DOM, so the counts are capped far above any real sprint
+ * or collection. */
+const MAX_JSON_LEN = 3_000_000
+const MAX_TASKS = 3000
+const MAX_MEMBERS = 500
+const MAX_OFF_PER_MEMBER = 400
+const MAX_SECTIONS = 200
+const MAX_STATUSES = 200
+
+/** Wire colors end up in inline `style` (background, `color-mix(…)`). Only a hex
+ * color is accepted: anything else (`url(https://…)`) would make the recipient's
+ * browser fetch an attacker URL on open — a tracking beacon. */
+const HEX_COLOR_RE = /^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i
+const safeColor = (x: unknown, fallback: string): string =>
+  typeof x === 'string' && HEX_COLOR_RE.test(x) ? x : fallback
+const optColor = (x: unknown): string | undefined =>
+  typeof x === 'string' && HEX_COLOR_RE.test(x) ? x : undefined
 
 // Fixed enum tables — the packed form stores the index; order must stay stable.
 const STATUS_CODE: Status[] = ['todo', 'in_progress', 'done']
@@ -434,6 +457,7 @@ function unpackSnapshot(o: unknown): SnapshotData | null {
   if (!isArr(p.mb) || cols.some((c) => !isArr(c))) return null
   const n = (p.ti as unknown[]).length
   if (cols.some((c) => (c as unknown[]).length !== n)) return null
+  if (n > MAX_TASKS || (p.mb as unknown[]).length > MAX_MEMBERS) return null
 
   const mb = p.mb as unknown[]
   const members: Member[] = mb.map((row, i) => {
@@ -442,7 +466,7 @@ function unpackSnapshot(o: unknown): SnapshotData | null {
       id: `m${i}`,
       projectId: '',
       name: String(r[0] ?? ''),
-      color: String(r[1] ?? '#8e8e93'),
+      color: safeColor(r[1], '#8e8e93'),
       daysOff: [],
       avatarEmoji: r[2] ? String(r[2]) : undefined,
       title: r[3] ? String(r[3]) : undefined,
@@ -464,6 +488,7 @@ function unpackSnapshot(o: unknown): SnapshotData | null {
   const membersOff: DayOff[][] = members.map((_, i) => {
     const list = isArr(moRaw[i]) ? (moRaw[i] as unknown[]) : []
     return list
+      .slice(0, MAX_OFF_PER_MEMBER)
       .map((e): DayOff | null => {
         const pair = (isArr(e) ? e : []) as unknown[]
         const date = fromOffset(d0, typeof pair[0] === 'number' ? pair[0] : null)
@@ -540,7 +565,7 @@ export function decodeSnapshot(blob: string): SnapshotData | null {
   if (!blob || blob.length > MAX_BLOB_LEN) return null
   let json: string | null
   try {
-    json = LZString.decompressFromEncodedURIComponent(blob)
+    json = decompressUriBounded(blob, MAX_JSON_LEN)
   } catch {
     return null
   }
@@ -726,14 +751,21 @@ function unpackCollection(o: unknown): CollectionSnapshotData | null {
   if (!isArr(p.se) || !isArr(p.st) || cols.some((c) => !isArr(c))) return null
   const n = (p.ti as unknown[]).length
   if (cols.some((c) => (c as unknown[]).length !== n)) return null
+  if (
+    n > MAX_TASKS ||
+    (p.se as unknown[]).length > MAX_SECTIONS ||
+    (p.st as unknown[]).length > MAX_STATUSES
+  ) {
+    return null
+  }
 
   const sections = (p.se as unknown[]).map((row, i) => {
     const r = (isArr(row) ? row : []) as unknown[]
-    return { id: `s${i}`, name: String(r[0] ?? ''), color: r[1] ? String(r[1]) : undefined }
+    return { id: `s${i}`, name: String(r[0] ?? ''), color: optColor(r[1]) }
   })
   const statuses = (p.st as unknown[]).map((row, i) => {
     const r = (isArr(row) ? row : []) as unknown[]
-    return { id: `x${i}`, name: String(r[0] ?? ''), color: String(r[1] ?? '#8e8e93') }
+    return { id: `x${i}`, name: String(r[0] ?? ''), color: safeColor(r[1], '#8e8e93') }
   })
   const sc = p.sc as number[]
   const xi = p.xi as number[]
@@ -766,7 +798,7 @@ export function decodeCollectionSnapshot(blob: string): CollectionSnapshotData |
   if (!blob || blob.length > MAX_BLOB_LEN) return null
   let json: string | null
   try {
-    json = LZString.decompressFromEncodedURIComponent(blob)
+    json = decompressUriBounded(blob, MAX_JSON_LEN)
   } catch {
     return null
   }

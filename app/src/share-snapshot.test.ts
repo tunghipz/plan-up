@@ -507,6 +507,56 @@ describe('encode / decode round-trip', () => {
   })
 })
 
+describe('hostile links: size caps and colors', () => {
+  const sprintBlob = (n: number, over: Record<string, unknown> = {}) =>
+    encodeRaw(
+      JSON.stringify({
+        v: 2, ts: '', pj: 'p', sn: 's', d0: '2026-07-05', d1: null,
+        mb: [['An', '#111', '', '']],
+        ti: Array(n).fill('T'), ss: Array(n).fill(0), pp: Array(n).fill(2), am: Array(n).fill(0),
+        pa: Array(n).fill(-1), ef: Array(n).fill(null), s0: Array(n).fill(null), s1: Array(n).fill(null),
+        ...over,
+      })
+    )
+  const collectionBlob = (over: Record<string, unknown>) =>
+    encodeRaw(JSON.stringify({ v: 3, ts: '', pj: 'p', cn: 'c', se: [], st: [], ti: [], sc: [], xi: [], a0: [], a1: [], ...over }))
+
+  it('a tiny blob can no longer decode into a giant task list', () => {
+    const big = sprintBlob(50_000)
+    expect(big.length).toBeLessThan(20_000) // the bomb is small on the wire
+    expect(decodeSnapshot(big)).toBeNull()
+    expect(decodeSnapshot(sprintBlob(3000))?.tasks).toHaveLength(3000) // the cap itself still decodes
+  })
+
+  it('caps members, off days, sections and statuses', () => {
+    const many = Array.from({ length: 501 }, (_, i) => [`m${i}`, '#111', '', ''])
+    expect(decodeSnapshot(sprintBlob(1, { mb: many }))).toBeNull()
+    const off = Array.from({ length: 1000 }, (_, i) => [i % 30, 0])
+    expect(decodeSnapshot(sprintBlob(1, { mo: [off] }))!.membersOff[0].length).toBeLessThanOrEqual(400)
+    const rows = (k: number) => Array.from({ length: k }, (_, i) => [`r${i}`, '#0071E3'])
+    expect(decodeCollectionSnapshot(collectionBlob({ se: rows(201) }))).toBeNull()
+    expect(decodeCollectionSnapshot(collectionBlob({ st: rows(201) }))).toBeNull()
+  })
+
+  it('stops a decompression bomb before it expands (bounded decompress)', () => {
+    const bomb = encodeRaw('['.repeat(20_000_000)) // 20 M chars from a ~12 KB blob
+    expect(bomb.length).toBeLessThan(20_000)
+    expect(decodeSnapshot(bomb)).toBeNull()
+    expect(decodeCollectionSnapshot(bomb)).toBeNull()
+  })
+
+  it('only hex colors survive — a url() beacon falls back to grey / none', () => {
+    const beacon = 'url(http://127.0.0.1:9/beacon.png)'
+    const s = decodeSnapshot(sprintBlob(1, { mb: [['An', beacon, '', '']] }))!
+    expect(s.members[0].color).toBe('#8e8e93')
+    expect(decodeSnapshot(sprintBlob(1, { mb: [['An', '#C04A1A', '', '']] }))!.members[0].color).toBe('#C04A1A')
+    const c = decodeCollectionSnapshot(collectionBlob({ se: [['S', beacon], ['T', '#34C759']], st: [['X', beacon]] }))!
+    expect(c.sections[0].color).toBeUndefined()
+    expect(c.sections[1].color).toBe('#34C759')
+    expect(c.statuses[0].color).toBe('#8e8e93')
+  })
+})
+
 describe('parseShareHash / buildShareUrl', () => {
   it('extracts version + blob from a #v=2&s=… hash', () => {
     expect(parseShareHash('#v=2&s=ABC123')).toEqual({ version: 2, blob: 'ABC123' })

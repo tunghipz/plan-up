@@ -1,7 +1,7 @@
 {
   "$schema": "gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Main window: core APIs (incl. menu), window drag + theme sync, native folder picker, updater + relaunch. File writes go through the app's own write_backup/prune_backups commands.",
+  "description": "Main window: core APIs (incl. menu), window drag + theme sync, updater + relaunch, open http(s)/mailto links. No dialog or fs permission: the native open/folder panels are opened from Rust (pick_import_file, pick_backup_dir) and file access goes only through the app's own backup commands, bound to the folder picked there.",
   "windows": [
     "main"
   ],
@@ -9,7 +9,6 @@
     "core:default",
     "core:window:allow-start-dragging",
     "core:window:allow-set-theme",
-    "dialog:allow-open",
     "updater:default",
     "process:allow-restart",
     "opener:allow-open-url",

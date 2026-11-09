@@ -1,7 +1,7 @@
 # Desktop native feel (macOS)
 
 **Status:** Implemented
-**Last updated:** 2026-11-09
+**Last updated:** 2026-11-09 (**security**: File ▸ Import… dùng `pick_import_file`, Rust tự mở panel và đọc file). Trước đó: 2026-11-09
 **Code:** `app/src/native-shell.ts` (menu bar, menu chuột phải, chặn context menu WebKit,
 đồng bộ theme cửa sổ), `app/src/App.tsx` (nối lệnh menu vào state), `app/src/index.css`
 (`html.desktop`, `html.native-vibrancy`), `app/src-tauri/` (window-state, vibrancy, ẩn
@@ -58,8 +58,10 @@ qua một ref (`cmdRef`), không đi qua event Rust.
   trong 300ms, nên dù cả hai đường cùng bắn thì cũng chỉ đổi một lần.
 - **File ▸ Import… dùng open panel native**, không dùng `<input type=file>`: action của
   menu tới trang qua IPC, không có user gesture, mà WebKit chỉ mở file chooser trong
-  một gesture. Menu mở panel bằng `dialog.open()` (lọc `.json`) rồi đọc file qua Rust
-  command `read_import_file` (chỉ file thường đuôi `.json`, tối đa 200 MB). Nội dung đi
+  một gesture. Rust command `pick_import_file` tự mở panel (lọc `.json`) **và** đọc đúng
+  file được chọn (chỉ file thường đuôi `.json`, tối đa 200 MB). Trang không bao giờ gửi
+  đường dẫn: bản trước có `read_import_file(path)`, cho phép script trong webview đọc bất kỳ
+  file `.json` nào trên máy (2026-11-09). Nội dung đi
   vào đúng luồng import cũ (`importText` trong `App.tsx`). Nút Import trên toolbar giữ
   nguyên `<input type=file>`.
 - Phím `n` (New Sprint không modifier) giữ nguyên trong JS; menu dùng ⌘N vì key

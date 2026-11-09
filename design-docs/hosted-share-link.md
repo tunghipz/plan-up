@@ -2,7 +2,7 @@
 
 **Status:** Implemented (backend needs a Vercel KV/Upstash store bound to the project;
 without it the API returns 503 and the modal falls back to the in-URL link)
-**Last updated:** 2026-11-09 (**perf**: `main.tsx` dynamic import từng nhánh, người nhận link không tải `App`). Trước đó: 2026-07-15 (**project-scope sprint link** — a sprint's hosted link is now
+**Last updated:** 2026-11-09 (**security**: rate limit theo IP, id 10 ký tự, trần blob 200 000, `no-store`). Trước đó: 2026-11-09 (**perf**: `main.tsx` dynamic import từng nhánh, người nhận link không tải `App`). Trước đó: 2026-07-15 (**project-scope sprint link** — a sprint's hosted link is now
 **one per project**, not one per sprint: it points at whichever sprint was last pushed, so
 switching sprint + Cập nhật keeps the SAME URL and overwrites the live snapshot. See
 "Project-scope sprint link" below. Collections stay per-ref [one link per collection].)
@@ -48,7 +48,8 @@ plan-up-eta.vercel.app/view/q3-launch-a7k2p9
    zero-knowledge, sàn ~53 ký tự — đã loại.) Blob vẫn nén lz-string như hiện tại, nhưng
    coi như **đọc được** (nén ≠ mã hoá). ⚠️ Note cho user khi share dữ liệu nhạy cảm.
 2. **id = `<slug>-<suffix>`.** `slug` = tên plan slugify (bỏ dấu, `[a-z0-9-]`, ≤40 ký tự),
-   `suffix` = 6 ký tự base32 ngẫu nhiên. **Chỉ `suffix` là key thật** tra store; `slug`
+   `suffix` = 10 ký tự ngẫu nhiên (bảng 31 chữ, ~49,5 bit; trước 2026-11-09 là 6 ký tự ~30 bit,
+   đủ ngắn để quét. Link cũ 6 ký tự vẫn mở được vì regex nhận 1–16 ký tự). **Chỉ `suffix` là key thật** tra store; `slug`
    thuần trang trí → **đổi tên plan không làm chết link** (suffix không đổi), gõ sai phần
    slug vẫn mở đúng. Server tách suffix = đoạn sau dấu `-` cuối.
 3. **Store = Vercel KV** (Upstash Redis, free tier) trong cùng project. Data runtime,
@@ -154,7 +155,7 @@ dùng nguyên si). `wt` = hash của writeToken (không lưu token thô). TTL 90
 `POST`/`PUT`.
 
 ### API (Vercel Functions, deployed cùng project)
-- `POST /api/share` — body `{ blob, kind, slug }`. Server: validate size (≤512 KB) → gen
+- `POST /api/share` — body `{ blob, kind, slug }`. Server: validate size (≤200 000 ký tự) → gen
   `suffix` (retry nếu trùng) + `writeToken` → lưu KV + TTL → trả `{ id, url, writeToken }`.
 - `GET /api/share/:id` — trả `{ v, blob, kind, updatedAt }`. **Mở**, không token. 404 nếu
   không có / hết hạn.
@@ -207,7 +208,15 @@ dùng nguyên si). `wt` = hash của writeToken (không lưu token thô). TTL 90
 - **Xoá plan → thu hồi link** → `deleteProject`/`deleteCollection` xoá `shares` row **và**
   gọi `revokeShare` best-effort (network; lỗi thì để TTL dọn) → link công khai không sống
   tiếp sau khi plan đã xoá. (Không có "delete sprint" riêng — sprint chỉ archive.)
-- **Size** → cap 512 KB ở server (KV value có hạn); blob nén nên collection rất lớn mới chạm.
+- **Size** → cap 200 000 ký tự ở server, khớp `MAX_BLOB_LEN` của decoder phía viewer (trước
+  là 512 KB: server cất được thứ không client nào mở nổi, chỉ thêm chỗ cho lạm dụng).
+- **Rate limit theo IP** (2026-11-09) → `POST` 30 lần/giờ, `GET`/`PUT`/`DELETE` trên `:id`
+  120 lần/phút; vượt thì trả `429`. Đếm bằng `INCR` trong cùng Upstash, key
+  `rl:<bucket>:<sha256(ip)[:16]>:<cửa sổ>`. Chỉ số cửa sổ nằm trong key, nên một key mất
+  `EXPIRE` vẫn không khoá ai mãi mãi. IP lấy từ `x-forwarded-for` do edge của Vercel ghi.
+  Modal báo lỗi 429 bằng câu riêng ("tạo/cập nhật link quá nhiều lần").
+- **`Cache-Control: no-store`** trên mọi response của API: snapshot là plan của ai đó, cache
+  trung gian không được giữ.
 - **Lỗi server** → 500 chỉ trả `{ error: 'server' }`; chi tiết (`console.error`) chỉ ở log
   Vercel, **không lộ** ra client vô danh. `fetch` tới Upstash có `AbortSignal.timeout(8s)` để
   function không treo khi store chậm.
@@ -221,8 +230,9 @@ dùng nguyên si). `wt` = hash của writeToken (không lưu token thô). TTL 90
   đè/xoá link). Có chủ đích (restore máy khác vẫn update được) nhưng nghĩa là: **ai có file
   backup = hijack/xoá được mọi link đang sống của mày**. Đừng chia sẻ backup bừa. (Project
   export **không** kèm shares — bản copy không trỏ tới link gốc.)
-- **⚠️ Abuse / rate-limit** → `POST /api/share` không auth, không giới hạn tần suất (tradeoff
-  của "ai cũng tạo được"). Spam có thể phình store/đội phí Upstash. Chưa có trần — xem Future.
+- **Abuse** → `POST /api/share` vẫn không auth (ai cũng tạo được, đó là thiết kế), nhưng đã có
+  trần theo IP và trần kích thước ở trên. Spam từ nhiều IP vẫn làm phình store được; trần
+  toàn cục vẫn để ở Future.
 
 ## Future / open questions
 
@@ -230,6 +240,6 @@ dùng nguyên si). `wt` = hash của writeToken (không lưu token thô). TTL 90
   `#fragment`, link ~53 ký tự. Đã thiết kế nhưng loại vì "không cần giấu".
 - **QR** từ link ngắn (giờ ngắn nên QR gọn) — cân nhắc.
 - **Gia hạn TTL khi có người đọc** — hiện chỉ reset khi ghi; có thể touch TTL trên `GET`.
-- **Rate-limit / abuse ceiling** — `POST` công khai không trần. Cân nhắc: per-IP cap, counter
-  global trong KV, TTL ngắn hơn cho link chưa từng update, hoặc hạ `MAX_BLOB_LEN`.
+- **Abuse ceiling toàn cục** — đã có trần theo IP (2026-11-09). Còn để ngỏ: counter toàn cục
+  trong KV, TTL ngắn hơn cho link chưa từng update.
 - **Cảnh báo token khi export** — 1 dòng note lúc tải backup rằng file chứa write-token.

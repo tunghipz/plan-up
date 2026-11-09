@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createRowStabilizer } from './stable-rows'
 import { createPortal } from 'react-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
@@ -634,22 +635,38 @@ function App() {
   const currentCollection =
     collections?.find((c) => c.id === currentCollectionId) ?? null
 
+  // Structural sharing: unchanged rows keep their object identity across
+  // emissions (and an unchanged result keeps the array), so memoized rows in
+  // List/Board only re-render for the task that actually changed. See
+  // stable-rows.ts.
+  const [taskRows] = useState(() => createRowStabilizer<Task>())
   const tasks = useLiveQuery<Task[]>(
     () =>
       currentSprintId
-        ? db.tasks.where('sprintId').equals(currentSprintId).toArray()
+        ? db.tasks
+            .where('sprintId')
+            .equals(currentSprintId)
+            .toArray()
+            .then((rows) => taskRows.stabilize(rows))
         : Promise.resolve([] as Task[]),
-    [currentSprintId]
+    [currentSprintId, taskRows]
   )
 
   // Items of the current collection — feeds the Export menu's collection
   // "Export as image…" action. See export-png.md / copy-to-telegram.md.
+  // Also THE source for CollectionView and the toolbar's CollectionBarIdentity
+  // (one subscription, not three), structurally shared like `tasks`.
+  const [collectionRows] = useState(() => createRowStabilizer<Task>())
   const collectionItems = useLiveQuery<Task[]>(
     () =>
       currentCollectionId
-        ? db.tasks.where('collectionId').equals(currentCollectionId).toArray()
+        ? db.tasks
+            .where('collectionId')
+            .equals(currentCollectionId)
+            .toArray()
+            .then((rows) => collectionRows.stabilize(rows))
         : Promise.resolve([] as Task[]),
-    [currentCollectionId]
+    [currentCollectionId, collectionRows]
   )
 
   // Members of the current project — used by the search palette to show each
@@ -1669,7 +1686,7 @@ function App() {
           )}
           <div className="flex items-center gap-2.5 text-sm min-w-0">
             {selKind === 'collection' && currentCollection ? (
-              <CollectionBarIdentity collection={currentCollection} />
+              <CollectionBarIdentity collection={currentCollection} items={collectionItems} />
             ) : currentSprint ? (
               // Breadcrumb (project › sprint) — fills the toolbar's left with
               // orientation, not filler (app-shell v4.1). The date range fades in
@@ -1949,6 +1966,7 @@ function App() {
             ) : selKind === 'collection' && currentCollection && currentProjectId ? (
               <CollectionView
                 collectionId={currentCollection.id}
+                items={collectionItems}
                 view={collectionView}
                 onViewInList={() => setCollectionView('list')}
               />

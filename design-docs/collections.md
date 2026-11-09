@@ -1,7 +1,7 @@
 # Collections (task ngoài sprint)
 
 **Status:** Implemented
-**Last updated:** 2026-09-21 (scheduler exemption: `planFor` + cả hai vòng recompute bỏ qua
+**Last updated:** 2026-11-09 (**perf**: item collection đến từ một live query ở App thay vì 3). Trước đó: 2026-09-21 (scheduler exemption: `planFor` + cả hai vòng recompute bỏ qua
 item có `collectionId` — xem "Cách ly khỏi sprint engine")
 **Previously:** 2026-07-15 (collection **Share link** on the top bar next to Export —
 see [share-link-snapshot.md](./share-link-snapshot.md) "Collections (v3)"; the old **Export as
@@ -209,7 +209,10 @@ ngay lần mở app kế tiếp — cột End giữ nguyên, ngày gốc mất l
   > Lưu ý: `reorderCollection` và `reorderStatus` **không được implement** — status reordering bị descope.
 - **`CollectionView.tsx`** — view (`list`/`calendar`) là **controlled prop** do `App.tsx` truyền
   từ top-bar toggle (không còn `tab` state nội bộ, không còn `Segmented` hay sub-header); identity
-  (`CollectionBarIdentity`) + `StatusEditor` được export để top bar render. List render card-per-section **bám sát
+  (`CollectionBarIdentity`) + `StatusEditor` được export để top bar render. Item của collection
+  đến từ **một** live query ở `App.tsx` (`collectionItems`, structural sharing như `tasks`)
+  truyền xuống cả `CollectionView` và `CollectionBarIdentity`. Trước đây có 3 subscription
+  giống hệt nhau. List render card-per-section **bám sát
   list-view của sprint**: cùng layout flex + bộ hằng `COL` (lead grip-gutter · dot · title flex-1 ·
   Start `w-28` · End `w-28` · Status `w-28`), cùng column-header `bg-canvas-sunk/40` + nhãn
   `text-[11px] text-ink-faint`, các row trong `divide-y divide-border`. **Title luôn ở chế độ sửa**

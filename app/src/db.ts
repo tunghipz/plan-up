@@ -758,7 +758,7 @@ export async function moveUnfinishedToNextSprint(
     }
     // Recompute after the bulk move so prereq chains settle in their new
     // home (and assignee off-days reapply).
-    for (const t of toMove) await recomputeDates(t.id)
+    await recomputeDates(toMove.map((t) => t.id))
 
     const movedCount = toMove.filter((t) => !parentIds.has(t.id)).length
     return { movedCount, targetSprintId: target.id }
@@ -786,7 +786,7 @@ export async function setProjectHolidays(
   return db.transaction('rw', db.projects, db.tasks, db.members, async () => {
     await db.projects.update(projectId, { holidays: clean })
     const owned = await db.tasks.where('projectId').equals(projectId).toArray()
-    for (const t of owned) await recomputeDates(t.id)
+    await recomputeDates(owned.map((t) => t.id))
     return clean
   })
 }
@@ -810,7 +810,7 @@ export async function setMemberDaysOff(
   return db.transaction('rw', db.projects, db.members, db.tasks, async () => {
     await db.members.update(memberId, { daysOff: clean })
     const owned = await db.tasks.where('assigneeId').equals(memberId).toArray()
-    for (const t of owned) await recomputeDates(t.id)
+    await recomputeDates(owned.map((t) => t.id))
     return clean
   })
 }
@@ -939,7 +939,7 @@ export async function reassignTasks(
   })
   // Outside the write transaction: recomputeDates opens its own, and the new
   // member's days off can shift every moved task and its dependents.
-  for (const id of moved) await recomputeDates(id)
+  await recomputeDates(moved)
   return moved.length
 }
 
@@ -1061,7 +1061,7 @@ export async function addTasksToGroup(parentId: string, taskIds: string[]): Prom
   })
   // Outside the write transaction: recomputeDates opens its own. A child's walk
   // also enqueues the dependents of its parent (the group span moved).
-  for (const id of moved) await recomputeDates(id)
+  await recomputeDates(moved)
   return moved
 }
 
@@ -1084,7 +1084,7 @@ export async function deleteTask(taskId: string) {
       touched.push(d.id)
     }
   })
-  for (const id of touched) await recomputeDates(id)
+  await recomputeDates(touched)
 }
 
 /**
@@ -1295,7 +1295,7 @@ export async function deleteMember(memberId: string) {
       })
     }
   })
-  for (const id of affected) await recomputeDates(id)
+  await recomputeDates(affected)
 }
 
 // ---- People (cross-project identity) — design-docs/home-dashboard.md ----

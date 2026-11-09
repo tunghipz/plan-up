@@ -1,7 +1,7 @@
 # List view
 
 **Status:** Implemented
-**Last updated:** 2026-11-09 (**chip member gọn**: dải chip của All xuống dòng dưới `Group by`,
+**Last updated:** 2026-11-09 (**perf**: `TaskRow` memo thật sự bỏ qua row không đổi: structural sharing + prop dẫn xuất từng row, xem *Hiệu năng*). Trước đó: 2026-11-09 (**chip member gọn**: dải chip của All xuống dòng dưới `Group by`,
 chip chỉ còn avatar · tên · done/total + chấm báo, phần còn lại trong thẻ rê chuột — xem *Chip
 member gọn*; trước đó cùng ngày: toggle `By member · All` **rời top bar** xuống hàng **`Group by`**
 đầu List — xem *Chỗ đặt toggle*;
@@ -263,6 +263,22 @@ Each group wraps its rows in `overflow-x-auto` with a `min-w` floor (**member 82
 `overflow-x-auto` / `min-w-[820px]` so it aligns. On narrow screens the table scrolls instead
 of crushing the Task column. *(Caveat: the pinned header doesn't track a card's independent
 horizontal scroll on very narrow viewports — see v4 note.)*
+
+## Hiệu năng: một lần sửa chỉ render lại row đổi (2026-11-09)
+
+`TaskRow` là `memo`. Trước đây mọi lần ghi task đều làm cả List render lại: Dexie trả object
+mới cho mọi row, còn `planById`/`tasksById` là Map mới, nên phép so sánh của memo luôn sai
+(N=900: 106–124 ms mỗi lần sửa, long task 85 ms). Nay:
+
+- **Structural sharing** (`app/src/stable-rows.ts`): live query `tasks` của App giữ nguyên object
+  cũ cho row không đổi, và giữ nguyên cả mảng khi không có gì đổi.
+- `TaskRows` tính sẵn giá trị **cho từng row** rồi truyền xuống: `plan` (so 4 field),
+  `blocked` (từ `computeBlockedIds`, một pass), `prereqLabel` (chuỗi). Không truyền Map nữa.
+- `PrereqInput` đọc task mới nhất của sprint qua `TaskLookupContext` (một ref ổn định) **lúc
+  commit**, nên row không render lại vẫn resolve đúng số vừa thêm.
+
+Đo: sửa title chỉ render lại 1 row (trước: cả 300). N=900: còn khoảng 66–85 ms, chủ yếu là
+chi phí của live query và tầng SprintView.
 
 ## Rules & edge cases
 - Changing a `COL` width means re-checking the `min-w` floors (must stay ≥ summed content).

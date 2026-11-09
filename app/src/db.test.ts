@@ -12,6 +12,7 @@ import {
   wouldCreateCycle,
   findCyclePath,
   isTaskBlocked,
+  computeBlockedIds,
   computeStartEnd,
   computeWorkingPlan,
   recomputeDates,
@@ -308,6 +309,29 @@ describe('task dependencies', () => {
     const byId = new Map([[a.id, a], [b.id, b]])
     expect(isTaskBlocked(a, byId)).toBe(false)
   })
+
+  it('computeBlockedIds matches isTaskBlocked for every task (groups, missing prereqs, done)', () => {
+    const tasks: Task[] = [
+      mkTask('a', ['b']), // b todo → blocked
+      mkTask('b', [], 'todo'),
+      mkTask('c', ['d']), // d done → free
+      mkTask('d', [], 'done'),
+      mkTask('e', ['ghost']), // missing prereq → free
+      mkTask('f', ['b'], 'done'), // done → never blocked
+      mkTask('g'), // group head, stored status ignored
+      { ...mkTask('g1', [], 'done'), parentId: 'g' },
+      { ...mkTask('g2', [], 'todo'), parentId: 'g' },
+      mkTask('h', ['g']), // group not fully done → blocked
+      mkTask('k'), // group head with stored todo…
+      { ...mkTask('k1', [], 'done'), parentId: 'k' }, // …but every child done
+      mkTask('m', ['k']), // → free
+      mkTask('n', ['d', 'b']), // one prereq open → blocked
+    ]
+    const byId = new Map(tasks.map((t) => [t.id, t]))
+    const expected = tasks.filter((t) => isTaskBlocked(t, byId)).map((t) => t.id).sort()
+    expect([...computeBlockedIds(byId)].sort()).toEqual(expected)
+    expect(expected).toEqual(['a', 'h', 'n'])
+  })
 })
 
 describe('date computation', () => {
@@ -524,6 +548,62 @@ describe('date computation', () => {
     expect(healed).toBe(1)
     expect((await db.tasks.get('a'))?.dueDate).toBe('2026-06-08')
     // Idempotent: a second pass changes nothing.
+    expect(await recomputeAllDates()).toBe(0)
+  })
+
+  // Chains + a group, all stored dates stale (null). Shared by the two
+  // batch-path tests below, which must land exactly where the per-task
+  // computeStartEnd (fresh cache per task) would.
+  const seedChains = async () => {
+    await db.members.add({
+      id: 'm', projectId: P, name: 'T', color: '#000',
+      daysOff: [{ date: '2026-06-03' }],
+    })
+    const base = {
+      projectId: P, sprintId: 's', status: 'todo' as const, priority: 'normal' as const,
+      createdAt: 0, title: 't', assigneeId: 'm',
+    }
+    await db.tasks.bulkAdd([
+      { ...base, id: 'a', sequence: 1, startDate: '2026-06-01', dueDate: null, estimate: 1, dependsOn: [] },
+      { ...base, id: 'b', sequence: 2, startDate: null, dueDate: null, estimate: 2, dependsOn: ['a'] },
+      { ...base, id: 'c', sequence: 3, startDate: null, dueDate: null, estimate: 1, dependsOn: ['b'] },
+      { ...base, id: 'x', sequence: 4, startDate: '2026-06-01', dueDate: null, estimate: 3, dependsOn: [] },
+      // y depends on the GROUP g, whose span comes from its children g1/g2.
+      { ...base, id: 'g', sequence: 5, startDate: null, dueDate: null, estimate: null, dependsOn: [] },
+      { ...base, id: 'g1', sequence: 6, startDate: null, dueDate: null, estimate: 1, dependsOn: ['x'], parentId: 'g' },
+      { ...base, id: 'g2', sequence: 7, startDate: '2026-06-01', dueDate: null, estimate: 1, dependsOn: [], parentId: 'g' },
+      { ...base, id: 'y', sequence: 8, startDate: null, dueDate: null, estimate: 1, dependsOn: ['g'] },
+    ])
+  }
+  const expectedDates = async () => {
+    const all = await db.tasks.toArray()
+    const byId = new Map(all.map((t) => [t.id, t]))
+    const memberById = new Map((await db.members.toArray()).map((m) => [m.id, m]))
+    return Object.fromEntries(all.map((t) => [t.id, computeStartEnd(t, byId, memberById)]))
+  }
+  const storedDates = async () =>
+    Object.fromEntries(
+      (await db.tasks.toArray()).map((t) => [t.id, { startDate: t.startDate, dueDate: t.dueDate }])
+    )
+
+  it('recomputeDates with several seeds walks every seed’s dependents (incl. via a group)', async () => {
+    await seedChains()
+    await recomputeDates(['a', 'x'])
+    const stored = await storedDates()
+    const expected = await expectedDates()
+    for (const id of ['a', 'b', 'c', 'x', 'g1', 'y']) {
+      expect(stored[id], id).toEqual(expected[id])
+      expect(stored[id].dueDate, id).not.toBeNull()
+    }
+    // y waits on the group, so it starts after g1 (which waits on x).
+    expect(stored.y.startDate! > stored.g1.dueDate!).toBe(true)
+  })
+
+  it('recomputeAllDates (shared cache) stores what per-task computeStartEnd computes', async () => {
+    await seedChains()
+    const expected = await expectedDates()
+    await recomputeAllDates()
+    expect(await storedDates()).toEqual(expected)
     expect(await recomputeAllDates()).toBe(0)
   })
 

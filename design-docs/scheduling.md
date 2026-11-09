@@ -1,10 +1,11 @@
 # Auto-scheduling engine
 
 **Status:** Implemented
-**Last updated:** 2026-09-21 (the engine no longer rewrites dates it does not own: a manual
+**Last updated:** 2026-11-09 (**perf**: `computeAllWorkingPlans`/`computeBlockedIds` cho view, `recomputeDates` nhận nhiều seed, `recomputeAllDates` một pass chung cache). Trước đó: 2026-09-21 (the engine no longer rewrites dates it does not own: a manual
 start is never pushed off a weekend, and collection items are exempt entirely)
 **Code:** `app/src/scheduling.ts` (`planFor`, `computeStartEnd`, `computeWorkingPlan`,
-`computeWorkingTimes`, `recomputeDates`, `recomputeAllDates`, `expandHolidaysNamed`,
+`computeAllWorkingPlans`, `computeBlockedIds`, `computeWorkingTimes`, `recomputeDates`,
+`recomputeAllDates`, `expandHolidaysNamed`,
 `expandHolidays`, `mergeOffPart`, `normalizeHolidays`, `projectHolidayMap`, `addDays`)
 
 ## Purpose
@@ -81,10 +82,19 @@ Shared helpers, so the same rule can't be re-written three ways:
 - `computeStartEnd(task, …)` — `{ startDate, dueDate }`.
 - `computeWorkingPlan(task, …)` — adds `startTime`/`endTime` (e.g. `08:00`, `17:00`,
   `12:00`, `13:00`) from one pass so date & time never drift. **Views render from this.**
+- `computeAllWorkingPlans(tasks, …)` — `computeWorkingPlan` cho cả một view trong **một pass**,
+  dùng chung memo cache + children map. List, Board và Timeline đều gọi hàm này một lần mỗi khi
+  data đổi; gọi `computeWorkingPlan` cho từng row là O(N²) vì mỗi lần dựng lại cả chuỗi prereq/group.
+- `computeBlockedIds(byId)` — `isTaskBlocked` cho mọi task một lượt, O(N + cạnh).
 - `computeWorkingTimes(…)` — just the times.
-- `recomputeDates(taskId)` — recompute this task and BFS-walk forward through dependents;
+- `recomputeDates(taskId | taskIds)` — recompute this task and BFS-walk forward through dependents;
   idempotent (stops when nothing changes). Runs after edits to effort/start/assignee/deps.
-- `recomputeAllDates()` — recompute & persist every task; heals drift; run on app load.
+  Thao tác hàng loạt (assign selection, lưu days off / holidays, đổi group) truyền **mọi seed
+  trong một lần gọi**: đọc bảng một lần thay vì một lần mỗi seed. Dependents tra bằng map
+  `dependentsOf` dựng một lần, không quét cả bảng ở mỗi bước walk.
+- `recomputeAllDates()` — recompute & persist every task; heals drift; run on app load. Một pass
+  dùng chung cache (như `computeAllWorkingPlans`): bản cũ tạo cache mới cho từng task nên O(N²)
+  trên **toàn DB** (3000 task: 119 ms → 8 ms).
 - Every public entry takes an optional trailing `holidays?: ProjectHolidayMap`; called
   without it they schedule exactly as they did before holidays existed.
 

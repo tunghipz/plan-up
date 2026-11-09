@@ -1,7 +1,7 @@
 # Dependencies (prerequisites)
 
 **Status:** Implemented
-**Last updated:** 2026-11-09 (List chế độ **All**: lane là cả sprint nên prereq khác người cũng
+**Last updated:** 2026-11-09 (**perf**: List tính `blocked` một pass bằng `computeBlockedIds`; `PrereqInput` đọc task mới nhất lúc commit). Trước đó: 2026-11-09 (List chế độ **All**: lane là cả sprint nên prereq khác người cũng
 kéo dependent; **sort theo Assignee** chỉ kéo trong cùng một người — see *Dependents stick to
 their prerequisite*)
 **Previously:** 2026-09-21 (a dependent now renders **directly under its prerequisite in
@@ -130,6 +130,9 @@ chain them, remove the back-edge first (here: clear 6's dependency on 7).
   deps-changed-without-log window.
 - `isTaskBlocked(task, tasksById)` — `true` if not done AND any prereq isn't done. A prereq
   that is a **parent** is "done" only when all its children are done. Done tasks never report blocked.
+  List dùng `computeBlockedIds(tasksById)`: cùng luật, tính cho cả sprint trong một pass.
+- `PrereqInput` resolve số và dựng cycle path từ task **mới nhất** của sprint, đọc qua
+  `TaskLookupContext` lúc commit (row là memo, nên prop có thể đã cũ).
 - `PrereqInput` parses input via `parsePrereqSeqs` (list + ranges), resolves sequence→ID
   **within the same sprint only** (sequences are per-sprint; cross-sprint deps survive but
   can't be typed by number), then diffs the requested set against what `setDependencies`

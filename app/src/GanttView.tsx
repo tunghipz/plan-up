@@ -8,6 +8,7 @@ import { createPortal } from 'react-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
   db,
+  computeAllWorkingPlans,
   computeWorkingPlan,
   compareMembersByOrder,
   expandHolidaysNamed,
@@ -199,11 +200,11 @@ export function GanttView({
     return seen
   }, [holidayByDate])
 
-  const planById = useMemo(() => {
-    const m = new Map<string, ReturnType<typeof computeWorkingPlan>>()
-    for (const t of tasksById.values()) m.set(t.id, computeWorkingPlan(t, tasksById, memberById, holidays))
-    return m
-  }, [tasksById, memberById, holidays])
+  // One shared-cache pass, not computeWorkingPlan per bar (quadratic).
+  const planById = useMemo(
+    () => computeAllWorkingPlans([...tasksById.values()], tasksById, memberById, holidays),
+    [tasksById, memberById, holidays]
+  )
 
   const N = workdays.length
   const firstDay = workdays[0]

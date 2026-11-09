@@ -600,10 +600,18 @@ export function computeStartEnd(
 }
 
 /**
- * Recompute dates for `taskId` and walk forward to any tasks that depend on
- * it. Idempotent — stops when a task's computed dates equal current ones.
+ * Recompute dates for `taskId` (or several seeds at once) and walk forward to
+ * any tasks that depend on them. Idempotent — stops when a task's computed
+ * dates equal current ones.
+ *
+ * Batch callers (assign a selection, save a member's days off, move a group)
+ * pass every seed in ONE call: the walk reads the tables once instead of once
+ * per seed. Correct because planFor derives every computed task from scratch
+ * off the current inputs, so a task reached from two seeds only needs one visit.
  */
-export async function recomputeDates(taskId: string): Promise<void> {
+export async function recomputeDates(taskIds: string | Iterable<string>): Promise<void> {
+  const seeds = typeof taskIds === 'string' ? [taskIds] : [...taskIds]
+  if (!seeds.length) return
   await db.transaction('rw', db.tasks, db.members, db.projects, async () => {
     const members = await db.members.toArray()
     const memberById = new Map(members.map((m) => [m.id, m]))
@@ -616,10 +624,22 @@ export async function recomputeDates(taskId: string): Promise<void> {
     // step (which was O(chain × N) full-table reads inside one transaction).
     const all = await db.tasks.toArray()
     const byId = new Map(all.map((t) => [t.id, t]))
+    // prereq id → ids of the tasks that list it in `dependsOn`. Built once, so
+    // each queue step looks up its dependents instead of scanning every task in
+    // the DB (which made the walk O(visited × N)).
+    const dependentsOf = new Map<string, string[]>()
+    for (const t of all) {
+      for (const dep of t.dependsOn ?? []) {
+        const arr = dependentsOf.get(dep)
+        if (arr) arr.push(t.id)
+        else dependentsOf.set(dep, [t.id])
+      }
+    }
     const visited = new Set<string>()
-    const queue: string[] = [taskId]
-    while (queue.length) {
-      const id = queue.shift()!
+    const queue: string[] = [...seeds]
+    let head = 0
+    while (head < queue.length) {
+      const id = queue[head++]
       if (visited.has(id)) continue
       visited.add(id)
       const task = byId.get(id)
@@ -641,14 +661,9 @@ export async function recomputeDates(taskId: string): Promise<void> {
       // Re-flow dependents of this task — and, if it's a group child, dependents
       // of its PARENT too (the group's rolled-up end shifts when a child does, so
       // anything depending on the group must recompute). See task-groups.md.
-      const parentId = task.parentId
-      for (const t of all) {
-        if (visited.has(t.id)) continue
-        if (
-          t.dependsOn?.includes(id) ||
-          (parentId && t.dependsOn?.includes(parentId))
-        ) {
-          queue.push(t.id)
+      for (const src of task.parentId ? [id, task.parentId] : [id]) {
+        for (const depId of dependentsOf.get(src) ?? []) {
+          if (!visited.has(depId)) queue.push(depId)
         }
       }
     }
@@ -671,10 +686,23 @@ export async function recomputeAllDates(): Promise<number> {
     const holidays = projectHolidayMap(await db.projects.toArray())
     const all = await db.tasks.toArray()
     const byId = new Map(all.map((t) => [t.id, t]))
+    // ONE memo cache + children map for the whole pass (as in
+    // computeAllWorkingPlans). Per-task `computeStartEnd` re-walked every
+    // prereq/group chain with a fresh cache and rebuilt the children map per
+    // task — O(N²) over the WHOLE DB (every project, every old sprint), on every
+    // app load. Safe to share: inputs don't change during the pass (writes go to
+    // the DB, not to `byId`), and planFor is a pure function of them.
+    const cache = new Map<string, TaskPlan>()
+    const ctx: PlanCtx = {
+      children: childrenByParent(byId),
+      inProgress: new Set<string>(),
+      holidays,
+      holidayDays: new Map<string, DayOff[]>(),
+    }
     let changed = 0
     for (const task of all) {
       if (task.collectionId) continue // outside the engine — see planFor
-      const next = computeStartEnd(task, byId, memberById, holidays)
+      const next = planFor(task, byId, memberById, cache, ctx)
       if (next.startDate !== task.startDate || next.dueDate !== task.dueDate) {
         await db.tasks.update(task.id, {
           startDate: next.startDate,
@@ -762,6 +790,32 @@ export function findCyclePath(
  * A task is "blocked" if any of its prerequisites is not yet `done`.
  * Done tasks themselves are never blocked (visual nicety).
  */
+/**
+ * `isTaskBlocked` for every task in `byId` at once: the ids of the blocked ones.
+ * One O(N + edges) pass — `isTaskBlocked` scans the whole map per prereq to find
+ * a group's children, which is O(N) per row when a view asks for every row.
+ */
+export function computeBlockedIds(byId: Map<string, Task>): Set<string> {
+  // parentId → are ALL its children done? (only parents that have children)
+  const kidsAllDone = new Map<string, boolean>()
+  for (const t of byId.values()) {
+    if (!t.parentId) continue
+    kidsAllDone.set(t.parentId, (kidsAllDone.get(t.parentId) ?? true) && t.status === 'done')
+  }
+  const out = new Set<string>()
+  for (const task of byId.values()) {
+    if (task.status === 'done' || !task.dependsOn?.length) continue
+    const blocked = task.dependsOn.some((id) => {
+      const dep = byId.get(id)
+      if (!dep) return false
+      const allDone = kidsAllDone.get(id)
+      return allDone !== undefined ? !allDone : dep.status !== 'done'
+    })
+    if (blocked) out.add(task.id)
+  }
+  return out
+}
+
 export function isTaskBlocked(task: Task, byId: Map<string, Task>): boolean {
   if (task.status === 'done') return false
   if (!task.dependsOn || task.dependsOn.length === 0) return false

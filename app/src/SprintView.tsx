@@ -1,4 +1,5 @@
 import {
+  createContext,
   Fragment,
   memo,
   useCallback,
@@ -50,7 +51,7 @@ import {
   updateTask,
   computeWorkingPlan,
   computeAllWorkingPlans,
-  isTaskBlocked,
+  computeBlockedIds,
   addSprintTask,
   type Member,
   type Task,
@@ -250,6 +251,12 @@ export function SprintView({
     () => computeAllWorkingPlans(tasks, tasksById, memberById, holidays),
     [tasks, tasksById, memberById, holidays]
   )
+  // Latest sprint tasks for PrereqInput's commit — a stable ref, see
+  // TaskLookupContext. Updated after each commit, read only from event handlers.
+  const taskLookup = useRef<TaskLookup>({ allTasks: tasks, tasksById })
+  useLayoutEffect(() => {
+    taskLookup.current = { allTasks: tasks, tasksById }
+  }, [tasks, tasksById])
 
   // ── Member-lane drag-to-reorder (per project) ───────────────────────────
   // Mirrors the row drag in TaskRows: state lives here, scoped to this view.
@@ -409,6 +416,7 @@ export function SprintView({
 
   return (
     <SprintRangeContext.Provider value={{ start: sprintStartDate, end: sprintEndDate }}>
+    <TaskLookupContext.Provider value={taskLookup}>
     <div className="space-y-4">
       {isEmpty && <EmptyState onAddMember={() => setShowAddMember(true)} />}
 
@@ -564,6 +572,7 @@ export function SprintView({
         onClear={clearSelection}
       />
     </div>
+    </TaskLookupContext.Provider>
     </SprintRangeContext.Provider>
   )
 }
@@ -2780,6 +2789,9 @@ function TaskRows({
     }
     return m
   }, [allTasks])
+  // Every row's `blocked` flag in one pass per data change (not isTaskBlocked
+  // per row, which scans the whole sprint per prereq).
+  const blockedIds = useMemo(() => computeBlockedIds(tasksById), [tasksById])
   const sprintRange = useContext(SprintRangeContext)
 
   // Collapse state per parent: localStorage is the source of truth, in-session
@@ -2941,9 +2953,9 @@ function TaskRows({
                     key={c.id}
                     task={c}
                     members={members}
-                    allTasks={allTasks}
-                    tasksById={tasksById}
-                    planById={planById}
+                    plan={planById.get(c.id) ?? NULL_WORKING_PLAN}
+                    blocked={blockedIds.has(c.id)}
+                    prereqLabel={prereqLabelOf(c, tasksById)}
                     showAssignee={showAssignee}
                     assigneeWide={assigneeWide}
                     isChild
@@ -2975,9 +2987,9 @@ function TaskRows({
             key={t.id}
             task={t}
             members={members}
-            allTasks={allTasks}
-            tasksById={tasksById}
-            planById={planById}
+            plan={planById.get(t.id) ?? NULL_WORKING_PLAN}
+            blocked={blockedIds.has(t.id)}
+            prereqLabel={prereqLabelOf(t, tasksById)}
             showAssignee={showAssignee}
             assigneeWide={assigneeWide}
             groupRef={t.parentId ? tasksById.get(t.parentId) : undefined}
@@ -2997,9 +3009,16 @@ function TaskRows({
 type TaskRowProps = {
   task: Task
   members: Member[]
-  allTasks: Task[]
-  tasksById: Map<string, Task>
-  planById: Map<string, WorkingPlan>
+  /**
+   * Values DERIVED per row by TaskRows, not the view-wide Maps they come from:
+   * the Maps are rebuilt on every task write, so passing them made every row
+   * unequal and re-rendered the whole List per edit. `plan` compares by its
+   * four fields, `blocked`/`prereqLabel` are primitives.
+   */
+  plan: WorkingPlan
+  blocked: boolean
+  /** Prereqs as a compact `2-5, 8` sequence label ('' = none). */
+  prereqLabel: string
   showAssignee?: boolean
   /** All table: wide Assignee column (avatar + name); implies showAssignee. */
   assigneeWide?: boolean
@@ -3018,9 +3037,11 @@ type TaskRowProps = {
 }
 
 /**
- * Row equality for React.memo. Data props compare by identity (they're
- * memoized upstream and only change when data changes). The two per-render
- * closures are compared by VALUE instead:
+ * Row equality for React.memo. Data props compare by identity: `task` and
+ * `groupRef` keep their object across live-query emissions unless that row
+ * changed (structural sharing, see stable-rows.ts), `members` only changes on a
+ * member write. `plan` is a fresh object per plan pass, so it compares by
+ * value. The two per-render closures are compared by VALUE too:
  * - `drag`: a fresh object every render — compare enabled/dragging/over (what
  *   the row displays). Its callbacks only ever fire from the row whose grip
  *   holds the pointer capture, and that row re-renders (dragging flips) and
@@ -3032,9 +3053,12 @@ function taskRowPropsEqual(prev: TaskRowProps, next: TaskRowProps): boolean {
   return (
     prev.task === next.task &&
     prev.members === next.members &&
-    prev.allTasks === next.allTasks &&
-    prev.tasksById === next.tasksById &&
-    prev.planById === next.planById &&
+    prev.plan.startDate === next.plan.startDate &&
+    prev.plan.dueDate === next.plan.dueDate &&
+    prev.plan.startTime === next.plan.startTime &&
+    prev.plan.endTime === next.plan.endTime &&
+    prev.blocked === next.blocked &&
+    prev.prereqLabel === next.prereqLabel &&
     prev.showAssignee === next.showAssignee &&
     prev.assigneeWide === next.assigneeWide &&
     prev.groupRef === next.groupRef &&
@@ -3051,9 +3075,9 @@ function taskRowPropsEqual(prev: TaskRowProps, next: TaskRowProps): boolean {
 const TaskRow = memo(function TaskRow({
   task,
   members,
-  allTasks,
-  tasksById,
-  planById,
+  plan,
+  blocked,
+  prereqLabel,
   showAssignee = true,
   assigneeWide = false,
   groupRef,
@@ -3068,18 +3092,12 @@ const TaskRow = memo(function TaskRow({
   // (design-docs/task-change-log.md). Covers title/status/assignee/effort/dates.
   const update = (patch: Partial<Task>) => updateTask(task.id, patch)
   const assignee = members.find((m) => m.id === task.assigneeId) ?? null
-  const blocked = isTaskBlocked(task, tasksById)
   const isWelcome = task.title.startsWith(WELCOME_PREFIX)
   // Date + time from one live plan so they always agree and reflect current
   // data — never a stale stored dueDate paired with a freshly-computed time.
   // The plan comes from the view-wide planById pass (one compute per data
   // change), not a per-row computeWorkingPlan (one per render).
-  const {
-    startDate: liveStart,
-    dueDate: liveDue,
-    startTime,
-    endTime,
-  } = planById.get(task.id) ?? NULL_WORKING_PLAN
+  const { startDate: liveStart, dueDate: liveDue, startTime, endTime } = plan
   // Effort 0 = milestone (a checkpoint, not a span). Distinct from estimate null
   // (= not estimated). See design-docs/milestones.md.
   const isMilestone = task.estimate === 0
@@ -3268,7 +3286,7 @@ const TaskRow = memo(function TaskRow({
       </div>
 
       <div className={COL.prereq}>
-        <PrereqInput task={task} allTasks={allTasks} tasksById={tasksById} />
+        <PrereqInput task={task} currentLabel={prereqLabel} />
       </div>
     </div>
   )
@@ -3702,22 +3720,36 @@ export function EffortCell({
  * task IDs and call setDependencies(). Invalid numbers / self-link / cycles
  * are dropped silently — the input snaps back to the saved state.
  */
-function PrereqInput({
-  task,
-  allTasks,
-  tasksById,
-}: {
-  task: Task
-  allTasks: Task[]
-  tasksById: Map<string, Task>
-}) {
-  const seqOf = (id: string): number | undefined => tasksById.get(id)?.sequence
-  // Display dependsOn as a compact range label (e.g. "2-5, 8").
-  const currentLabel = formatSeqRanges(
+type TaskLookup = { allTasks: Task[]; tasksById: Map<string, Task> }
+
+/**
+ * The sprint's CURRENT tasks, for PrereqInput's commit (resolve typed numbers,
+ * build the cycle path). A stable ref rather than a value: rows are memoized and
+ * don't re-render when OTHER tasks change, so a prop would go stale (a task
+ * added after the row last rendered would read "not in this sprint"). Reading
+ * the ref at commit time always sees the latest. Provided by SprintView.
+ */
+const TaskLookupContext = createContext<{ readonly current: TaskLookup } | null>(null)
+
+/** A task's prereqs as a compact sequence label (`2-5, 8`); '' when none. */
+function prereqLabelOf(task: Task, tasksById: Map<string, Task>): string {
+  if (!task.dependsOn.length) return ''
+  return formatSeqRanges(
     task.dependsOn
-      .map(seqOf)
+      .map((id) => tasksById.get(id)?.sequence)
       .filter((n): n is number => typeof n === 'number')
   )
+}
+
+function PrereqInput({
+  task,
+  currentLabel,
+}: {
+  task: Task
+  /** dependsOn as a compact range label (e.g. "2-5, 8"), from prereqLabelOf. */
+  currentLabel: string
+}) {
+  const lookup = useContext(TaskLookupContext)
 
   const [draft, setDraft] = useState(currentLabel)
   const [focused, setFocused] = useState(false)
@@ -3760,18 +3792,17 @@ function PrereqInput({
     }
   }, [notice])
 
-  // Sequence numbers are per-sprint now, so resolve only within the same
-  // sprint as this task. Cross-sprint dependencies (rare) can't be set by
-  // number — would need a different UX if we ever need them.
-  const seqToId = useMemo(() => {
-    const m = new Map<number, string>()
-    for (const t of allTasks) {
-      if (t.sprintId === task.sprintId) m.set(t.sequence, t.id)
-    }
-    return m
-  }, [allTasks, task.sprintId])
-
   const commit = async () => {
+    const allTasks = lookup?.current.allTasks ?? []
+    const tasksById = lookup?.current.tasksById ?? new Map<string, Task>()
+    const seqOf = (id: string): number | undefined => tasksById.get(id)?.sequence
+    // Sequence numbers are per-sprint now, so resolve only within the same
+    // sprint as this task. Cross-sprint dependencies (rare) can't be set by
+    // number — would need a different UX if we ever need them.
+    const seqToId = new Map<number, string>()
+    for (const t of allTasks) {
+      if (t.sprintId === task.sprintId) seqToId.set(t.sequence, t.id)
+    }
     const seqs = parsePrereqSeqs(draft)
     const known: { seq: number; id: string }[] = []
     const unknown: number[] = []

@@ -1,7 +1,7 @@
 # Persistence & backup
 
 **Status:** Implemented
-**Last updated:** 2026-07-08
+**Last updated:** 2026-11-09 (**perf**: `recomputeAllDates` một pass chung cache). Trước đó: 2026-07-08
 **Code:** `app/src/io.ts` (`exportAll`, `importAll`, `seedIfEmpty`), `app/src/App.tsx`, `app/vite.config.ts` (`__VERCEL_ENV__`)
 
 ## Purpose
@@ -91,4 +91,5 @@ Preview URLs can't be redirected (they exist on purpose); the banner covers them
 - Import is **replace, never merge** — by design (it's a restore, not a sync).
 - `__resetSeedLockForTests()` exists for the test suite.
 - `recomputeAllDates()` on load heals any stored dates that drifted under older off-day
-  state — it derives from scratch and only writes rows that actually changed.
+  state — it derives from scratch and only writes rows that actually changed. One pass with a
+  shared plan cache, so its cost grows linearly with the whole DB, not quadratically.

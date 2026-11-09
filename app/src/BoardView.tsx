@@ -4,6 +4,7 @@ import { ArrowUpDown, ChevronDown } from 'lucide-react'
 import {
   db,
   addSprintTask,
+  computeAllWorkingPlans,
   computeWorkingPlan,
   recomputeDates,
   updateTask,
@@ -115,11 +116,12 @@ export function BoardView({
   // Drag re-renders the board on every index change; recomputing the scheduler
   // for every card's due chip in that hot path was the source of drag jank.
   const holidays = useProjectHolidays()
-  const planById = useMemo(() => {
-    const m = new Map<string, ReturnType<typeof computeWorkingPlan>>()
-    for (const t of tasks) m.set(t.id, computeWorkingPlan(t, tasksById, membersById, holidays))
-    return m
-  }, [tasks, tasksById, membersById, holidays])
+  // One shared-cache pass (computeAllWorkingPlans), not computeWorkingPlan per
+  // card — that re-walks each card's prereq/group chain from scratch (quadratic).
+  const planById = useMemo(
+    () => computeAllWorkingPlans(tasks, tasksById, membersById, holidays),
+    [tasks, tasksById, membersById, holidays]
+  )
 
   const effectiveStatus = (t: Task): Status => {
     const kids = childrenByParent.get(t.id)

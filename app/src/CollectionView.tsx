@@ -129,10 +129,17 @@ const FLOAT_SHADOW =
 
 export function CollectionView({
   collectionId,
+  items: itemsProp,
   view,
   onViewInList,
 }: {
   collectionId: string
+  /**
+   * The collection's items from App's ONE live query (it also feeds the toolbar
+   * summary and Export) — three identical subscriptions used to deserialize the
+   * same rows three times per write. Undefined while loading.
+   */
+  items: Task[] | undefined
   /** Controlled view — driven by the single adaptive toggle in App's top bar. */
   view: 'list' | 'calendar'
   /** Calendar's "View in list →" callback (App flips the top-bar toggle). */
@@ -142,13 +149,15 @@ export function CollectionView({
     () => db.collections.get(collectionId),
     [collectionId]
   )
-  const itemsRaw = useLiveQuery<Task[]>(
-    () => db.tasks.where('collectionId').equals(collectionId).toArray(),
-    [collectionId]
-  )
   // Stable [] while the query loads — a fresh `?? []` per render would defeat
-  // every downstream useMemo keyed on `items`.
-  const items = itemsRaw ?? EMPTY_TASKS
+  // every downstream useMemo keyed on `items`. During a collection switch App's
+  // query can still hold the previous collection's rows for a beat: drop them.
+  const items = useMemo(() => {
+    if (!itemsProp) return EMPTY_TASKS
+    return itemsProp.every((t) => t.collectionId === collectionId)
+      ? itemsProp
+      : itemsProp.filter((t) => t.collectionId === collectionId)
+  }, [itemsProp, collectionId])
 
   const [addingTable, setAddingTable] = useState(false)
 
@@ -588,14 +597,13 @@ function NameModal({
  */
 export function CollectionBarIdentity({
   collection,
+  items: itemsProp,
 }: {
   collection: Collection
+  /** App's live query of this collection's items (shared with CollectionView). */
+  items: Task[] | undefined
 }) {
-  const items =
-    useLiveQuery<Task[]>(
-      () => db.tasks.where('collectionId').equals(collection.id).toArray(),
-      [collection.id]
-    ) ?? []
+  const items = (itemsProp ?? EMPTY_TASKS).filter((t) => t.collectionId === collection.id)
   return (
     <div className="flex items-center gap-2.5 min-w-0">
       <Layers size={15} className="text-ink-faint shrink-0" aria-hidden />

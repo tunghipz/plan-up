@@ -2,7 +2,7 @@
 
 **Status:** Implemented (backend needs a Vercel KV/Upstash store bound to the project;
 without it the API returns 503 and the modal falls back to the in-URL link)
-**Last updated:** 2026-07-15 (**project-scope sprint link** — a sprint's hosted link is now
+**Last updated:** 2026-11-09 (**perf**: `main.tsx` dynamic import từng nhánh, người nhận link không tải `App`). Trước đó: 2026-07-15 (**project-scope sprint link** — a sprint's hosted link is now
 **one per project**, not one per sprint: it points at whichever sprint was last pushed, so
 switching sprint + Cập nhật keeps the SAME URL and overwrites the live snapshot. See
 "Project-scope sprint link" below. Collections stay per-ref [one link per collection].)
@@ -112,6 +112,10 @@ summary + cảnh báo. Thêm state theo `shares`:
   `SnapshotViewer` (v2 sprint) hoặc `CollectionSnapshotViewer` (v3 collection). **Không
   đổi gì trong 2 viewer** — chúng nhận `SnapshotData` giải mã, không quan tâm blob đến
   từ `#` hay từ fetch.
+- Mỗi nhánh của `main.tsx` (hosted viewer, 2 viewer theo hash, `App`) là một **dynamic
+  import**, chờ xong mới render lần đầu. Người nhận link không tải `App` (~290 kB), app chính
+  không tải viewer. Route viewer sprint: khoảng 400 kB JS (gzip ~128 kB), trước đây 707 kB
+  (gzip 202 kB).
 - Trạng thái: **loading** (đang fetch) · **not-found/expired** (404 → "Link đã thu hồi
   hoặc hết hạn") · **ok** (render board). Không crash.
 - Link fragment cũ (`#v=2…`/`#v=3…`) vẫn chạy song song (boot vẫn đọc hash trước).

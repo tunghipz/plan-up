@@ -1,7 +1,7 @@
 # Board view
 
 **Status:** Implemented
-**Last updated:** 2026-07-02 (boardOrder midpoint collision → whole-column renormalize)
+**Last updated:** 2026-11-09 (**perf**: `planById` dùng `computeAllWorkingPlans` một pass thay vì `computeWorkingPlan` từng card). Trước đó: 2026-07-02 (boardOrder midpoint collision → whole-column renormalize)
 **Code:** `app/src/BoardView.tsx`
 
 ## Purpose
@@ -126,8 +126,9 @@ List), and **task creation** via `db.tasks.add` + `nextSequence` (bottom compose
     - Result: a dragover only re-renders the lightweight `<DropSlot>` placeholder; the dragged
       card re-renders once (its `dragging` flag flips it to `hidden`); **all other cards skip
       rendering entirely**. Measured: 0 card renders across 60 dragovers on a 17-card column.
-    - Each task's `computeWorkingPlan` is still precomputed once into `planById` (useMemo keyed
-      on tasks), so even when a card *does* render its due chip never re-runs the scheduler.
+    - Each task's plan is still precomputed once into `planById` (useMemo keyed on tasks, via
+      `computeAllWorkingPlans`: one shared-cache pass, not `computeWorkingPlan` per card), so
+      even when a card *does* render its due chip never re-runs the scheduler.
     - The board is written to the DB **only on drop** (`dropTo`), never mid-move.
   - **Perf — cross-column drag stays at 60fps (layout/paint, not React).** With cards already
     memo-stable, the residual jank when crossing columns was pure layout/paint cost. Three fixes:

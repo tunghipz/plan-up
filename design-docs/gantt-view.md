@@ -1,7 +1,7 @@
 # Timeline view (calendar swimlanes)
 
 **Status:** Implemented
-**Last updated:** 2026-08-18 (day-off hatch now also covers **project holidays** — the
+**Last updated:** 2026-11-09 (**perf**: `planById` dùng `computeAllWorkingPlans` một pass thay vì `computeWorkingPlan` từng bar). Trước đó: 2026-08-18 (day-off hatch now also covers **project holidays** — the
 timeline was the last surface where a holiday was invisible, so a bar crossing Tết read as
 uninterrupted work)
 
@@ -118,7 +118,7 @@ thing List and Board can't show. Read-only: a pure projection of the auto-schedu
   (measuredWidth − MGUT) / N)`. Few workdays → columns widen to fill; many → falls back to
   `MIN_DAY` and the surface scrolls. Sticky date header (`top`) + sticky member labels
   (`left`). Per member, in a `useMemo` (keyed on `dayW`):
-  - Each task → `computeWorkingPlan`, then classified: **in-window** (start within
+  - Each task → its plan (from `planById`, one `computeAllWorkingPlans` pass per data change), then classified: **in-window** (start within
     `[firstDay,lastDay]`) → an event block; **later** (start after the window, or whole
     span before it) and **no-dates** (no computed start/due) → the count buckets.
   - Block geometry: `left = startIdx·DAY (+½ if PM start)`, `right = endIdx·DAY (+½ if noon

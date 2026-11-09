@@ -78,7 +78,7 @@ Non-obvious behaviors, defaults, persistence keys.
 | [tasks.md](./tasks.md) | Task CRUD, fields, inline editing |
 | [task-change-log.md](./task-change-log.md) | **Removed (2026-06-16)** — per-task 🕒 change-log tooltip, superseded by the sprint activity log |
 | [sprint-activity-log.md](./sprint-activity-log.md) | Sprint-wide activity log — 🕒 toolbar entry opens a right-side drawer (timeline + by-member); append-only `events` store, the app's sole edit-history surface |
-| [task-groups.md](./task-groups.md) | Group tasks under a parent task (nested, roll-up + collapse); **Add to group** from a picker; a group may hold **several people's tasks**; each group renders as an **inset card tinted by its holder's colour**, with its own **Add task** row |
+| [task-groups.md](./task-groups.md) | Group tasks under a parent task (nested, roll-up + collapse); **Add to group** from a picker; a group may hold **several people's tasks**; each group renders as an **inset card tinted by its holder's colour** (no holder → untinted, with the people's avatars stacked on the head), with its own **Add task** row |
 | [task-rich-text.md](./task-rich-text.md) | Inline formatting inside a task title (**bold**, *italic*, ~~strike~~, ==highlight==) via markdown-lite markers + ⌘B/⌘I shortcuts |
 | [scheduling.md](./scheduling.md) | Auto-scheduling engine (effort, prereqs, workdays); the engine only rewrites dates it owns, and never touches collection items |
 | [milestones.md](./milestones.md) | Effort-0 tasks shown as milestones — `◆ Milestone` pill + single collapsed date (List view) |
@@ -86,7 +86,7 @@ Non-obvious behaviors, defaults, persistence keys.
 | [dependencies.md](./dependencies.md) | Prerequisites, cycle prevention, blocked state, dependents rendered under their prereq in every sort |
 | [status-and-priority.md](./status-and-priority.md) | Status circle/pill, priority chip |
 | [date-picker.md](./date-picker.md) | Custom Cupertino calendar picker (sprint-aware, days-off dots + list; **range mode** for collection items) |
-| [list-view.md](./list-view.md) | Grouped cards **or one All table** (`Group by` row at the top of the List with the `By member · All` toggle, member chips filter, Assignee sort), sortable columns, column widths, drag-to-reorder |
+| [list-view.md](./list-view.md) | Grouped cards **or one All table** (`Group by` row at the top of the List with the `By member · All` toggle, compact member chips under it that filter and open a hover card, Assignee sort), sortable columns, column widths, drag-to-reorder |
 | [member-header-summary.md](./member-header-summary.md) | Progress ring, overdue, next deadline, days off |
 | [board-view.md](./board-view.md) | Cupertino kanban |
 | [gantt-view.md](./gantt-view.md) | Timeline — Apple-Calendar swimlanes (one event block per task), per sprint |

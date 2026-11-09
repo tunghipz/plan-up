@@ -74,7 +74,7 @@ export function groupTasksByMember(
   const orderLane = (lane: Task[]): Task[] => {
     // Same ordering the List renders (sort + dependents pulled under their
     // prereqs) so the image matches the screen row for row.
-    const ordered = orderLaneShared(lane, sort, planById)
+    const ordered = orderLaneShared(lane, sort, planById, undefined, tasks)
     return opts.nestChildren ? flattenDisplayOrder([ordered]) : ordered
   }
 

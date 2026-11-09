@@ -94,13 +94,19 @@ function effortLabel(estimate: number | null): string {
   return fmtDays(estimate)
 }
 
-/** Per-member roll-up over LEAF tasks (parents excluded), mirroring MemberCard. */
-function memberStats(tasks: Task[], planById: Map<string, WorkingPlan>, today: string) {
-  const childParentIds = new Set<string>()
-  for (const t of tasks) {
-    if (t.parentId && tasks.some((x) => x.id === t.parentId)) childParentIds.add(t.parentId)
-  }
-  const leaf = tasks.filter((t) => !childParentIds.has(t.id))
+/**
+ * Per-member roll-up over LEAF tasks (parents excluded), mirroring MemberCard.
+ * `headIds` = group heads across the WHOLE export: a group may hold several
+ * people's tasks, so a head whose children all sit in other sections is still
+ * a container, not this member's work. See design-docs/task-groups.md.
+ */
+function memberStats(
+  tasks: Task[],
+  planById: Map<string, WorkingPlan>,
+  today: string,
+  headIds: Set<string>
+) {
+  const leaf = tasks.filter((t) => !headIds.has(t.id))
   const total = leaf.length
   const done = leaf.filter((t) => t.status === 'done').length
   let overdue = 0
@@ -284,6 +290,9 @@ export const PngExportCard = forwardRef<HTMLDivElement, PngExportCardProps>(
     ref
   ) {
     const totalTasks = groups.reduce((n, g) => n + g.tasks.length, 0)
+    // Group heads across the whole export (a group may span people) — see memberStats.
+    const headIds = new Set<string>()
+    for (const g of groups) for (const t of g.tasks) if (t.parentId) headIds.add(t.parentId)
     // Same function AND the same span (the sprint) as the share page and as
     // ProjectHolidays' sprint-scoped badge, so those three agree by construction:
     // one date union, weekends skipped, half-days halved. The member-card chip
@@ -402,7 +411,7 @@ export const PngExportCard = forwardRef<HTMLDivElement, PngExportCardProps>(
               {groups.map((g, gi) => {
                 const name = g.member?.name ?? 'Unassigned'
                 const color = g.member ? g.member.color || colorForName(name) : C.faint
-                const { total, done, overdue } = memberStats(g.tasks, planById, today)
+                const { total, done, overdue } = memberStats(g.tasks, planById, today, headIds)
                 const off = g.member
                   ? effectiveDaysOff(daysOffInRange(g.member.daysOff ?? [], sprintStart, sprintEnd))
                   : 0

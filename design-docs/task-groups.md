@@ -1,8 +1,8 @@
 # Task groups (parent task with nested children)
 
 **Status:** Implemented
-**Last updated:** 2026-11-09 (**Add to group** — tick task lẻ, chọn group trong popover của
-selection bar; ô Assignee từng dòng cũng gỡ task con khỏi group khi đổi người, xem tasks.md)
+**Last updated:** 2026-11-09 (**group được chứa task của nhiều người** — xem *Group nhiều
+người*; trước đó cùng ngày: **Add to group** chọn group trong popover của selection bar)
 **Previously:** 2026-09-11 (bulk Assign obeys the no-cross-member rule; see tasks.md)
 **Code:** `app/src/db.ts` (`Task.parentId`, `createGroupFromSelection`, `addTasksToGroup`,
 `setTaskParent`),
@@ -17,23 +17,56 @@ that doubles as the group title. Gives structure to a long member list without a
 separate epic/tag system. Approach **B** chosen 2026-06-04 (see
 `demo/task-group-options.html`): nested render **plus** parent roll-up + collapse.
 
+## Group nhiều người (2026-11-09)
+
+Trước ngày này một group chỉ chứa task của **một** người (group là danh sách con trong card của
+member đó). Từ khi List có chế độ **All** ([list-view.md](./list-view.md)), nhu cầu gom theo
+**tính năng** (ví dụ "Build 1" gồm việc của phongnd, duyl, minhvq) là hợp lý, nên luật đó bỏ.
+User hỏi *"task của người khác không push vô group được ah"*, rồi chọn hướng đề xuất: *"làm theo
+hướng đó đi"*.
+
+- **Ở All**: group hiện đủ mọi task con, của ai cũng được. Đây là chỗ chính để xem group.
+- **Ở By member**: group head nằm trong card của người giữ group (`assigneeId` của head, hoặc
+  card Unassigned). Task con của **người khác** nằm trong card của chính họ như một dòng lẻ,
+  kèm chip **`↳ #N tên group`** sau title để biết thuộc group nào. Group head vẫn là dòng group
+  (chevron, roll-up) kể cả khi card đó không có task con nào của người giữ group.
+- **Roll-up của group head** (`done/total`, status suy ra, effort cộng, ngày từ sớm nhất tới muộn
+  nhất) tính trên **mọi task con**, kể cả của người khác — giống số Timeline và share link vẫn
+  dùng. Ở By member, dưới head chỉ hiện task con của người đó, nên `0/5` có thể đứng trên 2 dòng.
+- **Đếm của từng member** (header card, chip ở All, PNG, share viewer) vẫn chỉ đếm **leaf** của
+  người đó. Một task là group head khi **bất kỳ** task nào trong sprint trỏ `parentId` vào nó,
+  không chỉ task cùng card — nếu không, head có toàn task con của người khác sẽ bị đếm như việc
+  của người giữ group.
+- **Tạo group** từ task của nhiều người: group head mới **Unassigned**. Cùng một người thì head
+  thuộc người đó, như trước.
+- **Add to group** liệt kê **mọi** group của sprint, mỗi dòng ghi người giữ group.
+- **Đổi người làm** (Assign hàng loạt, ô Assignee từng dòng): task con **ở lại group**. Đổi người
+  cho group head thì **chỉ head** chuyển, task con giữ người của mình. Xem [tasks.md](./tasks.md).
+- **Không đổi**: một cấp; cùng sprint (`setTaskParent`, rollover chuyển cả group); group làm
+  prereq được.
+- **Export**: PNG và Copy to Telegram vẫn chia theo member. Task con của người khác hiện thành
+  dòng lẻ trong phần của người làm nó, nên **không mất, không trùng**. Hạn chế đã biết: ở hai
+  chỗ này dòng group head chỉ gom task con cùng người (roll-up tính trong phần đó); head không có
+  task con nào cùng người thì hiện như một task thường. Share link đóng băng roll-up từ mọi task
+  con nên không bị hạn chế này.
+
 ## User-facing behavior
 - **Create a group (multi-select):** hover a task row → a **checkbox** appears in the
-  left gutter; check several tasks **of the same member**. A **floating action bar**
+  left gutter; check several tasks (any people — see *Group nhiều người*). A **floating action bar**
   slides up at the bottom (English labels): *"N selected · [Ungroup] · [Chain prereqs] ·
   [Clear prereqs] · [Group] · [Delete] · [Cancel]"*.
   - **Group** creates a **new parent task** titled `New group` (rename inline) and
-    nests the selected tasks under it. Enabled only when ≥2 are selected, all share the
-    same assignee, and none is already a group head (one level).
+    nests the selected tasks under it. Enabled when ≥2 **loose** tasks are selected and none
+    is already a group head (one level). The head belongs to the selection's person when they
+    all share one, else it is **Unassigned**.
   - **Add to group** (2026-11-09) đưa task lẻ vào một **group đã có**. Chỉ cần tick task lẻ
     (không cần tick gì trong group, group thu gọn cũng được) rồi bấm **Add to group** trên
     selection bar: một popover (cùng kiểu với Assign: ô tìm, ↑/↓, Enter, Esc) liệt kê các
-    group của sprint mà task được phép vào, mỗi dòng `#N tên group` + người làm + số task con.
+    group của sprint, mỗi dòng `#N tên group` + người giữ group + số task con.
     Chọn một group thì các task lẻ vào **cuối group** (`listOrder` = max của các con + 1, theo
     thứ tự hiển thị), rồi `recomputeDates` để task phụ thuộc vào group dời theo span mới.
-    - Chỉ liệt kê group **cùng người làm và cùng sprint** với task lẻ (group không trải qua
-      nhiều người). Task lẻ thuộc nhiều người khác nhau, hoặc người đó chưa có group nào, thì
-      nút tắt kèm tooltip nói lý do.
+    - Liệt kê **mọi group cùng sprint**, của ai cũng được (từ 2026-11-09, xem *Group nhiều
+      người*; bản đầu chỉ cho group cùng người làm).
     - Task đã nằm trong group khác hoặc group head trong lựa chọn thì bị bỏ qua (chuyển task
       giữa hai group: Ungroup trước).
     - Nút chỉ hiện khi sprint có ít nhất một group và lựa chọn có ít nhất một task lẻ.
@@ -43,7 +76,7 @@ separate epic/tag system. Approach **B** chosen 2026-06-04 (see
       ra tick một task con là thừa. Câu hỏi gốc: *"tao có task này muốn cho vào group đang có thì
       như nào"*. Không dùng kéo thả vì kéo thả chỉ đổi thứ tự trong cùng cấp
       ([list-view.md](./list-view.md)).
-  - **Group** chỉ đếm task lẻ: cần ≥2 task lẻ cùng người. Trước đây lựa chọn lẫn task con vẫn bật
+  - **Group** chỉ đếm task lẻ: cần ≥2 task lẻ. Trước đây lựa chọn lẫn task con vẫn bật
     Group nhưng bấm không làm gì (task con bị loại trong `createGroupFromSelection`).
   - **Ungroup** ungroups any selected children (clears their `parentId`); shown when the
     selection contains ≥1 grouped task.
@@ -170,10 +203,9 @@ child finish), exactly as if it depended on the latest child. Mechanics:
   already have children, and excludes parents from the sibling picker.
 - **Empty group**: a parent whose children are all removed/ungrouped silently reverts
   to a normal leaf task (no special "empty group" state).
-- **Cross-member / cross-sprint**: groups never span members or sprints; moving a task
-  out clears `parentId`, and `setTaskParent` refuses a parent in a different sprint. The
-  SelectionBar's bulk **Assign** obeys the same rule from the other side: a child reassigned
-  on its own is ungrouped, a head takes its children along (see
+- **Cross-sprint**: groups never span sprints; `setTaskParent` refuses a parent in a
+  different sprint. **Cross-member is allowed** since 2026-11-09 (*Group nhiều người*): Assign
+  never ungroups a child and never drags children along with their head (see
   [tasks.md](./tasks.md) "Bulk assign").
 - **Board view**: out of scope this round — `parentId` is ignored in BoardView (tasks
   show flat). Flag if grouping is wanted there later.

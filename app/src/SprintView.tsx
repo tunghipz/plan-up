@@ -264,8 +264,9 @@ export function SprintView({
     // order, same as `seq asc`; Start/End by the DISPLAYED computed/rollup date),
     // then dependents pulled under their prerequisites. `orderLane` owns both
     // halves so the PNG export can reproduce this exactly. See task-sort.ts.
-    for (const [id, arr] of byMember) byMember.set(id, orderLane(arr, sort, planById))
-    const orphanOrdered = orderLane(orphan, sort, planById)
+    for (const [id, arr] of byMember)
+      byMember.set(id, orderLane(arr, sort, planById, undefined, tasks))
+    const orphanOrdered = orderLane(orphan, sort, planById, undefined, tasks)
     const filled = ms.filter((m) => (byMember.get(m.id) ?? []).length > 0)
     const empty = ms.filter((m) => (byMember.get(m.id) ?? []).length === 0)
     return {
@@ -296,7 +297,7 @@ export function SprintView({
             filter === UNASSIGNED_FILTER ? ownerOf(t) === null : ownerOf(t) === filter
           )
     const assigneeRank = new Map(sortedMembers.map((m, i) => [m.id, i]))
-    const rows = orderLane(visible, sort, planById, assigneeRank)
+    const rows = orderLane(visible, sort, planById, assigneeRank, tasks)
     const byMember = new Map<string, Task[]>(sortedMembers.map((m) => [m.id, []]))
     let unassignedCount = 0
     for (const t of tasks) {
@@ -562,40 +563,34 @@ function SelectionBar({
   const [assignOpen, setAssignOpen] = useState(false)
   const assignBtnRef = useRef<HTMLButtonElement>(null)
   const n = selectedIds.size
+  // Group heads of the WHOLE sprint (tasksById), not just the displayed rows: a
+  // head whose children are all filtered out / in another card is still a head.
   const parentIds = useMemo(() => {
     const s = new Set<string>()
-    for (const t of allTasks) if (t.parentId) s.add(t.parentId)
+    for (const t of tasksById.values()) if (t.parentId) s.add(t.parentId)
     return s
-  }, [allTasks])
+  }, [tasksById])
   const selected = [...selectedIds]
     .map((id) => tasksById.get(id))
     .filter((t): t is Task => !!t)
   // Group is valid when ≥2 are selected, all share one assignee, and none is a
   // group head (parents can't be nested — one level).
-  const sameMember =
-    selected.length >= 2 &&
-    selected.every((t) => t.assigneeId === selected[0].assigneeId)
   const noneParent = selected.every((t) => !parentIds.has(t.id))
   // Only LOOSE tasks can form a new group (createGroupFromSelection skips
   // children), so count those — a selection with a child no longer enables a
-  // button that would silently do nothing.
-  const canGroup =
-    sameMember &&
-    noneParent &&
-    selected.filter((t) => !t.parentId).length >= 2
+  // button that would silently do nothing. Any people: a group may span them
+  // (the head is Unassigned when they differ). See task-groups.md.
+  const canGroup = noneParent && selected.filter((t) => !t.parentId).length >= 2
   const anyChild = selected.some((t) => !!t.parentId)
   // Add to an EXISTING group (picked in a popover — the group may be collapsed,
   // so nothing inside it has to be ticked). Only LOOSE tasks move: a child of
-  // another group or a group head is skipped. Offered groups share the loose
-  // tasks' person and sprint — groups never span members.
-  // See design-docs/task-groups.md "Add to group".
+  // another group or a group head is skipped. Every group of the sprint is
+  // offered — groups may span people. See design-docs/task-groups.md.
   const [groupPickOpen, setGroupPickOpen] = useState(false)
   const groupBtnRef = useRef<HTMLButtonElement>(null)
   const loose = selectedInOrderOf(allTasks, selectedIds).filter(
     (t) => !t.parentId && !parentIds.has(t.id)
   )
-  const looseOwners = new Set(loose.map((t) => t.assigneeId ?? null))
-  const looseOwner = looseOwners.size === 1 ? [...looseOwners][0] : undefined
   // Every group head of the sprint — from tasksById (the whole sprint), not the
   // displayed rows, so a group hidden by the All table's member filter still counts.
   const groupHeads = useMemo(() => {
@@ -608,20 +603,7 @@ function SelectionBar({
       .filter((g): g is { head: Task; count: number } => !!g.head && !g.head.parentId)
       .sort((a, b) => a.head.sequence - b.head.sequence)
   }, [tasksById])
-  const eligibleGroups =
-    looseOwner === undefined
-      ? []
-      : groupHeads.filter(
-          (g) =>
-            (g.head.assigneeId ?? null) === looseOwner &&
-            g.head.sprintId === loose[0]?.sprintId
-        )
-  const ownerName =
-    looseOwner === undefined
-      ? ''
-      : looseOwner === null
-        ? 'Unassigned'
-        : (members.find((m) => m.id === looseOwner)?.name ?? 'this person')
+  const eligibleGroups = groupHeads.filter((g) => g.head.sprintId === loose[0]?.sprintId)
   const showAddToGroup = loose.length > 0 && groupHeads.length > 0
   const canAddToGroup = eligibleGroups.length > 0
 
@@ -795,11 +777,7 @@ function SelectionBar({
           title={
             canAddToGroup
               ? 'Put the selected task(s) into an existing group'
-              : looseOwner === undefined
-                ? 'The selected tasks belong to different people — a group holds one person\'s tasks'
-                : looseOwner === null
-                  ? 'No group of unassigned tasks in this sprint'
-                  : `No group of ${ownerName}'s tasks in this sprint`
+              : 'No group in this sprint'
           }
           className={`inline-flex items-center gap-1.5 text-[13px] px-2.5 py-1.5 rounded-[9px] transition disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent ${
             groupPickOpen
@@ -814,7 +792,7 @@ function SelectionBar({
         <GroupPickPopover
           anchorRef={groupBtnRef}
           groups={eligibleGroups}
-          owner={members.find((m) => m.id === looseOwner) ?? null}
+          members={members}
           count={loose.length}
           onPick={doAddToGroup}
           onClose={() => setGroupPickOpen(false)}
@@ -826,7 +804,7 @@ function SelectionBar({
         title={
           canGroup
             ? undefined
-            : 'Select ≥2 tasks with the same assignee (not in a group) to group'
+            : 'Select ≥2 tasks that are not in a group'
         }
         // Button is always-white on the dark floating bar (both themes), so the
         // label stays hardcoded near-black — text-ink would flip to white in dark.
@@ -899,22 +877,22 @@ function useBarPopover(
 }
 
 /**
- * Group picker for the SelectionBar's **Add to group** action. Lists only the
- * groups the selection may join (same person + sprint, filtered by the caller);
+ * Group picker for the SelectionBar's **Add to group** action. Lists the
+ * sprint's groups (filtered by the caller), each with the person holding it;
  * same keyboard model as AssignPopover: type to filter by `#N` or title, ↑/↓,
  * Enter, Esc. See design-docs/task-groups.md "Add to group".
  */
 function GroupPickPopover({
   anchorRef,
   groups,
-  owner,
+  members,
   count,
   onPick,
   onClose,
 }: {
   anchorRef: React.RefObject<HTMLButtonElement | null>
   groups: { head: Task; count: number }[]
-  owner: Member | null
+  members: Member[]
   count: number
   onPick: (groupId: string) => void
   onClose: () => void
@@ -1002,7 +980,8 @@ function GroupPickPopover({
               <span className="flex-1 min-w-0 leading-tight">
                 <span className="block text-[13px] font-medium truncate">{head.title}</span>
                 <span className={`block text-[11.5px] truncate ${isActive ? 'text-white/70' : 'text-ink-faint'}`}>
-                  {owner?.name ?? 'Unassigned'} · {kids} task{kids === 1 ? '' : 's'}
+                  {members.find((m) => m.id === head.assigneeId)?.name ?? 'Unassigned'} · {kids} task
+                  {kids === 1 ? '' : 's'}
                 </span>
               </span>
             </button>
@@ -1329,11 +1308,13 @@ function memberHeaderStats(
   planById: Map<string, WorkingPlan>,
   holidays: ProjectHolidayMap | undefined
 ): MemberHeaderStats {
-  // Leaf-based counting: a parent (a task with children in this list) is a
-  // container, excluded from done/total/overdue so its work isn't double-counted
-  // with its children. See design-docs/task-groups.md.
+  // Leaf-based counting: a group head is a container, excluded from
+  // done/total/overdue so its work isn't double-counted with its children. Heads
+  // are found across the WHOLE sprint (tasksById), not this member's list: a
+  // group may hold other people's tasks, and a head whose children are all
+  // someone else's is still not this member's work. See task-groups.md.
   const parentIds = new Set<string>()
-  for (const t of tasks) if (t.parentId) parentIds.add(t.parentId)
+  for (const t of tasksById.values()) if (t.parentId) parentIds.add(t.parentId)
   const leafTasks = tasks.filter((t) => !parentIds.has(t.id))
   const total = leafTasks.length
   const done = leafTasks.filter((t) => t.status === 'done').length
@@ -1356,11 +1337,12 @@ function memberHeaderStats(
   // Double-booking warnings among this member's leaf tasks (see
   // design-docs/conflict-warning.md). Cheap O(n²) over a member's tasks.
   const conflictTips = computeMemberConflicts(leafTasks, tasksById, memberById, holidays)
-  // Date span this member's tasks actually touch — see `memberTaskSpan`.
+  // Date span this member's tasks actually touch — see `memberTaskSpan`. Leaf
+  // tasks only: a head's roll-up can cover other people's dates.
   const span = memberTaskSpan(
-    tasks,
+    leafTasks,
     new Map(
-      tasks.map((t) => [
+      leafTasks.map((t) => [
         t.id,
         planById.get(t.id) ?? computeWorkingPlan(t, tasksById, memberById, holidays),
       ])
@@ -1969,6 +1951,24 @@ function PriorityChip({ priority }: { priority: string }) {
  * work. Rendered as a soft accent pill (with a ◆ diamond) after the title via
  * TitleTextarea's `trailing` slot. See design-docs/milestones.md.
  */
+/**
+ * `↳ #N title` after a row that belongs to a group shown elsewhere (its head is
+ * in another person's card). Quiet: it's orientation, not a signal.
+ * See design-docs/task-groups.md "Group nhiều người".
+ */
+function GroupRefChip({ group }: { group: Task }) {
+  return (
+    <span
+      className="inline-flex items-center gap-0.5 max-w-[180px] shrink-0 rounded-full bg-fill px-1.5 py-px text-[11px] font-medium text-ink-faint align-middle"
+      title={`In group #${group.sequence} ${group.title}`}
+    >
+      <span aria-hidden>↳</span>
+      <span className="font-mono">#{group.sequence}</span>
+      <span className="truncate">{group.title}</span>
+    </span>
+  )
+}
+
 function MilestoneTag() {
   return (
     <span
@@ -2499,6 +2499,19 @@ function TaskRows({
     const isChild = (t: Task) => !!(t.parentId && idSet.has(t.parentId))
     return { topLevel: tasks.filter((t) => !isChild(t)), childrenByParent }
   }, [tasks])
+  // Children across the WHOLE sprint. A group may hold several people's tasks
+  // (task-groups.md "Group nhiều người"): a head is a group row even when this
+  // card holds none of its children, and its roll-up covers every child.
+  const allChildrenByParent = useMemo(() => {
+    const m = new Map<string, Task[]>()
+    for (const t of allTasks) {
+      if (!t.parentId) continue
+      const arr = m.get(t.parentId)
+      if (arr) arr.push(t)
+      else m.set(t.parentId, [t])
+    }
+    return m
+  }, [allTasks])
 
   // Collapse state per parent: localStorage is the source of truth, in-session
   // toggles overlay it. DERIVED (not seeded once into state) so a sprint
@@ -2625,14 +2638,15 @@ function TaskRows({
   return (
     <>
       {topLevel.map((t) => {
-        const kids = childrenByParent.get(t.id)
-        if (kids && kids.length > 0) {
+        const kids = childrenByParent.get(t.id) ?? []
+        const allKids = allChildrenByParent.get(t.id)
+        if (allKids && allKids.length > 0) {
           const isCollapsed = collapsed.has(t.id)
           return (
             <Fragment key={t.id}>
               <TaskGroupRow
                 task={t}
-                childrenTasks={kids}
+                childrenTasks={allKids}
                 members={members}
                 tasksById={tasksById}
                 planById={planById}
@@ -2675,6 +2689,7 @@ function TaskRows({
             planById={planById}
             showAssignee={showAssignee}
             assigneeWide={assigneeWide}
+            groupRef={t.parentId ? tasksById.get(t.parentId) : undefined}
             warn={conflictTips?.get(t.id)}
             selected={selectedIds?.has(t.id)}
             onToggleSelect={
@@ -2697,6 +2712,12 @@ type TaskRowProps = {
   showAssignee?: boolean
   /** All table: wide Assignee column (avatar + name); implies showAssignee. */
   assigneeWide?: boolean
+  /**
+   * The group this row belongs to when it renders OUTSIDE it — a child shown in
+   * its own person's card while the head sits in someone else's. Renders a
+   * `↳ #N title` chip after the title. See task-groups.md "Group nhiều người".
+   */
+  groupRef?: Task
   isChild?: boolean
   /** Conflict tooltip — renders an amber warning triangle in the lead gutter. */
   warn?: string
@@ -2725,6 +2746,7 @@ function taskRowPropsEqual(prev: TaskRowProps, next: TaskRowProps): boolean {
     prev.planById === next.planById &&
     prev.showAssignee === next.showAssignee &&
     prev.assigneeWide === next.assigneeWide &&
+    prev.groupRef === next.groupRef &&
     prev.isChild === next.isChild &&
     prev.warn === next.warn &&
     prev.selected === next.selected &&
@@ -2743,6 +2765,7 @@ const TaskRow = memo(function TaskRow({
   planById,
   showAssignee = true,
   assigneeWide = false,
+  groupRef,
   isChild = false,
   warn,
   selected = false,
@@ -2848,7 +2871,14 @@ const TaskRow = memo(function TaskRow({
         welcomeHint={isWelcome}
         priority={task.priority}
         indent={isChild}
-        trailing={isMilestone ? <MilestoneTag /> : undefined}
+        trailing={
+          isMilestone || groupRef ? (
+            <>
+              {isMilestone && <MilestoneTag />}
+              {groupRef && <GroupRefChip group={groupRef} />}
+            </>
+          ) : undefined
+        }
       />
 
       {assigneeWide ? (

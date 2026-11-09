@@ -189,3 +189,26 @@ describe('All table — one lane, Assignee sort', () => {
     expect(ids(out)).toEqual(['p14', 'g'])
   })
 })
+
+// A group may hold several people's tasks: in one member's card the head's
+// Start/End roll-up still spans EVERY child (what the group row displays).
+describe('date sort keys roll a group up across cards', () => {
+  const head = mkTask('h', { sequence: 1, assigneeId: 'p' })
+  const mine = mkTask('mine', { sequence: 2, parentId: 'h', assigneeId: 'p' })
+  const theirs = mkTask('theirs', { sequence: 3, parentId: 'h', assigneeId: 'd' })
+  const plans = new Map<string, WorkingPlan>([
+    ['mine', plan('2026-11-10', '2026-11-09')],
+    ['theirs', plan('2026-11-13', '2026-11-12')],
+  ])
+  const card = [head, mine] // phongnd's card: the other child lives in duyl's
+
+  it('uses only the lane children without the sprint', () => {
+    expect(buildDateSortKeys(card, plans).get('h')?.dueDate).toBe('2026-11-10T17:00')
+  })
+
+  it('uses every child when given the whole sprint', () => {
+    const keys = buildDateSortKeys(card, plans, [head, mine, theirs])
+    expect(keys.get('h')?.dueDate).toBe('2026-11-13T17:00')
+    expect(keys.get('h')?.startDate).toBe('2026-11-09T08:00')
+  })
+})

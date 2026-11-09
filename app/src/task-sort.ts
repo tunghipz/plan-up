@@ -36,16 +36,18 @@ const EMPTY_DATE_KEY = '￿' // no date → sorts last ascending (matches the ra
  * *scheduled* plan date, and a group-head row shows a rollup (earliest child start …
  * latest child end) that its own stored `startDate`/`dueDate` never tracks — so sorting
  * by the raw field puts parents out of order (usually last, since a parent's raw dueDate
- * is empty). Computed per lane (the array being sorted) so the rollup considers exactly
- * the children nested under the parent in that card. See design-docs/list-view.md.
+ * is empty). The rollup spans the children in `allTasks` (the whole sprint) when given —
+ * that is what the group row displays, and a group may hold other people's tasks that
+ * live in other cards — else the children in this lane. See design-docs/list-view.md.
  */
 export function buildDateSortKeys(
   lane: Task[],
-  planById: Map<string, WorkingPlan>
+  planById: Map<string, WorkingPlan>,
+  allTasks?: Task[]
 ): DateSortKeys {
   const idSet = new Set(lane.map((t) => t.id))
   const kidsByParent = new Map<string, Task[]>()
-  for (const t of lane) {
+  for (const t of allTasks ?? lane) {
     if (t.parentId && idSet.has(t.parentId)) {
       const arr = kidsByParent.get(t.parentId) ?? []
       arr.push(t)
@@ -284,11 +286,13 @@ export function orderLane(
   lane: Task[],
   sort: Sort,
   planById: Map<string, WorkingPlan>,
-  assigneeRank?: AssigneeRank
+  assigneeRank?: AssigneeRank,
+  /** The whole sprint — group roll-ups for the date sort span every child. */
+  allTasks?: Task[]
 ): Task[] {
   const dateKeys =
     sort.field === 'startDate' || sort.field === 'dueDate'
-      ? buildDateSortKeys(lane, planById)
+      ? buildDateSortKeys(lane, planById, allTasks)
       : undefined
   const sorted = [...lane].sort((a, b) =>
     compareTasks(

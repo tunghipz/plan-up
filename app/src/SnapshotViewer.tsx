@@ -47,12 +47,12 @@ function effortLabel(estimate: number | null): string {
   return fmtDays(estimate)
 }
 
-/** Per-member roll-up over LEAF tasks (parents excluded), mirroring the PNG card. */
-function memberStats(tasks: Task[]): { done: number; total: number } {
-  const parentIds = new Set(
-    tasks.filter((t) => t.parentId && tasks.some((x) => x.id === t.parentId)).map((t) => t.parentId)
-  )
-  const leaf = tasks.filter((t) => !parentIds.has(t.id))
+/**
+ * Per-member roll-up over LEAF tasks (parents excluded), mirroring the PNG card.
+ * `headIds` spans the whole snapshot — a group may hold several people's tasks.
+ */
+function memberStats(tasks: Task[], headIds: Set<string>): { done: number; total: number } {
+  const leaf = tasks.filter((t) => !headIds.has(t.id))
   return { total: leaf.length, done: leaf.filter((t) => t.status === 'done').length }
 }
 
@@ -403,7 +403,7 @@ export function SnapshotViewer({ raw }: { raw: string }) {
                 const name = g.member?.name ?? 'Unassigned'
                 const color = g.member ? g.member.color || colorForName(name) : 'var(--color-ink-faint)'
                 const rows = laneRows(g.tasks)
-                const { done, total } = memberStats(g.tasks)
+                const { done, total } = memberStats(g.tasks, parentIds)
                 const offList = g.member ? offById.get(g.member.id) ?? [] : []
                 const offCount = effectiveDaysOff(offList)
                 const groupTop = gi === 0 ? 'none' : '2px solid var(--color-border-strong)'

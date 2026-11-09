@@ -839,8 +839,7 @@ export async function reassignTasks(
   taskIds: string[],
   assigneeId: string | null,
   /**
-   * Per-row picker: leave `listOrder` alone so the row doesn't jump — except a
-   * child leaving its group, whose order only meant something inside the group.
+   * Per-row picker: leave `listOrder` alone so the row doesn't jump.
    * See design-docs/tasks.md "Per-row Assignee picker".
    */
   opts: { keepOrder?: boolean } = {}
@@ -849,14 +848,14 @@ export async function reassignTasks(
   await db.transaction('rw', db.projects, db.tasks, db.members, db.events, async () => {
     const all = await db.tasks.toArray()
     const byId = new Map(all.map((t) => [t.id, t]))
-    // Expand group heads into head + children, then drop tasks already in the
-    // target lane so a no-op selection writes (and logs) nothing.
+    // Groups may span people (design-docs/task-groups.md "Group nhiều người"), so
+    // a head moves ALONE and a child stays in its group — no expansion, no
+    // ungrouping. Tasks already in the target lane are dropped below so a no-op
+    // selection writes (and logs) nothing.
     const targets = new Map<string, Task>()
     for (const id of taskIds) {
       const t = byId.get(id)
-      if (!t) continue
-      targets.set(t.id, t)
-      for (const c of all) if (c.parentId === t.id) targets.set(c.id, c)
+      if (t) targets.set(t.id, t)
     }
     // Bottom of the target lane, per sprint — computed once, then walked forward
     // so a multi-task move keeps the selection's own top-to-bottom order.
@@ -875,14 +874,12 @@ export async function reassignTasks(
       const key = laneKey(t)
       const next = (laneEnd.get(key) ?? -1) + 1
       laneEnd.set(key, next)
-      // parentId clears for a child that is moving on its own; a child moving
-      // WITH its head keeps the link (the whole group changes lane together).
-      const keepsParent = t.parentId ? targets.has(t.parentId) : false
-      const leavesGroup = !!t.parentId && !keepsParent
+      // A child keeps its listOrder: it stays in its group, where that value is
+      // its position among siblings — not a slot in the new person's lane.
+      const keepOrder = opts.keepOrder || !!t.parentId
       await updateTask(t.id, {
         assigneeId,
-        ...(opts.keepOrder && !leavesGroup ? {} : { listOrder: next }),
-        ...(leavesGroup ? { parentId: null } : {}),
+        ...(keepOrder ? {} : { listOrder: next }),
       })
       moved.push(t.id)
     }
@@ -928,8 +925,8 @@ export async function setTaskParent(
 
 /**
  * Create a new "New group" parent task and nest the given tasks under it. The
- * tasks must all share one member + sprint, and any that are already group heads
- * (have children) are skipped (one level only). Returns the new parent's id, or
+ * tasks must share one sprint (any people — the head is Unassigned when they
+ * differ); children and group heads are skipped (one level only). Returns the new parent's id, or
  * null if nothing eligible. See design-docs/task-groups.md.
  */
 export async function createGroupFromSelection(
@@ -946,12 +943,16 @@ export async function createGroupFromSelection(
       if (kids === 0 && !t.parentId) eligible.push(t)
     }
     if (eligible.length < 2) return null
-    const { assigneeId, sprintId, projectId } = eligible[0]
+    const { sprintId, projectId } = eligible[0]
     // Grouping is a sprint-only operation; collection items (sprintId=null)
     // are never grouped here.
     if (!sprintId) return null
-    if (eligible.some((t) => t.assigneeId !== assigneeId || t.sprintId !== sprintId))
-      return null
+    if (eligible.some((t) => t.sprintId !== sprintId)) return null
+    // A group may hold several people's tasks (task-groups.md "Group nhiều
+    // người"). The head belongs to the selection's person when they all share
+    // one; a mixed selection gets an Unassigned head.
+    const owner = eligible[0].assigneeId ?? null
+    const assigneeId = eligible.every((t) => (t.assigneeId ?? null) === owner) ? owner : null
     const sprint = await db.sprints.get(sprintId)
     const parentId = uid()
     await db.tasks.add({
@@ -977,10 +978,10 @@ export async function createGroupFromSelection(
 
 /**
  * Nest existing loose tasks under an existing group head — the selection bar's
- * "Add to #N". Same invariants as creating a group: one level only (the head is
- * top-level, a task with children never becomes a child), same sprint, and the
- * SAME assignee as the head (groups never span members). Ineligible ids are
- * skipped, not thrown. New children land at the bottom of the group, in the
+ * "Add to group". Same invariants as creating a group: one level only (the head
+ * is top-level, a task with children never becomes a child) and the same sprint.
+ * Any person's task may join (task-groups.md "Group nhiều người"). Ineligible
+ * ids are skipped, not thrown. New children land at the bottom of the group, in the
  * order given. Dates recompute afterwards so anything that depends on the group
  * follows its new span. Returns the ids actually moved.
  * See design-docs/task-groups.md "Add to #N".
@@ -1000,7 +1001,6 @@ export async function addTasksToGroup(parentId: string, taskIds: string[]): Prom
     for (const id of taskIds) {
       const t = byId.get(id)
       if (!t || t.id === parentId || t.parentId || heads.has(t.id)) continue
-      if ((t.assigneeId ?? null) !== (parent.assigneeId ?? null)) continue
       end += 1
       await db.tasks.update(id, { parentId, listOrder: end })
       moved.push(id)

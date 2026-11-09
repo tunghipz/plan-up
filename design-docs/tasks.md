@@ -1,7 +1,9 @@
 # Tasks
 
 **Status:** Implemented
-**Last updated:** 2026-11-09 (ô **Assignee trên từng dòng** đi qua `reassignTasks` như Assign
+**Last updated:** 2026-11-09 (group được chứa task của nhiều người: đổi người làm **không còn
+gỡ task con khỏi group**, và group head đổi người thì đi một mình — xem *What moving does*;
+trước đó cùng ngày: ô **Assignee trên từng dòng** đi qua `reassignTasks` như Assign
 hàng loạt: task con đổi người thì ra khỏi group — trước đó nó ghi thẳng `assigneeId` nên một
 group có thể trải qua nhiều người; xem *Per-row Assignee picker*)
 **Previously:** 2026-09-11 (bulk **Assign** — move the selection to another member)
@@ -54,15 +56,15 @@ bar-morph variants both stop working past ~6.
 ### What moving does to the rest of the row
 - **Dates recompute** for every moved task (`recomputeDates`) — the target member's days off
   are different, so the plan has to re-derive. See [scheduling.md](./scheduling.md).
-- **A group child is ungrouped** on the way out: groups never span members
-  ([task-groups.md](./task-groups.md)), so moving a child out of its lane clears `parentId`.
-- **A group head takes its children with it** — the whole group lands in the target lane,
-  intact, because moving the head alone would split the group across two members. The List
-  gives a head no select checkbox today, so this path is a guarantee at the data layer
-  (`reassignTasks`) rather than something the UI can currently reach.
+- **Groups are left alone** (2026-11-09). A group may hold several people's tasks
+  ([task-groups.md](./task-groups.md) *Group nhiều người*), so a child that changes person
+  **stays in its group**, and a head that changes person moves **alone** — its children keep
+  their own people. (Until that day a child was ungrouped on the way out and a head dragged its
+  children along, because a group could not span members.)
 - **The task lands at the bottom** of the target lane (`listOrder` = the lane's max + 1),
   the same place a newly added task appears. Carrying the old `listOrder` across would drop
-  the row in an arbitrary spot in a lane it has never been in.
+  the row in an arbitrary spot in a lane it has never been in. A **group child keeps its
+  `listOrder`**: it stays in its group, where that value is its position among siblings.
 - Each move is one logged edit (`assigneeId` is a `LoggableField`), so the sprint activity
   log shows `Assignee A→B` per task.
 
@@ -71,17 +73,16 @@ bar-morph variants both stop working past ~6.
 The Assignee cell on a row (card Unassigned, and every row of the List's **All** table) is a
 native `<select>`. It goes through the **same `reassignTasks`** as bulk Assign, so the rules
 above hold for a single row too:
-- **A group child that changes person leaves its group** (`parentId` cleared). Groups never
-  span members ([task-groups.md](./task-groups.md)).
-- **Bug it fixes:** the picker used to write `assigneeId` straight through `updateTask`, so
-  assigning one child of an unassigned group to Alice left a group holding Alice's task and
-  unassigned ones. The All table puts the picker on every row, which made it easy to hit.
+- **Logged and recomputed like a bulk move**: one `Assignee A→B` event, dates re-derived
+  against the new person's days off. The child stays in its group (groups may span people since
+  2026-11-09).
+- *History:* for a few hours on 2026-11-09 the picker cleared `parentId` on a child, enforcing
+  the old one-person-per-group rule that the picker used to bypass. That rule was dropped the
+  same day.
 - **Position:** unlike bulk Assign, the row **keeps its manual position** (`listOrder`
   untouched, `reassignTasks(…, { keepOrder: true })`) — you changed one cell, the row should
   not jump. In the All table the manual order is shared, so the row stays put and also lands
-  in the matching spot of the new person's card. The one exception is a child leaving its
-  group: its order was a position *inside the group*, meaningless at top level, so it drops to
-  the bottom of the new person's tasks like a bulk move.
+  in the matching spot of the new person's card.
 
 ## Inline editing affordance
 All click-to-edit text fields share the `.editable` class (`index.css`):

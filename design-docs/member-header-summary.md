@@ -1,8 +1,10 @@
 # Member header summary
 
 **Status:** Implemented
-**Last updated:** 2026-11-09 (số liệu tách ra `memberHeaderStats`, dùng chung cho header card
-và chip member ở List chế độ All — xem [list-view.md](./list-view.md) *Chế độ All*)
+**Last updated:** 2026-11-09 (leaf = task không phải group head **của cả sprint**: group giờ
+được chứa task nhiều người, nên head có toàn task con của người khác không bị đếm là việc của
+người giữ group — [task-groups.md](./task-groups.md) *Group nhiều người*; trước đó cùng ngày: số
+liệu tách ra `memberHeaderStats`, dùng chung cho header card và chip member ở List chế độ All)
 **Previously:** 2026-08-18 (+ chip `Nd holiday`)
 **Code:** `app/src/SprintView.tsx` (`MemberCard`, `memberHeaderStats`, `MemberFilterStrip`,
 `AvatarRing`, `MemberStatsBar`),

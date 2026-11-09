@@ -98,6 +98,11 @@ inset-grouped cards, fully editable inline.
   [dependencies.md](./dependencies.md).
 - Member cards omit the **Assignee** column (everyone in the group is the same person);
   the Unassigned card keeps it.
+- **Group nhiều người** (2026-11-09, [task-groups.md](./task-groups.md)): ở By member, task con
+  thuộc group của người khác nằm trong card của chính nó như dòng lẻ, kèm chip `↳ #N tên group`
+  sau title. Group head luôn là dòng group (roll-up trên mọi task con) kể cả khi card đó không có
+  task con nào. Ở All, group hiện đủ task con. Sort theo Start/End dùng ngày roll-up của mọi task
+  con, đúng như ô ngày đang hiện.
 - A task with **Effort = 0** renders as a **milestone**: a `◆ Milestone` pill after the
   title and a single collapsed milestone date (instead of a `Start → End` span). This is
   distinct from Effort `—` (*not estimated*, ⚠). See [milestones.md](./milestones.md).

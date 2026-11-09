@@ -54,6 +54,7 @@ import {
 } from './db'
 import { useProjectHolidays } from './scheduling-context'
 import type { ProjectHolidayMap } from './scheduling'
+import { colorForName } from './schema'
 import { Avatar, MemberDaysOffButton } from './members'
 import {
   STATUS_META,
@@ -2360,7 +2361,7 @@ function TaskGroupRow({
     <div
       {...rowProps}
       data-task-id={task.id}
-      className={`task-row group/row relative flex items-center gap-3 px-4 py-1.5 text-sm hover:bg-surface-hover transition bg-accent/[0.025] ${
+      className={`task-row task-group-head group/row relative flex items-center gap-3 px-4 py-1.5 text-sm hover:bg-surface-hover transition ${
         dragging ? 'opacity-40' : ''
       }`}
     >
@@ -2642,8 +2643,17 @@ function TaskRows({
         const allKids = allChildrenByParent.get(t.id)
         if (allKids && allKids.length > 0) {
           const isCollapsed = collapsed.has(t.id)
+          // The group renders as an inset card tinted by its holder's avatar
+          // colour (an Unassigned / mixed head falls back to neutral grey).
+          // See design-docs/task-groups.md "Nền group" and .task-group-card.
+          const holder = t.assigneeId ? members.find((m) => m.id === t.assigneeId) : undefined
+          const ownerColor = holder ? holder.color || colorForName(holder.name) : undefined
           return (
-            <Fragment key={t.id}>
+            <div
+              key={t.id}
+              className="task-group-card divide-y divide-border"
+              style={ownerColor ? ({ '--owner': ownerColor } as React.CSSProperties) : undefined}
+            >
               <TaskGroupRow
                 task={t}
                 childrenTasks={allKids}
@@ -2676,7 +2686,7 @@ function TaskRows({
                     drag={dragFor(c)}
                   />
                 ))}
-            </Fragment>
+            </div>
           )
         }
         return (

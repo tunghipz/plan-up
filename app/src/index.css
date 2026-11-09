@@ -294,6 +294,46 @@ h1, h2, h3, .display-tight {
     inset 0 0 0 0.5px var(--glass-ring);
 }
 
+/* task-group-card: a task group in the List as an inset card INSIDE the member /
+ * All card — the same inset-grouped language one level down (design-system §4.1),
+ * tinted by the group holder's avatar colour (`--owner`, set inline; absent → ink,
+ * which reads as neutral grey for an Unassigned / mixed group). Chosen as
+ * "B nhưng màu theo C" in demo/group-background.html; see design-docs/task-groups.md
+ * "Nền group". Unlayered on purpose: it must beat the parent's divide-y utility. */
+.task-group-card {
+  --group-tint: 5%;
+  --group-head-tint: 10%;
+  margin: 6px 8px;
+  border-radius: 12px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--owner, var(--color-ink)) var(--group-tint), transparent);
+  box-shadow: inset 0 0 0 0.5px var(--color-border-hair);
+  border-bottom-width: 0; /* the parent divide-y hairline — space separates the card */
+}
+.dark .task-group-card {
+  --group-tint: 8%;
+  --group-head-tint: 14%;
+}
+/* 8px margin + 8px padding = the 16px a plain row has, so columns stay aligned. */
+.task-group-card > .task-row {
+  padding-left: 8px;
+  padding-right: 8px;
+}
+.task-group-card > .task-group-head {
+  background: color-mix(in srgb, var(--owner, var(--color-ink)) var(--group-head-tint), transparent);
+}
+.task-group-card > .task-group-head:hover {
+  background: color-mix(
+    in srgb,
+    var(--owner, var(--color-ink)) calc(var(--group-head-tint) + 4%),
+    transparent
+  );
+}
+/* Space, not a hairline, separates the card from the row above it (§8.2). */
+.divide-y > :has(+ .task-group-card) {
+  border-bottom-width: 0;
+}
+
 /* no-scrollbar: a surface that scrolls but must not show a track — the floating
  * SelectionBar on a narrow screen, where a visible bar would sit on top of the
  * material. The content still scrolls by wheel/trackpad/touch. */

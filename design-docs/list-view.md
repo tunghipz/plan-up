@@ -103,6 +103,8 @@ inset-grouped cards, fully editable inline.
   sau title. Group head luôn là dòng group (roll-up trên mọi task con) kể cả khi card đó không có
   task con nào. Ở All, group hiện đủ task con. Sort theo Start/End dùng ngày roll-up của mọi task
   con, đúng như ô ngày đang hiện.
+- **Nền group** (2026-11-09): mỗi group là một thẻ bo lồng trong bảng, nhuộm nhẹ theo màu người
+  giữ group (`.task-group-card`, xem [task-groups.md](./task-groups.md) *Nền group*).
 - A task with **Effort = 0** renders as a **milestone**: a `◆ Milestone` pill after the
   title and a single collapsed milestone date (instead of a `Start → End` span). This is
   distinct from Effort `—` (*not estimated*, ⚠). See [milestones.md](./milestones.md).

@@ -1,8 +1,9 @@
 # Task groups (parent task with nested children)
 
 **Status:** Implemented
-**Last updated:** 2026-11-09 (**group được chứa task của nhiều người** — xem *Group nhiều
-người*; trước đó cùng ngày: **Add to group** chọn group trong popover của selection bar)
+**Last updated:** 2026-11-09 (**nền group**: mỗi group trong List là một thẻ bo lồng trong bảng,
+nhuộm nhẹ theo màu avatar của người giữ group — xem *Nền group*; trước đó cùng ngày: group được
+chứa task của nhiều người, và **Add to group** chọn group trong popover của selection bar)
 **Previously:** 2026-09-11 (bulk Assign obeys the no-cross-member rule; see tasks.md)
 **Code:** `app/src/db.ts` (`Task.parentId`, `createGroupFromSelection`, `addTasksToGroup`,
 `setTaskParent`),
@@ -16,6 +17,27 @@ that acts as a group heading — e.g. `32) build 3` with `33/34/35` nested benea
 that doubles as the group title. Gives structure to a long member list without a
 separate epic/tag system. Approach **B** chosen 2026-06-04 (see
 `demo/task-group-options.html`): nested render **plus** parent roll-up + collapse.
+
+## Nền group (2026-11-09)
+
+Trước đây mọi dòng trong List cùng nền trắng, group head chỉ in đậm (và một vệt accent 2.5% gần
+như không thấy), nên lướt bảng khó biết group bắt đầu và kết thúc ở đâu. User: *"cho group có màu
+nền khác nhẹ nhẹ để dễ nhìn hơn"*.
+
+Ba hướng trong `demo/group-background.html`: **A** dải nền xám liền, **B** thẻ lồng, **C** dải nền
+nhuộm theo màu người giữ group. User chọn: *"B nhưng màu theo C"*.
+
+- **Hình (B):** cả group (head + các task con đang hiện) nằm trong **một thẻ bo 12px lồng trong
+  bảng**, cách mép card 8px và cách dòng trên/dưới 6px, viền 0.5px. Đây là "inset grouped" của
+  card member (design-system §4.1) lặp lại ở cấp con. Dòng ngay trên thẻ không có hairline: khoảng
+  trống tách thẻ, không phải đường kẻ (§8.2). Bên trong thẻ các dòng vẫn cách nhau bằng hairline.
+  Dòng trong thẻ dùng padding ngang 8px thay 16px, nên mọi cột vẫn thẳng với header.
+- **Màu (C):** nền thẻ = màu avatar của **người giữ group** (`assigneeId` của head) pha 5% (dark
+  8%), dòng head pha 10% (dark 14%). Group head Unassigned (group nhiều người) dùng màu chữ nên ra
+  xám trung tính. Màu lấy đúng như avatar (`member.color`, thiếu thì `colorForName`). Dòng đang
+  chọn vẫn dùng `accent-soft` đè lên.
+- Thẻ hiện ở **List** (By member và All). Board, Timeline, PNG, share link không đổi.
+- Group thu gọn thì thẻ chỉ còn dòng head.
 
 ## Group nhiều người (2026-11-09)
 

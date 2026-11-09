@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Calendar, X, Upload, Trash2 } from 'lucide-react'
 import { usePinnedPopover } from './usePinnedPopover'
@@ -614,14 +614,18 @@ export function MemberDaysOffButton({
   variant = 'header',
   range,
   taskSpan,
+  onOpenChange,
 }: {
   member: Member
   /**
    * 'header' = Sprint group-header chip; 'metric' = always-visible settings line;
-   * 'compact' = small calendar button inside a member chip of the List's All
-   * table (same popover, no holiday chip). See design-docs/list-view.md "Chế độ All".
+   * 'card' = full-width button inside the hover card of a member chip in the
+   * List's All table (same popover, no holiday chip). See design-docs/list-view.md
+   * "Chip member gọn".
    */
-  variant?: 'header' | 'metric' | 'compact'
+  variant?: 'header' | 'metric' | 'card'
+  /** Told when the popover opens/closes, so a hover card can stay up meanwhile. */
+  onOpenChange?: (open: boolean) => void
   /**
    * When set (sprint view), scope the list + chip + entry to this sprint's
    * inclusive date range. Settings passes no range and sees the full aggregate.
@@ -638,6 +642,9 @@ export function MemberDaysOffButton({
   taskSpan?: { start: string; end: string } | null
 }) {
   const [open, setOpen] = useState(false)
+  useEffect(() => {
+    onOpenChange?.(open)
+  }, [open, onOpenChange])
   const [draftDate, setDraftDate] = useState('')
   const [draftHalf, setDraftHalf] = useState<'all' | 'am' | 'pm'>('all')
   const popRef = useRef<HTMLDivElement>(null)
@@ -774,7 +781,7 @@ export function MemberDaysOffButton({
 
   return (
     <>
-      {variant === 'compact' ? (
+      {variant === 'card' ? (
         <button
           ref={btnRef as React.RefObject<HTMLButtonElement>}
           type="button"
@@ -782,20 +789,13 @@ export function MemberDaysOffButton({
             e.stopPropagation()
             setOpen((v) => !v)
           }}
-          className={
-            count > 0
-              ? 'inline-flex items-center gap-1 h-6 rounded-full px-2 text-[11px] font-medium text-ink hover:bg-surface-hover transition whitespace-nowrap'
-              : 'inline-flex items-center justify-center w-6 h-6 rounded-full border border-dashed border-border-strong text-ink-muted hover:text-accent hover:border-accent hover:bg-accent-soft transition'
-          }
-          title={
-            count > 0
-              ? `${fmtDays(effDays)} day${effDays === 1 ? '' : 's'} off — click to edit`
-              : 'Set days off'
-          }
-          aria-label="Days off"
+          aria-expanded={open}
+          className={`flex w-full items-center justify-center gap-1.5 h-7 rounded-lg text-[12.5px] font-medium transition ${
+            open ? 'bg-accent-soft text-accent' : 'bg-fill text-ink hover:bg-surface-hover'
+          }`}
         >
-          <Calendar size={12} />
-          {count > 0 && <span>{fmtDays(effDays)}d off</span>}
+          <Calendar size={13} aria-hidden />
+          {count > 0 ? `${fmtDays(effDays)}d off · Edit` : 'Set days off'}
         </button>
       ) : variant === 'metric' ? (
         <button

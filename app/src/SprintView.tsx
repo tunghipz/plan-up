@@ -1,6 +1,7 @@
 import {
   Fragment,
   memo,
+  useCallback,
   useContext,
   useEffect,
   useLayoutEffect,
@@ -1527,11 +1528,10 @@ function AllTasksCard({
  * (dimmed) chip so their days off stay reachable. See list-view.md "Chế độ All".
  */
 /**
- * First row of the sprint List: `Group by [By member | All]`, then — in All — the
- * member chips after a hairline. Chips wrap inside their own column so the toggle
- * never moves. Not sticky (the column header below it is). See
- * design-docs/list-view.md "Chỗ đặt toggle" (direction C of
- * demo/list-grouping-placement.html).
+ * Top of the sprint List: `Group by [By member | All]`, and under it — in All —
+ * the member chips, flush left with the label. Not sticky (the column header
+ * below it is). See design-docs/list-view.md "Chỗ đặt toggle" (direction C of
+ * demo/list-grouping-placement.html) and "Chip member gọn".
  */
 function ListViewBar({
   grouping,
@@ -1543,18 +1543,12 @@ function ListViewBar({
   children?: React.ReactNode
 }) {
   return (
-    <div className="flex items-start gap-3">
-      {/* h-9 = FilterChip height, so the toggle centres on the first chip line. */}
-      <div className="flex h-9 shrink-0 items-center gap-2">
+    <div className="space-y-2.5">
+      <div className="flex items-center gap-2">
         <span className="text-[12px] font-medium text-ink-faint">Group by</span>
         <ViewToggle value={grouping} options={LIST_GROUPINGS} onChange={onGroupingChange} />
       </div>
-      {children && (
-        <>
-          <div className="mt-2 h-5 w-px shrink-0 bg-border-hair" aria-hidden />
-          <div className="min-w-0 flex-1">{children}</div>
-        </>
-      )}
+      {children}
     </div>
   )
 }
@@ -1580,65 +1574,24 @@ function MemberFilterStrip({
 }) {
   const toggle = (f: string) => onFilter(filter === f ? null : f)
   return (
-    <div className="flex flex-wrap items-center gap-2" role="toolbar" aria-label="Filter by member">
+    <div className="flex flex-wrap items-center gap-1.5" role="toolbar" aria-label="Filter by member">
       <FilterChip active={filter == null} onActivate={() => onFilter(null)} label="All tasks">
-        <span className="px-1.5 font-medium text-ink">All</span>
-        <span className="pr-1.5 text-xs text-ink-faint font-mono">{total}</span>
+        <span className="pl-1.5 font-medium text-ink">All</span>
+        <span className="text-[11.5px] text-ink-faint font-mono">{total}</span>
       </FilterChip>
       {members.map((m) => {
         const st = stats.get(m.id)
         if (!st) return null
         return (
-          <FilterChip
+          <MemberFilterChip
             key={m.id}
+            member={m}
+            st={st}
             active={filter === m.id}
             onActivate={() => toggle(m.id)}
-            label={`Filter by ${m.name}`}
-          >
-            <Avatar member={m} size={22} ring={false} />
-            <span className={`font-medium whitespace-nowrap ${st.total ? 'text-ink' : 'text-ink-muted'}`}>
-              {m.name}
-            </span>
-            <span className="text-xs text-ink-faint font-mono">
-              {st.done}/{st.total}
-            </span>
-            {st.overdue > 0 && (
-              <span
-                className="inline-flex items-center text-[11px] font-semibold px-1.5 py-px rounded-full"
-                style={{
-                  background: 'color-mix(in srgb, var(--color-priority-urgent) 14%, transparent)',
-                  color: 'color-mix(in srgb, var(--color-priority-urgent) 78%, var(--color-ink) 22%)',
-                }}
-                title={`${st.overdue} task${st.overdue === 1 ? '' : 's'} overdue`}
-              >
-                {st.overdue} overdue
-              </span>
-            )}
-            {st.conflictTips.size > 0 && (
-              <span
-                className="inline-flex items-center gap-0.5 text-[11px] font-semibold text-priority-high"
-                title={`${st.conflictTips.size} task trùng lịch`}
-              >
-                <AlertTriangle size={12} />
-                {st.conflictTips.size}
-              </span>
-            )}
-            {st.nextDue && (
-              <span className="text-[11px] font-medium text-ink-faint whitespace-nowrap" title="Next upcoming deadline">
-                due {formatShortDate(st.nextDue)}
-              </span>
-            )}
-            <MemberDaysOffButton
-              member={m}
-              variant="compact"
-              range={daysOffWindow(sprintStartDate, sprintEndDate, [st.earliestDate, st.latestDate])}
-              taskSpan={
-                st.earliestDate && st.latestDate
-                  ? { start: st.earliestDate, end: st.latestDate }
-                  : null
-              }
-            />
-          </FilterChip>
+            sprintStartDate={sprintStartDate}
+            sprintEndDate={sprintEndDate}
+          />
         )
       })}
       {unassignedCount > 0 && (
@@ -1647,54 +1600,237 @@ function MemberFilterStrip({
           onActivate={() => toggle(UNASSIGNED_FILTER)}
           label="Filter unassigned tasks"
         >
-          <span className="w-[22px] h-[22px] rounded-full flex items-center justify-center text-[10px] text-ink-faint border border-dashed border-border-strong">
+          <span className="w-[18px] h-[18px] rounded-full flex items-center justify-center text-[9px] text-ink-faint border border-dashed border-border-strong">
             —
           </span>
           <span className="font-medium text-ink-muted">Unassigned</span>
-          <span className="pr-1.5 text-xs text-ink-faint font-mono">{unassignedCount}</span>
+          <span className="text-[11.5px] text-ink-faint font-mono">{unassignedCount}</span>
         </FilterChip>
       )}
     </div>
   )
 }
 
+const CHIP_CARD_W = 240
+
 /**
- * One chip of the member strip. A div with role=button (not a <button>) because
- * it holds the Days off button, and buttons can't nest. Keys only fire when the
- * chip itself has focus, so Enter on the inner Days off button doesn't filter.
+ * A member chip of the All table: avatar · name · done/total, plus one dot when
+ * something needs attention (red = overdue, else orange = schedule conflicts).
+ * Hover / keyboard focus opens a small card with the numbers, the next due date
+ * and the Days off button. The card is a portal (no clipping by the scroller) and
+ * a SIBLING of the chip, so a click inside it never bubbles into the chip's
+ * filter toggle. It stays up while the Days off popover is open.
+ * See design-docs/list-view.md "Chip member gọn".
  */
+function MemberFilterChip({
+  member,
+  st,
+  active,
+  onActivate,
+  sprintStartDate,
+  sprintEndDate,
+}: {
+  member: Member
+  st: MemberHeaderStats
+  active: boolean
+  onActivate: () => void
+  sprintStartDate: string
+  sprintEndDate: string
+}) {
+  const chipRef = useRef<HTMLButtonElement>(null)
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
+  const [daysOffOpen, setDaysOffOpen] = useState(false)
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const clear = () => {
+    if (timer.current) clearTimeout(timer.current)
+    timer.current = null
+  }
+  const place = () => {
+    const r = chipRef.current?.getBoundingClientRect()
+    if (!r) return
+    const left = Math.max(8, Math.min(r.left, window.innerWidth - CHIP_CARD_W - 8))
+    setPos({ top: r.bottom + 6, left })
+  }
+  const show = (delay: number) => {
+    clear()
+    timer.current = setTimeout(place, delay)
+  }
+  const hide = () => {
+    clear()
+    timer.current = setTimeout(() => setPos(null), 120)
+  }
+  useEffect(() => clear, [])
+  // A scroll moves the chip out from under a fixed card — close it, unless the
+  // Days off popover hangs off it.
+  useEffect(() => {
+    if (!pos || daysOffOpen) return
+    const close = () => setPos(null)
+    window.addEventListener('scroll', close, true)
+    window.addEventListener('resize', close)
+    return () => {
+      window.removeEventListener('scroll', close, true)
+      window.removeEventListener('resize', close)
+    }
+  }, [pos, daysOffOpen])
+  // Only an open → closed flip matters (the button also reports `false` on mount).
+  // Then close the card too, unless the pointer is resting on it.
+  const daysOffRef = useRef(false)
+  const overCard = useRef(false)
+  const onDaysOffOpen = useCallback((o: boolean) => {
+    const was = daysOffRef.current
+    daysOffRef.current = o
+    setDaysOffOpen(o)
+    if (was && !o && !overCard.current) {
+      if (timer.current) clearTimeout(timer.current)
+      timer.current = setTimeout(() => setPos(null), 120)
+    }
+  }, [])
+
+  const conflicts = st.conflictTips.size
+  const signal = st.overdue > 0 ? 'overdue' : conflicts > 0 ? 'conflict' : null
+  const label = [
+    `Filter by ${member.name}`,
+    `${st.done}/${st.total} done`,
+    st.overdue > 0 ? `${st.overdue} overdue` : '',
+    conflicts > 0 ? `${conflicts} schedule conflict${conflicts === 1 ? '' : 's'}` : '',
+  ]
+    .filter(Boolean)
+    .join(', ')
+  const open = pos !== null || daysOffOpen
+
+  return (
+    <>
+      <FilterChip
+        active={active}
+        onActivate={onActivate}
+        label={label}
+        chipRef={chipRef}
+        onMouseEnter={() => show(250)}
+        onMouseLeave={hide}
+        onFocus={(e) => {
+          if (e.currentTarget.matches(':focus-visible')) show(0)
+        }}
+        onBlur={hide}
+      >
+        <Avatar member={member} size={18} ring={false} />
+        <span className={`font-medium whitespace-nowrap ${st.total ? 'text-ink' : 'text-ink-muted'}`}>
+          {member.name}
+        </span>
+        <span className="text-[11.5px] text-ink-faint font-mono">
+          {st.done}/{st.total}
+        </span>
+        {signal && (
+          <span
+            aria-hidden
+            className={`-ml-0.5 w-1.5 h-1.5 rounded-full ${
+              signal === 'overdue' ? 'bg-priority-urgent' : 'bg-priority-high'
+            }`}
+          />
+        )}
+      </FilterChip>
+      {open &&
+        pos &&
+        createPortal(
+          <div
+            role="tooltip"
+            className="fixed z-50 rounded-[13px] glass-popover p-3 text-[13px]"
+            style={{ top: pos.top, left: pos.left, width: CHIP_CARD_W }}
+            onMouseEnter={() => {
+              overCard.current = true
+              clear()
+            }}
+            onMouseLeave={() => {
+              overCard.current = false
+              if (!daysOffOpen) hide()
+            }}
+          >
+            <div className="flex items-center gap-2 mb-1.5">
+              <Avatar member={member} size={20} ring={false} />
+              <span className="font-semibold text-ink truncate">{member.name}</span>
+              <span className="ml-auto text-[12px] text-ink-faint font-mono">
+                {st.done}/{st.total}
+              </span>
+            </div>
+            {st.overdue > 0 && (
+              <div className="flex justify-between py-0.5 text-ink-muted">
+                Overdue
+                <span className="font-semibold text-priority-urgent tabular-nums">{st.overdue}</span>
+              </div>
+            )}
+            {conflicts > 0 && (
+              <div className="flex justify-between py-0.5 text-ink-muted">
+                Schedule conflicts
+                <span className="inline-flex items-center gap-1 font-semibold text-priority-high tabular-nums">
+                  <AlertTriangle size={12} aria-hidden />
+                  {conflicts}
+                </span>
+              </div>
+            )}
+            <div className="flex justify-between py-0.5 text-ink-muted">
+              Next due
+              <span className="font-medium text-ink">
+                {st.nextDue ? formatShortDate(st.nextDue) : '—'}
+              </span>
+            </div>
+            <div className="mt-2">
+              <MemberDaysOffButton
+                member={member}
+                variant="card"
+                onOpenChange={onDaysOffOpen}
+                range={daysOffWindow(sprintStartDate, sprintEndDate, [st.earliestDate, st.latestDate])}
+                taskSpan={
+                  st.earliestDate && st.latestDate
+                    ? { start: st.earliestDate, end: st.latestDate }
+                    : null
+                }
+              />
+            </div>
+          </div>,
+          document.body
+        )}
+    </>
+  )
+}
+
+/** One 28px chip of the member strip. Holds no other control, so a plain button. */
 function FilterChip({
   active,
   onActivate,
   label,
   children,
+  chipRef,
+  onMouseEnter,
+  onMouseLeave,
+  onFocus,
+  onBlur,
 }: {
   active: boolean
   onActivate: () => void
   label: string
   children: React.ReactNode
+  chipRef?: React.Ref<HTMLButtonElement>
+  onMouseEnter?: () => void
+  onMouseLeave?: () => void
+  onFocus?: (e: React.FocusEvent<HTMLButtonElement>) => void
+  onBlur?: () => void
 }) {
   return (
-    <div
-      role="button"
-      tabIndex={0}
+    <button
+      ref={chipRef}
+      type="button"
       aria-pressed={active}
       aria-label={label}
-      title={label}
       onClick={onActivate}
-      onKeyDown={(e) => {
-        if (e.target !== e.currentTarget) return
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault()
-          onActivate()
-        }
-      }}
-      className={`inline-flex items-center gap-2 h-9 pl-1.5 pr-1.5 rounded-full text-sm cursor-pointer select-none transition outline-none focus-visible:ring-2 focus-visible:ring-accent/50 ${
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
+      onFocus={onFocus}
+      onBlur={onBlur}
+      className={`inline-flex items-center gap-1.5 h-7 pl-1 pr-2.5 rounded-full text-[13px] select-none transition outline-none focus-visible:ring-2 focus-visible:ring-accent/50 ${
         active ? 'bg-accent-soft ring-[1.5px] ring-accent' : 'glass-toolbar hover:bg-surface-hover'
       }`}
     >
       {children}
-    </div>
+    </button>
   )
 }
 
@@ -2065,6 +2201,7 @@ function TitleTextarea({
   priority,
   indent = false,
   bold = false,
+  nested = false,
   trailing,
 }: {
   value: string
@@ -2074,6 +2211,12 @@ function TitleTextarea({
   priority: string
   indent?: boolean
   bold?: boolean
+  /**
+   * Inside another Task cell (the group head row, beside its chevron and
+   * `done/total`): fill what's left and shrink freely. The column's own 150px
+   * minimum would push the count into the Assignee column on a narrow table.
+   */
+  nested?: boolean
   /** Optional element rendered snug after the title text (e.g. change-log 🕒). */
   trailing?: React.ReactNode
 }) {
@@ -2223,7 +2366,7 @@ function TitleTextarea({
 
   return (
     <div
-      className={`${COL.title} flex items-start gap-1.5 ${indent ? 'pl-5' : ''}`}
+      className={`${nested ? 'flex-1 min-w-0' : COL.title} flex items-start gap-1.5 ${indent ? 'pl-5' : ''}`}
     >
       <PriorityChip priority={priority} />
       {/* flex-1 fills the whole Task column so the title (and its click-to-edit
@@ -2471,6 +2614,7 @@ function TaskGroupRow({
           welcomeHint={false}
           priority={task.priority}
           bold
+          nested
         />
         <span className="shrink-0 text-[11px] font-medium text-ink-faint tabular-nums">
           {done}/{total}

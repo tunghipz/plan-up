@@ -1,8 +1,10 @@
 # Members & days off
 
 **Status:** Implemented
-**Last updated:** 2026-11-09 (`MemberDaysOffButton variant="compact"` — nút lịch gọn cho chip
-member ở List chế độ All, cùng popover; xem [list-view.md](./list-view.md) *Chế độ All*)
+**Last updated:** 2026-11-09 (`MemberDaysOffButton variant="card"` thay `compact`: nút rộng
+`1d off · Edit` / `Set days off` trong thẻ rê chuột của chip member ở List chế độ All, cùng
+popover; prop `onOpenChange` để thẻ giữ mở khi popover đang mở — xem
+[list-view.md](./list-view.md) *Chip member gọn*)
 **Previously:** 2026-08-18 (days-off window widens to cover a member's task-date
 span, so off-days on overdue dates before the sprint start are pickable; + sibling
 `Nd holiday` chip driven by `taskSpan`)

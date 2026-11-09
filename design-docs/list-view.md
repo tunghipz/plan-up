@@ -1,8 +1,10 @@
 # List view
 
 **Status:** Implemented
-**Last updated:** 2026-11-09 (toggle `By member · All` **rời top bar** xuống hàng **`Group by`**
-đầu List, chung hàng với dải chip member của All — xem *Chỗ đặt toggle*; trước đó cùng ngày:
+**Last updated:** 2026-11-09 (**chip member gọn**: dải chip của All xuống dòng dưới `Group by`,
+chip chỉ còn avatar · tên · done/total + chấm báo, phần còn lại trong thẻ rê chuột — xem *Chip
+member gọn*; trước đó cùng ngày: toggle `By member · All` **rời top bar** xuống hàng **`Group by`**
+đầu List — xem *Chỗ đặt toggle*;
 **chế độ All** gộp mọi task của sprint vào một bảng có cột Assignee + dải chip member để lọc;
 sort theo **Assignee**; hàng xóm khi kéo thả bỏ qua dòng bị pull — xem *Chế độ All* và
 *Drag-to-reorder* dưới)
@@ -11,7 +13,7 @@ của nó** — `orderLane()`, xem [dependencies.md](./dependencies.md) *Depende
 prerequisite*); 2026-08-17 (**title 2+ dòng bị xén 2px ở đáy — fixed**, xem v5 dưới; prior:
 2026-07-08 column header → floating glass capsule; sprint note → inline description in the merged Notion-style page header, see app-shell v4; prior: calm refinements — time-on-hover dates, quiet empty cells, sticky-light group headers, compact rows, `#`-prefixed prereq)
 **Code:** `app/src/SprintView.tsx` (`MemberCard`, `UnassignedCard`, `AllTasksCard`,
-`ListViewBar`, `MemberFilterStrip`, `memberHeaderStats`, `GroupHeader`, `TaskColumnHeader`,
+`ListViewBar`, `MemberFilterStrip`, `MemberFilterChip`, `memberHeaderStats`, `GroupHeader`, `TaskColumnHeader`,
 `SortHeader`, `COL`, `TaskRows` drag state, `TaskRow` grip), `app/src/ViewToggle.tsx`
 (segmented control), `app/src/App.tsx` (grouping state, `plan-up:list-grouping`), `app/src/task-sort.ts` (`assignee` sort, `orderLane`),
 `app/src/reorder.ts` (`anchorNeighbours`), `app/src/members.tsx`
@@ -134,9 +136,9 @@ pull khi sort Assignee, làm đi"*.
   - Hàng **`Group by [By member | All]`** là hàng đầu tiên của List, trên thanh tên cột, dưới thẻ
     sprint. Nhãn `Group by` chữ nhỏ mờ, segmented giống hệt `List · Board · Timeline` (cùng
     component `ViewToggle`).
-  - Ở **All**, dải chip member nằm **cùng hàng**, bên phải toggle sau một vạch dọc mảnh; chip
-    nhiều thì xuống dòng trong phần của chip, toggle đứng yên. Ở **By member** hàng chỉ có toggle.
-    Toggle vì vậy ở đúng một chỗ cho cả hai chế độ.
+  - Ở **All**, dải chip member nằm **ngay dưới** hàng này, thẳng mép trái với chữ `Group by`
+    (bản đầu để chip cùng hàng bên phải toggle; đổi theo *Chip member gọn* dưới). Ở **By member**
+    chỉ có hàng toggle. Toggle vì vậy ở đúng một chỗ cho cả hai chế độ.
   - Hàng này không dính khi cuộn (thanh tên cột vẫn dính). Đã biết khi chọn: cuộn sâu thì phải
     cuộn lên mới đổi chế độ.
   - Top bar còn lại `List · Board · Timeline` và các công cụ toàn sprint, giữ một hình ở mọi view.
@@ -149,9 +151,27 @@ pull khi sort Assignee, làm đi"*.
 - **Dải chip member** phía trên bảng: `All N`, rồi mỗi member một chip theo thứ tự lane
   ([member-lane-order.md](./member-lane-order.md)), rồi `Unassigned N` nếu có. Chip member gồm
   avatar, tên, `done/total` (đếm leaf như header card), badge overdue nếu > 0, badge trùng lịch
-  nếu có, `due <ngày>` gần nhất, và nút Days off gọn (`MemberDaysOffButton variant="compact"`,
-  cùng popover với header card). Số liệu lấy từ `memberHeaderStats`, chung với `MemberCard`, nên
+  nếu có, `due <ngày>` gần nhất, và nút Days off (`MemberDaysOffButton`, cùng popover với header
+  card). Từ *Chip member gọn* dưới, chip chỉ hiện avatar, tên, done/total và chấm báo; phần còn lại
+  nằm trong thẻ rê chuột. Số liệu lấy từ `memberHeaderStats`, chung với `MemberCard`, nên
   chip và card không bao giờ lệch nhau. Member chưa có task vẫn có chip (mờ) để vào Days off.
+- **Chip member gọn** (đổi cùng ngày). Bản đầu mỗi chip cao 36px, chứa đủ avatar, tên,
+  done/total, badge overdue, ⚠ trùng lịch, `due`, và ô Days off (nét đứt khi chưa có ngày nghỉ):
+  7 member chiếm 2–3 dòng. User: *"cho đống filter gọn hơn và hiện dưới chữ group"*. Ba hướng
+  trong `demo/member-chips-compact.html`: **A** thu nhỏ giữ đủ, **B** chip chỉ để lọc, **C** một
+  thanh segmented. User chọn: *"B"*.
+  - Chip cao **28px**: avatar 18, tên, `done/total`. Có overdue thì thêm **chấm đỏ**, không có
+    overdue nhưng có task trùng lịch thì **chấm cam**. Chấm chỉ báo "có chuyện", số nằm trong thẻ.
+  - **Rê chuột** (hoặc focus bằng bàn phím) lên chip, sau 250ms mở **thẻ nhỏ** dưới chip: avatar,
+    tên, `done/total`, dòng Overdue (nếu > 0), Schedule conflicts (nếu > 0), Next due, và nút
+    **Days off** rộng cả thẻ (ghi `1d off · Edit` hoặc `Set days off`), mở đúng popover ngày nghỉ
+    như trước. Thẻ còn mở khi chuột đi vào thẻ, và **giữ mở khi popover Days off đang mở**.
+  - Thẻ là portal (không bị cắt bởi vùng cuộn), canh trái theo chip, kẹp trong màn hình. Cuộn
+    trang thì thẻ đóng (trừ khi đang mở popover Days off).
+  - `aria-label` của chip đọc luôn số liệu bị cất (done/total, overdue, trùng lịch) cho trình đọc
+    màn hình.
+  - Không có chuột (màn cảm ứng) thì không thấy thẻ; ngày nghỉ vẫn đặt được ở header card bên By
+    member.
 - **Bấm chip = lọc** bảng theo người đó; bấm lại chip đang chọn, hoặc bấm `All`, để bỏ lọc. Lọc
   là state tạm, không lưu, reset khi đổi sprint.
 - **Thứ tự tay dùng chung `listOrder`.** Thứ tự neutral của All là `listOrder ?? sequence` trên cả

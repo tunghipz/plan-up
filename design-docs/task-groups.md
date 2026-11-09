@@ -1,7 +1,7 @@
 # Task groups (parent task with nested children)
 
 **Status:** Implemented
-**Last updated:** 2026-11-09 (**group không có người giữ** không pha xám nữa: thẻ trắng viền
+**Last updated:** 2026-11-09 (**card "Group nhiều người"** ở By member: group không có người giữ mà có task con đã giao thì không còn nằm trong card Unassigned — xem *Group nhiều người*; trước đó cùng ngày: **group không có người giữ** không pha xám nữa: thẻ trắng viền
 mảnh, head hiện avatar chồng của những người trong group — xem *Nền group*; trước đó cùng ngày:
 **group một người đi cùng nhau**: giao hết task con cho một người
 thì group head theo sang người đó, đổi người cho head của group một người thì task con theo — xem
@@ -83,10 +83,22 @@ User hỏi *"task của người khác không push vô group được ah"*, rồ
 hướng đó đi"*.
 
 - **Ở All**: group hiện đủ mọi task con, của ai cũng được. Đây là chỗ chính để xem group.
-- **Ở By member**: group head nằm trong card của người giữ group (`assigneeId` của head, hoặc
-  card Unassigned). Task con của **người khác** nằm trong card của chính họ như một dòng lẻ,
-  kèm chip **`↳ #N tên group`** sau title để biết thuộc group nào. Group head vẫn là dòng group
-  (chevron, roll-up) kể cả khi card đó không có task con nào của người giữ group.
+- **Ở By member**: group head nằm trong card của người giữ group (`assigneeId` của head). Task
+  con của **người khác** nằm trong card của chính họ như một dòng lẻ, kèm chip **`↳ #N tên
+  group`** sau title để biết thuộc group nào. Group head vẫn là dòng group (chevron, roll-up) kể
+  cả khi card đó không có task con nào của người giữ group.
+- **Card "Group nhiều người"** (2026-11-09). Group head không có người giữ mà **có ít nhất một
+  task con đã giao cho member** thì nằm trong card riêng tên **Group nhiều người**, xếp trước
+  card Unassigned. Trước đó các head này nằm trong card **Unassigned** và được đếm vào số của
+  card, nên sprint đã giao hết vẫn hiện `Unassigned 3`. User hỏi *"sao lại chưa assign, tất cả
+  task đều được assign hết rồi"*, rồi chọn hướng **card riêng** trong ba hướng (card riêng · cùng
+  card đổi nhãn · chỉ sửa số đếm).
+  - Header: icon nhóm người trong vòng tròn nét đứt (như Unassigned), số đếm là **số group**
+    (`3 group`), không phải số task.
+  - Card **Unassigned** chỉ còn task thật sự chưa giao, kể cả group head không người giữ mà task
+    con cũng đều chưa giao (đó là việc chưa giao thật). Không còn gì thì card ẩn.
+  - Thứ tự hiển thị (Chain prereqs, chọn nhiều): các card member, rồi Group nhiều người, rồi
+    Unassigned.
 - **Roll-up của group head** (`done/total`, status suy ra, effort cộng, ngày từ sớm nhất tới muộn
   nhất) tính trên **mọi task con**, kể cả của người khác — giống số Timeline và share link vẫn
   dùng. Ở By member, dưới head chỉ hiện task con của người đó, nên `0/5` có thể đứng trên 2 dòng.

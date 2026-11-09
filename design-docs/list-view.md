@@ -1,7 +1,7 @@
 # List view
 
 **Status:** Implemented
-**Last updated:** 2026-11-09 (**perf**: `TaskRow` memo thật sự bỏ qua row không đổi: structural sharing + prop dẫn xuất từng row, xem *Hiệu năng*). Trước đó: 2026-11-09 (**chip member gọn**: dải chip của All xuống dòng dưới `Group by`,
+**Last updated:** 2026-11-09 (card **Group nhiều người** tách khỏi Unassigned — xem task-groups.md). Trước đó: 2026-11-09 (**perf**: `TaskRow` memo thật sự bỏ qua row không đổi: structural sharing + prop dẫn xuất từng row, xem *Hiệu năng*). Trước đó: 2026-11-09 (**chip member gọn**: dải chip của All xuống dòng dưới `Group by`,
 chip chỉ còn avatar · tên · done/total + chấm báo, phần còn lại trong thẻ rê chuột — xem *Chip
 member gọn*; trước đó cùng ngày: toggle `By member · All` **rời top bar** xuống hàng **`Group by`**
 đầu List — xem *Chỗ đặt toggle*;
@@ -68,8 +68,9 @@ The primary editing surface: every task in the sprint, grouped by assignee in
 inset-grouped cards, fully editable inline.
 
 ## User-facing behavior
-- One **card per member** (plus an **Unassigned** card, and a collapsed "members with no
-  tasks" section). Each card = a `GroupHeader` + task rows + an "Add task" row. The
+- One **card per member** (plus a **Group nhiều người** card for groups with no holder whose
+  tasks are assigned to members — see task-groups.md, *Group nhiều người* — an **Unassigned**
+  card for tasks really nobody owns, and a collapsed "members with no tasks" section). Each card = a `GroupHeader` + task rows + an "Add task" row. The
   **column header is a single sticky bar** at the top of the list (not repeated per card) —
   see v4 note above. Since 2026-07-08 it renders as a **floating glass capsule**
   (`.glass-toolbar rounded-full`, sticky `top-2`, no border-b — the capsule rim is the

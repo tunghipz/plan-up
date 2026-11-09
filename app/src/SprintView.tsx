@@ -271,14 +271,23 @@ export function SprintView({
     () => (members ?? []).slice().sort(compareMembersByOrder),
     [members]
   )
-  const { groups, emptyMembers, unassigned } = useMemo(() => {
+  const { groups, emptyMembers, sharedGroups, unassigned } = useMemo(() => {
     const ms = sortedMembers
     const byMember = new Map<string, Task[]>()
     for (const m of ms) byMember.set(m.id, [])
-    const orphan: Task[] = []
+    // Group heads with no holder whose work IS assigned (≥1 child owned by a
+    // member) get their own "Group nhiều người" card instead of reading as
+    // unassigned work. See design-docs/task-groups.md "Group nhiều người".
+    const heldByMember = new Set<string>()
     for (const t of tasks) {
-      const owner = ms.some((m) => m.id === t.assigneeId) ? t.assigneeId : null
+      if (t.parentId && t.assigneeId && byMember.has(t.assigneeId)) heldByMember.add(t.parentId)
+    }
+    const orphan: Task[] = []
+    const shared: Task[] = []
+    for (const t of tasks) {
+      const owner = t.assigneeId && byMember.has(t.assigneeId) ? t.assigneeId : null
       if (owner) byMember.get(owner)!.push(t)
+      else if (heldByMember.has(t.id)) shared.push(t)
       else orphan.push(t)
     }
     // Order each member's tasks: the user-selected field (neutral → the manual
@@ -288,11 +297,13 @@ export function SprintView({
     for (const [id, arr] of byMember)
       byMember.set(id, orderLane(arr, sort, planById, undefined, tasks))
     const orphanOrdered = orderLane(orphan, sort, planById, undefined, tasks)
+    const sharedOrdered = orderLane(shared, sort, planById, undefined, tasks)
     const filled = ms.filter((m) => (byMember.get(m.id) ?? []).length > 0)
     const empty = ms.filter((m) => (byMember.get(m.id) ?? []).length === 0)
     return {
       groups: filled.map((m) => ({ member: m, tasks: byMember.get(m.id)! })),
       emptyMembers: empty,
+      sharedGroups: sharedOrdered,
       unassigned: orphanOrdered,
     }
   }, [sortedMembers, tasks, sort, planById])
@@ -345,8 +356,8 @@ export function SprintView({
     () =>
       allTable
         ? flattenDisplayOrder([allTable.rows])
-        : flattenDisplayOrder([...groups.map((g) => g.tasks), unassigned]),
-    [allTable, groups, unassigned]
+        : flattenDisplayOrder([...groups.map((g) => g.tasks), sharedGroups, unassigned]),
+    [allTable, groups, sharedGroups, unassigned]
   )
 
   if (!members) return <p className="text-ink-muted py-12 text-center">Loading…</p>
@@ -530,6 +541,21 @@ export function SprintView({
           drag={laneDragFor(member)}
         />
       ))}
+
+      {!allTable && sharedGroups.length > 0 && (
+        <UnassignedCard
+          kind="shared"
+          tasks={sharedGroups}
+          members={members}
+          allTasks={tasks}
+          tasksById={tasksById}
+          planById={planById}
+          sort={sort}
+          setSort={setSort}
+          selectedIds={selectedIds}
+          onToggleSelect={toggleSelect}
+        />
+      )}
 
       {!allTable && unassigned.length > 0 && (
         <UnassignedCard
@@ -1404,7 +1430,13 @@ function memberHeaderStats(
   return { total, done, pct, overdue, nextDue, conflictTips, earliestDate, latestDate }
 }
 
+/**
+ * A lane with no member: `unassigned` = tasks nobody owns; `shared` = group
+ * heads with no holder whose children are assigned (task-groups.md "Group nhiều
+ * người"). Same rows and inline column header; only the header differs.
+ */
 function UnassignedCard({
+  kind = 'unassigned',
   tasks,
   members,
   allTasks,
@@ -1415,6 +1447,7 @@ function UnassignedCard({
   selectedIds,
   onToggleSelect,
 }: {
+  kind?: 'unassigned' | 'shared'
   tasks: Task[]
   members: Member[]
   allTasks: Task[]
@@ -1427,16 +1460,25 @@ function UnassignedCard({
   selectedIds: Set<string>
   onToggleSelect: (id: string) => void
 }) {
+  // Count work items, not containers: a group head is a head when ANY sprint
+  // task points at it (task-groups.md "Đếm của từng member").
+  const count = useMemo(() => {
+    if (kind === 'shared') return tasks.length
+    const parentIds = new Set<string>()
+    for (const t of allTasks) if (t.parentId) parentIds.add(t.parentId)
+    return tasks.filter((t) => !parentIds.has(t.id)).length
+  }, [kind, tasks, allTasks])
   return (
     <Card>
       <GroupHeader
         avatar={
           <span className="w-7 h-7 rounded-full flex items-center justify-center text-xs text-ink-faint border border-dashed border-border-strong">
-            —
+            {kind === 'shared' ? <Users size={14} strokeWidth={1.75} aria-hidden /> : '—'}
           </span>
         }
-        name="Unassigned"
-        count={tasks.length}
+        name={kind === 'shared' ? 'Group nhiều người' : 'Unassigned'}
+        count={count}
+        countText={kind === 'shared' ? `${count} group` : undefined}
         muted
       />
       <div className="overflow-x-auto">

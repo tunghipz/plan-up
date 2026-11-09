@@ -2628,11 +2628,48 @@ function TaskGroupRow({
         <div className={assigneeWide ? COL.assigneeWide : COL.assignee}>
           {(() => {
             const a = task.assigneeId ? memberById.get(task.assigneeId) : undefined
-            if (!a) return <span className="text-ink-faint opacity-40">—</span>
+            if (a)
+              return (
+                <span className="inline-flex items-center gap-1.5 min-w-0" title={a.name}>
+                  <Avatar member={a} size={22} ring={false} />
+                  {assigneeWide && <span className="truncate text-sm text-ink-muted">{a.name}</span>}
+                </span>
+              )
+            // No holder: the people with a task in the group, as a stack (first
+            // three, then +N). See design-docs/task-groups.md "Nền group".
+            const people: Member[] = []
+            for (const c of childrenTasks) {
+              const m = c.assigneeId ? memberById.get(c.assigneeId) : undefined
+              if (m && !people.includes(m)) people.push(m)
+            }
+            if (people.length === 0) return <span className="text-ink-faint opacity-40">—</span>
+            const shown = people.slice(0, 3)
             return (
-              <span className="inline-flex items-center gap-1.5 min-w-0" title={a.name}>
-                <Avatar member={a} size={22} ring={false} />
-                {assigneeWide && <span className="truncate text-sm text-ink-muted">{a.name}</span>}
+              <span
+                className="inline-flex items-center gap-1.5 min-w-0"
+                title={people.map((m) => m.name).join(', ')}
+                aria-label={`${people.length} people: ${people.map((m) => m.name).join(', ')}`}
+              >
+                <span className="inline-flex items-center shrink-0">
+                  {shown.map((m, i) => (
+                    <span
+                      key={m.id}
+                      className={`rounded-full shadow-[0_0_0_2px_var(--color-surface)] ${i ? '-ml-1.5' : ''}`}
+                    >
+                      <Avatar member={m} size={20} ring={false} />
+                    </span>
+                  ))}
+                  {people.length > 3 && (
+                    <span className="ml-1 text-[11.5px] text-ink-muted tabular-nums">
+                      +{people.length - 3}
+                    </span>
+                  )}
+                </span>
+                {assigneeWide && (
+                  <span className="truncate text-[12.5px] text-ink-muted">
+                    {people.length} people
+                  </span>
+                )}
               </span>
             )
           })()}
@@ -2875,14 +2912,15 @@ function TaskRows({
         if (allKids && allKids.length > 0) {
           const isCollapsed = collapsed.has(t.id)
           // The group renders as an inset card tinted by its holder's avatar
-          // colour (an Unassigned / mixed head falls back to neutral grey).
-          // See design-docs/task-groups.md "Nền group" and .task-group-card.
+          // colour. No holder (Unassigned head) → `is-shared`: untinted, and the
+          // head shows its people's avatars instead. See design-docs/task-groups.md
+          // "Nền group" and .task-group-card.
           const holder = t.assigneeId ? members.find((m) => m.id === t.assigneeId) : undefined
           const ownerColor = holder ? holder.color || colorForName(holder.name) : undefined
           return (
             <div
               key={t.id}
-              className="task-group-card divide-y divide-border"
+              className={`task-group-card divide-y divide-border ${ownerColor ? '' : 'is-shared'}`}
               style={ownerColor ? ({ '--owner': ownerColor } as React.CSSProperties) : undefined}
             >
               <TaskGroupRow

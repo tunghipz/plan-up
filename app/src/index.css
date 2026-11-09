@@ -345,6 +345,18 @@ h1, h2, h3, .display-tight {
     transparent
   );
 }
+/* No holder (Unassigned head — usually several people's group): no tint at all.
+ * The ink fallback mixed into a muddy grey; colour lives in the head's avatar
+ * stack instead. Chosen as C in demo/mixed-group-color.html; see
+ * design-docs/task-groups.md "Nền group". */
+.task-group-card.is-shared {
+  background: transparent;
+  box-shadow: inset 0 0 0 0.5px var(--color-border-strong);
+  --group-head-tint: 4%;
+}
+.dark .task-group-card.is-shared {
+  --group-head-tint: 7%;
+}
 /* Space, not a hairline, separates the card from the row above it (§8.2). */
 .divide-y > :has(+ .task-group-card) {
   border-bottom-width: 0;

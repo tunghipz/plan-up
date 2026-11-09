@@ -1,7 +1,9 @@
 # Task groups (parent task with nested children)
 
 **Status:** Implemented
-**Last updated:** 2026-11-09 (**group một người đi cùng nhau**: giao hết task con cho một người
+**Last updated:** 2026-11-09 (**group không có người giữ** không pha xám nữa: thẻ trắng viền
+mảnh, head hiện avatar chồng của những người trong group — xem *Nền group*; trước đó cùng ngày:
+**group một người đi cùng nhau**: giao hết task con cho một người
 thì group head theo sang người đó, đổi người cho head của group một người thì task con theo — xem
 *Group nhiều người*; trước đó cùng ngày: **nền group** thẻ bo nhuộm màu người giữ group, group
 được chứa task của nhiều người, và **Add to group** chọn group trong popover của selection bar)
@@ -34,9 +36,19 @@ nhuộm theo màu người giữ group. User chọn: *"B nhưng màu theo C"*.
   trống tách thẻ, không phải đường kẻ (§8.2). Bên trong thẻ các dòng vẫn cách nhau bằng hairline.
   Dòng trong thẻ dùng padding ngang 8px thay 16px, nên mọi cột vẫn thẳng với header.
 - **Màu (C):** nền thẻ = màu avatar của **người giữ group** (`assigneeId` của head) pha 5% (dark
-  8%), dòng head pha 10% (dark 14%). Group head Unassigned (group nhiều người) dùng màu chữ nên ra
-  xám trung tính. Màu lấy đúng như avatar (`member.color`, thiếu thì `colorForName`). Dòng đang
-  chọn vẫn dùng `accent-soft` đè lên.
+  8%), dòng head pha 10% (dark 14%). Màu lấy đúng như avatar (`member.color`, thiếu thì
+  `colorForName`). Dòng đang chọn vẫn dùng `accent-soft` đè lên.
+- **Group không có người giữ** (head Unassigned, thường là group nhiều người; sửa cùng ngày).
+  Bản đầu pha màu chữ (gần đen) 5%/10% nên ra **xám đục**, cạnh pill `To do` xám thì cả khối bẩn.
+  User: *"group nhiều người màu xấu quá, có cách nào fix không"*. Ba hướng trong
+  `demo/mixed-group-color.html`: **A** xám nhẹ hơn, **B** màu riêng cho mỗi group, **C** thẻ
+  trắng + avatar chồng. User chọn: *"C"*.
+  - Thẻ **không pha nền**: chỉ viền mảnh đậm hơn một nấc (`border-strong`), dòng head xám rất nhạt
+    (màu chữ 4%, dark 7%). Màu không nằm ở nền nữa mà ở avatar.
+  - Ô **Assignee của head** hiện **avatar chồng** của những người có task con trong group (theo
+    thứ tự xuất hiện, tối đa 3, thêm `+N`), viền trắng tách nhau; ở All (cột rộng) kèm chữ
+    `N people`. Rê chuột thấy tên đủ. Group chưa có ai (mọi task con chưa giao) vẫn hiện `—`.
+  - Group có người giữ giữ nguyên màu người đó, kể cả khi bên trong có task của người khác.
 - Thẻ hiện ở **List** (By member và All). Board, Timeline, PNG, share link không đổi.
 - Group thu gọn thì thẻ chỉ còn dòng head.
 - **Không `overflow: hidden`** (sửa cùng ngày): bản đầu cắt mọi thứ ở mép thẻ, và vì dòng trong thẻ

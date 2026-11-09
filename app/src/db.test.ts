@@ -937,6 +937,10 @@ describe('reassignTasks — keepOrder (per-row Assignee picker)', () => {
     expect(kid?.assigneeId).toBe('m1')
     expect(kid?.parentId).toBe('head')
     expect(kid?.listOrder).toBe(0)
+    // Its only child now sits with m1, so the head follows — keeping its place.
+    const head = await db.tasks.get('head')
+    expect(head?.assigneeId).toBe('m1')
+    expect(head?.listOrder).toBeUndefined()
   })
 })
 
@@ -1049,29 +1053,61 @@ describe('reassignTasks (bulk move to another member)', () => {
   })
 
   // Groups may span people (task-groups.md "Group nhiều người"): Assign never
-  // drags children along and never ungroups.
-  it('moves a group head alone — its children keep their people', async () => {
+  // ungroups. A mixed group's head moves alone…
+  it('moves a mixed group\'s head alone — its children keep their people', async () => {
     await mk('head', 1)
     await mk('kid1', 2, { parentId: 'head' })
-    await mk('kid2', 3, { parentId: 'head' })
+    await mk('kid2', 3, { parentId: 'head', assigneeId: 'm2' })
     expect(await reassignTasks(['head'], 'm2')).toBe(1)
     expect((await db.tasks.get('head'))?.assigneeId).toBe('m2')
-    for (const id of ['kid1', 'kid2']) {
-      const kid = await db.tasks.get(id)
-      expect(kid?.assigneeId).toBe('m1')
-      expect(kid?.parentId).toBe('head')
+    expect((await db.tasks.get('kid1'))?.assigneeId).toBe('m1')
+    for (const id of ['kid1', 'kid2']) expect((await db.tasks.get(id))?.parentId).toBe('head')
+  })
+
+  // …but a one-person group moves together ("Group một người đi cùng nhau").
+  it('carries a one-person group\'s children along with its head', async () => {
+    await mk('head', 1)
+    await mk('kid1', 2, { parentId: 'head', listOrder: 0 })
+    await mk('kid2', 3, { parentId: 'head', listOrder: 1 })
+    expect(await reassignTasks(['head'], 'm2')).toBe(3)
+    for (const id of ['head', 'kid1', 'kid2']) {
+      expect((await db.tasks.get(id))?.assigneeId).toBe('m2')
     }
+    expect((await db.tasks.get('kid2'))?.listOrder).toBe(1)
+  })
+
+  it('moves the head once every child sits with the new person', async () => {
+    // The user's case: grouped while unassigned, then assigned the children.
+    await mk('x', 1, { assigneeId: 'm2', listOrder: 7 })
+    await mk('head', 2, { assigneeId: null })
+    await mk('kid1', 3, { assigneeId: null, parentId: 'head', listOrder: 0 })
+    await mk('kid2', 4, { assigneeId: null, parentId: 'head', listOrder: 1 })
+    expect(await reassignTasks(['kid1', 'kid2'], 'm2')).toBe(3)
+    const head = await db.tasks.get('head')
+    expect(head?.assigneeId).toBe('m2')
+    expect(head?.listOrder).toBe(8) // bottom of m2's lane, like any assigned task
+    expect((await db.tasks.get('kid1'))?.listOrder).toBe(0)
+  })
+
+  it('heals a split group when its children are re-assigned to their own person', async () => {
+    await mk('head', 1, { assigneeId: null })
+    await mk('kid1', 2, { assigneeId: 'm2', parentId: 'head' })
+    await mk('kid2', 3, { assigneeId: 'm2', parentId: 'head' })
+    expect(await reassignTasks(['kid1', 'kid2'], 'm2')).toBe(1)
+    expect((await db.tasks.get('head'))?.assigneeId).toBe('m2')
   })
 
   it('keeps a child in its group (and its place there) when it changes person', async () => {
     await mk('x', 1, { assigneeId: 'm2', listOrder: 7 })
     await mk('head', 2)
     await mk('kid', 3, { parentId: 'head', listOrder: 0 })
+    await mk('kid2', 4, { parentId: 'head', listOrder: 1 })
     await reassignTasks(['kid'], 'm2')
     const kid = await db.tasks.get('kid')
     expect(kid?.assigneeId).toBe('m2')
     expect(kid?.parentId).toBe('head')
     expect(kid?.listOrder).toBe(0) // its slot among siblings, not m2's lane end
+    // kid2 still sits with m1, so the group is mixed and the head stays.
     expect((await db.tasks.get('head'))?.assigneeId).toBe('m1')
   })
 

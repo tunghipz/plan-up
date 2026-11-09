@@ -872,13 +872,40 @@ export async function reassignTasks(
     const all = await db.tasks.toArray()
     const byId = new Map(all.map((t) => [t.id, t]))
     // Groups may span people (design-docs/task-groups.md "Group nhiều người"), so
-    // a head moves ALONE and a child stays in its group — no expansion, no
-    // ungrouping. Tasks already in the target lane are dropped below so a no-op
-    // selection writes (and logs) nothing.
+    // a child stays in its group — no ungrouping. Tasks already in the target lane
+    // are dropped below so a no-op selection writes (and logs) nothing.
     const targets = new Map<string, Task>()
     for (const id of taskIds) {
       const t = byId.get(id)
       if (t) targets.set(t.id, t)
+    }
+    // …except a ONE-person group moves together (task-groups.md "Group một người
+    // đi cùng nhau"). A head whose children all sit with the head's person carries
+    // them along; a mixed group's head still moves alone.
+    const kidsOf = new Map<string, Task[]>()
+    for (const t of all) {
+      if (!t.parentId) continue
+      const arr = kidsOf.get(t.parentId)
+      if (arr) arr.push(t)
+      else kidsOf.set(t.parentId, [t])
+    }
+    for (const t of [...targets.values()]) {
+      const kids = kidsOf.get(t.id)
+      const owner = t.assigneeId ?? null
+      if (kids && kids.every((k) => (k.assigneeId ?? null) === owner)) {
+        for (const k of kids) targets.set(k.id, k)
+      }
+    }
+    // And when the move leaves every child of a group with one person, the head
+    // follows — otherwise a group built from unassigned tasks and then assigned
+    // keeps its head in the Unassigned card. Runs for selected children that are
+    // already with the target too, so re-assigning heals a group split earlier.
+    for (const t of [...targets.values()]) {
+      if (!t.parentId || targets.has(t.parentId)) continue
+      const head = byId.get(t.parentId)
+      const kids = kidsOf.get(t.parentId) ?? []
+      const endsWith = (k: Task) => (targets.has(k.id) ? assigneeId : (k.assigneeId ?? null))
+      if (head && kids.every((k) => endsWith(k) === assigneeId)) targets.set(head.id, head)
     }
     // Bottom of the target lane, per sprint — computed once, then walked forward
     // so a multi-task move keeps the selection's own top-to-bottom order.
@@ -894,15 +921,18 @@ export async function reassignTasks(
     }
     for (const t of targets.values()) {
       if (t.assigneeId === assigneeId) continue
-      const key = laneKey(t)
-      const next = (laneEnd.get(key) ?? -1) + 1
-      laneEnd.set(key, next)
       // A child keeps its listOrder: it stays in its group, where that value is
       // its position among siblings — not a slot in the new person's lane.
       const keepOrder = opts.keepOrder || !!t.parentId
+      let listOrder: number | undefined
+      if (!keepOrder) {
+        const key = laneKey(t)
+        listOrder = (laneEnd.get(key) ?? -1) + 1
+        laneEnd.set(key, listOrder)
+      }
       await updateTask(t.id, {
         assigneeId,
-        ...(keepOrder ? {} : { listOrder: next }),
+        ...(listOrder === undefined ? {} : { listOrder }),
       })
       moved.push(t.id)
     }

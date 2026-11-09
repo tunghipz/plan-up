@@ -1,9 +1,10 @@
 # Task groups (parent task with nested children)
 
 **Status:** Implemented
-**Last updated:** 2026-11-09 (**nền group**: mỗi group trong List là một thẻ bo lồng trong bảng,
-nhuộm nhẹ theo màu avatar của người giữ group — xem *Nền group*; trước đó cùng ngày: group được
-chứa task của nhiều người, và **Add to group** chọn group trong popover của selection bar)
+**Last updated:** 2026-11-09 (**group một người đi cùng nhau**: giao hết task con cho một người
+thì group head theo sang người đó, đổi người cho head của group một người thì task con theo — xem
+*Group nhiều người*; trước đó cùng ngày: **nền group** thẻ bo nhuộm màu người giữ group, group
+được chứa task của nhiều người, và **Add to group** chọn group trong popover của selection bar)
 **Previously:** 2026-09-11 (bulk Assign obeys the no-cross-member rule; see tasks.md)
 **Code:** `app/src/db.ts` (`Task.parentId`, `createGroupFromSelection`, `addTasksToGroup`,
 `setTaskParent`),
@@ -84,8 +85,24 @@ hướng đó đi"*.
 - **Tạo group** từ task của nhiều người: group head mới **Unassigned**. Cùng một người thì head
   thuộc người đó, như trước.
 - **Add to group** liệt kê **mọi** group của sprint, mỗi dòng ghi người giữ group.
-- **Đổi người làm** (Assign hàng loạt, ô Assignee từng dòng): task con **ở lại group**. Đổi người
-  cho group head thì **chỉ head** chuyển, task con giữ người của mình. Xem [tasks.md](./tasks.md).
+- **Đổi người làm** (Assign hàng loạt, ô Assignee từng dòng): task con **ở lại group**. Xem
+  [tasks.md](./tasks.md).
+- **Group một người đi cùng nhau** (sửa cùng ngày). User tạo group từ 3 task chưa giao (head ra
+  Unassigned), rồi giao cả 3 cho một người: head vẫn nằm ở card Unassigned, còn card người đó chỉ
+  có 3 dòng lẻ kèm chip `↳ #51`, không thành thẻ group, không có màu (*"tao group khi chưa assign,
+  sau khi group xong mới assign thì hiện như này, cũng không có màu theo member"*). Group chỉ
+  thật sự "nhiều người" khi task con thuộc nhiều người, nên:
+  - **Task con đổi người** mà sau đó **mọi** task con của group cùng một người → group head
+    **theo sang** người đó (ghi log `Assignee` như mọi lần đổi). Còn lẫn nhiều người thì head giữ
+    nguyên.
+  - **Đổi người cho group head** khi mọi task con đang cùng người với head (group một người) →
+    task con **theo head**. Group lẫn nhiều người thì **chỉ head** chuyển, task con giữ người của
+    mình.
+  - Chọn lại đúng người đang giữ (ví dụ chọn 3 task con đang của A rồi Assign A) cũng chạy bước
+    khớp head, nên group lệch từ trước sửa được bằng một lần Assign lại, hoặc đổi Assignee của head.
+  - Head theo sang người mới thì nằm **cuối card** người đó (như task được Assign), trừ khi đổi
+    bằng ô Assignee trên dòng (giữ chỗ). Task con luôn giữ chỗ trong group.
+  - Chỉ áp dụng khi **đổi người**. Gỡ task khỏi group hay xoá task con không tự đổi người giữ group.
 - **Không đổi**: một cấp; cùng sprint (`setTaskParent`, rollover chuyển cả group); group làm
   prereq được.
 - **Export**: PNG và Copy to Telegram vẫn chia theo member. Task con của người khác hiện thành

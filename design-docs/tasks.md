@@ -1,9 +1,10 @@
 # Tasks
 
 **Status:** Implemented
-**Last updated:** 2026-11-09 (group được chứa task của nhiều người: đổi người làm **không còn
-gỡ task con khỏi group**, và group head đổi người thì đi một mình — xem *What moving does*;
-trước đó cùng ngày: ô **Assignee trên từng dòng** đi qua `reassignTasks` như Assign
+**Last updated:** 2026-11-09 (group **một người** đi cùng nhau khi đổi người: task con cùng sang
+một người thì head theo, head đổi người thì task con theo; group lẫn nhiều người thì head đi một
+mình — xem *What moving does*; trước đó cùng ngày: đổi người làm **không còn gỡ task con khỏi
+group**; ô **Assignee trên từng dòng** đi qua `reassignTasks` như Assign
 hàng loạt: task con đổi người thì ra khỏi group — trước đó nó ghi thẳng `assigneeId` nên một
 group có thể trải qua nhiều người; xem *Per-row Assignee picker*)
 **Previously:** 2026-09-11 (bulk **Assign** — move the selection to another member)
@@ -56,11 +57,16 @@ bar-morph variants both stop working past ~6.
 ### What moving does to the rest of the row
 - **Dates recompute** for every moved task (`recomputeDates`) — the target member's days off
   are different, so the plan has to re-derive. See [scheduling.md](./scheduling.md).
-- **Groups are left alone** (2026-11-09). A group may hold several people's tasks
+- **Children stay in their group** (2026-11-09). A group may hold several people's tasks
   ([task-groups.md](./task-groups.md) *Group nhiều người*), so a child that changes person
-  **stays in its group**, and a head that changes person moves **alone** — its children keep
-  their own people. (Until that day a child was ungrouped on the way out and a head dragged its
-  children along, because a group could not span members.)
+  **stays in its group**. (Until that day a child was ungrouped on the way out, because a group
+  could not span members.)
+- **A one-person group moves together** (same day). When a move leaves **every** child of a
+  group with one person, the head follows to that person. Moving the head of a group whose
+  children all sit with the head's person carries those children along. A group whose children
+  belong to several people is left as it is: its head moves alone. Without this, a group made
+  from unassigned tasks and then assigned kept its head in the Unassigned card, and the
+  person's card showed the children as loose rows with a `↳ #N` chip and no group tint.
 - **The task lands at the bottom** of the target lane (`listOrder` = the lane's max + 1),
   the same place a newly added task appears. Carrying the old `listOrder` across would drop
   the row in an arbitrary spot in a lane it has never been in. A **group child keeps its

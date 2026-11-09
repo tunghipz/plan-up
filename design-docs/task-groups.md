@@ -38,6 +38,26 @@ nhuộm theo màu người giữ group. User chọn: *"B nhưng màu theo C"*.
   chọn vẫn dùng `accent-soft` đè lên.
 - Thẻ hiện ở **List** (By member và All). Board, Timeline, PNG, share link không đổi.
 - Group thu gọn thì thẻ chỉ còn dòng head.
+- **Không `overflow: hidden`** (sửa cùng ngày): bản đầu cắt mọi thứ ở mép thẻ, và vì dòng trong thẻ
+  chỉ còn 8px padding trái, nút kéo (grip, nằm sát mép trái dòng) đè lên checkbox. Giờ góc bo nằm
+  ở dòng đầu/dòng cuối của thẻ, và grip của dòng trong thẻ dời ra lề thẻ (`left: -8px`), đúng chỗ
+  nó đứng ở dòng thường.
+
+## Thêm task ngay trong group (2026-11-09)
+
+User: *"tao muốn add task vào group đang có thì có cách nào làm nhanh không"*; trong 3 cách đề xuất
+(dòng thêm trong thẻ group / kéo thả vào thẻ / phím `g` cho Add to group) user chọn: *"làm 1"*.
+
+- Cuối mỗi thẻ group (khi không thu gọn) có dòng **`+ Add task`**, mờ khi nghỉ, rõ khi rê chuột vào
+  thẻ hoặc khi đang gõ. Gõ tên, Enter: task mới nằm **cuối group** (`listOrder` = max các con + 1),
+  ô vẫn mở để gõ tiếp. Bấm ra ngoài cũng lưu, như Add task thường.
+- Task mới: cùng sprint, ngày bắt đầu = đầu sprint, log `created` như mọi task mới, rồi
+  `recomputeDates` để task phụ thuộc vào group dời theo span mới.
+- **Người làm**: ở By member là người của card đó (card Unassigned → chưa giao); ở All là người
+  đang lọc nếu bảng đang lọc theo một member, không thì **người giữ group** (head chưa giao → task
+  chưa giao).
+- `addSprintTask({ parentId })` chỉ nhận group head còn tồn tại, top-level, cùng sprint; sai thì
+  tạo task lẻ như thường thay vì gắn nhầm.
 
 ## Group nhiều người (2026-11-09)
 

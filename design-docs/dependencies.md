@@ -23,6 +23,11 @@ UI can flag blocked work.
   tolerated and normalised to `2..5`). On blur/Enter they resolve to task IDs and save.
 - The saved set is shown **collapsed into ranges** (`formatSeqRanges`): dependsOn on
   2,3,4,5,8 renders as `2-5, 8`, so even a long chain stays readable in the narrow column.
+- **At rest the cell wraps instead of cutting** (2026-11-09). It used to be a one-line `<input>`
+  in an 80px column, so `#1-2, 4, 6` showed as `#1-2, 4, 6` cut mid-digit. Now, while not editing,
+  the value renders as text that wraps onto a second line (the row grows, like a long title — the
+  List's rule is *wrap, never cut*); clicking it, or tabbing in, swaps to the input exactly as
+  before.
 - **Rejections are no longer silent.** If a typed number can't apply, a small popover under
   the field says why and which numbers were dropped, then auto-dismisses (~4.5s):
   - `Dropped #9 — creates a cycle` **plus the loop drawn as a path-trace**: the sequence

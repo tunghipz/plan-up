@@ -307,8 +307,25 @@ export async function addSprintTask(input: {
   assigneeId?: string | null
   status?: Status
   priority?: Priority
+  /**
+   * Create the task straight inside this group (the List's in-group Add task
+   * row). Must be a live, top-level task of the same sprint, else the task is
+   * created loose rather than mis-attached. See task-groups.md.
+   */
+  parentId?: string | null
 }): Promise<Task> {
-  return db.transaction('rw', db.projects, db.tasks, db.events, async () => {
+  const task = await db.transaction('rw', db.projects, db.tasks, db.events, async () => {
+    let parentId: string | null = null
+    let listOrder: number | undefined
+    if (input.parentId) {
+      const parent = await db.tasks.get(input.parentId)
+      if (parent && !parent.parentId && parent.sprintId === input.sprintId) {
+        parentId = parent.id
+        // Bottom of the group. parentId is non-indexed → filter, not where().
+        const siblings = await db.tasks.filter((t) => t.parentId === parent.id).toArray()
+        listOrder = siblings.reduce((m, t) => Math.max(m, t.listOrder ?? t.sequence), -1) + 1
+      }
+    }
     const task: Task = {
       id: uid(),
       projectId: input.projectId,
@@ -324,6 +341,7 @@ export async function addSprintTask(input: {
       estimate: null,
       createdAt: Date.now(),
       dependsOn: [],
+      ...(parentId ? { parentId, listOrder } : {}),
     }
     await db.tasks.add(task)
     // Record creation on the sprint activity log.
@@ -340,6 +358,11 @@ export async function addSprintTask(input: {
     })
     return task
   })
+  // A new child moves its group's span, so anything that depends on the group
+  // must follow (the walk enqueues the parent's dependents). Outside the write
+  // transaction: recomputeDates opens its own.
+  if (task.parentId) await recomputeDates(task.id)
+  return task
 }
 
 // The pure order math lives in `reorder.ts` (no Dexie import there, so the

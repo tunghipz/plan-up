@@ -1909,3 +1909,41 @@ describe('getProjectShare (project-scope sprint link, Hướng A)', () => {
     expect((await getShareForRef('c1'))?.id).toBe('coll')
   })
 })
+
+// The List's in-group "Add task" row. See design-docs/task-groups.md
+// "Thêm task ngay trong group".
+describe('addSprintTask into a group', () => {
+  const mk = async (id: string, seq: number, over: Partial<Task> = {}) =>
+    db.tasks.add({
+      id, projectId: P, sequence: seq, title: id, assigneeId: null, sprintId: 's',
+      status: 'todo', priority: 'normal',
+      startDate: '2026-06-01', dueDate: null, estimate: null, createdAt: 0, dependsOn: [],
+      ...over,
+    } as Task)
+
+  it('creates the task as the last child of the group', async () => {
+    await mk('head', 1)
+    await mk('k1', 2, { parentId: 'head', listOrder: 0 })
+    await mk('k2', 3, { parentId: 'head', listOrder: 4 })
+    const t = await addSprintTask({
+      projectId: P, sprintId: 's', title: 'new', startDate: '2026-06-01', assigneeId: 'm1',
+      parentId: 'head',
+    })
+    const saved = await db.tasks.get(t.id)
+    expect(saved?.parentId).toBe('head')
+    expect(saved?.listOrder).toBe(5)
+    expect(saved?.assigneeId).toBe('m1')
+  })
+
+  it('creates a loose task when the target is not a usable group head', async () => {
+    await mk('head', 1)
+    await mk('kid', 2, { parentId: 'head' })
+    await mk('elsewhere', 3, { sprintId: 's2' })
+    for (const parentId of ['kid', 'elsewhere', 'missing']) {
+      const t = await addSprintTask({
+        projectId: P, sprintId: 's', title: parentId, startDate: '2026-06-01', parentId,
+      })
+      expect((await db.tasks.get(t.id))?.parentId ?? null).toBe(null)
+    }
+  })
+})

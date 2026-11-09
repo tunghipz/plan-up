@@ -1,6 +1,7 @@
 import {
   Fragment,
   memo,
+  useContext,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -1266,6 +1267,7 @@ function MemberCard({
                 tasksById={tasksById}
                 planById={planById}
                 showAssignee={false}
+                laneAssigneeId={member.id}
                 conflictTips={conflictTips}
                 selectedIds={selectedIds}
                 onToggleSelect={onToggleSelect}
@@ -1399,6 +1401,7 @@ function UnassignedCard({
               allTasks={allTasks}
               tasksById={tasksById}
               planById={planById}
+              laneAssigneeId={null}
               selectedIds={selectedIds}
               onToggleSelect={onToggleSelect}
               canReorder={isLaneManualOrder(sort)}
@@ -1461,6 +1464,7 @@ function AllTasksCard({
               tasksById={tasksById}
               planById={planById}
               assigneeWide
+              laneAssigneeId={addFor ? addFor.id : undefined}
               conflictTips={conflictTips}
               selectedIds={selectedIds}
               onToggleSelect={onToggleSelect}
@@ -1848,6 +1852,7 @@ function AddTaskRow({
   showAssignee = true,
   assigneeWide = false,
   placeholder = 'Add task',
+  parentId,
 }: {
   projectId: string
   sprintId: string
@@ -1857,6 +1862,8 @@ function AddTaskRow({
   /** All table: wide Assignee column (implies showAssignee). */
   assigneeWide?: boolean
   placeholder?: string
+  /** In-group row: the task is created inside this group (task-groups.md). */
+  parentId?: string
 }) {
   const [title, setTitle] = useState('')
   const add = async () => {
@@ -1869,10 +1876,11 @@ function AddTaskRow({
       title: t,
       assigneeId,
       startDate: sprintStartDate,
+      parentId,
     })
   }
   return (
-    <div className="flex items-center gap-3 px-4 py-2 text-sm">
+    <div className={`flex items-center gap-3 px-4 py-2 text-sm ${parentId ? 'task-group-add' : ''}`}>
       <div className={COL.lead} />
       <div className={COL.dot}>
         <Plus size={14} className="text-ink-faint" />
@@ -1891,7 +1899,7 @@ function AddTaskRow({
         // so an Enter-then-blur can't double-submit.
         onBlur={() => void add()}
         placeholder={placeholder}
-        className={`${COL.title} editable placeholder:text-ink-faint bg-transparent`}
+        className={`${COL.title} editable placeholder:text-ink-faint bg-transparent ${parentId ? 'pl-5' : ''}`}
       />
       {assigneeWide ? (
         <div className={COL.assigneeWide} />
@@ -2466,6 +2474,7 @@ function TaskRows({
   planById,
   showAssignee = true,
   assigneeWide = false,
+  laneAssigneeId,
   conflictTips,
   selectedIds,
   onToggleSelect,
@@ -2479,6 +2488,12 @@ function TaskRows({
   showAssignee?: boolean
   /** All table: wide Assignee column (avatar + name). */
   assigneeWide?: boolean
+  /**
+   * Who a task added from a group's own "Add task" row goes to: the card's
+   * member (null = the Unassigned card). Undefined = the group holder (All table
+   * with no member filter). See task-groups.md "Thêm task ngay trong group".
+   */
+  laneAssigneeId?: string | null
   /** taskId → conflict tooltip (member double-booking); absent map = no warnings. */
   conflictTips?: Map<string, string>
   /** Multi-select state for the group-via-selection flow. */
@@ -2513,6 +2528,7 @@ function TaskRows({
     }
     return m
   }, [allTasks])
+  const sprintRange = useContext(SprintRangeContext)
 
   // Collapse state per parent: localStorage is the source of truth, in-session
   // toggles overlay it. DERIVED (not seeded once into state) so a sprint
@@ -2686,6 +2702,17 @@ function TaskRows({
                     drag={dragFor(c)}
                   />
                 ))}
+            {!isCollapsed && t.sprintId && sprintRange && (
+                <AddTaskRow
+                  projectId={t.projectId}
+                  sprintId={t.sprintId}
+                  sprintStartDate={sprintRange.start}
+                  assigneeId={laneAssigneeId !== undefined ? laneAssigneeId : (t.assigneeId ?? null)}
+                  showAssignee={showAssignee}
+                  assigneeWide={assigneeWide}
+                  parentId={t.id}
+                />
+              )}
             </div>
           )
         }
@@ -3461,11 +3488,13 @@ function PrereqInput({
     return () => clearTimeout(t)
   }, [notice])
 
-  // Pin the notice popover to the input (portal escapes the card's overflow).
+  // Pin the notice popover to the cell (portal escapes the card's overflow). The
+  // cell, not the input: at rest the input is visually hidden behind the
+  // wrapping label, so its own box is a 1px sliver.
   useEffect(() => {
     if (!notice) return
     const pin = () => {
-      const r = inputRef.current?.getBoundingClientRect()
+      const r = inputRef.current?.parentElement?.getBoundingClientRect()
       if (r) setPos({ top: r.bottom + 4, right: Math.max(8, window.innerWidth - r.right) })
     }
     pin()
@@ -3539,8 +3568,25 @@ function PrereqInput({
     setNotice(items.length ? items : null)
   }
 
+  // At rest a saved set renders as WRAPPING text: the one-line input cut a long
+  // set (`#1-2, 4, 6`) mid-digit in the 80px column. Click / Tab swaps to the
+  // input (kept in the tab order, visually hidden meanwhile) exactly as before.
+  // See design-docs/dependencies.md "At rest the cell wraps instead of cutting".
+  const showLabel = !focused && !!draft
   return (
     <>
+      {showLabel && (
+        <span
+          onClick={() => inputRef.current?.focus()}
+          title="Prereq task numbers — list or ranges, e.g. 2-5, 8"
+          aria-hidden
+          className={`editable block w-full cursor-text text-sm text-right tabular-nums leading-snug whitespace-normal break-words ${
+            notice ? 'text-priority-high' : ''
+          }`}
+        >
+          #{draft}
+        </span>
+      )}
       <input
         ref={inputRef}
         // Show a `#`-prefixed ref at rest (matches the `#N` language in the cycle
@@ -3568,7 +3614,7 @@ function PrereqInput({
         aria-label="Prerequisite task numbers"
         className={`editable w-full text-sm text-right tabular-nums bg-transparent placeholder:text-ink-faint placeholder:opacity-40 ${
           notice ? 'text-priority-high' : ''
-        }`}
+        } ${showLabel ? 'sr-only' : ''}`}
       />
       {notice &&
         createPortal(

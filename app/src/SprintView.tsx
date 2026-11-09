@@ -31,6 +31,7 @@ import {
   deleteTask,
   setTaskParent,
   createGroupFromSelection,
+  addTasksToGroup,
   setDependencies,
   setListOrder,
   renormalizeListOrder,
@@ -528,10 +529,16 @@ export function SprintView({
   )
 }
 
+/** The selected tasks in displayed top-to-bottom order (`allTasks` arrives flattened). */
+const selectedInOrderOf = (allTasks: Task[], selectedIds: Set<string>) =>
+  allTasks.filter((t) => selectedIds.has(t.id))
+
 /**
  * Floating action bar shown while ≥1 task is selected (group-via-selection flow).
  * "Group" creates a new group parent from the selection (same member, ≥2, none a
- * group head); "Ungroup" ungroups any selected children; "Chain prereqs" links the
+ * group head) — or, when the selection holds a child of ONE existing group plus
+ * loose tasks, becomes "Add to #N" and nests the loose tasks there; "Ungroup"
+ * ungroups any selected children; "Chain prereqs" links the
  * selection top-to-bottom (each depends on the one above, keeping existing prereqs,
  * ≥2 needed); "Clear prereqs" wipes dependsOn on the selection; "Delete" deletes the
  * selection (confirm first; deleting a group head ungroups its children, doesn't
@@ -571,17 +578,48 @@ function SelectionBar({
   const noneParent = selected.every((t) => !parentIds.has(t.id))
   const canGroup = sameMember && noneParent
   const anyChild = selected.some((t) => !!t.parentId)
+  // Add to an EXISTING group: the selection holds children of exactly one group
+  // (the head itself has no checkbox) plus ≥1 loose task. Loose tasks must share
+  // the head's assignee and sprint — groups never span members. When a group is
+  // targeted the Group button becomes "Add to #N" (disabled if the people don't
+  // match). See design-docs/task-groups.md "Add to #N".
+  const groupIds = new Set(selected.filter((t) => t.parentId).map((t) => t.parentId!))
+  const targetGroup =
+    groupIds.size === 1 ? tasksById.get([...groupIds][0]) : undefined
+  const looseInOrder = selectedInOrderOf(allTasks, selectedIds).filter(
+    (t) => !t.parentId && !parentIds.has(t.id)
+  )
+  const canAddToGroup =
+    !!targetGroup &&
+    noneParent &&
+    looseInOrder.length > 0 &&
+    looseInOrder.every(
+      (t) =>
+        (t.assigneeId ?? null) === (targetGroup.assigneeId ?? null) &&
+        t.sprintId === targetGroup.sprintId
+    )
+  const groupOwner = targetGroup
+    ? (members.find((m) => m.id === targetGroup.assigneeId)?.name ?? 'Unassigned')
+    : ''
 
   // Chain follows the displayed top-to-bottom order: `allTasks` arrives already
   // flattened in render order (flattenDisplayOrder), so filtering it keeps that
   // order — not Set insertion or raw DB order. ≥2 needed to form a chain.
-  const selectedInOrder = allTasks.filter((t) => selectedIds.has(t.id))
+  const selectedInOrder = selectedInOrderOf(allTasks, selectedIds)
   const canChain = selectedInOrder.length >= 2
   const canClearPrereq = selected.some((t) => t.dependsOn.length > 0)
 
   const doGroup = async () => {
     if (!canGroup) return
     await createGroupFromSelection(selected.map((t) => t.id))
+    onClear()
+  }
+  const doAddToGroup = async () => {
+    if (!canAddToGroup || !targetGroup) return
+    await addTasksToGroup(
+      targetGroup.id,
+      looseInOrder.map((t) => t.id)
+    )
     onClear()
   }
   // Chain prereqs: for each adjacent pair (A above B), make B depend on A,
@@ -724,20 +762,37 @@ function SelectionBar({
       >
         <Link2Off size={14} /> Clear prereqs
       </button>
-      <button
-        onClick={doGroup}
-        disabled={!canGroup}
-        title={
-          canGroup
-            ? undefined
-            : 'Select ≥2 tasks with the same assignee (not a group) to group'
-        }
-        // Button is always-white on the dark floating bar (both themes), so the
-        // label stays hardcoded near-black — text-ink would flip to white in dark.
-        className="inline-flex items-center gap-1.5 text-[13px] font-semibold rounded-[9px] px-3 py-1.5 transition disabled:opacity-40 disabled:cursor-not-allowed bg-white text-[#1d1d1f] hover:bg-white/90"
-      >
-        <FolderPlus size={14} /> Group
-      </button>
+      {targetGroup ? (
+        <button
+          onClick={doAddToGroup}
+          disabled={!canAddToGroup}
+          title={
+            canAddToGroup
+              ? `Add ${looseInOrder.length} task${looseInOrder.length === 1 ? '' : 's'} to #${targetGroup.sequence} ${targetGroup.title}`
+              : looseInOrder.length === 0
+                ? `Also tick the task(s) to add to #${targetGroup.sequence}`
+                : `Only ${groupOwner}'s tasks in this sprint can join #${targetGroup.sequence}`
+          }
+          className="inline-flex items-center gap-1.5 text-[13px] font-semibold rounded-[9px] px-3 py-1.5 transition disabled:opacity-40 disabled:cursor-not-allowed bg-white text-[#1d1d1f] hover:bg-white/90"
+        >
+          <FolderPlus size={14} /> Add to #{targetGroup.sequence}
+        </button>
+      ) : (
+        <button
+          onClick={doGroup}
+          disabled={!canGroup}
+          title={
+            canGroup
+              ? undefined
+              : 'Select ≥2 tasks with the same assignee (not a group) to group'
+          }
+          // Button is always-white on the dark floating bar (both themes), so the
+          // label stays hardcoded near-black — text-ink would flip to white in dark.
+          className="inline-flex items-center gap-1.5 text-[13px] font-semibold rounded-[9px] px-3 py-1.5 transition disabled:opacity-40 disabled:cursor-not-allowed bg-white text-[#1d1d1f] hover:bg-white/90"
+        >
+          <FolderPlus size={14} /> Group
+        </button>
+      )}
       <button
         onClick={doDelete}
         className="inline-flex items-center gap-1.5 text-[13px] text-red-300 hover:text-white hover:bg-red-500/80 px-2.5 py-1.5 rounded-[9px] transition"
@@ -2631,12 +2686,12 @@ const TaskRow = memo(function TaskRow({
 
       {assigneeWide ? (
         <div className={COL.assigneeWide}>
-          <AssigneePicker task={task} members={members} assignee={assignee} update={update} wide />
+          <AssigneePicker task={task} members={members} assignee={assignee} wide />
         </div>
       ) : (
         showAssignee && (
           <div className={COL.assignee}>
-            <AssigneePicker task={task} members={members} assignee={assignee} update={update} />
+            <AssigneePicker task={task} members={members} assignee={assignee} />
           </div>
         )
       )}
@@ -3030,13 +3085,11 @@ function AssigneePicker({
   task,
   members,
   assignee,
-  update,
   wide = false,
 }: {
   task: Task
   members: Member[]
   assignee: Member | null
-  update: (p: Partial<Task>) => void
   /** All table: show the name next to the avatar; unassigned reads "Assign". */
   wide?: boolean
 }) {
@@ -3077,10 +3130,12 @@ function AssigneePicker({
       <select
         ref={ref}
         value={task.assigneeId ?? ''}
-        onChange={async (e) => {
-          update({ assigneeId: e.target.value || null })
-          // Reassign may change which member's daysOff apply → recompute.
-          await recomputeDates(task.id)
+        onChange={(e) => {
+          // Same path as bulk Assign: a group child that changes person leaves its
+          // group (groups never span members), and dates recompute for the new
+          // member's days off. keepOrder: the row stays where it is.
+          // See design-docs/tasks.md "Per-row Assignee picker".
+          void reassignTasks([task.id], e.target.value || null, { keepOrder: true })
         }}
         className="absolute inset-0 opacity-0 cursor-pointer"
         aria-label="Assignee"

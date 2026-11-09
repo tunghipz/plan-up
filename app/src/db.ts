@@ -837,7 +837,13 @@ export async function setMemberAvatar(
  */
 export async function reassignTasks(
   taskIds: string[],
-  assigneeId: string | null
+  assigneeId: string | null,
+  /**
+   * Per-row picker: leave `listOrder` alone so the row doesn't jump — except a
+   * child leaving its group, whose order only meant something inside the group.
+   * See design-docs/tasks.md "Per-row Assignee picker".
+   */
+  opts: { keepOrder?: boolean } = {}
 ): Promise<number> {
   const moved: string[] = []
   await db.transaction('rw', db.projects, db.tasks, db.members, db.events, async () => {
@@ -872,10 +878,11 @@ export async function reassignTasks(
       // parentId clears for a child that is moving on its own; a child moving
       // WITH its head keeps the link (the whole group changes lane together).
       const keepsParent = t.parentId ? targets.has(t.parentId) : false
+      const leavesGroup = !!t.parentId && !keepsParent
       await updateTask(t.id, {
         assigneeId,
-        listOrder: next,
-        ...(t.parentId && !keepsParent ? { parentId: null } : {}),
+        ...(opts.keepOrder && !leavesGroup ? {} : { listOrder: next }),
+        ...(leavesGroup ? { parentId: null } : {}),
       })
       moved.push(t.id)
     }
@@ -966,6 +973,43 @@ export async function createGroupFromSelection(
     for (const t of eligible) await db.tasks.update(t.id, { parentId })
     return parentId
   })
+}
+
+/**
+ * Nest existing loose tasks under an existing group head — the selection bar's
+ * "Add to #N". Same invariants as creating a group: one level only (the head is
+ * top-level, a task with children never becomes a child), same sprint, and the
+ * SAME assignee as the head (groups never span members). Ineligible ids are
+ * skipped, not thrown. New children land at the bottom of the group, in the
+ * order given. Dates recompute afterwards so anything that depends on the group
+ * follows its new span. Returns the ids actually moved.
+ * See design-docs/task-groups.md "Add to #N".
+ */
+export async function addTasksToGroup(parentId: string, taskIds: string[]): Promise<string[]> {
+  const moved: string[] = []
+  await db.transaction('rw', db.projects, db.tasks, async () => {
+    const parent = await db.tasks.get(parentId)
+    if (!parent || parent.parentId || !parent.sprintId) return
+    // parentId is non-indexed → filter, not where()
+    const all = await db.tasks.filter((t) => t.sprintId === parent.sprintId).toArray()
+    const heads = new Set(all.filter((t) => t.parentId).map((t) => t.parentId!))
+    let end = all
+      .filter((t) => t.parentId === parentId)
+      .reduce((m, t) => Math.max(m, t.listOrder ?? t.sequence), -1)
+    const byId = new Map(all.map((t) => [t.id, t]))
+    for (const id of taskIds) {
+      const t = byId.get(id)
+      if (!t || t.id === parentId || t.parentId || heads.has(t.id)) continue
+      if ((t.assigneeId ?? null) !== (parent.assigneeId ?? null)) continue
+      end += 1
+      await db.tasks.update(id, { parentId, listOrder: end })
+      moved.push(id)
+    }
+  })
+  // Outside the write transaction: recomputeDates opens its own. A child's walk
+  // also enqueues the dependents of its parent (the group span moved).
+  for (const id of moved) await recomputeDates(id)
+  return moved
 }
 
 export async function deleteTask(taskId: string) {

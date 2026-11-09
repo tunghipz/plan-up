@@ -1,8 +1,11 @@
 # Task groups (parent task with nested children)
 
 **Status:** Implemented
-**Last updated:** 2026-09-11 (bulk Assign obeys the no-cross-member rule; see tasks.md)
-**Code:** `app/src/db.ts` (`Task.parentId`, `createGroupFromSelection`, `setTaskParent`),
+**Last updated:** 2026-11-09 (**Add to group** — đưa task lẻ vào group đã có từ selection
+bar; ô Assignee từng dòng cũng gỡ task con khỏi group khi đổi người, xem tasks.md)
+**Previously:** 2026-09-11 (bulk Assign obeys the no-cross-member rule; see tasks.md)
+**Code:** `app/src/db.ts` (`Task.parentId`, `createGroupFromSelection`, `addTasksToGroup`,
+`setTaskParent`),
 `app/src/SprintView.tsx` (`MemberCard` task tree render, `TaskGroupRow` parent roll-up,
 `SelectionBar` group/ungroup/delete), collapse persisted in `localStorage`
 
@@ -22,6 +25,17 @@ separate epic/tag system. Approach **B** chosen 2026-06-04 (see
   - **Group** creates a **new parent task** titled `New group` (rename inline) and
     nests the selected tasks under it. Enabled only when ≥2 are selected, all share the
     same assignee, and none is already a group head (one level).
+  - **Add to #N** (2026-11-09) đưa task lẻ vào một **group đã có**. Tick task lẻ cùng **một
+    task con bất kỳ** của group đó (group head không có checkbox), nút **Group** đổi thành
+    **Add to #N** (N = số của group head, tên group ở tooltip). Bật khi: lựa chọn có task con của
+    **đúng một** group, có ≥1 task lẻ, task lẻ **cùng người làm và cùng sprint với group head**,
+    không task nào là group head. Sai người thì nút vẫn hiện nhưng tắt, tooltip nói phải là task
+    của ai. Task mới vào nằm **cuối group** (`listOrder` = max của các con + 1), rồi
+    `recomputeDates` để task phụ thuộc vào group dời theo span mới. Trước đó không có đường nào:
+    Group chỉ tạo group mới, và một lựa chọn lẫn task con thì Group âm thầm không làm gì (task
+    con bị loại khỏi `createGroupFromSelection`). User hỏi: *"tao có task này muốn cho vào group
+    đang có thì như nào"*; chọn selection bar thay vì kéo thả vì kéo thả chỉ đổi thứ tự trong
+    cùng cấp ([list-view.md](./list-view.md)).
   - **Ungroup** ungroups any selected children (clears their `parentId`); shown when the
     selection contains ≥1 grouped task.
   - **Chain prereqs** / **Clear prereqs** set or clear prerequisites across the selection —

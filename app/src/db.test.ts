@@ -29,6 +29,7 @@ import {
   addSprintTask,
   updateTask,
   reassignTasks,
+  addTasksToGroup,
   addCollectionItem,
   memberNameExists,
   exportAll,
@@ -899,6 +900,84 @@ describe('setDependencies: auto-move under the prereq', () => {
     await setDependencies('d', ['a']) // a, d, b, c
     await setDependencies('b', ['d']) // a, d, b, c
     expect(await laneOrder(['a', 'b', 'c', 'd'])).toEqual(['a', 'd', 'b', 'c'])
+  })
+})
+
+describe('reassignTasks — keepOrder (per-row Assignee picker)', () => {
+  const mk = async (id: string, seq: number, over: Partial<Task> = {}) =>
+    db.tasks.add({
+      id, projectId: P, sequence: seq, title: id, assigneeId: 'm1', sprintId: 's',
+      status: 'todo', priority: 'normal',
+      startDate: '2026-06-01', dueDate: null, estimate: null, createdAt: 0, dependsOn: [],
+      ...over,
+    } as Task)
+
+  beforeEach(async () => {
+    await db.members.bulkAdd([
+      { id: 'm1', projectId: P, name: 'A', color: '#000', daysOff: [] },
+      { id: 'm2', projectId: P, name: 'B', color: '#111', daysOff: [] },
+    ])
+  })
+
+  it('keeps the row\'s manual position', async () => {
+    await mk('x', 1, { assigneeId: 'm2', listOrder: 7 })
+    await mk('a', 2, { listOrder: 1.5 })
+    await reassignTasks(['a'], 'm2', { keepOrder: true })
+    const a = await db.tasks.get('a')
+    expect(a?.assigneeId).toBe('m2')
+    expect(a?.listOrder).toBe(1.5)
+  })
+
+  it('still ungroups a child, and drops it to the bottom of the new lane', async () => {
+    await mk('x', 1, { assigneeId: 'm1', listOrder: 7 })
+    await mk('head', 2, { assigneeId: null })
+    await mk('kid', 3, { assigneeId: null, parentId: 'head', listOrder: 0 })
+    await reassignTasks(['kid'], 'm1', { keepOrder: true })
+    const kid = await db.tasks.get('kid')
+    expect(kid?.assigneeId).toBe('m1')
+    expect(kid?.parentId).toBe(null)
+    expect(kid?.listOrder).toBe(8) // bottom of m1's lane (x = 7), not its in-group 0
+  })
+})
+
+describe('addTasksToGroup (selection bar "Add to #N")', () => {
+  const mk = async (id: string, seq: number, over: Partial<Task> = {}) =>
+    db.tasks.add({
+      id, projectId: P, sequence: seq, title: id, assigneeId: null, sprintId: 's',
+      status: 'todo', priority: 'normal',
+      startDate: '2026-06-01', dueDate: null, estimate: null, createdAt: 0, dependsOn: [],
+      ...over,
+    } as Task)
+
+  it('nests loose tasks at the bottom of the group, in the given order', async () => {
+    await mk('head', 6)
+    await mk('k1', 3, { parentId: 'head', listOrder: 0 })
+    await mk('k2', 4, { parentId: 'head', listOrder: 1 })
+    await mk('loose1', 7)
+    await mk('loose2', 8)
+    expect(await addTasksToGroup('head', ['loose2', 'loose1'])).toEqual(['loose2', 'loose1'])
+    expect((await db.tasks.get('loose2'))?.parentId).toBe('head')
+    expect((await db.tasks.get('loose2'))?.listOrder).toBe(2)
+    expect((await db.tasks.get('loose1'))?.listOrder).toBe(3)
+  })
+
+  it('skips a task of another person, another sprint, a child elsewhere, or a group head', async () => {
+    await mk('head', 1)
+    await mk('kid', 2, { parentId: 'head' })
+    await mk('other', 3, { assigneeId: 'm9' })
+    await mk('later', 4, { sprintId: 's2' })
+    await mk('head2', 5)
+    await mk('kid2', 6, { parentId: 'head2' })
+    expect(await addTasksToGroup('head', ['other', 'later', 'kid2', 'head2', 'head'])).toEqual([])
+    expect((await db.tasks.get('other'))?.parentId ?? null).toBe(null)
+    expect((await db.tasks.get('kid2'))?.parentId).toBe('head2')
+  })
+
+  it('refuses a target that is itself a child', async () => {
+    await mk('head', 1)
+    await mk('kid', 2, { parentId: 'head' })
+    await mk('loose', 3)
+    expect(await addTasksToGroup('kid', ['loose'])).toEqual([])
   })
 })
 

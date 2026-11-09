@@ -1,7 +1,10 @@
 # Tasks
 
 **Status:** Implemented
-**Last updated:** 2026-09-11 (bulk **Assign** — move the selection to another member)
+**Last updated:** 2026-11-09 (ô **Assignee trên từng dòng** đi qua `reassignTasks` như Assign
+hàng loạt: task con đổi người thì ra khỏi group — trước đó nó ghi thẳng `assigneeId` nên một
+group có thể trải qua nhiều người; xem *Per-row Assignee picker*)
+**Previously:** 2026-09-11 (bulk **Assign** — move the selection to another member)
 **Code:** `app/src/SprintView.tsx` (`TaskRow`, `AddTaskRow`, `TitleTextarea`,
 `EffortCell`, `DatePickCell`, `PrereqInput`, `SelectionBar`, `AssignPopover`),
 `app/src/db.ts` (`reassignTasks`)
@@ -62,6 +65,23 @@ bar-morph variants both stop working past ~6.
   the row in an arbitrary spot in a lane it has never been in.
 - Each move is one logged edit (`assigneeId` is a `LoggableField`), so the sprint activity
   log shows `Assignee A→B` per task.
+
+## Per-row Assignee picker (2026-11-09)
+
+The Assignee cell on a row (card Unassigned, and every row of the List's **All** table) is a
+native `<select>`. It goes through the **same `reassignTasks`** as bulk Assign, so the rules
+above hold for a single row too:
+- **A group child that changes person leaves its group** (`parentId` cleared). Groups never
+  span members ([task-groups.md](./task-groups.md)).
+- **Bug it fixes:** the picker used to write `assigneeId` straight through `updateTask`, so
+  assigning one child of an unassigned group to Alice left a group holding Alice's task and
+  unassigned ones. The All table puts the picker on every row, which made it easy to hit.
+- **Position:** unlike bulk Assign, the row **keeps its manual position** (`listOrder`
+  untouched, `reassignTasks(…, { keepOrder: true })`) — you changed one cell, the row should
+  not jump. In the All table the manual order is shared, so the row stays put and also lands
+  in the matching spot of the new person's card. The one exception is a child leaving its
+  group: its order was a position *inside the group*, meaningless at top level, so it drops to
+  the bottom of the new person's tasks like a bulk move.
 
 ## Inline editing affordance
 All click-to-edit text fields share the `.editable` class (`index.css`):

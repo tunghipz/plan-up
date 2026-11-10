@@ -57,7 +57,10 @@ undoable). Desktop-only **Claude panel** (`⌘J`, View ▸ Ask Claude, or the �
 button): ask about the open project with **your own Claude subscription** — the app runs
 the locally installed Claude Code CLI headless (no API key, no tools, none of your
 hooks/MCP/skills), feeding it a snapshot of the project's sprints, tasks, members and days
-off. It answers in a right-hand inspector column, can **build a slide deck** (Claude writes
+off. It answers in a right-hand inspector column (drag its left edge to resize; the width is
+remembered), where every **task, person and sprint it mentions is a link** — click one to
+jump there in the plan (its sprint opens in List, the row or member card scrolls into view
+and flashes). It can **build a slide deck** (Claude writes
 the content, a fixed Cupertino template renders one self-contained HTML file — preview,
 open in the browser, save, present with ←/→, print to PDF; dense slides shrink to fit), and
 can **propose changes** (create / edit / move / delete tasks, prerequisites, sprint goal) as

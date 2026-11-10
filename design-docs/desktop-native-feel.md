@@ -1,11 +1,10 @@
 # Desktop native feel (macOS)
 
 **Status:** Implemented
-**Last updated:** 2026-11-09 (**security**: File ▸ Import… dùng `pick_import_file`, Rust tự mở panel và đọc file). Trước đó: 2026-11-09
+**Last updated:** 2026-11-10 (**bỏ vibrancy native** ở §4: cửa sổ đục lại, sidebar dùng `.vibrancy` CSS như bản web). Trước đó: 2026-11-09 (**security**: File ▸ Import… dùng `pick_import_file`, Rust tự mở panel và đọc file), 2026-11-09
 **Code:** `app/src/native-shell.ts` (menu bar, menu chuột phải, chặn context menu WebKit,
 đồng bộ theme cửa sổ), `app/src/App.tsx` (nối lệnh menu vào state), `app/src/index.css`
-(`html.desktop`, `html.native-vibrancy`), `app/src-tauri/` (window-state, vibrancy, ẩn
-cửa sổ khi ⌘W)
+(`html.desktop`), `app/src-tauri/` (window-state, ẩn cửa sổ khi ⌘W)
 
 ## Purpose
 
@@ -103,28 +102,26 @@ phục khi mở: `SIZE | POSITION | MAXIMIZED | FULLSCREEN`. **Không** lưu `DE
 `VISIBLE`: khôi phục decorations có thể đè overlay title bar; khôi phục visible có thể
 mở app ở trạng thái ẩn (vì ⌘W giờ là ẩn). Lần mở đầu tiên vẫn 1280×800.
 
-## 4. Vibrancy thật cho sidebar
+## 4. Vibrancy native cho sidebar: **đã bỏ (2026-11-10)**
 
-Thay vì CSS `backdrop-filter` làm mờ nền canvas, sidebar dùng `NSVisualEffectView`
-material **sidebar** của macOS, thấy hình nền desktop phía sau như Finder:
+User nói ngày 2026-11-10, nguyên văn: *"bỏ cái vibrance đi"*. Cửa sổ đục lại; sidebar và
+icon rail dùng `.vibrancy` CSS (`--color-vibrancy` + `backdrop-filter`) trên canvas của app,
+giống hệt bản web. Không còn thấy hình nền desktop sau sidebar.
 
-- `tauri.conf.json`: `app.macOSPrivateApi: true` (Cargo feature `macos-private-api`),
-  cửa sổ `transparent: true` + `windowEffects { effects: ["sidebar"], state:
-  "followsWindowActiveState" }`: cửa sổ không active thì material chuyển xám phẳng,
-  giống Finder.
-- Web: class `native-vibrancy` trên `<html>` (chỉ `IS_TAURI`). Khi đó `html`, `body` và
-  root shell trong suốt; **cột chính** mang `.ambient-canvas` (trước đây là root) nên
-  nội dung và các card kính vẫn nằm trên canvas đục như cũ. `.vibrancy` (sidebar + icon
-  rail) bỏ nền và blur để lộ material native.
-- **Dark mode của app ≠ appearance hệ thống:** material native theo `NSAppearance` của
-  cửa sổ, không theo class `dark`. Mỗi khi đổi dark mode, app gọi
-  `getCurrentWindow().setTheme('dark' | 'light')` (quyền `core:window:allow-set-theme`).
-  Lợi thêm: menu chuột phải, menu bar dropdown, hộp thoại hệ thống cũng theo theme của
-  app.
-- Popover kính đè lên vùng sidebar không làm mờ được material native (WKWebView chỉ
-  blur nội dung web). Chấp nhận: `--color-glass-thick` 0.78 đủ đục.
-- `macOSPrivateApi` khiến app không lên được Mac App Store. Không sao: app phát hành
-  qua DMG trên GitHub Releases.
+Đã gỡ:
+
+- `tauri.conf.json`: `app.macOSPrivateApi`, `transparent: true`, `windowEffects`. Cargo bỏ
+  feature `macos-private-api` (tauri-build bắt feature khớp với config).
+- Web: class `html.native-vibrancy` và CSS đi kèm. Root shell lại mang `.ambient-canvas`
+  như trước, cột chính không mang riêng nữa.
+
+Giữ: đồng bộ theme cửa sổ (`getCurrentWindow().setTheme`, quyền
+`core:window:allow-set-theme`) vì menu chuột phải, menu bar dropdown và hộp thoại hệ thống
+vẫn cần theo dark mode của app.
+
+Bản cũ (2026-11-09) để tham khảo: cửa sổ `transparent` + `NSVisualEffectView` material
+`sidebar` (`state: followsWindowActiveState`), page trong suốt, chỉ cột chính mang canvas.
+Nằm trong git history (`be4db16`).
 
 ## 5. Menu chuột phải native trên task
 

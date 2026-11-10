@@ -150,10 +150,7 @@ const FORCE_DESKTOP_CHROME =
   (new URLSearchParams(window.location.search).has('desktop') ||
     window.localStorage?.getItem('plan-up:forceDesktopChrome') === '1')
 const DESKTOP_CHROME = IS_TAURI || FORCE_DESKTOP_CHROME
-// Real Tauri window: transparent page over an NSVisualEffectView sidebar
-// (desktop-native-feel.md §4). Never in the browser preview — nothing behind it.
-const NATIVE_VIBRANCY = IS_TAURI
-applyShellClasses(DESKTOP_CHROME, NATIVE_VIBRANCY)
+applyShellClasses(DESKTOP_CHROME)
 type ViewMode = 'list' | 'board' | 'timeline'
 type CollectionViewMode = 'list' | 'calendar'
 
@@ -1352,14 +1349,7 @@ function App() {
     // popovers show project holidays as read-only rows and need the same map.
     <ProjectHolidaysContext value={holidayMap}>
     <ProjectHolidayListContext value={currentProject?.holidays ?? EMPTY_HOLIDAYS}>
-    {/* Native vibrancy: the root stays transparent so the window's sidebar
-        material shows through; the main column carries the canvas instead
-        (desktop-native-feel.md §4). Home has no sidebar, so it keeps the canvas. */}
-    <div
-      className={`h-screen flex text-ink overflow-hidden ${
-        NATIVE_VIBRANCY && !(HOME_ENABLED && screen === 'home') ? '' : 'ambient-canvas'
-      }`}
-    >
+    <div className="h-screen flex text-ink overflow-hidden ambient-canvas">
       {/* Browser-only preview: paint fake macOS traffic lights so `?desktop=1`
           shows the real desktop layout. Real Tauri draws OS lights instead. */}
       {FORCE_DESKTOP_CHROME && !IS_TAURI && (
@@ -1832,7 +1822,7 @@ function App() {
 
       {/* Main column: thin header + capacity + sprint view. Always rendered;
           settings opens as a right-side drawer overlay (below), not a takeover. */}
-      <div className={`flex-1 flex flex-col min-w-0 overflow-hidden ${NATIVE_VIBRANCY ? 'ambient-canvas' : ''}`}>
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         {/* Liquid Glass capsule toolbar (design-docs/liquid-glass-material.md) —
             floats with a margin instead of a full-bleed bar + border-b. */}
         {/* relative z-30: glass surfaces below create stacking contexts
@@ -2211,16 +2201,13 @@ function App() {
       {/* Claude inspector column — pushes the board aside rather than covering it,
           so applied changes show beside the chat. Width-animates like the sidebar;
           the panel keeps its fixed width inside so nothing reflows mid-slide.
-          Stays mounted while a project exists: an answer keeps streaming in.
-          ambient-canvas is viewport-anchored, so it lines up with the main column's. */}
+          Stays mounted while a project exists: an answer keeps streaming in. */}
       {IS_TAURI && currentProject && (
         <aside
           aria-label="Claude"
           aria-hidden={!claudeOpen}
           inert={!claudeOpen}
-          className={`shrink-0 overflow-hidden transition-[width] duration-300 ease-[cubic-bezier(.32,.72,0,1)] motion-reduce:transition-none ${
-            NATIVE_VIBRANCY ? 'ambient-canvas' : ''
-          }`}
+          className="shrink-0 overflow-hidden transition-[width] duration-300 ease-[cubic-bezier(.32,.72,0,1)] motion-reduce:transition-none"
           style={{ width: claudeOpen ? 412 : 0 }}
         >
           <div className="w-[412px] h-full pt-3 pb-3 pr-3">

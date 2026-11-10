@@ -53,7 +53,18 @@ folder had reached 211 MB, see *Disk footprint* in the doc). Older uncompressed
 snapshots keep working, no migration. Desktop-only **Restore từ version**: the backup settings modal lists those
 `versions/` snapshots — pick one, preview its project/sprint/task counts, and restore the
 whole DB to it (it auto-snapshots the current state first, so a mistaken restore is
-undoable). See [`design-docs/desktop-app-tauri.md`](./design-docs/desktop-app-tauri.md),
+undoable). Desktop-only **Claude panel** (`⌘J`, View ▸ Ask Claude, or the ✦ toolbar
+button): ask about the open project with **your own Claude subscription** — the app runs
+the locally installed Claude Code CLI headless (no API key, no tools, none of your
+hooks/MCP/skills), feeding it a snapshot of the project's sprints, tasks, members and days
+off. It answers in a right-hand inspector column, can **build a slide deck** (Claude writes
+the content, a fixed Cupertino template renders one self-contained HTML file — preview,
+open in the browser, save, present with ←/→, print to PDF; dense slides shrink to fit), and
+can **propose changes** (create / edit / move / delete tasks, prerequisites, sprint goal) as
+a checklist that only touches your data when you press **Apply** — with **Undo**. See
+[`design-docs/claude-assistant.md`](./design-docs/claude-assistant.md). The desktop window
+is opaque (the see-through native sidebar vibrancy was removed on 2026-11-10).
+See [`design-docs/desktop-app-tauri.md`](./design-docs/desktop-app-tauri.md),
 [`design-docs/auto-backup.md`](./design-docs/auto-backup.md) and
 [`design-docs/restore-versions.md`](./design-docs/restore-versions.md).
 

@@ -246,19 +246,6 @@ h1, h2, h3, .display-tight {
 /* Desktop native feel — design-docs/desktop-native-feel.md. Unlayered on purpose
  * so these beat Tailwind's layered utilities (e.g. `.cursor-pointer`). */
 
-/* §4 Real Tauri window: the page is transparent and the window's
- * NSVisualEffectView (sidebar material) shows through the sidebar + icon rail.
- * The main column carries .ambient-canvas instead of the root (App.tsx). */
-html.native-vibrancy,
-html.native-vibrancy body {
-  background: transparent;
-}
-html.native-vibrancy .vibrancy {
-  background: transparent;
-  -webkit-backdrop-filter: none;
-  backdrop-filter: none;
-}
-
 /* §2 No web tells (desktop chrome, incl. the ?desktop=1 preview). */
 html.desktop,
 html.desktop body {

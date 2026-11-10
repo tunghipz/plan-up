@@ -1,7 +1,7 @@
 # Desktop app (Tauri 2, macOS)
 
 **Status:** Implemented
-**Last updated:** 2026-11-09 (**security**: CSP thật thay vì `null`, bỏ quyền dialog, import và folder backup chọn từ Rust). Trước đó: 2026-11-09 (native feel: menu bar, window state, real vibrancy, context menu — see desktop-native-feel.md)
+**Last updated:** 2026-11-10 (Claude assistant commands in `src/claude.rs`; native vibrancy removed, see desktop-native-feel.md §4). Trước đó: 2026-11-09 (**security**: CSP thật thay vì `null`, bỏ quyền dialog, import và folder backup chọn từ Rust). Trước đó: 2026-11-09 (native feel: menu bar, window state, real vibrancy, context menu — see desktop-native-feel.md)
 **Code:** `app/src-tauri/` (shell), `app/vite.config.ts`, `app/src/VersionFooter.tsx`, `.github/workflows/release.yml`
 
 ## Purpose
@@ -78,7 +78,9 @@ reset — the auto-backup feature is the durability mitigation.
   `Cargo.toml`, `src/lib.rs` (plugins + the four backup commands: `write_backup`,
   `prune_backups`, `list_backups`, `read_backup`, bound to the folder picked by `pick_backup_dir`
   (+ the one-time `adopt_backup_dir`); plus `pick_import_file` for the menu's
-  File ▸ Import…, and the hide-on-close / Dock-reopen handlers — desktop-native-feel.md), `src/main.rs`,
+  File ▸ Import…, and the hide-on-close / Dock-reopen handlers — desktop-native-feel.md),
+  `src/claude.rs` (Claude assistant: `claude_stream`, `claude_cancel`, `open_deck`,
+  `save_deck` — claude-assistant.md), `src/main.rs`,
   `build.rs`, `capabilities/default.json`, `icons/`.
 - `tauri.conf.json`: `"version": "../package.json"` — Tauri reads the version straight
   from `app/package.json`, so the existing `npm version patch` push flow covers the

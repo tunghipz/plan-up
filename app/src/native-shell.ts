@@ -46,13 +46,12 @@ export type MenuState = {
 
 const PRIORITY_ORDER: Priority[] = ['urgent', 'high', 'normal', 'low', 'none']
 
-/** `<html>` classes the CSS keys on (index.css): `desktop` = desktop chrome (also
- *  the `?desktop=1` browser preview), `native-vibrancy` = real Tauri window with
- *  the NSVisualEffectView sidebar behind a transparent page. */
-export function applyShellClasses(desktopChrome: boolean, tauri: boolean) {
+/** `<html>` class the CSS keys on (index.css): `desktop` = desktop chrome (also
+ *  the `?desktop=1` browser preview). The native-vibrancy class was removed on
+ *  2026-11-10 with the transparent window (desktop-native-feel.md §4). */
+export function applyShellClasses(desktopChrome: boolean) {
   if (typeof document === 'undefined') return
   document.documentElement.classList.toggle('desktop', desktopChrome)
-  document.documentElement.classList.toggle('native-vibrancy', tauri)
 }
 
 // A toggle can arrive twice for one key press: from the page's keydown handler

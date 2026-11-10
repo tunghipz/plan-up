@@ -10,7 +10,6 @@
     "frontendDist": "../dist"
   },
   "app": {
-    "macOSPrivateApi": true,
     "windows": [
       {
         "title": "plan-up",
@@ -23,13 +22,6 @@
         "trafficLightPosition": {
           "x": 14,
           "y": 24
-        },
-        "transparent": true,
-        "windowEffects": {
-          "effects": [
-            "sidebar"
-          ],
-          "state": "followsWindowActiveState"
         }
       }
     ],

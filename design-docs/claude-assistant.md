@@ -1,7 +1,7 @@
 # Claude assistant (desktop)
 
 **Status:** Implemented
-**Last updated:** 2026-11-09
+**Last updated:** 2026-11-10 (kéo đổi bề rộng panel; task, người, sprint trong câu trả lời bấm được để nhảy tới trong plan). Trước đó: 2026-11-09
 **Code:** `app/src-tauri/src/claude.rs`, `app/src/claude-run.ts`, `app/src/claude-context.ts`,
 `app/src/claude-prompt.ts`, `app/src/claude-actions.ts`, `app/src/claude-deck.ts`,
 `app/src/ClaudePanel.tsx`, `app/src/App.tsx`, `app/src/native-shell.ts`
@@ -39,11 +39,16 @@ Hai việc:
 
 - Nút **✦ Claude** (lucide `Sparkles`) trên toolbar, cạnh nút Activity. Phím **⌘J** bật/tắt.
   Menu **View ▸ Ask Claude** (⌘J).
-- Panel là **cột inspector bên phải** rộng 412px (thẻ trắng bo 18px, cách mép 12px), mở ra
+- Panel là **cột inspector bên phải**, mặc định rộng 412px (thẻ trắng bo 18px, cách mép 12px), mở ra
   thì đẩy cột chính hẹp lại chứ không đè lên board, không có scrim: board vẫn bấm và cuộn
   được, thấy ngay thay đổi vừa Apply. Mở/đóng trượt bề rộng như sidebar trái (300ms, tắt khi
   `prefers-reduced-motion`). Đóng bằng Esc, ⌘J hoặc nút ×. Mở app lên thì panel đóng (không
   lưu trạng thái mở).
+- **Đổi bề rộng** (2026-11-10, user: *"cho thay đổi size kích thước của cửa số claude"*):
+  kéo mép trái của panel, giống mép phải của sidebar (vạch accent hiện khi rê chuột, con trỏ
+  `col-resize`, không có animation trong lúc kéo). Kẹp từ 340px tới 760px, và không quá 60%
+  bề rộng cửa sổ. Lưu `plan-up:claudeWidth`. Double-click mép thì về 412px. Bàn phím: focus
+  vào mép rồi ← rộng ra, → hẹp lại, mỗi lần 16px.
 - Panel theo project: mỗi project có cuộc hội thoại riêng, giữ trong bộ nhớ suốt phiên chạy
   app (đóng app là mất; slide đã lưu thì còn trên đĩa). Không ghi chat vào IndexedDB.
 
@@ -58,6 +63,27 @@ Hai việc:
   Việt vì đó là lời user gửi đi; phần chrome của panel giữ tiếng Anh như cả app.
 - **Hội thoại:** tin của user là bong bóng xám bên phải. Câu trả lời của Claude là văn bản
   markdown gọn (đoạn, gạch đầu dòng, `**đậm**`), hiện dần trong lúc Claude viết.
+- **Link trong câu trả lời** (2026-11-10, user: *"có thể làm highlight tên và task để bấm vào
+  thì show trong plan không"*). Task, người và sprint Claude nhắc tới hiện thành link:
+  - **Task** `#12 Login API`: chữ accent, đậm vừa. Bấm thì chọn sprint của task (nếu khác
+    sprint đang xem), chuyển sang List, cuộn tới dòng đó và nháy viền accent (giống chọn kết
+    quả ở search palette). Thẻ của người giữ task đang thu gọn thì mở ra; bảng All đang lọc
+    người khác thì bỏ lọc. Task nằm trong task group đang thu gọn thì nháy dòng đầu group.
+  - **Người**: avatar nhỏ + tên, chữ đậm vừa. Bấm thì chuyển sang List của sprint đang xem.
+    Chế độ By member: mở thẻ của người đó nếu đang thu gọn, cuộn tới và nháy viền accent quanh
+    thẻ. Người chưa có task trong sprint thì mở mục "N members with no tasks" rồi nháy thẻ của họ
+    trong đó. Chế độ All: lọc bảng theo người đó (giống bấm chip của họ).
+  - **Sprint**: chữ accent. Bấm thì chọn sprint đó.
+  - Task hoặc người đã bị xoá: link mờ, không bấm được, rê chuột thấy "No longer in this
+    project".
+  - Tiêu đề task trong thẻ Proposed changes (dòng Edit, Move, Delete, Prereqs của task có
+    sẵn) cũng bấm được như link task.
+  - Cách làm: prompt bảo Claude viết mỗi task, người, sprint nhắc tới thành link Markdown trỏ
+    vào handle: `[#12 "Login API"](t12)`, `[An](m1)`, `[Sprint 22](s3)`. Lúc gửi câu hỏi,
+    app lưu bảng handle → id của snapshot đó vào lượt trả lời (`refs`), nên link đúng cả khi
+    về sau task bị đánh số lại. Lúc kể lại các lượt trước trong prompt mới, link bị bỏ còn
+    nhãn (handle cũ có thể trỏ sai trong snapshot mới). Deck và lý do của từng đề xuất là chữ
+    thường: link (nếu có) bị bỏ còn nhãn.
 - **Ô soạn:** textarea dưới đáy. Enter gửi, Shift+Enter xuống dòng. Khi đang chạy, nút gửi
   thành **Stop** (huỷ tiến trình `claude`).
 - **Trạng thái chạy:** "Reading project…" tới khi có chữ đầu tiên, rồi chữ chảy ra. Sau 8

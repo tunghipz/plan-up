@@ -12,7 +12,7 @@ import {
 import { buildContext, loadContextData } from './claude-context'
 import { applyActions, resolveActions, summarizeActions, type ResolvedAction } from './claude-actions'
 import { deckFileName, renderDeckHtml, sanitizeDeck, type Deck } from './claude-deck'
-import { ANSWER_SCHEMA, SYSTEM_PROMPT, buildPrompt, type HistoryTurn } from './claude-prompt'
+import { ANSWER_SCHEMA, SYSTEM_PROMPT, buildPrompt, stripRefLinks, type HistoryTurn } from './claude-prompt'
 import { describeClaudeError, runClaude, type ClaudeModel } from './claude-run'
 import type { ConfirmOpts } from './confirm-context'
 import { safeStorage, todayLocalISO } from './lib'
@@ -40,6 +40,12 @@ export interface Proposal {
   sigAfter?: string
 }
 
+/** What a link in an answer points at (handle → real id, frozen at question time). */
+export interface ClaudeRef {
+  kind: 'task' | 'member' | 'sprint'
+  id: string
+}
+
 export interface AssistantTurn {
   id: string
   role: 'assistant'
@@ -51,6 +57,8 @@ export interface AssistantTurn {
   /** The question that started it (Try again). */
   request: string
   error?: string
+  /** Handles of the snapshot this answer was written against. */
+  refs?: Record<string, ClaudeRef>
   deck?: Deck
   proposal?: Proposal
 }
@@ -125,8 +133,12 @@ function outcomes(t: AssistantTurn): string[] {
 function toHistory(turns: Turn[]): HistoryTurn[] {
   return turns.slice(-HISTORY_TURNS).map((t) => {
     if (t.role === 'user') return { role: 'user', text: t.text }
-    if (t.status === 'done') return { role: 'assistant', text: t.reply, outcomes: outcomes(t) }
-    return { role: 'assistant', text: t.reply || '(no answer)', outcomes: [t.status === 'stopped' ? 'stopped by the user' : 'failed'] }
+    if (t.status === 'done') return { role: 'assistant', text: stripRefLinks(t.reply), outcomes: outcomes(t) }
+    return {
+      role: 'assistant',
+      text: stripRefLinks(t.reply) || '(no answer)',
+      outcomes: [t.status === 'stopped' ? 'stopped by the user' : 'failed'],
+    }
   })
 }
 
@@ -157,6 +169,12 @@ export async function ask(
     const data = await loadContextData(projectId, currentSprintId, todayLocalISO())
     if (!data) throw new Error('This project no longer exists.')
     const ctx = buildContext(data)
+    const refs: Record<string, ClaudeRef> = {}
+    for (const [h, id] of ctx.handles.task) refs[h] = { kind: 'task', id }
+    for (const [h, id] of ctx.handles.member) refs[h] = { kind: 'member', id }
+    for (const [h, id] of ctx.handles.sprint) refs[h] = { kind: 'sprint', id }
+    // Before the run: links become clickable while the answer is still streaming.
+    patchTurn(projectId, turn.id, () => ({ refs }))
     const result = (await runClaude({
       model,
       systemPrompt: SYSTEM_PROMPT,

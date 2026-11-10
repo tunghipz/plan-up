@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
   ArrowUp,
@@ -16,7 +16,8 @@ import {
   Undo2,
   X,
 } from 'lucide-react'
-import { db, type Project } from './db'
+import { db, type Member, type Project } from './db'
+import { Avatar } from './members'
 import {
   applyProposal,
   ask,
@@ -33,8 +34,10 @@ import {
   undoProposal,
   useChat,
   type AssistantTurn,
+  type ClaudeRef,
   type Proposal,
 } from './claude-chat'
+import { REF_LINK_SOURCE } from './claude-prompt'
 import type { ResolvedAction } from './claude-actions'
 import { renderDeckHtml, type Deck } from './claude-deck'
 import type { ClaudeModel } from './claude-run'
@@ -58,17 +61,37 @@ const SUGGESTIONS = [
  * App mounts it only under Tauri. Lives in a right-hand column that pushes the
  * board aside instead of covering it, so applied changes show up beside the chat.
  */
+/** Show a task / member / sprint in the plan — App owns navigation (claude-assistant.md). */
+export interface ShowInPlan {
+  task: (id: string) => void
+  member: (id: string) => void
+  sprint: (id: string) => void
+}
+
+/** What reference links need to render and act: live existence + avatars + navigation. */
+interface LinkEnv {
+  show: ShowInPlan
+  members: Map<string, Member>
+  taskIds: Set<string>
+  sprintIds: Set<string>
+}
+const LinkEnvCtx = createContext<LinkEnv | null>(null)
+/** The refs of the answer being rendered (handles differ per answer). */
+const RefsCtx = createContext<Record<string, ClaudeRef> | undefined>(undefined)
+
 export function ClaudePanel({
   open,
   project,
   currentSprintId,
   onClose,
+  show,
 }: {
   open: boolean
   project: Project
   /** The sprint on screen: Claude's default sprint, and whose activity it reads. */
   currentSprintId: string | null
   onClose: () => void
+  show: ShowInPlan
 }) {
   const chat = useChat(project.id)
   const running = isRunning(chat)
@@ -78,6 +101,32 @@ export function ClaudePanel({
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const stickRef = useRef(true)
+  const live = useLiveQuery(
+    async () => ({
+      members: await db.members.where('projectId').equals(project.id).toArray(),
+      taskIds: (await db.tasks.where('projectId').equals(project.id).primaryKeys()).map(String),
+      sprintIds: (await db.sprints.where('projectId').equals(project.id).primaryKeys()).map(String),
+    }),
+    [project.id]
+  )
+  const showRef = useRef(show)
+  useLayoutEffect(() => {
+    showRef.current = show
+  })
+  const linkEnv = useMemo<LinkEnv>(
+    () => ({
+      // Stable wrapper: App re-creates its handlers every render.
+      show: {
+        task: (id) => showRef.current.task(id),
+        member: (id) => showRef.current.member(id),
+        sprint: (id) => showRef.current.sprint(id),
+      },
+      members: new Map((live?.members ?? []).map((m) => [m.id, m])),
+      taskIds: new Set(live?.taskIds ?? []),
+      sprintIds: new Set(live?.sprintIds ?? []),
+    }),
+    [live]
+  )
   const counts = useLiveQuery(
     async () => ({
       sprints: await db.sprints.where('projectId').equals(project.id).count(),
@@ -117,6 +166,7 @@ export function ClaudePanel({
   )
 
   return (
+    <LinkEnvCtx value={linkEnv}>
     <div className="h-full flex flex-col rounded-[18px] bg-surface border border-border-hair shadow-[0_1px_3px_rgba(0,0,0,0.06),0_12px_36px_rgba(0,0,0,0.10)] overflow-hidden">
       {/* Header */}
       <div className="shrink-0 px-4 pt-3.5 pb-3 border-b border-border-hair">
@@ -234,6 +284,7 @@ export function ClaudePanel({
 
       {preview && <DeckPreview deck={preview} onClose={() => setPreview(null)} />}
     </div>
+    </LinkEnvCtx>
   )
 }
 
@@ -312,6 +363,7 @@ function AssistantView({
   const stalled = turn.status === 'running' && !turn.alive && now - turn.startedAt > STALL_HINT_MS
 
   return (
+    <RefsCtx value={turn.refs}>
     <div className="space-y-3">
       {turn.reply ? (
         <Markdown text={turn.reply} />
@@ -357,6 +409,7 @@ function AssistantView({
       {turn.deck && <DeckCard deck={turn.deck} onPreview={() => onPreview(turn.deck!)} />}
       {turn.proposal && <ProposalCard proposal={turn.proposal} projectId={projectId} turnId={turn.id} />}
     </div>
+    </RefsCtx>
   )
 }
 
@@ -493,11 +546,7 @@ function ProposalCard({ proposal, projectId, turnId }: { proposal: Proposal; pro
                     <span className={`shrink-0 rounded-full px-1.5 py-[1px] text-[10.5px] font-semibold ${VERB_CLASS[a.verb]}`}>
                       {a.verb}
                     </span>
-                    <span
-                      className={`text-[13px] text-ink truncate ${a.verb === 'Delete' ? 'line-through decoration-[1.5px]' : ''}`}
-                    >
-                      {a.subject}
-                    </span>
+                    <ProposalSubject action={a} />
                   </span>
                   {a.details.map((d, i) => (
                     <span key={i} className="block mt-0.5 text-[12px] text-ink-muted break-words">
@@ -608,8 +657,92 @@ function parseBlocks(text: string): Block[] {
   return blocks
 }
 
-/** Inline: `code` spans, then RichText's **bold** / *italic* / ~~strike~~. */
+/**
+ * Inline: reference links (`[#12 "Login"](t12)`, `[An](m1)`, `[Sprint 3](s2)`) become
+ * clickable chips; the text between them goes through `code` spans and RichText.
+ */
 function Inline({ text }: { text: string }) {
+  const re = new RegExp(REF_LINK_SOURCE, 'g')
+  const out: React.ReactNode[] = []
+  let last = 0
+  for (let m = re.exec(text); m; m = re.exec(text)) {
+    if (m.index > last) out.push(<PlainInline key={`p${last}`} text={text.slice(last, m.index)} />)
+    out.push(<RefLink key={`r${m.index}`} label={m[1]} handle={m[2]} />)
+    last = m.index + m[0].length
+  }
+  if (last === 0) return <PlainInline text={text} />
+  if (last < text.length) out.push(<PlainInline key={`p${last}`} text={text.slice(last)} />)
+  return <>{out}</>
+}
+
+/** A task label as Claude writes it, `#12 "Login API"` → `#12 Login API` (calmer). */
+function taskLabel(label: string): string {
+  return label.replace(/^(#\d+)\s+"(.*)"(.*)$/, '$1 $2$3')
+}
+
+function RefLink({ label, handle }: { label: string; handle: string }) {
+  const env = useContext(LinkEnvCtx)
+  const ref = useContext(RefsCtx)?.[handle]
+  // A new-task ref (n1) or a handle we never had: just the label.
+  if (!env || !ref) return <RichText text={label} />
+  const alive =
+    ref.kind === 'task' ? env.taskIds.has(ref.id) : ref.kind === 'member' ? env.members.has(ref.id) : env.sprintIds.has(ref.id)
+  if (!alive) {
+    return (
+      <span title="No longer in this project" className="text-ink-faint">
+        <RichText text={ref.kind === 'task' ? taskLabel(label) : label} />
+      </span>
+    )
+  }
+  if (ref.kind === 'member') {
+    const m = env.members.get(ref.id)!
+    return (
+      <button
+        type="button"
+        onClick={() => env.show.member(ref.id)}
+        title={`Show ${m.name} in the plan`}
+        className="inline-flex items-baseline gap-1 rounded-[5px] px-[3px] -mx-[1px] font-medium text-ink hover:bg-accent-soft hover:text-accent transition-colors"
+      >
+        <Avatar member={m} size={15} ring={false} className="self-center text-[8px]" />
+        <RichText text={label} />
+      </button>
+    )
+  }
+  return (
+    <button
+      type="button"
+      onClick={() => (ref.kind === 'task' ? env.show.task(ref.id) : env.show.sprint(ref.id))}
+      title={ref.kind === 'task' ? 'Show this task in the plan' : 'Open this sprint'}
+      className="inline rounded-[5px] px-[3px] -mx-[1px] font-medium text-accent hover:bg-accent-soft transition-colors text-left"
+    >
+      <RichText text={ref.kind === 'task' ? taskLabel(label) : label} />
+    </button>
+  )
+}
+
+function ProposalSubject({ action: a }: { action: ResolvedAction }) {
+  const env = useContext(LinkEnvCtx)
+  const id = a.task && 'id' in a.task ? a.task.id : undefined
+  const cls = `text-[13px] text-ink truncate ${a.verb === 'Delete' ? 'line-through decoration-[1.5px]' : ''}`
+  if (!env || !id || !env.taskIds.has(id) || a.error) return <span className={cls}>{a.subject}</span>
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        // Inside the row's <label>: don't toggle the checkbox.
+        e.preventDefault()
+        env.show.task(id)
+      }}
+      title="Show this task in the plan"
+      className={`${cls} text-left hover:text-accent hover:underline decoration-accent/40 underline-offset-2`}
+    >
+      {a.subject}
+    </button>
+  )
+}
+
+/** `code` spans, then RichText's **bold** / *italic* / ~~strike~~. */
+function PlainInline({ text }: { text: string }) {
   const parts = text.split('`')
   return (
     <>

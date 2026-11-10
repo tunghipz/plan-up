@@ -15,7 +15,7 @@ import {
 import { buildContext, loadContextData, ARCHIVED_TASK_CAP } from './claude-context'
 import { applyActions, resolveActions, summarizeActions } from './claude-actions'
 import { deckFileName, escapeHtml, renderDeckHtml, sanitizeDeck, slideZoom } from './claude-deck'
-import { buildPrompt } from './claude-prompt'
+import { SYSTEM_PROMPT, buildPrompt, stripRefLinks } from './claude-prompt'
 import { readPartialJsonString, describeClaudeError, CLAUDE_NOT_FOUND } from './claude-run'
 
 const P = 'claude-project'
@@ -127,6 +127,22 @@ describe('buildPrompt', () => {
     expect(p.indexOf('SNAP')).toBeLessThan(p.indexOf('User: hi'))
     expect(p).toContain('Assistant: yo\n[x]')
     expect(p.trim().endsWith('<request>\nQ\n</request>')).toBe(true)
+  })
+})
+
+describe('reference links', () => {
+  it('strips links to their labels for old answers, deck text and reasons', async () => {
+    expect(stripRefLinks('See [#3 "Login"](t12), [An](m1), [Sprint 2](s2), [new](n1) and [x](y1)')).toBe(
+      'See #3 "Login", An, Sprint 2, new and [x](y1)'
+    )
+    expect(SYSTEM_PROMPT).toContain('[#12 "Login API"](t12)')
+    const html = renderDeckHtml(sanitizeDeck({ title: 'D', slides: [{ layout: 'bullets', title: '[An](m1) owns it', bullets: ['**[#1 "x"](t1)** late'] }] })!)
+    expect(html).toContain('An owns it')
+    expect(html).toContain('<strong>#1 &quot;x&quot;</strong> late')
+    await task('Login')
+    const { data, ctx } = await context()
+    const [a] = resolveActions([{ op: 'update_task', task: 't1', status: 'done', reason: 'xong như [An](m1) nói' }], data, ctx.handles)
+    expect(a.reason).toBe('xong như An nói')
   })
 })
 

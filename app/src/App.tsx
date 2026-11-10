@@ -69,7 +69,7 @@ import { isProjectBundle, looksLikeProjectBundle } from './project-io'
 import { CollectionView, CollectionBarIdentity, StatusEditor } from './CollectionView'
 import { useConfirm } from './confirm-context'
 import { ModalSheet } from './ModalSheet'
-import { SprintView, type ListGrouping } from './SprintView'
+import { SprintView, type ListFocus, type ListGrouping } from './SprintView'
 import { ViewToggle } from './ViewToggle'
 import { ProjectHolidaysContext, ProjectHolidayListContext } from './scheduling-context'
 import { projectHolidayMap } from './scheduling'
@@ -151,6 +151,14 @@ const FORCE_DESKTOP_CHROME =
     window.localStorage?.getItem('plan-up:forceDesktopChrome') === '1')
 const DESKTOP_CHROME = IS_TAURI || FORCE_DESKTOP_CHROME
 applyShellClasses(DESKTOP_CHROME)
+// Claude panel width (claude-assistant.md): default, clamp, and the share of the
+// window it may take at most.
+const CLAUDE_DEFAULT = 412
+const CLAUDE_MIN = 340
+const CLAUDE_MAX = 760
+const CLAUDE_MAX_SHARE = 0.6
+const clampClaudeWidth = (w: number) =>
+  Math.round(Math.min(CLAUDE_MAX, window.innerWidth * CLAUDE_MAX_SHARE, Math.max(CLAUDE_MIN, w)))
 type ViewMode = 'list' | 'board' | 'timeline'
 type CollectionViewMode = 'list' | 'calendar'
 
@@ -370,6 +378,16 @@ function App() {
   // Claude assistant inspector (design-docs/claude-assistant.md) — desktop only,
   // not persisted: opens closed every launch, stays open across sprint switches.
   const [claudeOpen, setClaudeOpen] = useState(false)
+  // Its width: drag the left edge (claude-assistant.md "Đổi bề rộng"), persisted.
+  const [claudeWidth, setClaudeWidth] = useState<number>(() => {
+    const w = Number(safeStorage.get('plan-up:claudeWidth'))
+    return w >= CLAUDE_MIN && w <= CLAUDE_MAX ? w : CLAUDE_DEFAULT
+  })
+  const [claudeResizing, setClaudeResizing] = useState(false)
+  // A one-shot request for the List to reveal a task / member (Claude's links).
+  // `n` makes a repeat click on the same link a new request.
+  const [listFocus, setListFocus] = useState<ListFocus | null>(null)
+  const listFocusSeq = useRef(0)
   // Collection view (List/Calendar) — lifted here so the single adaptive top-bar
   // toggle can drive it; persisted separately from the sprint view.
   const COLLVIEW_KEY = 'plan-up:collectionView'
@@ -790,27 +808,107 @@ function App() {
   // only sprint view that hosts the row highlight), then scroll the container to
   // the picked task and flash it. Never scrollIntoView (breaks the container);
   // measure the row vs the container and call scrollTo.
-  const jumpToTask = (taskId: string) => {
+  const jumpToTask = (taskId: string, fallbackIds: string[] = []) => {
     setPaletteOpen(false)
     setView('list')
-    // The list view may still be mounting (we just flipped it) — poll per
-    // frame until the row exists instead of trusting one fixed delay, which
-    // silently no-ops on slow machines / large sprints. Bounded so a task
-    // that never renders (deleted mid-jump) can't poll forever.
+    scrollToInList([taskId, ...fallbackIds].map((id) => `[data-task-id="${id}"]`))
+  }
+
+  // Scroll the List to the first selector that matches and flash it. The list
+  // may still be mounting (view/sprint just flipped) — poll per frame instead
+  // of trusting one fixed delay, which silently no-ops on slow machines / large
+  // sprints. Bounded so a row that never renders (deleted mid-jump) can't poll
+  // forever. Fallback selectors (e.g. the head of a collapsed task group) only
+  // count once the primary had a few frames to appear.
+  const scrollToInList = (selectors: string[]) => {
     let tries = 60 // ~1s at 60fps
     const attempt = () => {
       const c = scrollRef.current
-      const el = c?.querySelector<HTMLElement>(`[data-task-id="${taskId}"]`)
+      let el = c?.querySelector<HTMLElement>(selectors[0]) ?? null
+      if (c && !el && tries < 50) {
+        for (const sel of selectors.slice(1)) {
+          el = c.querySelector<HTMLElement>(sel)
+          if (el) break
+        }
+      }
       if (!c || !el) {
         if (--tries > 0) requestAnimationFrame(attempt)
         return
       }
-      const top = c.scrollTop + (el.getBoundingClientRect().top - c.getBoundingClientRect().top) - 80
+      const target = el
+      const top = c.scrollTop + (target.getBoundingClientRect().top - c.getBoundingClientRect().top) - 80
       c.scrollTo({ top: top < 0 ? 0 : top, behavior: 'smooth' })
-      el.setAttribute('data-flash', '1')
-      window.setTimeout(() => el.removeAttribute('data-flash'), 1300)
+      target.setAttribute('data-flash', '1')
+      window.setTimeout(() => target.removeAttribute('data-flash'), 1300)
     }
     requestAnimationFrame(attempt)
+  }
+
+  // Claude's links (claude-assistant.md "Link trong câu trả lời"): reveal a task,
+  // a member or a sprint in the plan. Overlays that hide the List close first.
+  const clearOverlaysForPlan = () => {
+    setSettingsOpen(false)
+    setShowActivity(false)
+    setPaletteOpen(false)
+  }
+  const showTaskInPlan = async (taskId: string) => {
+    const t = await db.tasks.get(taskId)
+    if (!t?.sprintId || t.projectId !== currentProjectId) return
+    clearOverlaysForPlan()
+    if (selKind !== 'sprint' || currentSprintId !== t.sprintId) selectSprint(t.sprintId)
+    setListFocus({ kind: 'task', id: taskId, n: ++listFocusSeq.current })
+    jumpToTask(taskId, t.parentId ? [t.parentId] : [])
+  }
+  const showMemberInPlan = (memberId: string) => {
+    const sprintId = selKind === 'sprint' && currentSprintId ? currentSprintId : sprintToSelect(sprints ?? [])
+    if (!sprintId) return
+    clearOverlaysForPlan()
+    if (selKind !== 'sprint' || currentSprintId !== sprintId) selectSprint(sprintId)
+    setView('list')
+    setListFocus({ kind: 'member', id: memberId, n: ++listFocusSeq.current })
+    // All table: the List filters to them instead (SprintView `focus`).
+    if (listGrouping === 'member') scrollToInList([`[data-member-card="${memberId}"]`])
+  }
+  const showSprintInPlan = (sprintId: string) => {
+    clearOverlaysForPlan()
+    selectSprint(sprintId)
+  }
+
+  const startClaudeResize = (e: React.MouseEvent) => {
+    e.preventDefault()
+    setClaudeResizing(true)
+    const startX = e.clientX
+    const startW = claudeWidth
+    let raf = 0
+    let nextW = startW
+    const onMove = (ev: MouseEvent) => {
+      // The panel sits on the right: dragging left widens it.
+      nextW = clampClaudeWidth(startW + startX - ev.clientX)
+      if (raf) return
+      raf = requestAnimationFrame(() => {
+        raf = 0
+        setClaudeWidth(nextW)
+      })
+    }
+    const onUp = () => {
+      if (raf) cancelAnimationFrame(raf)
+      setClaudeWidth(nextW)
+      safeStorage.set('plan-up:claudeWidth', String(nextW))
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+      document.body.style.userSelect = ''
+      document.body.style.cursor = ''
+      setClaudeResizing(false)
+    }
+    document.body.style.userSelect = 'none'
+    document.body.style.cursor = 'col-resize'
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+  }
+  const setClaudeWidthPersist = (w: number) => {
+    const next = clampClaudeWidth(w)
+    setClaudeWidth(next)
+    safeStorage.set('plan-up:claudeWidth', String(next))
   }
 
   // Keyboard shortcuts: / or ⌘K open the search palette, n new sprint, esc closes.
@@ -2190,6 +2288,7 @@ function App() {
                   tasks={tasks}
                   grouping={listGrouping}
                   onGroupingChange={setListGrouping}
+                  focus={listFocus}
                 />
               )
             ) : (
@@ -2207,15 +2306,46 @@ function App() {
           aria-label="Claude"
           aria-hidden={!claudeOpen}
           inert={!claudeOpen}
-          className="shrink-0 overflow-hidden transition-[width] duration-300 ease-[cubic-bezier(.32,.72,0,1)] motion-reduce:transition-none"
-          style={{ width: claudeOpen ? 412 : 0 }}
+          className={`relative shrink-0 overflow-hidden ${
+            claudeResizing
+              ? ''
+              : 'transition-[width] duration-300 ease-[cubic-bezier(.32,.72,0,1)] motion-reduce:transition-none'
+          }`}
+          style={{ width: claudeOpen ? claudeWidth : 0 }}
         >
-          <div className="w-[412px] h-full pt-3 pb-3 pr-3">
+          {/* Drag the left edge to resize (double-click resets; ←/→ when focused). */}
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize Claude panel"
+            aria-valuenow={claudeWidth}
+            aria-valuemin={CLAUDE_MIN}
+            aria-valuemax={CLAUDE_MAX}
+            tabIndex={0}
+            title="Drag to resize · double-click to reset"
+            onMouseDown={startClaudeResize}
+            onDoubleClick={() => setClaudeWidthPersist(CLAUDE_DEFAULT)}
+            onKeyDown={(e) => {
+              if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+                e.preventDefault()
+                setClaudeWidthPersist(claudeWidth + (e.key === 'ArrowLeft' ? 16 : -16))
+              }
+            }}
+            className="group/resize absolute left-0 top-3 bottom-3 w-2 -ml-0.5 cursor-col-resize z-10 outline-none"
+          >
+            <div
+              className={`absolute left-[3px] top-4 bottom-4 w-[2px] rounded-full transition-colors group-hover/resize:bg-accent group-focus-visible/resize:bg-accent ${
+                claudeResizing ? 'bg-accent' : 'bg-transparent'
+              }`}
+            />
+          </div>
+          <div className="h-full pt-3 pb-3 pr-3 pl-1.5" style={{ width: claudeWidth }}>
             <ClaudePanel
               open={claudeOpen}
               project={currentProject}
               currentSprintId={selKind === 'sprint' ? currentSprintId : null}
               onClose={() => setClaudeOpen(false)}
+              show={{ task: (id) => void showTaskInPlan(id), member: showMemberInPlan, sprint: showSprintInPlan }}
             />
           </div>
         </aside>

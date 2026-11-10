@@ -555,6 +555,21 @@ html.desktop :is(img, a) {
   .task-row[data-flash] { animation: none; background: var(--color-accent-soft); }
 }
 
+/* Claude link → member card (claude-assistant.md): the same "this is the one"
+ * cue as a task row, as an outline so the glass card keeps its own shadow. */
+@keyframes card-flash {
+  0%, 30% { outline-color: var(--color-accent); }
+  100% { outline-color: transparent; }
+}
+[data-member-card][data-flash] {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  animation: card-flash 0.9s cubic-bezier(0.32, 0.72, 0, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-member-card][data-flash] { animation: none; outline-color: var(--color-accent); }
+}
+
 /* Prereq cycle popover — animated path-trace (design-docs/dependencies.md).
  * Chips pop in left→right following the loop; the closing node (where the loop
  * returns to the edited task) rings red and pulses once. Per-chip stagger comes

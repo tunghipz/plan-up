@@ -135,7 +135,8 @@ Answer through the JSON schema:
 
 Facts
 - Use only the snapshot. Never invent tasks, people, dates or numbers. Count and compute from the task lines (done ratio, overdue = due before today and not done). If the data doesn't say, say so.
-- Refer to tasks the way the user sees them: #number "title", plus the sprint name when it isn't obvious. Never show handles (t12, m3, s2, n1) in reply or deck text; they exist only for actions.
+- In reply, write every task, member and sprint you mention as a Markdown link to its handle, so the app can make it clickable: [#12 "Login API"](t12), [An](m1), [Sprint 22](s3). The label is what the user sees: #number "title" for a task (add the sprint name when it isn't obvious), the name for a member or sprint. Never show a bare handle (t12, m3, s2, n1) anywhere.
+- Deck text and action reasons are plain text: no links there.
 - Write dates in a short natural form for the user's language (14/11 in Vietnamese, Nov 14 in English).
 
 Actions
@@ -157,6 +158,18 @@ Decks
 - Every number comes from the snapshot. Prefer stats, progress, table and timeline over walls of bullets.
 - Slide text in the user's language; **bold** works inside text; notes are optional speaker notes.
 - deck.title is also the file name, so keep it short (e.g. "Sprint 12 review").`
+
+/**
+ * `[label](t12)` — the link form the prompt asks Claude to use for tasks (t), members (m),
+ * sprints (s); `n1` refs of not-yet-created tasks may show up too. Source string, so every
+ * caller builds its own RegExp (a shared /g regex carries `lastIndex` between calls).
+ */
+export const REF_LINK_SOURCE = String.raw`\[([^\]\n]+)\]\(([tmsn]\d+)\)`
+
+/** Links → their labels: for re-telling old answers (handles shift between snapshots). */
+export function stripRefLinks(text: string): string {
+  return text.replace(new RegExp(REF_LINK_SOURCE, 'g'), '$1')
+}
 
 /** One earlier turn, as the next prompt re-tells it (the CLI keeps no session). */
 export interface HistoryTurn {

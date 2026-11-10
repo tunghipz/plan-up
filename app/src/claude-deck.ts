@@ -125,9 +125,12 @@ export function escapeHtml(s: string): string {
     .replace(/'/g, '&#39;')
 }
 
-/** Escaped text with `**bold**` turned into <strong> (after escaping, so no markup gets in). */
+/**
+ * Escaped text with `**bold**` turned into <strong> (after escaping, so no markup gets in).
+ * A stray reference link (`[An](m1)`) keeps only its label — handles mean nothing in a file.
+ */
 function inline(s: string): string {
-  return escapeHtml(s).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+  return escapeHtml(s.replace(/\[([^\]\n]+)\]\([tmsn]\d+\)/g, '$1')).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
 }
 
 function bulletsHtml(items: string[] | undefined): string {

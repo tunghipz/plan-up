@@ -17,7 +17,7 @@ import {
   type Task,
 } from './db'
 import type { ClaudeContextData, Handles } from './claude-context'
-import { ACTION_OPS } from './claude-prompt'
+import { ACTION_OPS, stripRefLinks } from './claude-prompt'
 import { PRIORITY_LABEL, STATUS_LABEL, formatShortDate } from './lib'
 import { stripRich } from './rich-text'
 
@@ -95,7 +95,7 @@ export function resolveActions(raw: unknown, data: ClaudeContextData, handles: H
   list.forEach((item, i) => {
     const a = (item && typeof item === 'object' ? item : {}) as Raw
     const op = ACTION_OPS.includes(a.op as ActionOp) ? (a.op as ActionOp) : null
-    const reason = typeof a.reason === 'string' && a.reason.trim() ? a.reason.trim() : undefined
+    const reason = typeof a.reason === 'string' && a.reason.trim() ? stripRefLinks(a.reason.trim()) : undefined
     const base = { key: `a${i}`, reason }
     if (!op) {
       out.push({ ...base, op: 'update_task', verb: 'Edit', subject: '?', details: [], error: `Unknown action "${String(a.op)}"` })

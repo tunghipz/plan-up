@@ -166,6 +166,13 @@ function saveCollapsed(sprintId: string, set: Set<string>) {
 
 
 
+/**
+ * A one-shot request to reveal something in the List (Claude's links,
+ * claude-assistant.md): expand the owner's collapsed card, or filter the All
+ * table to a member. App does the scrolling. `n` distinguishes repeat requests.
+ */
+export type ListFocus = { kind: 'task' | 'member'; id: string; n: number }
+
 export function SprintView({
   projectId,
   sprintId,
@@ -174,6 +181,7 @@ export function SprintView({
   tasks,
   grouping = 'member',
   onGroupingChange,
+  focus,
 }: {
   projectId: string
   sprintId: string
@@ -184,6 +192,7 @@ export function SprintView({
   grouping?: ListGrouping
   /** Absent = no `Group by` row (the toggle lives with the List, not the top bar). */
   onGroupingChange?: (g: ListGrouping) => void
+  focus?: ListFocus | null
 }) {
   const members = useLiveQuery(
     () => db.members.where('projectId').equals(projectId).toArray(),
@@ -225,6 +234,38 @@ export function SprintView({
   useEffect(() => {
     saveSort(sort)
   }, [sort])
+
+  // Apply a reveal request once. A task request waits until the task is in this
+  // sprint's list (the sprint may have just been switched to).
+  const handledFocus = useRef<number | null>(null)
+  useEffect(() => {
+    if (!focus || handledFocus.current === focus.n) return
+    const expand = (laneId: string) =>
+      setCollapsed((prev) => {
+        if (!prev.has(laneId)) return prev
+        const next = new Set(prev)
+        next.delete(laneId)
+        saveCollapsed(sprintId, next)
+        return next
+      })
+    if (focus.kind === 'member') {
+      handledFocus.current = focus.n
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot reveal request from App (Claude link)
+      if (grouping === 'all') setMemberFilter(focus.id)
+      // No task in this sprint → their card lives in the folded "with no tasks" list.
+      else if (!tasks.some((x) => x.assigneeId === focus.id)) setShowEmpty(true)
+      else expand(focus.id)
+      return
+    }
+    const t = tasks.find((x) => x.id === focus.id)
+    if (!t) return
+    handledFocus.current = focus.n
+    if (grouping === 'all') {
+      if (memberFilter && memberFilter !== t.assigneeId) setMemberFilter(null)
+    } else if (t.assigneeId) {
+      expand(t.assigneeId)
+    }
+  }, [focus, tasks, grouping, memberFilter, sprintId])
 
   const toggleCollapse = (memberId: string) => {
     setCollapsed((prev) => {
@@ -1294,7 +1335,7 @@ function MemberCard({
   )
   const { grip, rowProps, dragging } = useDragHandle(drag, LANE_GRIP_CLASS, 'data-lane-id')
   return (
-    <Card className={`relative ${dragging ? 'opacity-40' : ''}`} {...rowProps}>
+    <Card className={`relative ${dragging ? 'opacity-40' : ''}`} data-member-card={member.id} {...rowProps}>
       {drag?.over === 'before' && (
         <div className="absolute left-3 right-3 top-0 h-0.5 rounded-full bg-accent pointer-events-none z-30" />
       )}
@@ -1920,7 +1961,7 @@ function CollapsedMembers({
       </button>
       {expanded &&
         members.map((m) => (
-          <Card key={m.id}>
+          <Card key={m.id} data-member-card={m.id}>
             <GroupHeader
               avatar={<Avatar member={m} />}
               name={m.name}

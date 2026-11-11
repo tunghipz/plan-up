@@ -1,7 +1,7 @@
 # Claude assistant (desktop)
 
 **Status:** Implemented
-**Last updated:** 2026-11-11 (bôi đen và copy được chữ trong hội thoại). Trước đó: 2026-11-10 (kéo đổi bề rộng panel; task, người, sprint trong câu trả lời bấm được để nhảy tới trong plan). Trước đó: 2026-11-09
+**Last updated:** 2026-11-11 (hội thoại được lưu lại, mở app lên vẫn còn; bôi đen và copy được chữ trong hội thoại). Trước đó: 2026-11-10 (kéo đổi bề rộng panel; task, người, sprint trong câu trả lời bấm được để nhảy tới trong plan). Trước đó: 2026-11-09
 **Code:** `app/src-tauri/src/claude.rs`, `app/src/claude-run.ts`, `app/src/claude-context.ts`,
 `app/src/claude-prompt.ts`, `app/src/claude-actions.ts`, `app/src/claude-deck.ts`,
 `app/src/ClaudePanel.tsx`, `app/src/App.tsx`, `app/src/native-shell.ts`
@@ -49,8 +49,18 @@ Hai việc:
   `col-resize`, không có animation trong lúc kéo). Kẹp từ 340px tới 760px, và không quá 60%
   bề rộng cửa sổ. Lưu `plan-up:claudeWidth`. Double-click mép thì về 412px. Bàn phím: focus
   vào mép rồi ← rộng ra, → hẹp lại, mỗi lần 16px.
-- Panel theo project: mỗi project có cuộc hội thoại riêng, giữ trong bộ nhớ suốt phiên chạy
-  app (đóng app là mất; slide đã lưu thì còn trên đĩa). Không ghi chat vào IndexedDB.
+- Panel theo project: mỗi project có cuộc hội thoại riêng.
+- **Hội thoại được lưu lại** (2026-11-11, user: *"phần thông tin claude không lưu lại ah, mở
+  lại thì mất"*). Đóng app rồi mở lại vẫn thấy tin đã gửi, câu trả lời, thẻ deck và thẻ
+  Proposed changes của từng project. Chi tiết:
+  - Lượt đang chạy lúc đóng app hiện lại là "Stopped.", có Try again.
+  - Đề xuất đã Apply vẫn hiện "Applied …" nhưng **không còn nút Undo** sau khi mở lại app
+    (bản chụp plan để Undo chỉ giữ trong bộ nhớ).
+  - Đề xuất đang Apply dở lúc đóng app quay về trạng thái chờ, kèm dòng "The app closed while
+    applying. Check the plan before applying again."
+  - **New chat** xoá luôn bản lưu. Xoá project thì xoá hội thoại của project đó.
+  - Hội thoại **không** nằm trong backup, export hay share: nó ở một database riêng trên máy
+    (xem Data).
 
 ### Bố cục panel
 
@@ -156,7 +166,13 @@ ngày sai định dạng, sprint archived) hiện mờ, không chọn được, 
 
 ## Data
 
-- Không đổi schema, không bump Dexie version.
+- Không đổi schema của DB chính, không bump Dexie version của nó.
+- Hội thoại lưu ở một Dexie database riêng tên `plan-up-claude` (`claude-store.ts`), bảng
+  `chats` khoá theo `projectId`: `{ projectId, turns, updatedAt }`. Tách riêng để không lẫn
+  vào backup/export và không phải bump schema chính. Ghi sau mỗi thay đổi, gom 300ms (chữ
+  đang chảy ra patch liên tục), và ghi ngay khi cửa sổ đóng (`pagehide`). Trước khi ghi bỏ
+  `proposal.snapshot`. Hội thoại rỗng thì xoá dòng. Đọc lại một lần cho mỗi project, lúc
+  panel cần hội thoại của project đó lần đầu.
 - Thay đổi Claude đề xuất đi qua đúng các hàm DB mà UI dùng (`addSprintTask`, `updateTask`,
   `reassignTasks`, `deleteTask`, `setDependencies`, `setSprintNote`, `recomputeDates`), nên
   activity log, scheduler và auto backup chạy y như sửa tay.

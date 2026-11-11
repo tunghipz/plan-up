@@ -31,6 +31,7 @@ import { db, uid, colorForName, nextSequence } from './schema'
 import { recomputeDates, wouldCreateCycle, normalizeHolidays } from './scheduling'
 import { logEvent, logTaskEdits } from './activity-log'
 import { revokeShare } from './share-hosted'
+import { deleteStoredChat } from './claude-store'
 
 /** Status mặc định khi tạo collection (user sửa được sau). */
 function defaultStatuses(): CollectionStatus[] {
@@ -495,6 +496,8 @@ export async function deleteProject(projectId: string): Promise<void> {
       await db.projects.delete(projectId)
     }
   )
+  // The project's Claude conversation lives in its own database (claude-store.ts).
+  await deleteStoredChat(projectId).catch(() => {})
   // Best-effort revoke of each hosted link (network; TTL cleans up on failure).
   for (const s of shares) revokeShare(s.id, s.writeToken).catch(() => {})
 }

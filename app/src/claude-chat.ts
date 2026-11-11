@@ -1,8 +1,9 @@
 // Conversation state and actions of the Claude assistant (design-docs/claude-assistant.md).
-// One chat per project, kept in memory for the life of the app. A module store (not React
-// state) so a run keeps writing into its chat after the panel closes or the project changes.
+// One chat per project. A module store (not React state) so a run keeps writing into its
+// chat after the panel closes or the project changes. Every change is also written to
+// claude-store.ts, and read back once per project, so a chat survives an app restart.
 
-import { useSyncExternalStore } from 'react'
+import { useEffect, useSyncExternalStore } from 'react'
 import {
   projectPlanSignature,
   restoreProjectPlan,
@@ -16,6 +17,7 @@ import { ANSWER_SCHEMA, SYSTEM_PROMPT, buildPrompt, stripRefLinks, type HistoryT
 import { describeClaudeError, runClaude, type ClaudeModel } from './claude-run'
 import type { ConfirmOpts } from './confirm-context'
 import { safeStorage, todayLocalISO } from './lib'
+import { loadStoredChat, saveStoredChat } from './claude-store'
 
 /** Earlier turns re-told in each prompt (the CLI keeps no session). */
 const HISTORY_TURNS = 12
@@ -82,6 +84,103 @@ function subscribe(fn: () => void) {
 function setChat(projectId: string, fn: (c: Chat) => Chat) {
   chats.set(projectId, fn(chats.get(projectId) ?? EMPTY))
   for (const l of listeners) l()
+  scheduleSave(projectId)
+}
+
+// ── Persistence ──────────────────────────────────────────────────────────────
+
+/** A streaming answer patches its turn many times a second; writes are batched. */
+const SAVE_DELAY_MS = 300
+const INTERRUPTED_APPLY = 'The app closed while applying. Check the plan before applying again.'
+const saveTimers = new Map<string, ReturnType<typeof setTimeout>>()
+const hydrating = new Map<string, Promise<void>>()
+
+/** The turns as they are written to disk: the undo snapshot stays in memory only. */
+export function toStoredTurns(turns: Turn[]): Turn[] {
+  return turns.map((t) => {
+    if (t.role !== 'assistant' || !t.proposal?.snapshot) return t
+    const proposal = { ...t.proposal }
+    delete proposal.snapshot
+    return { ...t, proposal }
+  })
+}
+
+/** Stored turns as a new launch shows them: nothing is running or applying any more. */
+export function reviveTurns(stored: unknown[]): Turn[] {
+  const out: Turn[] = []
+  for (const raw of stored) {
+    if (!raw || typeof raw !== 'object') continue
+    const t = raw as Turn
+    if (typeof t.id !== 'string') continue
+    if (t.role === 'user') {
+      if (typeof t.text === 'string') out.push(t)
+      continue
+    }
+    if (t.role !== 'assistant') continue
+    const turn: AssistantTurn = { ...t, reply: typeof t.reply === 'string' ? t.reply : '' }
+    if (turn.status === 'running') turn.status = 'stopped'
+    if (turn.proposal) {
+      const proposal = { ...turn.proposal }
+      delete proposal.snapshot
+      turn.proposal =
+        proposal.state === 'applying' ? { ...proposal, state: 'pending', error: INTERRUPTED_APPLY } : proposal
+    }
+    out.push(turn)
+  }
+  return out
+}
+
+function saveNow(projectId: string): Promise<void> {
+  const timer = saveTimers.get(projectId)
+  if (timer !== undefined) clearTimeout(timer)
+  saveTimers.delete(projectId)
+  // A failed write (storage full, private mode) only costs the restart copy.
+  return saveStoredChat(projectId, toStoredTurns((chats.get(projectId) ?? EMPTY).turns)).catch(() => {})
+}
+
+function scheduleSave(projectId: string) {
+  if (saveTimers.has(projectId)) return
+  saveTimers.set(
+    projectId,
+    setTimeout(() => void saveNow(projectId), SAVE_DELAY_MS)
+  )
+}
+
+/** Write every pending change now (the window is closing). */
+export function flushChats(): Promise<void> {
+  return Promise.all([...saveTimers.keys()].map(saveNow)).then(() => {})
+}
+
+if (typeof window !== 'undefined') window.addEventListener('pagehide', () => void flushChats())
+
+/** Read this project's stored chat, once. A chat already started in memory wins. */
+export function hydrateChat(projectId: string): Promise<void> {
+  let p = hydrating.get(projectId)
+  if (!p) {
+    p = loadStoredChat(projectId)
+      .then((stored) => {
+        if (!stored || chats.has(projectId)) return
+        const turns = reviveTurns(stored)
+        if (!turns.length) return
+        chats.set(projectId, { turns })
+        for (const l of listeners) l()
+      })
+      .catch(() => {})
+    hydrating.set(projectId, p)
+  }
+  return p
+}
+
+/** Tests: forget everything held in memory, as a fresh launch would. */
+export function resetChatsForTest() {
+  for (const timer of saveTimers.values()) clearTimeout(timer)
+  saveTimers.clear()
+  hydrating.clear()
+  chats.clear()
+}
+
+export function getChat(projectId: string): Chat {
+  return chats.get(projectId) ?? EMPTY
 }
 
 function patchTurn(projectId: string, turnId: string, patch: (t: AssistantTurn) => Partial<AssistantTurn>) {
@@ -100,6 +199,9 @@ function findTurn(projectId: string, turnId: string): AssistantTurn | undefined 
 }
 
 export function useChat(projectId: string): Chat {
+  useEffect(() => {
+    void hydrateChat(projectId)
+  }, [projectId])
   return useSyncExternalStore(subscribe, () => chats.get(projectId) ?? EMPTY)
 }
 
@@ -152,6 +254,8 @@ export async function ask(
 ): Promise<void> {
   const request = text.trim()
   if (!request) return
+  // The stored chat first: its turns are part of the history Claude is told.
+  await hydrateChat(projectId)
   const history = toHistory((chats.get(projectId) ?? EMPTY).turns)
   const turn: AssistantTurn = {
     id: newId(),

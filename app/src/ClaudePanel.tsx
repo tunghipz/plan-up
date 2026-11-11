@@ -393,7 +393,17 @@ function AssistantView({
         </div>
       )}
 
-      {turn.status === 'stopped' && <p className="text-[12px] text-ink-faint">Stopped.</p>}
+      {turn.status === 'stopped' && (
+        <p className="flex items-center gap-2.5 text-[12px] text-ink-faint">
+          Stopped.
+          <button
+            onClick={onRetry}
+            className="inline-flex items-center gap-1.5 font-medium text-accent hover:underline"
+          >
+            <RotateCw size={12} strokeWidth={2} /> Try again
+          </button>
+        </p>
+      )}
 
       {turn.status === 'error' && (
         <div className="rounded-[10px] bg-[color-mix(in_srgb,var(--color-overdue)_9%,transparent)] px-3 py-2.5">

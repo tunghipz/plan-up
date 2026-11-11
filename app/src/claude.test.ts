@@ -17,6 +17,9 @@ import { applyActions, resolveActions, summarizeActions } from './claude-actions
 import { deckFileName, escapeHtml, renderDeckHtml, sanitizeDeck, slideZoom } from './claude-deck'
 import { SYSTEM_PROMPT, buildPrompt, stripRefLinks } from './claude-prompt'
 import { readPartialJsonString, describeClaudeError, CLAUDE_NOT_FOUND } from './claude-run'
+import { clearChat, flushChats, getChat, hydrateChat, resetChatsForTest, reviveTurns, toStoredTurns, type Turn } from './claude-chat'
+import { deleteStoredChat, loadStoredChat, saveStoredChat } from './claude-store'
+import { deleteProject } from './db'
 
 const P = 'claude-project'
 const TODAY = '2026-11-09'
@@ -349,5 +352,67 @@ describe('deck', () => {
     expect(deckFileName('Sprint 12: review / Q4')).toBe('Sprint 12 review Q4.html')
     expect(deckFileName('..hidden...')).toBe('hidden.html')
     expect(deckFileName('   ')).toBe('plan-up deck.html')
+  })
+})
+
+describe('stored chats', () => {
+  const PID = 'chat-project'
+  const user: Turn = { id: 'u1', role: 'user', text: 'Ai đang quá tải?' }
+  const answer = (over: Partial<Extract<Turn, { role: 'assistant' }>> = {}): Turn => ({
+    id: 'a1',
+    role: 'assistant',
+    status: 'done',
+    reply: 'An đang giữ 9 task.',
+    alive: true,
+    startedAt: 1,
+    request: 'Ai đang quá tải?',
+    ...over,
+  })
+
+  beforeEach(async () => {
+    resetChatsForTest()
+    await deleteStoredChat(PID)
+  })
+
+  it('keeps the undo snapshot out of the stored copy', () => {
+    const snapshot = { projectId: PID } as never
+    const turns = [user, answer({ proposal: { actions: [], selected: [], state: 'applied', applied: 2, snapshot } })]
+    const stored = toStoredTurns(turns)
+    expect((stored[1] as { proposal: object }).proposal).not.toHaveProperty('snapshot')
+    expect((stored[1] as { proposal: { applied: number } }).proposal.applied).toBe(2)
+    // The live turn keeps its snapshot: Undo still works this session.
+    expect((turns[1] as { proposal: object }).proposal).toHaveProperty('snapshot')
+  })
+
+  it('revives a running answer as stopped and an interrupted apply as pending', () => {
+    const turns = reviveTurns([
+      user,
+      answer({ status: 'running', proposal: { actions: [], selected: [], state: 'applying' } }),
+      null,
+      { role: 'assistant' },
+      { id: 'x', role: 'user' },
+    ])
+    expect(turns).toHaveLength(2)
+    const a = turns[1] as Extract<Turn, { role: 'assistant' }>
+    expect(a.status).toBe('stopped')
+    expect(a.proposal?.state).toBe('pending')
+    expect(a.proposal?.error).toMatch(/closed while applying/)
+  })
+
+  it('reads a stored chat back after a restart, and New chat removes it', async () => {
+    await saveStoredChat(PID, toStoredTurns([user, answer()]))
+    expect(getChat(PID).turns).toHaveLength(0)
+    await hydrateChat(PID)
+    expect(getChat(PID).turns.map((t) => t.id)).toEqual(['u1', 'a1'])
+    clearChat(PID)
+    await flushChats()
+    expect(await loadStoredChat(PID)).toBeNull()
+    expect(getChat(PID).turns).toHaveLength(0)
+  })
+
+  it('drops the chat with its project', async () => {
+    await saveStoredChat(PID, [user])
+    await deleteProject(PID)
+    expect(await loadStoredChat(PID)).toBeNull()
   })
 })

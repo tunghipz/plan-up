@@ -1,7 +1,7 @@
 # Claude assistant (desktop)
 
 **Status:** Implemented
-**Last updated:** 2026-11-10 (kéo đổi bề rộng panel; task, người, sprint trong câu trả lời bấm được để nhảy tới trong plan). Trước đó: 2026-11-09
+**Last updated:** 2026-11-11 (bôi đen và copy được chữ trong hội thoại). Trước đó: 2026-11-10 (kéo đổi bề rộng panel; task, người, sprint trong câu trả lời bấm được để nhảy tới trong plan). Trước đó: 2026-11-09
 **Code:** `app/src-tauri/src/claude.rs`, `app/src/claude-run.ts`, `app/src/claude-context.ts`,
 `app/src/claude-prompt.ts`, `app/src/claude-actions.ts`, `app/src/claude-deck.ts`,
 `app/src/ClaudePanel.tsx`, `app/src/App.tsx`, `app/src/native-shell.ts`
@@ -63,6 +63,11 @@ Hai việc:
   Việt vì đó là lời user gửi đi; phần chrome của panel giữ tiếng Anh như cả app.
 - **Hội thoại:** tin của user là bong bóng xám bên phải. Câu trả lời của Claude là văn bản
   markdown gọn (đoạn, gạch đầu dòng, `**đậm**`), hiện dần trong lúc Claude viết.
+- **Bôi đen và copy** (2026-11-11, user: *"panel AI không bôi đen và copy được text"*). Chữ
+  trong hội thoại (tin của user, câu trả lời, thẻ deck, thẻ Proposed changes) bôi đen và copy
+  được. Bản desktop tắt chọn chữ toàn app (`desktop-native-feel.md` §2), nên vùng hội thoại
+  gắn class `select-text` để mở lại. Header và các gợi ý lúc chưa có tin vẫn không chọn được
+  vì đó là chrome.
 - **Link trong câu trả lời** (2026-11-10, user: *"có thể làm highlight tên và task để bấm vào
   thì show trong plan không"*). Task, người và sprint Claude nhắc tới hiện thành link:
   - **Task** `#12 Login API`: chữ accent, đậm vừa. Bấm thì chọn sprint của task (nếu khác

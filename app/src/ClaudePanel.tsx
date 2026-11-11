@@ -213,7 +213,11 @@ export function ClaudePanel({
           const el = e.currentTarget
           stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80
         }}
-        className="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-4"
+        // select-text: the desktop build turns selection off app-wide (index.css,
+        // html.desktop body); the conversation is content, so it stays copyable.
+        className={`flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-4 ${
+          chat.turns.length > 0 ? 'select-text' : ''
+        }`}
       >
         {chat.turns.length === 0 ? (
           <EmptyState projectName={project.name} onPick={send} />

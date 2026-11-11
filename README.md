@@ -64,7 +64,9 @@ and flashes). It can **build a slide deck** (Claude writes
 the content, a fixed Cupertino template renders one self-contained HTML file — preview,
 open in the browser, save, present with ←/→, print to PDF; dense slides shrink to fit), and
 can **propose changes** (create / edit / move / delete tasks, prerequisites, sprint goal) as
-a checklist that only touches your data when you press **Apply** — with **Undo**. See
+a checklist that only touches your data when you press **Apply** — with **Undo**.
+**Conversations are kept per project across restarts** (in a separate local database, not
+part of backup/export; **New chat** clears it), and their text can be selected and copied. See
 [`design-docs/claude-assistant.md`](./design-docs/claude-assistant.md). The desktop window
 is opaque (the see-through native sidebar vibrancy was removed on 2026-11-10).
 See [`design-docs/desktop-app-tauri.md`](./design-docs/desktop-app-tauri.md),

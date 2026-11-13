@@ -37,6 +37,8 @@ import {
   Check,
   Link2,
   TriangleAlert,
+  Menu,
+  MoreHorizontal,
 } from 'lucide-react'
 import {
   db,
@@ -67,6 +69,8 @@ import {
 } from './db'
 import { isProjectBundle, looksLikeProjectBundle } from './project-io'
 import { CollectionView, CollectionBarIdentity, StatusEditor } from './CollectionView'
+import { useIsMobile } from './useIsMobile'
+import { MobileActionSheet } from './MobileActionSheet'
 import { useConfirm } from './confirm-context'
 import { ModalSheet } from './ModalSheet'
 import { SprintView, type ListFocus, type ListGrouping } from './SprintView'
@@ -544,6 +548,28 @@ function App() {
     safeStorage.set('plan-up:sidebarCollapsed', sidebarCollapsed ? '1' : '0')
   }, [sidebarCollapsed])
   const [sidebarResizing, setSidebarResizing] = useState(false)
+  // Phone width (< 768px): the sidebar is an overlay drawer with its own,
+  // unpersisted open state — never the desktop `sidebarCollapsed`, so a phone
+  // visit can't leave the desktop sidebar hidden. `⋯` holds the toolbar actions
+  // that don't fit. See design-docs/mobile-layout.md.
+  const isMobile = useIsMobile()
+  // The drawer remembers WHICH selection it was opened on: picking a sprint /
+  // collection / project changes the key, so the drawer reads as closed and the
+  // pick shows — no effect needed. Both overlays also vanish at desktop width.
+  const selKey = `${currentProjectId}|${selKind}|${currentSprintId}|${currentCollectionId}`
+  const [drawerOpenAt, setDrawerOpenAt] = useState<string | null>(null)
+  const drawerOpen = isMobile && drawerOpenAt === selKey
+  const setDrawerOpen = (open: boolean) => setDrawerOpenAt(open ? selKey : null)
+  const [moreOpenRaw, setMoreOpen] = useState(false)
+  const moreOpen = isMobile && moreOpenRaw
+  useEffect(() => {
+    if (!drawerOpen) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setDrawerOpenAt(null)
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [drawerOpen])
   const startSidebarResize = (e: React.MouseEvent) => {
     e.preventDefault()
     setSidebarResizing(true)
@@ -1202,7 +1228,10 @@ function App() {
     return (
       <div key={s.id} className="relative group/row">
         <button
-          onClick={() => selectSprint(s.id)}
+          onClick={() => {
+            selectSprint(s.id)
+            setDrawerOpenAt(null) // phone drawer: re-picking the open sprint closes it too
+          }}
           className={`w-full text-left flex flex-col gap-0.5 px-2.5 py-1.5 mb-0.5 rounded-lg transition ${
             isActive ? 'brand-fill text-white' : 'text-ink hover:bg-surface-hover'
           }`}
@@ -1471,16 +1500,21 @@ function App() {
           Collapses to width 0 (app-shell v4.2); `inert` when collapsed so its
           controls leave the tab order. Width transition off during drag-resize. */}
       <aside
-        className={`vibrancy shrink-0 border-border-hair flex flex-col overflow-hidden relative ${
-          sidebarCollapsed ? '' : 'border-r'
-        } ${
-          sidebarResizing
-            ? ''
-            : 'transition-[width] duration-300 ease-[cubic-bezier(.32,.72,0,1)] motion-reduce:transition-none'
+        className={`vibrancy shrink-0 border-border-hair flex flex-col overflow-hidden ${
+          isMobile
+            ? // Phone: overlay drawer sliding in from the left (mobile-layout.md).
+              `fixed inset-y-0 left-0 z-50 border-r shadow-[6px_0_24px_rgba(0,0,0,0.18)] transition-transform duration-300 ease-[cubic-bezier(.32,.72,0,1)] motion-reduce:transition-none ${
+                drawerOpen ? 'translate-x-0' : '-translate-x-full'
+              }`
+            : `relative ${sidebarCollapsed ? '' : 'border-r'} ${
+                sidebarResizing
+                  ? ''
+                  : 'transition-[width] duration-300 ease-[cubic-bezier(.32,.72,0,1)] motion-reduce:transition-none'
+              }`
         }`}
-        style={{ width: sidebarCollapsed ? 0 : sidebarWidth }}
-        aria-hidden={sidebarCollapsed}
-        inert={sidebarCollapsed}
+        style={{ width: isMobile ? 'min(84vw, 320px)' : sidebarCollapsed ? 0 : sidebarWidth }}
+        aria-hidden={isMobile ? !drawerOpen : sidebarCollapsed}
+        inert={isMobile ? !drawerOpen : sidebarCollapsed}
       >
         {/* Desktop overlay title bar (desktop-app-tauri.md): the traffic lights
             float over this strip; it doubles as the window drag region. */}
@@ -1778,7 +1812,10 @@ function App() {
                 return (
                   <div key={c.id} className="group relative mb-0.5">
                     <button
-                      onClick={() => selectCollection(c.id)}
+                      onClick={() => {
+                        selectCollection(c.id)
+                        setDrawerOpenAt(null)
+                      }}
                       className={`w-full text-left flex items-center gap-2.5 px-2.5 py-2 text-[14px] rounded-lg transition ${
                         isActive ? 'brand-fill text-white' : 'text-ink hover:bg-surface-hover'
                       }`}
@@ -1855,17 +1892,63 @@ function App() {
             {dark ? <Sun size={16} /> : <Moon size={16} />}
           </button>
         </div>
-        {/* Drag handle — resize the panel; persists across sessions */}
-        <div
-          onMouseDown={startSidebarResize}
-          className="group/resize absolute top-0 right-0 h-full w-1.5 cursor-col-resize z-10"
-          role="separator"
-          aria-orientation="vertical"
-          title="Drag to resize"
-        >
-          <div className="absolute right-0 top-0 h-full w-px bg-transparent group-hover/resize:bg-accent transition-colors" />
-        </div>
+        {/* Drag handle — resize the panel; persists across sessions. Not on
+            phone width: there the sidebar is a fixed-width drawer. */}
+        {!isMobile && (
+          <div
+            onMouseDown={startSidebarResize}
+            className="group/resize absolute top-0 right-0 h-full w-1.5 cursor-col-resize z-10"
+            role="separator"
+            aria-orientation="vertical"
+            title="Drag to resize"
+          >
+            <div className="absolute right-0 top-0 h-full w-px bg-transparent group-hover/resize:bg-accent transition-colors" />
+          </div>
+        )}
       </aside>
+      {isMobile && drawerOpen && (
+        <div
+          className="dlg-scrim fixed inset-0 z-40 bg-black/30"
+          onClick={() => setDrawerOpen(false)}
+          aria-hidden
+        />
+      )}
+      {/* Phone `⋯` menu — the capsule actions that don't fit (mobile-layout.md). */}
+      {moreOpen && (
+        <MobileActionSheet
+          title={
+            selKind === 'collection' ? currentCollection?.name : currentSprint?.name
+          }
+          onClose={() => setMoreOpen(false)}
+          actions={[
+            ...(selKind === 'sprint' && currentSprint
+              ? [{ label: 'Activity log', Icon: History, onSelect: () => setShowActivity(true) }]
+              : []),
+            ...(selKind === 'collection' && currentCollection && (collectionItems?.length ?? 0) > 0
+              ? [{ label: 'Share read-only link', Icon: Link2, onSelect: () => setCollShareOpen(true) }]
+              : []),
+            {
+              label: 'Export this project',
+              Icon: Package,
+              detail: currentProject?.name,
+              disabled: !currentProject,
+              onSelect: () =>
+                currentProject && handleExportProject(currentProject.id, currentProject.name),
+            },
+            {
+              label: 'Export all (full backup)',
+              Icon: Database,
+              onSelect: () => void handleExportAll(),
+            },
+            {
+              label: 'Import',
+              Icon: Upload,
+              detail: 'Project file or full backup',
+              onSelect: handleImportClick,
+            },
+          ]}
+        />
+      )}
 
       {/* Desktop collapsed → 74px icon rail (desktop-app-tauri.md; app-shell v4.3).
           Fills the traffic-light safe zone instead of leaving an orphaned gutter, and
@@ -1931,21 +2014,32 @@ function App() {
             to its right — no marginLeft shove needed (app-shell v4.3). */}
         <header
           {...(DESKTOP_CHROME ? { 'data-tauri-drag-region': true } : {})}
-          className="relative z-30 h-[46px] shrink-0 mx-3 mt-3 rounded-full glass-toolbar flex items-center px-4 gap-3"
+          className="relative z-30 h-[46px] shrink-0 mx-3 mt-3 rounded-full glass-toolbar flex items-center px-0.5 gap-1 md:px-4 md:gap-3"
         >
           {/* Sidebar toggle — macOS sidebar.left idiom (one button, both ways). While
               the desktop icon rail is up it owns the toggle, so hide this one to avoid
               a duplicate; web/expanded keeps it here. */}
           {!(DESKTOP_CHROME && sidebarCollapsed) && (
-            <button
-              onClick={() => setSidebarCollapsed((c) => !c)}
-              title={`${sidebarCollapsed ? 'Show' : 'Hide'} sidebar (⌘\\)`}
-              aria-label={`${sidebarCollapsed ? 'Show' : 'Hide'} sidebar`}
-              aria-pressed={!sidebarCollapsed}
-              className="shrink-0 inline-flex items-center justify-center w-8 h-8 -ml-1.5 rounded-md text-ink-faint hover:text-ink hover:bg-surface-hover transition"
-            >
-              <PanelLeft size={16} strokeWidth={1.9} />
-            </button>
+            isMobile ? (
+              <button
+                onClick={() => setDrawerOpen(true)}
+                aria-label="Open sidebar"
+                aria-expanded={drawerOpen}
+                className="shrink-0 inline-flex items-center justify-center w-11 h-11 rounded-full text-accent active:bg-surface-hover transition"
+              >
+                <Menu size={21} strokeWidth={1.9} />
+              </button>
+            ) : (
+              <button
+                onClick={() => setSidebarCollapsed((c) => !c)}
+                title={`${sidebarCollapsed ? 'Show' : 'Hide'} sidebar (⌘\\)`}
+                aria-label={`${sidebarCollapsed ? 'Show' : 'Hide'} sidebar`}
+                aria-pressed={!sidebarCollapsed}
+                className="shrink-0 inline-flex items-center justify-center w-8 h-8 -ml-1.5 rounded-md text-ink-faint hover:text-ink hover:bg-surface-hover transition"
+              >
+                <PanelLeft size={16} strokeWidth={1.9} />
+              </button>
+            )
           )}
           <div className="flex items-center gap-2.5 text-sm min-w-0">
             {selKind === 'collection' && currentCollection ? (
@@ -1957,7 +2051,7 @@ function App() {
               // switching project is a sidebar-only affordance (no duplicate, §8.3),
               // so this is aria-hidden — the title h1 + Dates carry it for a11y.
               <div className="flex items-center gap-2 min-w-0" aria-hidden>
-                {currentProject && (
+                {currentProject && !isMobile && (
                   <>
                     <ProjectTile project={currentProject} size={20} />
                     <span className="text-[13px] text-ink-muted truncate max-w-[168px]">
@@ -1970,9 +2064,14 @@ function App() {
                     />
                   </>
                 )}
-                <span className="text-[13px] font-semibold text-ink shrink-0">
+                <span
+                  className={`font-semibold text-ink ${
+                    isMobile ? 'text-[15px] truncate' : 'text-[13px] shrink-0'
+                  }`}
+                >
                   {currentSprint.name}
                 </span>
+                {!isMobile && (
                 <span
                   className={`text-[12.5px] text-ink-muted tab-data shrink-0 overflow-hidden whitespace-nowrap transition-[max-width,opacity] duration-[280ms] ease-[cubic-bezier(.32,.72,0,1)] motion-reduce:transition-none ${
                     scrolled ? 'max-w-[180px] opacity-100 ml-0.5' : 'max-w-0 opacity-0'
@@ -1980,6 +2079,7 @@ function App() {
                 >
                   · {formatSprintRange(currentSprint.startDate, currentSprint.endDate)}
                 </span>
+                )}
               </div>
             ) : (
               <span className="text-ink-faint">No sprint selected</span>
@@ -1990,15 +2090,15 @@ function App() {
                   ref={rollBtnRef}
                   onClick={() => setRollOpen((o) => !o)}
                   aria-expanded={rollOpen}
-                  className={`text-xs flex items-center gap-1 text-accent rounded-md px-2 py-1 hover:bg-accent-soft transition ${
+                  className={`text-xs flex items-center gap-1 text-accent rounded-md px-2 py-1 max-md:min-h-11 max-md:px-2.5 hover:bg-accent-soft transition ${
                     rollOpen ? 'bg-accent-soft' : ''
                   }`}
                   title={`Move ${unfinishedCount} unfinished task${
                     unfinishedCount === 1 ? '' : 's'
                   } to "${nextSprint.name}"`}
                 >
-                  <ArrowRightCircle size={13} strokeWidth={1.75} />
-                  <span>Roll over</span>
+                  <ArrowRightCircle size={isMobile ? 18 : 13} strokeWidth={1.75} />
+                  <span className="hidden md:inline">Roll over</span>
                   <span className="text-ink-faint">{unfinishedCount}</span>
                 </button>
                 {rollOpen && (
@@ -2015,22 +2115,24 @@ function App() {
               </div>
             )}
           </div>
-          <div className="ml-auto flex items-center gap-1.5">
+          <div className="ml-auto flex items-center gap-0.5 md:gap-1.5">
+            {/* Phone: the view toggle moves to a full-width row under the page
+                header (mobile-layout.md), so the capsule only holds what fits. */}
             {selKind === 'collection' && currentCollection ? (
               <>
                 <StatusEditor collection={currentCollection} />
-                <ViewToggle
-                  value={collectionView}
-                  options={COLLECTION_VIEWS}
-                  onChange={setCollectionView}
-                />
+                {!isMobile && (
+                  <ViewToggle
+                    value={collectionView}
+                    options={COLLECTION_VIEWS}
+                    onChange={setCollectionView}
+                  />
+                )}
               </>
             ) : (
-              <>
-                <ViewToggle value={view} options={SPRINT_VIEWS} onChange={setView} />
-              </>
+              !isMobile && <ViewToggle value={view} options={SPRINT_VIEWS} onChange={setView} />
             )}
-            <div className="w-px h-5 bg-border-hair mx-1" />
+            <div className="hidden md:block w-px h-5 bg-border-hair mx-1" />
             {/* Search = command palette (Spotlight). Sprint-only (search never
                 applied to collections). Trigger: this icon, "/", or ⌘K. */}
             {selKind === 'sprint' && currentSprint && (
@@ -2038,11 +2140,25 @@ function App() {
                 onClick={() => setPaletteOpen(true)}
                 title="Search tasks (/ or ⌘K)"
                 aria-label="Search tasks"
-                className="inline-flex items-center justify-center w-8 h-8 rounded-md text-ink-faint hover:text-ink hover:bg-surface-hover transition"
+                className="inline-flex items-center justify-center w-11 h-11 rounded-full text-accent md:w-8 md:h-8 md:rounded-md md:text-ink-faint hover:text-ink hover:bg-surface-hover transition"
               >
-                <Search size={15} strokeWidth={1.9} />
+                <Search size={isMobile ? 20 : 15} strokeWidth={1.9} />
               </button>
             )}
+            {isMobile && (
+              <button
+                onClick={() => setMoreOpen(true)}
+                aria-label="More actions"
+                aria-haspopup="menu"
+                aria-expanded={moreOpen}
+                className="inline-flex items-center justify-center w-11 h-11 rounded-full text-accent active:bg-surface-hover transition"
+              >
+                <MoreHorizontal size={21} strokeWidth={1.9} />
+              </button>
+            )}
+            {/* Phone: everything from here to Import lives in the `⋯` sheet. */}
+            {!isMobile && (
+            <>
             {/* Sprint activity log — toggle the right-side drawer. Calm grey at
                 rest (accent is a signal, not chrome); accent only while open. */}
             {selKind === 'sprint' && currentSprint && (
@@ -2182,6 +2298,8 @@ function App() {
             >
               <Upload size={13} /> Import
             </button>
+            </>
+            )}
             <input
               ref={fileInputRef}
               type="file"
@@ -2230,7 +2348,28 @@ function App() {
             />
           )}
 
-          <main className="px-6 pb-12">
+          {/* Phone: List · Board · Timeline as a full-width row (mobile-layout.md). */}
+          {isMobile &&
+            (selKind === 'collection' ? (
+              currentCollection && (
+                <div className="px-3 pt-3 pb-3">
+                  <ViewToggle
+                    fill
+                    value={collectionView}
+                    options={COLLECTION_VIEWS}
+                    onChange={setCollectionView}
+                  />
+                </div>
+              )
+            ) : (
+              currentSprint && (
+                <div className="px-3 pb-3">
+                  <ViewToggle fill value={view} options={SPRINT_VIEWS} onChange={setView} />
+                </div>
+              )
+            ))}
+
+          <main className="px-3 md:px-6 pb-12">
             {!projects || !sprints ? (
               <p className="text-ink-muted py-12 text-center">Loading…</p>
             ) : projects.length === 0 ? (
@@ -2968,7 +3107,7 @@ function SprintPageHeader({
     hasNext
   )
   return (
-    <div className="mx-6 mt-4 mb-3 glass-card rounded-[18px] px-5 pt-4 pb-4">
+    <div className="mx-3 mt-3 mb-3 md:mx-6 md:mt-4 glass-card rounded-[18px] px-4 md:px-5 pt-4 pb-4">
       {/* Title + Copy button on one row; note flows under the title. */}
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1">

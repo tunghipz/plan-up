@@ -481,7 +481,13 @@ export function BoardView({
 
   return (
     <SprintRangeContext.Provider value={{ start: sprintStartDate, end: sprintEndDate }}>
-    <div ref={gridRef} className="grid grid-cols-1 md:grid-cols-3 items-start gap-5 max-w-6xl">
+    <div
+      // Phone: the three columns sit side by side, each 86% wide, swiped one at a
+      // time with snap (mobile-layout.md "Board view"); the -mx-3/px-3 bleed lets
+      // the next column peek in from the screen edge. Desktop: the usual 3-col grid.
+      ref={gridRef}
+      className="flex items-start gap-3 overflow-x-auto snap-x snap-mandatory scroll-px-3 -mx-3 px-3 pb-2 no-scrollbar md:grid md:grid-cols-3 md:gap-5 md:overflow-visible md:snap-none md:mx-0 md:px-0 md:pb-0 max-w-6xl"
+    >
       {STATUS_ORDER.map((status) => {
         const meta = STATUS_META[status]
         const list = byStatus[status]
@@ -489,7 +495,7 @@ export function BoardView({
         return (
           <section
             key={status}
-            className={`flex flex-col gap-2.5 min-h-[200px] rounded-[14px] [contain:layout] ${
+            className={`flex flex-col gap-2.5 min-h-[200px] rounded-[14px] [contain:layout] shrink-0 basis-[86%] snap-start md:basis-auto ${
               isOver ? 'bg-accent/[0.05]' : ''
             }`}
             onDragOver={(e) => {

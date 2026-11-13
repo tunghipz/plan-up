@@ -506,7 +506,7 @@ export function DatePickCell({
         ) : emptyHint ? (
           <span
             className={`inline-flex items-center rounded-full border border-dashed border-border px-2.5 py-0.5 text-[11.5px] font-medium text-ink-faint group-hover:border-accent group-hover:text-accent transition ${
-              emptyHintHover ? 'opacity-0 group-hover/row:opacity-100' : ''
+              emptyHintHover ? 'empty-hint-hover opacity-0 group-hover/row:opacity-100' : ''
             }`}
           >
             ＋ {emptyHint}

@@ -185,6 +185,18 @@ Một **khối mảnh** trên đầu view (không phải 3 thẻ số rời): ti
 - `notEstimated` không nhồi vào thanh (thanh chỉ tải done/assigned/free) — đặt ở legend dạng cảnh báo.
 - *Decision 2026-06-08*: đổi từ "3 stat tiles" (Backlog/Assigned/Progress) sang hybrid bar này để khớp đúng triết lý "thanh xếp tầng" của DNA; bản tiles cũ nằm trong git history.
 
+### 4.8 Mobile (< 768px) *(2026-11-13)*
+
+Một breakpoint duy nhất: Tailwind `md` (768px). Dưới mức đó app dùng layout điện thoại, chi tiết ở
+[`design-docs/mobile-layout.md`](design-docs/mobile-layout.md). Luật chung:
+- **Chỉ đổi hình bằng CSS** (`md:` / `max-md:` hoặc khối *Mobile layout* trong `index.css`); `useIsMobile()`
+  chỉ dùng khi **hành vi** khác (drawer, menu `⋯`). Desktop không được lệch một pixel nào.
+- Vùng bấm chính 44×44 (status circle, ☰, Search, `⋯`); ô meta trong row tối thiểu 36px cao.
+- Chữ tối thiểu 12px. Ô nhập 16px (tránh iOS tự zoom khi focus).
+- Không có hover trên cảm ứng: thứ gì desktop chỉ hiện khi hover thì trên mobile phải hiện sẵn hoặc
+  nằm trong menu `⋯`.
+- Không cuộn ngang cả trang. Bảng nhiều cột re-flow thành card hai dòng thay vì cuộn ngang.
+
 ## 5. Component rules
 
 ### 5.1 Avatar

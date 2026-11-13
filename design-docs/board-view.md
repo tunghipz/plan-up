@@ -1,7 +1,7 @@
 # Board view
 
 **Status:** Implemented
-**Last updated:** 2026-11-09 (**fix**: popover Schedule hiện đúng plan của card, có tính project holidays). Trước đó cùng ngày (**perf**: `planById` dùng `computeAllWorkingPlans` một pass thay vì `computeWorkingPlan` từng card). Trước đó: 2026-07-02 (boardOrder midpoint collision → whole-column renormalize)
+**Last updated:** 2026-11-13 (phone width < 768px: columns sit side by side, 86% wide, swiped with snap — see [mobile-layout.md](./mobile-layout.md)). Trước đó: 2026-11-09 (**fix**: popover Schedule hiện đúng plan của card, có tính project holidays). Trước đó cùng ngày (**perf**: `planById` dùng `computeAllWorkingPlans` một pass thay vì `computeWorkingPlan` từng card). Trước đó: 2026-07-02 (boardOrder midpoint collision → whole-column renormalize)
 **Code:** `app/src/BoardView.tsx`
 
 ## Purpose

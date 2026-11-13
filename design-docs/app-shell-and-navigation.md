@@ -1,7 +1,10 @@
 # App shell & navigation
 
 **Status:** Implemented
-**Last updated:** 2026-11-09 (the List-only **`By member · All`** toggle left the top bar for a
+**Last updated:** 2026-11-13 (**phone width** < 768px: the sidebar becomes an overlay **drawer** opened
+from a ☰ button, the toolbar keeps ☰ · sprint name · Roll over · Search · `⋯`, the rest of its actions move
+into a `⋯` action sheet, and `List · Board · Timeline` drops to a full-width row under the page header —
+see [mobile-layout.md](./mobile-layout.md); desktop unchanged). Trước đó: 2026-11-09 (the List-only **`By member · All`** toggle left the top bar for a
 `Group by` row at the top of the List — see [list-view.md](./list-view.md) *Chỗ đặt toggle*; the
 top bar keeps only `List · Board · Timeline` and sprint-wide tools, so it has one shape in every
 view. Key `plan-up:list-grouping` unchanged)
@@ -234,6 +237,12 @@ computed from the current sprint's **leaf** tasks (parents excluded — see task
   (`active:scale-[0.92]`, spring easing) on its squircle tiles — see git history / the earlier
   `demo/sidebar-activitylog-motion.html`. The `.tile-press` class stays in `index.css` for any
   future dock-style control.
+
+## Phone width (< 768px)
+
+See [mobile-layout.md](./mobile-layout.md) *Shell*. The drawer uses its own unpersisted state, never
+`plan-up:sidebarCollapsed`, so a phone visit can't leave the desktop sidebar hidden. The Tauri app has
+`minWidth` 900, so it never enters this layout.
 
 ## Rules & edge cases
 - **localStorage keys:** `plan-up:screen`, `plan-up:currentProjectId`, `plan-up:currentSprintId`,

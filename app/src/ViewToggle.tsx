@@ -10,10 +10,14 @@ export function ViewToggle<T extends string>({
   value,
   options,
   onChange,
+  fill = false,
 }: {
   value: T
   options: { value: T; label: string; Icon: LucideIcon; title?: string }[]
   onChange: (v: T) => void
+  /** Stretch to the parent's width, equal segments, 36px tall (mobile row —
+   * design-docs/mobile-layout.md). */
+  fill?: boolean
 }) {
   // Sliding white indicator (macOS segmented control): measure the active
   // segment after layout and glide the pill to it, instead of swapping a
@@ -21,13 +25,22 @@ export function ViewToggle<T extends string>({
   const ref = useRef<HTMLDivElement>(null)
   const [ind, setInd] = useState<{ left: number; width: number } | null>(null)
   useLayoutEffect(() => {
-    const el = ref.current?.querySelector<HTMLElement>(`[data-seg="${value}"]`)
-    if (el) setInd({ left: el.offsetLeft, width: el.offsetWidth })
-  }, [value, options])
+    const measure = () => {
+      const el = ref.current?.querySelector<HTMLElement>(`[data-seg="${value}"]`)
+      if (el) setInd({ left: el.offsetLeft, width: el.offsetWidth })
+    }
+    measure()
+    // A filled toggle's segments change width with the viewport (rotation).
+    if (!fill) return
+    window.addEventListener('resize', measure)
+    return () => window.removeEventListener('resize', measure)
+  }, [value, options, fill])
   return (
     <div
       ref={ref}
-      className="relative inline-flex items-center gap-0.5 p-0.5 rounded-[9px] bg-fill"
+      className={`relative items-center gap-0.5 p-0.5 rounded-[9px] bg-fill ${
+        fill ? 'flex w-full' : 'inline-flex'
+      }`}
     >
       {ind && (
         <span
@@ -43,7 +56,9 @@ export function ViewToggle<T extends string>({
             key={v}
             data-seg={v}
             onClick={() => onChange(v)}
-            className={`relative z-10 flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded-[7px] transition-colors ${
+            className={`relative z-10 flex items-center gap-1.5 px-3 font-medium rounded-[7px] transition-colors ${
+              fill ? 'flex-1 justify-center min-h-9 text-[13.5px]' : 'py-1 text-xs'
+            } ${
               active ? 'text-ink' : 'text-ink-muted hover:text-ink'
             }`}
             title={title ?? `${label} view`}

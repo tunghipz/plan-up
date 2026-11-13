@@ -1,3 +1,4 @@
+import { useIsMobile } from './useIsMobile'
 import {
   createContext,
   Fragment,
@@ -518,10 +519,10 @@ export function SprintView({
           )}
           {/* Same sticky glass capsule as the member layout, plus the (sortable)
               wide Assignee column — mirrors the card's min-w so columns align. */}
-          <div className="sticky top-2 z-20">
+          <div className="sticky top-2 z-20 hidden md:block">
             <div className="glass-toolbar rounded-full overflow-hidden">
               <div className="overflow-x-auto">
-                <div className="min-w-[960px]">
+                <div className="md:min-w-[960px]">
                   <TaskColumnHeader sort={sort} setSort={setSort} assigneeWide bare />
                 </div>
               </div>
@@ -550,10 +551,10 @@ export function SprintView({
       )}
 
       {!allTable && groups.length > 0 && (
-        <div className="sticky top-2 z-20">
+        <div className="sticky top-2 z-20 hidden md:block">
           <div className="glass-toolbar rounded-full overflow-hidden">
             <div className="overflow-x-auto">
-              <div className="min-w-[820px]">
+              <div className="md:min-w-[820px]">
                 <TaskColumnHeader sort={sort} setSort={setSort} showAssignee={false} bare />
               </div>
             </div>
@@ -1371,7 +1372,7 @@ function MemberCard({
         // Assignee column is omitted — every row in a member group is the same
         // person (shown in the group header avatar).
         <div className="overflow-x-auto">
-          <div className="min-w-[820px]">
+          <div className="md:min-w-[820px]">
             {/* Column header hoisted to a single sticky header above the whole
                 list (see SprintView top). Member cards no longer carry their own. */}
             <div className="divide-y divide-border">
@@ -1523,8 +1524,12 @@ function UnassignedCard({
         muted
       />
       <div className="overflow-x-auto">
-        <div className="min-w-[896px]">
-          {tasks.length > 0 && <TaskColumnHeader sort={sort} setSort={setSort} />}
+        <div className="md:min-w-[896px]">
+          {tasks.length > 0 && (
+            <div className="hidden md:block">
+              <TaskColumnHeader sort={sort} setSort={setSort} />
+            </div>
+          )}
           <div className="divide-y divide-border">
             <TaskRows
               tasks={tasks}
@@ -1583,7 +1588,7 @@ function AllTasksCard({
   return (
     <Card>
       <div className="overflow-x-auto">
-        <div className="min-w-[960px]">
+        <div className="md:min-w-[960px]">
           <div className="divide-y divide-border">
             {rows.length === 0 && (
               <div className="px-4 py-6 text-center text-sm text-ink-faint">No tasks</div>
@@ -1638,11 +1643,17 @@ function ListViewBar({
   onGroupingChange: (g: ListGrouping) => void
   children?: React.ReactNode
 }) {
+  const isMobile = useIsMobile()
   return (
     <div className="space-y-2.5">
       <div className="flex items-center gap-2">
-        <span className="text-[12px] font-medium text-ink-faint">Group by</span>
-        <ViewToggle value={grouping} options={LIST_GROUPINGS} onChange={onGroupingChange} />
+        <span className="shrink-0 text-[12px] font-medium text-ink-faint">Group by</span>
+        <ViewToggle
+          value={grouping}
+          options={LIST_GROUPINGS}
+          onChange={onGroupingChange}
+          fill={isMobile}
+        />
       </div>
       {children}
     </div>
@@ -2042,7 +2053,7 @@ function GroupHeader({
   // header is read-mostly (see design-docs/project-member-settings.md).
   return (
     <div
-      className={`relative flex items-center gap-2.5 px-[18px] py-[13px] ${
+      className={`relative flex flex-wrap items-center gap-2.5 px-3.5 py-3 md:flex-nowrap md:px-[18px] md:py-[13px] ${
         collapsed ? '' : 'border-b border-border'
       } ${collapsible ? 'cursor-pointer transition hover:bg-surface-hover' : ''}`}
       onClick={collapsible ? onToggleCollapse : undefined}
@@ -2075,10 +2086,12 @@ function GroupHeader({
       <span className="text-xs text-ink-faint select-none font-mono shrink-0">
         {countText ?? count}
       </span>
-      <div className="ml-auto flex items-center gap-2.5">
+      {/* Phone: the stats drop to their own line under the name, aligned with it
+          (mobile-layout.md) — side by side they ran past the card edge. */}
+      <div className="ml-auto flex items-center gap-2.5 max-md:flex-wrap max-md:basis-full max-md:ml-0 max-md:pl-[50px] max-md:-mt-1 max-md:empty:hidden">
         {conflictCount !== undefined && conflictCount > 0 && (
           <span
-            className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold tabular-nums bg-priority-high/15 text-priority-high"
+            className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[12px] md:text-[11px] font-semibold tabular-nums bg-priority-high/15 text-priority-high"
             title="Task trùng lịch: chồng thời gian, cùng giờ bắt đầu/kết thúc, hoặc chung prereq"
           >
             <AlertTriangle size={12} />
@@ -2121,7 +2134,7 @@ function MemberStatsBar({ overdue, nextDue }: { overdue: number; nextDue: string
     <>
       {overdue > 0 && (
         <span
-          className="inline-flex items-center text-[11px] font-semibold px-2 py-0.5 rounded-full select-none"
+          className="inline-flex items-center text-[12px] md:text-[11px] font-semibold px-2 py-0.5 rounded-full select-none"
           style={{
             background: 'color-mix(in srgb, var(--color-priority-urgent) 14%, transparent)',
             color: 'color-mix(in srgb, var(--color-priority-urgent) 78%, var(--color-ink) 22%)',
@@ -2133,7 +2146,7 @@ function MemberStatsBar({ overdue, nextDue }: { overdue: number; nextDue: string
       )}
       {nextDue && (
         <span
-          className="text-[11px] font-medium text-ink-faint select-none whitespace-nowrap"
+          className="text-[12px] md:text-[11px] font-medium text-ink-faint select-none whitespace-nowrap"
           title="Next upcoming deadline"
         >
           due {formatShortDate(nextDue)}
@@ -2179,7 +2192,7 @@ function AddTaskRow({
     })
   }
   return (
-    <div className={`flex items-center gap-3 px-4 py-2 text-sm ${parentId ? 'task-group-add' : ''}`}>
+    <div className={`task-add-row flex items-center gap-3 px-4 py-2 text-sm ${parentId ? 'task-group-add' : ''}`}>
       <div className={COL.lead} />
       <div className={COL.dot}>
         <Plus size={14} className="text-ink-faint" />
@@ -2220,19 +2233,22 @@ function AddTaskRow({
 //   seq "123"≈24 · "Effort (day)" hdr 73 · date "Jun 30, 17:00"≈99 · "In progress"
 //   pill 97 (+ pl-2). Title takes the slack via flex-1. (Row delete moved off the
 //   row into the multi-select SelectionBar — no per-row actions column.)
+// Each width also carries a semantic `lc-<col>` class: the phone layout
+// (index.css "Mobile layout", design-docs/mobile-layout.md) re-flows a row into a
+// two-line card by targeting these, without touching the desktop widths.
 const COL = {
-  lead: 'w-5 shrink-0 flex justify-center items-center',
-  dot: 'w-4 shrink-0',
-  seq: 'w-8 text-sm text-ink-faint tabular-nums text-center shrink-0 font-mono',
-  title: 'flex-1 min-w-[150px]',
-  assignee: 'w-16 flex justify-center shrink-0',
+  lead: 'lc-lead w-5 shrink-0 flex justify-center items-center',
+  dot: 'lc-dot w-4 shrink-0',
+  seq: 'lc-seq w-8 text-sm text-ink-faint tabular-nums text-center shrink-0 font-mono',
+  title: 'lc-title flex-1 min-w-[150px]',
+  assignee: 'lc-assignee w-16 flex justify-center shrink-0',
   // All table: avatar + name. See design-docs/list-view.md "Chế độ All".
-  assigneeWide: 'w-32 flex justify-start items-center shrink-0 min-w-0',
-  effort: 'w-20 flex justify-center shrink-0',
-  start: 'w-28 flex justify-end shrink-0',
-  due: 'w-28 flex justify-end shrink-0',
-  status: 'w-28 flex justify-start shrink-0 pl-2',
-  prereq: 'w-20 flex justify-end shrink-0',
+  assigneeWide: 'lc-assignee w-32 flex justify-start items-center shrink-0 min-w-0',
+  effort: 'lc-effort w-20 flex justify-center shrink-0',
+  start: 'lc-start w-28 flex justify-end shrink-0',
+  due: 'lc-due w-28 flex justify-end shrink-0',
+  status: 'lc-status w-28 flex justify-start shrink-0 pl-2',
+  prereq: 'lc-prereq w-20 flex justify-end shrink-0',
 }
 
 /**
@@ -3299,7 +3315,7 @@ const TaskRow = memo(function TaskRow({
         // A milestone is one point in time: collapse Start+End into a single
         // editable date, spanning both date columns so Status stays aligned.
         // Width = w-28 + gap-3 + w-28 = 112 + 12 + 112. See design-docs/milestones.md.
-        <div className="w-[236px] flex justify-center items-center shrink-0">
+        <div className="lc-milestone w-[236px] flex justify-center items-center shrink-0">
           <DatePickCell
             value={liveStart}
             /* A milestone is a completion point, so show its END time (its

@@ -1,3 +1,5 @@
+import { IS_NATIVE_MOBILE } from './platform'
+import { saveToNativeFiles } from './native-save'
 import { useEffect, useState } from 'react'
 import type { Status, Priority, LoggableField, Sprint, Task } from './db'
 import { mergeOffPart, type OffPart } from './scheduling'
@@ -637,8 +639,14 @@ export const PRIORITY_TAG: Record<
   },
 }
 
-/** Download any JSON-serialisable payload as a file (Blob + transient anchor). */
+/** Download any JSON-serialisable payload as a file (Blob + transient anchor).
+ * In the iOS app a download does nothing, so the file goes to Files › plan-up
+ * instead (design-docs/ios-app.md). */
 export function downloadJson(filename: string, data: unknown) {
+  if (IS_NATIVE_MOBILE) {
+    void saveToNativeFiles(filename, { text: JSON.stringify(data, null, 2) })
+    return
+  }
   const blob = new Blob([JSON.stringify(data, null, 2)], {
     type: 'application/json',
   })

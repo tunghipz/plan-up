@@ -1,0 +1,18 @@
+{
+  "$schema": "gen/schemas/mobile-schema.json",
+  "identifier": "mobile",
+  "description": "iOS / Android shell (ios-app.md): core APIs and opening http(s)/mailto links in the system browser. Export goes through the app's own save_export command; no fs, no updater, no window APIs.",
+  "platforms": [
+    "iOS",
+    "android"
+  ],
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:default",
+    "opener:allow-open-url",
+    "opener:allow-default-urls",
+    "dialog:allow-message"
+  ]
+}

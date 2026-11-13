@@ -1,3 +1,5 @@
+import { IS_NATIVE_MOBILE } from './platform'
+import { saveToNativeFiles } from './native-save'
 import type { Member, Task } from './types'
 import type { WorkingPlan } from './scheduling'
 import { flattenDisplayOrder } from './lib'
@@ -149,6 +151,11 @@ export async function copyPngToClipboard(node: HTMLElement): Promise<boolean> {
 
 /** Trigger a download of a data-URL under `filename`. */
 export function downloadPng(dataUrl: string, filename: string): void {
+  // iOS app: no browser download — write to Files › plan-up (ios-app.md).
+  if (IS_NATIVE_MOBILE) {
+    void saveToNativeFiles(filename, { base64: dataUrl.slice(dataUrl.indexOf(',') + 1) })
+    return
+  }
   const a = document.createElement('a')
   a.href = dataUrl
   a.download = filename

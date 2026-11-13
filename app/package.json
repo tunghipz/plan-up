@@ -10,7 +10,10 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "ios:build": "tauri ios build --export-method debugging",
+    "ios:install": "node scripts/ios-install.mjs",
+    "ios:device": "npm run ios:build && npm run ios:install"
   },
   "dependencies": {
     "@tanstack/react-table": "^8.21.3",

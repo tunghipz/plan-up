@@ -1,3 +1,8 @@
+// iOS / Android build (ios-app.md): the folder backup tier, the Claude panel and
+// the window plugins are desktop-only, so on mobile most of this file is unused.
+#![cfg_attr(mobile, allow(dead_code, unused_imports))]
+
+#[cfg(desktop)]
 mod claude;
 
 use flate2::read::GzDecoder;
@@ -113,6 +118,7 @@ fn chosen_dir(state: &BackupDir) -> Result<String, String> {
 
 /// Native folder panel, opened from Rust; the pick becomes THE backup folder.
 /// Returns the path for display, or None when the user cancels.
+#[cfg(desktop)]
 #[tauri::command]
 async fn pick_backup_dir(app: AppHandle, state: State<'_, BackupDir>) -> Result<Option<String>, String> {
     let Some(picked) = app
@@ -261,6 +267,7 @@ const IMPORT_MAX_BYTES: u64 = 200 * 1024 * 1024;
 /// one, so the page can't pick by itself. The page never hands Rust a path:
 /// a command that read any path it was given would let a script in the webview
 /// read any `.json` on the machine. Returns None when the user cancels.
+#[cfg(desktop)]
 #[tauri::command]
 async fn pick_import_file(app: AppHandle) -> Result<Option<String>, String> {
     let Some(picked) = app
@@ -295,7 +302,95 @@ fn read_import_file_at(path: String) -> Result<String, String> {
     fs::read_to_string(p).map_err(|e| e.to_string())
 }
 
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// iPhone export (ios-app.md): a browser-style download does nothing inside the
+/// app, so the page hands the bytes here and they land in the app's Documents
+/// folder — shown in Files › On My iPhone › plan-up (Info.plist
+/// `UIFileSharingEnabled`). Exactly one of `text` / `base64` is set. The name is
+/// a bare file name: no separators, no `..`.
+#[cfg(mobile)]
+#[tauri::command]
+fn save_export(
+    app: AppHandle,
+    file_name: String,
+    text: Option<String>,
+    base64: Option<String>,
+) -> Result<String, String> {
+    use tauri_plugin_dialog::{MessageDialogKind};
+    let bad = file_name.is_empty()
+        || file_name.contains('/')
+        || file_name.contains('\\')
+        || file_name.contains("..")
+        || file_name.starts_with('.');
+    if bad {
+        return Err(format!("invalid file name: {file_name}"));
+    }
+    let bytes = match (text, base64) {
+        (Some(t), None) => t.into_bytes(),
+        (None, Some(b)) => decode_base64(&b)?,
+        _ => return Err("pass exactly one of text / base64".into()),
+    };
+    let dir = app.path().document_dir().map_err(|e| e.to_string())?;
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    fs::write(dir.join(&file_name), bytes).map_err(|e| e.to_string())?;
+    app.dialog()
+        .message(format!("Saved to Files › On My iPhone › plan-up\n\n{file_name}"))
+        .title("Exported")
+        .kind(MessageDialogKind::Info)
+        .show(|_| {});
+    Ok(file_name)
+}
+
+/// Standard base64 (with or without padding) → bytes. Small and dependency-free;
+/// only used for PNG exports on mobile.
+#[cfg_attr(desktop, allow(dead_code))]
+fn decode_base64(s: &str) -> Result<Vec<u8>, String> {
+    fn val(c: u8) -> Option<u32> {
+        match c {
+            b'A'..=b'Z' => Some((c - b'A') as u32),
+            b'a'..=b'z' => Some((c - b'a' + 26) as u32),
+            b'0'..=b'9' => Some((c - b'0' + 52) as u32),
+            b'+' => Some(62),
+            b'/' => Some(63),
+            _ => None,
+        }
+    }
+    let clean: Vec<u8> = s.bytes().filter(|c| !c.is_ascii_whitespace() && *c != b'=').collect();
+    let mut out = Vec::with_capacity(clean.len() * 3 / 4);
+    for chunk in clean.chunks(4) {
+        let mut acc: u32 = 0;
+        for (i, &c) in chunk.iter().enumerate() {
+            acc |= val(c).ok_or("invalid base64")? << (18 - 6 * i);
+        }
+        let n = chunk.len();
+        if n < 2 {
+            return Err("invalid base64 length".into());
+        }
+        out.push((acc >> 16) as u8);
+        if n > 2 {
+            out.push((acc >> 8) as u8);
+        }
+        if n > 3 {
+            out.push(acc as u8);
+        }
+    }
+    Ok(out)
+}
+
+/// Mobile shell (ios-app.md): no window plugins, no updater, no folder backup,
+/// no Claude — the page runs as the phone web layout; only external links
+/// (opener) and file export (`save_export`) reach native code.
+#[cfg(mobile)]
+#[tauri::mobile_entry_point]
+pub fn run() {
+    tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
+        .invoke_handler(tauri::generate_handler![save_export])
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
+}
+
+#[cfg(desktop)]
 pub fn run() {
     use tauri_plugin_window_state::StateFlags;
 
@@ -371,11 +466,22 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        is_backup_filename, list_backups_at as list_backups, prune_backups_at as prune_backups,
+        decode_base64, is_backup_filename, list_backups_at as list_backups,
+        prune_backups_at as prune_backups,
         read_backup_at as read_backup, read_import_file_at as read_import_file,
         write_backup_at as write_backup,
     };
     use std::fs;
+
+    #[test]
+    fn decode_base64_round_trips() {
+        assert_eq!(decode_base64("aGVsbG8=").unwrap(), b"hello");
+        assert_eq!(decode_base64("aGVsbG8").unwrap(), b"hello");
+        assert_eq!(decode_base64("aGk=").unwrap(), b"hi");
+        assert_eq!(decode_base64("").unwrap(), b"");
+        assert!(decode_base64("a").is_err());
+        assert!(decode_base64("a$==").is_err());
+    }
 
     #[test]
     fn read_import_file_reads_json_only() {

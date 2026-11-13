@@ -25,4 +25,7 @@ dist-ssr
 
 # Tauri (Rust build artifacts)
 src-tauri/target
-src-tauri/gen
+# Generated schemas stay ignored; the iOS Xcode project (gen/apple) is committed,
+# minus its own build/ and xcuserdata/ (gen/apple/.gitignore). See design-docs/ios-app.md.
+src-tauri/gen/*
+!src-tauri/gen/apple

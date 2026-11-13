@@ -1,4 +1,4 @@
-import { IS_TAURI } from './backup'
+import { IS_NATIVE_SHELL } from './platform'
 
 /**
  * Runtime client for the hosted share store (`/api/share/*`). The pure snapshot
@@ -14,11 +14,11 @@ const DEPLOYED_ORIGIN = 'https://plan-up-eta.vercel.app'
 /** Where the API lives. Web + Tauri *dev* = same origin (relative ''); a packaged
  * desktop build's origin is `tauri://localhost`, so it must hit the deployed API. */
 function apiBase(): string {
-  return IS_TAURI && import.meta.env.PROD ? DEPLOYED_ORIGIN : ''
+  return IS_NATIVE_SHELL && import.meta.env.PROD ? DEPLOYED_ORIGIN : ''
 }
 /** Origin used to compose the shareable `/view` URL shown to the sender. */
 function viewOrigin(): string {
-  if (IS_TAURI && import.meta.env.PROD) return DEPLOYED_ORIGIN
+  if (IS_NATIVE_SHELL && import.meta.env.PROD) return DEPLOYED_ORIGIN
   return typeof location !== 'undefined' ? location.origin : ''
 }
 

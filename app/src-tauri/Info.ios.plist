@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Merged into the iOS app's Info.plist (design-docs/ios-app.md): the app's
+     Documents folder shows up in Files › On My iPhone › plan-up, which is where
+     Export writes. -->
+<plist version="1.0">
+<dict>
+  <key>UIFileSharingEnabled</key>
+  <true/>
+  <key>LSSupportsOpeningDocumentsInPlace</key>
+  <true/>
+  <key>CFBundleDisplayName</key>
+  <string>plan-up</string>
+</dict>
+</plist>

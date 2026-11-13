@@ -1476,7 +1476,10 @@ function App() {
     // popovers show project holidays as read-only rows and need the same map.
     <ProjectHolidaysContext value={holidayMap}>
     <ProjectHolidayListContext value={currentProject?.holidays ?? EMPTY_HOLIDAYS}>
-    <div className="h-screen flex text-ink overflow-hidden ambient-canvas">
+    <div
+      // Safe-area padding: the iOS app and a home-screen PWA draw edge to edge
+      // (viewport-fit=cover); everywhere else the insets are 0 (ios-app.md).
+      className="h-screen flex text-ink overflow-hidden ambient-canvas pt-[env(safe-area-inset-top)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]">
       {/* Browser-only preview: paint fake macOS traffic lights so `?desktop=1`
           shows the real desktop layout. Real Tauri draws OS lights instead. */}
       {FORCE_DESKTOP_CHROME && !IS_TAURI && (
@@ -1503,7 +1506,7 @@ function App() {
         className={`vibrancy shrink-0 border-border-hair flex flex-col overflow-hidden ${
           isMobile
             ? // Phone: overlay drawer sliding in from the left (mobile-layout.md).
-              `fixed inset-y-0 left-0 z-50 border-r shadow-[6px_0_24px_rgba(0,0,0,0.18)] transition-transform duration-300 ease-[cubic-bezier(.32,.72,0,1)] motion-reduce:transition-none ${
+              `fixed inset-y-0 left-0 z-50 border-r pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] shadow-[6px_0_24px_rgba(0,0,0,0.18)] transition-transform duration-300 ease-[cubic-bezier(.32,.72,0,1)] motion-reduce:transition-none ${
                 drawerOpen ? 'translate-x-0' : '-translate-x-full'
               }`
             : `relative ${sidebarCollapsed ? '' : 'border-r'} ${

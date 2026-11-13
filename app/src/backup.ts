@@ -6,8 +6,8 @@ import { safeStorage } from './lib'
  * (dialog, invoke, liveQuery wiring) lives in backup-tauri.ts.
  */
 
-/** True when running inside the Tauri (desktop) shell. */
-export const IS_TAURI = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
+/** True only in the Tauri DESKTOP shell (not the iOS app) — see platform.ts. */
+export { IS_TAURI } from './platform'
 
 export const BACKUP_DIR_KEY = 'plan-up:backupDir'
 export const BACKUP_ENABLED_KEY = 'plan-up:backupEnabled'

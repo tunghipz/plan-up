@@ -1,4 +1,4 @@
-import { IS_TAURI } from './backup'
+import { IS_NATIVE_SHELL } from './platform'
 
 /**
  * Runtime glue for share links (kept out of the pure, unit-tested share-snapshot
@@ -16,12 +16,12 @@ import { IS_TAURI } from './backup'
 const DEPLOYED_BASE = 'https://plan-up-eta.vercel.app/'
 
 export function shareBaseUrl(): string | undefined {
-  return IS_TAURI && import.meta.env.PROD ? DEPLOYED_BASE : undefined
+  return IS_NATIVE_SHELL && import.meta.env.PROD ? DEPLOYED_BASE : undefined
 }
 
 /** Open a URL in the system browser (Tauri) or a new tab (web). */
 export async function openExternal(url: string): Promise<void> {
-  if (IS_TAURI) {
+  if (IS_NATIVE_SHELL) {
     try {
       const { openUrl } = await import('@tauri-apps/plugin-opener')
       await openUrl(url)

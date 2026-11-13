@@ -1,7 +1,7 @@
 # Restore from version (in-app)
 
 **Status:** Implemented
-**Last updated:** 2026-08-18 (snapshots are now gzipped `.json.gz` and the tier keeps
+**Last updated:** 2026-11-13 (`RestoreSection` nhận `source`, app iPhone dùng lại nó để mở bản từ folder iCloud: [ios-backup-folder.md](./ios-backup-folder.md)). Trước đó: 2026-08-18 (snapshots are now gzipped `.json.gz` and the tier keeps
 50, not 200 — see [auto-backup.md](./auto-backup.md) *Disk footprint*. The picker is
 unaffected: `read_backup` gunzips in Rust, and pre-existing `.json` snapshots stay
 listed and restorable.)

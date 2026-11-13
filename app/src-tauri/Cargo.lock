@@ -2678,6 +2678,7 @@ dependencies = [
  "serde_json",
  "tauri",
  "tauri-build",
+ "tauri-plugin-backup-folder",
  "tauri-plugin-dialog",
  "tauri-plugin-opener",
  "tauri-plugin-process",
@@ -3890,6 +3891,14 @@ dependencies = [
  "serde_json",
  "tauri-utils",
  "walkdir",
+]
+
+[[package]]
+name = "tauri-plugin-backup-folder"
+version = "0.1.0"
+dependencies = [
+ "tauri",
+ "tauri-plugin",
 ]
 
 [[package]]

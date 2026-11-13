@@ -57,12 +57,50 @@ function PreviewStat({ n, label }: { n: number; label: string }) {
 }
 
 /**
+ * Where the version list comes from and the words around it. Desktop reads its
+ * own backup folder (default below); the iPhone app reads the Mac's folder in
+ * iCloud Drive (BackupFolderModal, design-docs/ios-backup-folder.md).
+ */
+export interface RestoreSource {
+  list: () => Promise<VersionEntry[]>
+  read: (file: string) => Promise<ExportPayload>
+  restore: (file: string) => Promise<void>
+  actionLabel: string
+  confirmTitle: string
+  confirmMessage: (when: string) => string
+  confirmLabel: string
+  emptyText: string
+}
+
+const DESKTOP_SOURCE: RestoreSource = {
+  list: listVersions,
+  read: readVersion,
+  restore: restoreVersion,
+  actionLabel: 'Restore bản này',
+  confirmTitle: 'Thay toàn bộ dữ liệu?',
+  confirmMessage: (when) =>
+    `Khôi phục về ${when} sẽ thay toàn bộ dữ liệu hiện tại bằng bản đó. State hiện tại được tự backup vào versions/ trước — restore nhầm vẫn quay lại được.`,
+  confirmLabel: 'Restore',
+  emptyText: 'Chưa có version nào. Bản đầu tiên được ghi sau thay đổi dữ liệu đầu tiên.',
+}
+
+/**
  * Restore-from-version section (design-docs/restore-versions.md, Variant A).
  * Lists versions/ snapshots (timestamps only — no read), expands a preview
- * inline on select, and restores the whole DB via restoreVersion() then reloads.
- * Rendered only when a backup dir is set (desktop).
+ * inline on select, and restores the whole DB via `source.restore` then reloads.
+ * Desktop renders it only when a backup dir is set. `preselectFirst` opens the
+ * newest one's preview straight away and tags it "Mới nhất" (iPhone: one tap to
+ * open the latest).
  */
-function RestoreSection() {
+export function RestoreSection({
+  title = 'Restore từ version',
+  source = DESKTOP_SOURCE,
+  preselectFirst = false,
+}: {
+  title?: string
+  source?: RestoreSource
+  preselectFirst?: boolean
+}) {
   const confirm = useConfirm()
   const [entries, setEntries] = useState<VersionEntry[] | null>(null)
   const [selected, setSelected] = useState<string | null>(null)
@@ -74,12 +112,6 @@ function RestoreSection() {
   // the preview is the verify-before-restore check, so wrong counts are unsafe.
   const reqId = useRef(0)
 
-  useEffect(() => {
-    listVersions()
-      .then(setEntries)
-      .catch(() => setEntries([]))
-  }, [])
-
   const pick = async (file: string) => {
     const myReq = ++reqId.current
     setSelected(file)
@@ -87,7 +119,7 @@ function RestoreSection() {
     setErr(null)
     setBusy(true)
     try {
-      const p = await readVersion(file)
+      const p = await source.read(file)
       if (myReq !== reqId.current) return // superseded by a newer pick
       setPreview(p)
     } catch (e) {
@@ -98,17 +130,39 @@ function RestoreSection() {
     }
   }
 
+  // Mount-only on purpose: `source` is a stable object per caller, and the
+  // parent remounts this section (key) when the folder changes.
+  useEffect(() => {
+    let live = true
+    source
+      .list()
+      .then((list) => {
+        if (!live) return
+        setEntries(list)
+        if (preselectFirst && list.length) void pick(list[0].file)
+      })
+      .catch((e) => {
+        if (!live) return
+        setEntries([])
+        setErr(`Không đọc được folder: ${String(e)}`)
+      })
+    return () => {
+      live = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const restore = async (file: string, at: Date) => {
     const ok = await confirm({
-      title: 'Thay toàn bộ dữ liệu?',
-      message: `Khôi phục về ${fmtVersionTime(at)} sẽ thay toàn bộ dữ liệu hiện tại bằng bản đó. State hiện tại được tự backup vào versions/ trước — restore nhầm vẫn quay lại được.`,
-      confirmLabel: 'Restore',
+      title: source.confirmTitle,
+      message: source.confirmMessage(fmtVersionTime(at)),
+      confirmLabel: source.confirmLabel,
     })
     if (!ok) return
     setBusy(true)
     setErr(null)
     try {
-      await restoreVersion(file)
+      await source.restore(file)
       location.reload()
     } catch (e) {
       setErr(`Restore thất bại: ${String(e)}`)
@@ -119,7 +173,7 @@ function RestoreSection() {
   return (
     <div className="pt-2 border-t border-border-hair space-y-2">
       <div className="flex items-baseline justify-between">
-        <span className="text-[13.5px] font-medium text-ink">Restore từ version</span>
+        <span className="text-[13.5px] font-medium text-ink">{title}</span>
         <span className="text-[11.5px] text-ink-faint">{VERSIONS_KEEP} bản gần nhất</span>
       </div>
 
@@ -127,10 +181,10 @@ function RestoreSection() {
         <p className="text-[12px] text-ink-faint">Đang tải…</p>
       ) : entries.length === 0 ? (
         <p className="text-[12px] text-ink-faint leading-snug">
-          Chưa có version nào. Bản đầu tiên được ghi sau thay đổi dữ liệu đầu tiên.
+          {source.emptyText}
         </p>
       ) : (
-        <div className="max-h-[220px] overflow-auto -mx-1.5 px-1.5 flex flex-col gap-0.5">
+        <div className="max-h-[220px] max-md:max-h-[45vh] overflow-auto -mx-1.5 px-1.5 flex flex-col gap-0.5">
           {entries.map((e, i) => {
             const showDay = i === 0 || dayLabel(entries[i - 1].at) !== dayLabel(e.at)
             const sel = e.file === selected
@@ -143,7 +197,7 @@ function RestoreSection() {
                 )}
                 <button
                   onClick={() => pick(e.file)}
-                  className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-[9px] text-left transition ${
+                  className={`w-full flex items-center gap-2.5 px-2.5 py-2 max-md:min-h-11 rounded-[9px] text-left transition ${
                     sel ? 'bg-accent-tint' : 'hover:bg-surface-hover'
                   }`}
                 >
@@ -153,6 +207,9 @@ function RestoreSection() {
                   <span className="flex-1 min-w-0 text-[13px] tabular-nums truncate">
                     {fmtVersionTime(e.at)}
                   </span>
+                  {preselectFirst && i === 0 && (
+                    <span className="shrink-0 text-[11px] font-semibold text-accent">Mới nhất</span>
+                  )}
                 </button>
                 {sel && (
                   <div className="mt-1 mb-1 bg-surface border border-border-hair rounded-[12px] p-3">
@@ -172,12 +229,12 @@ function RestoreSection() {
                           <button
                             onClick={() => restore(e.file, e.at)}
                             disabled={busy}
-                            className="text-xs font-semibold px-3 py-1.5 rounded-[8px] bg-accent text-white hover:bg-accent-hover transition disabled:opacity-40 inline-flex items-center gap-2"
+                            className="text-xs max-md:text-[15px] max-md:min-h-11 max-md:px-4 font-semibold px-3 py-1.5 rounded-[8px] bg-accent text-white hover:bg-accent-hover transition disabled:opacity-40 inline-flex items-center gap-2"
                           >
                             {busy && (
                               <span className="w-3 h-3 rounded-full border-2 border-white/40 border-t-white animate-spin" />
                             )}
-                            Restore bản này
+                            {source.actionLabel}
                           </button>
                         </div>
                       </>

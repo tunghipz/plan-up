@@ -25,6 +25,7 @@ import {
   ChevronDown,
   ChevronRight,
   History,
+  FolderOpen,
   Sparkles,
   Archive,
   ArchiveRestore,
@@ -98,6 +99,8 @@ import {
 } from './native-shell'
 import { startAutoBackup } from './backup-tauri'
 import { BackupSettingsModal } from './BackupSettingsModal'
+import { BackupFolderModal } from './BackupFolderModal'
+import { IS_NATIVE_MOBILE } from './platform'
 import { ShareLinkModal } from './ShareLinkModal'
 import { CollectionShareModal } from './CollectionShareModal'
 import { buildSnapshot, buildCollectionSnapshot } from './share-snapshot'
@@ -413,6 +416,8 @@ function App() {
     fromName: string
   } | null>(null)
   const [backupSettingsOpen, setBackupSettingsOpen] = useState(false)
+  // iPhone app: open a backup from the Mac's iCloud folder (ios-backup-folder.md)
+  const [backupFolderOpen, setBackupFolderOpen] = useState(false)
   const [shareOpen, setShareOpen] = useState(false)
   const [collShareOpen, setCollShareOpen] = useState(false)
   const [showNewProject, setShowNewProject] = useState(false)
@@ -1949,6 +1954,16 @@ function App() {
               detail: 'Project file or full backup',
               onSelect: handleImportClick,
             },
+            ...(IS_NATIVE_MOBILE
+              ? [
+                  {
+                    label: 'Folder backup…',
+                    Icon: FolderOpen,
+                    detail: 'Mở bản backup của Mac trong iCloud Drive',
+                    onSelect: () => setBackupFolderOpen(true),
+                  },
+                ]
+              : []),
           ]}
         />
       )}
@@ -2567,6 +2582,7 @@ function App() {
       )}
 
       {backupSettingsOpen && <BackupSettingsModal onClose={() => setBackupSettingsOpen(false)} />}
+      {backupFolderOpen && <BackupFolderModal onClose={() => setBackupFolderOpen(false)} />}
       {shareOpen && currentSprint && currentProject && (() => {
         const sprintTasksNow = (tasks ?? []).filter((t) => t.sprintId === currentSprint.id)
         const shareMembers = membersWithTasks(paletteMembers ?? [], sprintTasksNow)

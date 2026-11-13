@@ -1,7 +1,7 @@
 # iOS app (cài qua cáp)
 
 **Status:** Implemented (đã cài và chạy trên iPhone Air, 2026-11-13)
-**Last updated:** 2026-11-13
+**Last updated:** 2026-11-13 (thêm Folder backup, xem ios-backup-folder.md)
 **Code:** `app/src-tauri/` (`lib.rs`, `Cargo.toml`, `capabilities/mobile.json`,
 `tauri.ios.conf.json`, `Info.ios.plist`, `gen/apple/`), `app/src/platform.ts` (`IS_TAURI`,
 `IS_NATIVE_SHELL`, `IS_NATIVE_MOBILE`), `app/src/native-save.ts`, `app/src/lib.ts` (`downloadJson`),
@@ -27,7 +27,9 @@ là code web hiện có cùng layout điện thoại ở [mobile-layout.md](./mo
   ngang, menu `⋯`. Không có những thứ chỉ desktop mới có: menu bar, auto update, panel Claude,
   auto backup ra folder, nhớ kích thước cửa sổ.
 - **Dữ liệu nằm trong app**, tách hẳn với Mac và với Safari. Lần đầu mở: dữ liệu demo. Muốn có plan
-  đang làm: Export trên Mac, gửi file sang iPhone (AirDrop, Files), rồi trong app `⋯ → Import`.
+  đang làm: `⋯ → Folder backup…`, chọn folder auto backup của Mac trong iCloud Drive, mở bản mới
+  nhất ([ios-backup-folder.md](./ios-backup-folder.md)). Hoặc Export trên Mac, gửi file sang
+  iPhone (AirDrop, Files), rồi `⋯ → Import`.
 - **Export trên iPhone** (`⋯ → Export…`, Export PNG): file được ghi vào **Files › On My iPhone ›
   plan-up**, kèm thông báo tên file. (Trong app, tải file kiểu trình duyệt không chạy.)
 - **Share link:** link trỏ về bản web đã deploy (`plan-up-eta.vercel.app`), như bản macOS, vì

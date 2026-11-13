@@ -229,15 +229,33 @@ fn list_backups_at(dir: String, subdir: Option<String>) -> Result<Vec<String>, S
         return Ok(Vec::new());
     }
     let entries = fs::read_dir(&target).map_err(|e| e.to_string())?;
-    let mut names: Vec<String> = entries
+    let names: Vec<String> = entries
         .filter_map(|e| e.ok())
         .filter(|e| e.path().is_file())
         .filter_map(|e| e.file_name().into_string().ok())
-        .filter(|n| is_backup_filename(n))
         .collect();
+    Ok(backup_names_newest_first(names))
+}
+
+/// Keep only our backup names, newest first. Shared by the desktop folder and the
+/// iPhone's iCloud folder (ios-backup-folder.md), whose listing comes from Swift.
+fn backup_names_newest_first(names: Vec<String>) -> Vec<String> {
+    let mut names: Vec<String> = names.into_iter().filter(|n| is_backup_filename(n)).collect();
     // name == date[-time], fixed width → lexicographic desc is newest-first
     names.sort_by(|a, b| b.cmp(a));
-    Ok(names)
+    names
+}
+
+/// Raw file bytes → JSON text: `.json.gz` is inflated, plain `.json` must be UTF-8.
+fn decode_backup(file_name: &str, bytes: Vec<u8>) -> Result<String, String> {
+    if !is_gzipped(file_name) {
+        return String::from_utf8(bytes).map_err(|e| e.to_string());
+    }
+    let mut out = String::new();
+    GzDecoder::new(&bytes[..])
+        .read_to_string(&mut out)
+        .map_err(|e| e.to_string())?;
+    Ok(out)
 }
 
 fn read_backup_at(dir: String, file_name: String, subdir: Option<String>) -> Result<String, String> {
@@ -245,16 +263,8 @@ fn read_backup_at(dir: String, file_name: String, subdir: Option<String>) -> Res
         return Err(format!("invalid backup filename: {file_name}"));
     }
     let target = resolve_dir(&dir, subdir.as_deref())?;
-    let path = target.join(&file_name);
-    if !is_gzipped(&file_name) {
-        return fs::read_to_string(path).map_err(|e| e.to_string());
-    }
-    let bytes = fs::read(path).map_err(|e| e.to_string())?;
-    let mut out = String::new();
-    GzDecoder::new(&bytes[..])
-        .read_to_string(&mut out)
-        .map_err(|e| e.to_string())?;
-    Ok(out)
+    let bytes = fs::read(target.join(&file_name)).map_err(|e| e.to_string())?;
+    decode_backup(&file_name, bytes)
 }
 
 /// Largest file File ▸ Import… will read — far above any real export, low enough
@@ -306,7 +316,9 @@ fn read_import_file_at(path: String) -> Result<String, String> {
 /// app, so the page hands the bytes here and they land in the app's Documents
 /// folder — shown in Files › On My iPhone › plan-up (Info.plist
 /// `UIFileSharingEnabled`). Exactly one of `text` / `base64` is set. The name is
-/// a bare file name: no separators, no `..`.
+/// a bare file name: no separators, no `..`. `quiet` skips the "Exported"
+/// message — used for the safety copy written before opening a backup
+/// (ios-backup-folder.md).
 #[cfg(mobile)]
 #[tauri::command]
 fn save_export(
@@ -314,6 +326,7 @@ fn save_export(
     file_name: String,
     text: Option<String>,
     base64: Option<String>,
+    quiet: Option<bool>,
 ) -> Result<String, String> {
     use tauri_plugin_dialog::{MessageDialogKind};
     let bad = file_name.is_empty()
@@ -332,6 +345,9 @@ fn save_export(
     let dir = app.path().document_dir().map_err(|e| e.to_string())?;
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     fs::write(dir.join(&file_name), bytes).map_err(|e| e.to_string())?;
+    if quiet == Some(true) {
+        return Ok(file_name);
+    }
     app.dialog()
         .message(format!("Saved to Files › On My iPhone › plan-up\n\n{file_name}"))
         .title("Exported")
@@ -376,16 +392,115 @@ fn decode_base64(s: &str) -> Result<Vec<u8>, String> {
     Ok(out)
 }
 
-/// Mobile shell (ios-app.md): no window plugins, no updater, no folder backup,
-/// no Claude — the page runs as the phone web layout; only external links
-/// (opener) and file export (`save_export`) reach native code.
+/// iPhone: read-only access to the Mac's backup folder in iCloud Drive
+/// (ios-backup-folder.md). The Swift plugin holds the folder (a bookmark) and
+/// does the file I/O; these commands are the fence in front of it — only our
+/// backup names and the `""` / `"versions"` subfolders ever reach Swift, and the
+/// webview never names a path. All `async`: the plugin call waits for Swift, and
+/// the picker needs the main thread, which a sync command would block.
+#[cfg(target_os = "ios")]
+mod ios_folder {
+    use super::{backup_names_newest_first, decode_backup, decode_base64, is_backup_filename};
+    use serde::Deserialize;
+    use serde_json::json;
+    use tauri::{AppHandle, Manager, Runtime};
+    use tauri_plugin_backup_folder::BackupFolder;
+
+    #[derive(Deserialize)]
+    struct NameResponse {
+        name: Option<String>,
+    }
+    #[derive(Deserialize)]
+    struct ListResponse {
+        files: Vec<String>,
+    }
+    #[derive(Deserialize)]
+    struct ReadResponse {
+        data: String,
+    }
+
+    fn check_subdir(subdir: &Option<String>) -> Result<String, String> {
+        match subdir.as_deref() {
+            None | Some("") => Ok(String::new()),
+            Some("versions") => Ok("versions".into()),
+            Some(other) => Err(format!("invalid backup subfolder: {other}")),
+        }
+    }
+
+    async fn call<R: Runtime, T: serde::de::DeserializeOwned>(
+        app: &AppHandle<R>,
+        command: &str,
+        payload: serde_json::Value,
+    ) -> Result<T, String> {
+        let plugin = app.state::<BackupFolder<R>>();
+        plugin
+            .0
+            .run_mobile_plugin_async(command, payload)
+            .await
+            .map_err(|e| e.to_string())
+    }
+
+    /// Open the iOS folder picker. Returns the folder's name, or None on Cancel.
+    #[tauri::command]
+    pub async fn backup_folder_pick(app: AppHandle) -> Result<Option<String>, String> {
+        let r: NameResponse = call(&app, "pick", json!({})).await?;
+        Ok(r.name)
+    }
+
+    /// Name of the saved folder, or None when none was picked yet.
+    #[tauri::command]
+    pub async fn backup_folder_status(app: AppHandle) -> Result<Option<String>, String> {
+        let r: NameResponse = call(&app, "status", json!({})).await?;
+        Ok(r.name)
+    }
+
+    /// Backup file names in the folder (or `versions/`), newest first.
+    #[tauri::command]
+    pub async fn backup_folder_list(app: AppHandle, subdir: Option<String>) -> Result<Vec<String>, String> {
+        let subdir = check_subdir(&subdir)?;
+        let r: ListResponse = call(&app, "list", json!({ "subdir": subdir })).await?;
+        Ok(backup_names_newest_first(r.files))
+    }
+
+    /// One backup file as JSON text (`.json.gz` inflated).
+    #[tauri::command]
+    pub async fn backup_folder_read(
+        app: AppHandle,
+        file_name: String,
+        subdir: Option<String>,
+    ) -> Result<String, String> {
+        if !is_backup_filename(&file_name) {
+            return Err(format!("invalid backup filename: {file_name}"));
+        }
+        let subdir = check_subdir(&subdir)?;
+        let r: ReadResponse = call(&app, "read", json!({ "fileName": file_name, "subdir": subdir })).await?;
+        decode_backup(&file_name, decode_base64(&r.data)?)
+    }
+}
+
+/// Mobile shell (ios-app.md): no window plugins, no updater, no folder backup
+/// writes, no Claude — the page runs as the phone web layout; only external
+/// links (opener), file export (`save_export`) and, on iPhone, reading the Mac's
+/// backup folder (ios-backup-folder.md) reach native code.
 #[cfg(mobile)]
 #[tauri::mobile_entry_point]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![save_export])
+        .plugin(tauri_plugin_opener::init());
+    #[cfg(target_os = "ios")]
+    let builder = builder
+        .plugin(tauri_plugin_backup_folder::init())
+        .invoke_handler(tauri::generate_handler![
+            save_export,
+            ios_folder::backup_folder_pick,
+            ios_folder::backup_folder_status,
+            ios_folder::backup_folder_list,
+            ios_folder::backup_folder_read,
+        ]);
+    #[cfg(not(target_os = "ios"))]
+    let builder = builder.invoke_handler(tauri::generate_handler![save_export]);
+    builder
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
@@ -466,12 +581,50 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
+        backup_names_newest_first, decode_backup,
         decode_base64, is_backup_filename, list_backups_at as list_backups,
         prune_backups_at as prune_backups,
         read_backup_at as read_backup, read_import_file_at as read_import_file,
         write_backup_at as write_backup,
     };
+    use flate2::write::GzEncoder;
+    use flate2::Compression;
     use std::fs;
+    use std::io::Write;
+
+    #[test]
+    fn backup_names_from_a_foreign_listing() {
+        // What Swift returns for an iCloud folder: our files, a Finder droppings
+        // file, an unrelated JSON — only ours survive, newest first.
+        let names = vec![
+            "plan-up-2026-11-12-145959.json.gz".to_string(),
+            ".DS_Store".to_string(),
+            "notes.json".to_string(),
+            "plan-up-2026-11-13-093554.json.gz".to_string(),
+            "plan-up-2026-07-01-080000.json".to_string(),
+        ];
+        assert_eq!(
+            backup_names_newest_first(names),
+            vec![
+                "plan-up-2026-11-13-093554.json.gz",
+                "plan-up-2026-11-12-145959.json.gz",
+                "plan-up-2026-07-01-080000.json",
+            ]
+        );
+    }
+
+    #[test]
+    fn decode_backup_plain_and_gzip() {
+        assert_eq!(decode_backup("plan-up-2026-11-13.json", b"{}".to_vec()).unwrap(), "{}");
+        let mut enc = GzEncoder::new(Vec::new(), Compression::default());
+        enc.write_all(b"{\"a\":1}").unwrap();
+        let gz = enc.finish().unwrap();
+        assert_eq!(
+            decode_backup("plan-up-2026-11-13-093554.json.gz", gz).unwrap(),
+            "{\"a\":1}"
+        );
+        assert!(decode_backup("plan-up-2026-11-13-093554.json.gz", b"not gzip".to_vec()).is_err());
+    }
 
     #[test]
     fn decode_base64_round_trips() {

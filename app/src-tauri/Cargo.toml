@@ -28,6 +28,10 @@ tauri-plugin-process = "2"
 # remembers window size/position across launches (desktop-native-feel.md)
 tauri-plugin-window-state = "2" # keep tauri + @tauri-apps/api on the same minor (both 2.12 since ios-app.md)
 
+# iPhone: read the Mac's backup folder in iCloud Drive (ios-backup-folder.md)
+[target.'cfg(target_os = "ios")'.dependencies]
+tauri-plugin-backup-folder = { path = "plugins/backup-folder" }
+
 [profile.release]
 codegen-units = 1
 lto = true

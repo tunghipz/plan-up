@@ -1,0 +1,13 @@
+[package]
+name = "tauri-plugin-backup-folder"
+version = "0.1.0"
+description = "plan-up iOS: pick the Mac's backup folder (iCloud Drive) once and read backups from it (design-docs/ios-backup-folder.md)"
+edition = "2021"
+publish = false
+links = "tauri-plugin-backup-folder"
+
+[dependencies]
+tauri = { version = "2", features = [] }
+
+[build-dependencies]
+tauri-plugin = { version = "2", features = ["build"] }

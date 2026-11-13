@@ -1,6 +1,6 @@
 # iOS app (cài qua cáp)
 
-**Status:** Implemented (build + ký OK; cài lên máy chờ cắm iPhone)
+**Status:** Implemented (đã cài và chạy trên iPhone Air, 2026-11-13)
 **Last updated:** 2026-11-13
 **Code:** `app/src-tauri/` (`lib.rs`, `Cargo.toml`, `capabilities/mobile.json`,
 `tauri.ios.conf.json`, `Info.ios.plist`, `gen/apple/`), `app/src/platform.ts` (`IS_TAURI`,
@@ -75,6 +75,11 @@ nằm trong khung trắng).
   `Cargo.lock`): bản 1.0.7 biên dịch phần Swift của Tauri bằng SDK macOS; 1.0.9 sửa chuyện đó và
   dùng `llvm-objcopy` để đưa các symbol `@_cdecl` ra global, thiếu `llvm-tools` thì link lỗi
   "Undefined symbols … init_plugin_dialog".
+- **iOS 27 bắt app dùng UIScene lifecycle**: app không khai báo scene bị dừng ngay khi mở
+  (`EXC_BREAKPOINT` trong `UIApplicationEvaluateRuntimeIssueForNoSceneLifecycleAdoption`). Cần
+  **Tauri ≥ 2.12** (kéo theo tao 0.37, có `TaoSceneDelegate`) và `UIApplicationSceneManifest` trong
+  `Info.ios.plist` (một scene, delegate `TaoSceneDelegate`). Đã nâng Tauri 2.11 → 2.12.5, plugin
+  và `@tauri-apps/*` lên cùng minor; `tauri-plugin-window-state` bỏ ghim `~2.4`.
 - Lần đầu trên iPhone: bật **Developer Mode** (Settings › Privacy & Security), khởi động lại máy.
 - Profile ký app (team ZINGPLAY) đã có UDID của iPhone Air `00008150-001251E10244401C`. Máy khác
   phải được thêm vào team trước.

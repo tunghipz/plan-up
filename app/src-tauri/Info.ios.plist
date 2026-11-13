@@ -9,6 +9,27 @@
   <true/>
   <key>LSSupportsOpeningDocumentsInPlace</key>
   <true/>
+  <!-- iOS 27 stops apps that don't adopt the UIScene lifecycle at launch
+       (UIApplicationEvaluateRuntimeIssueForNoSceneLifecycleAdoption). tao ≥ 0.37
+       (tauri 2.12) ships TaoSceneDelegate; declaring the manifest puts the app
+       on scenes. One window only. -->
+  <key>UIApplicationSceneManifest</key>
+  <dict>
+    <key>UIApplicationSupportsMultipleScenes</key>
+    <false/>
+    <key>UISceneConfigurations</key>
+    <dict>
+      <key>UIWindowSceneSessionRoleApplication</key>
+      <array>
+        <dict>
+          <key>UISceneConfigurationName</key>
+          <string>Default Configuration</string>
+          <key>UISceneDelegateClassName</key>
+          <string>TaoSceneDelegate</string>
+        </dict>
+      </array>
+    </dict>
+  </dict>
   <key>CFBundleDisplayName</key>
   <string>plan-up</string>
 </dict>

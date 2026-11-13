@@ -26,7 +26,7 @@ flate2 = "1"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
 # remembers window size/position across launches (desktop-native-feel.md)
-tauri-plugin-window-state = "~2.4" # 2.5 needs tauri 2.12; keep crate + @tauri-apps/api on the same minor
+tauri-plugin-window-state = "2" # keep tauri + @tauri-apps/api on the same minor (both 2.12 since ios-app.md)
 
 [profile.release]
 codegen-units = 1

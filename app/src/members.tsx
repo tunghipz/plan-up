@@ -842,7 +842,7 @@ export function MemberDaysOffButton({
                   'inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-[11px] font-medium text-ink-muted hover:text-accent hover:bg-accent-soft transition'
                 : // Resting (no off-days in this sprint): always-visible quiet
                   // dashed "add" pill — calm at rest, accent on hover.
-                  'inline-flex items-center gap-1.5 text-[12px] font-medium rounded-full px-2.5 py-1 border border-dashed border-border-strong text-ink-muted hover:text-accent hover:border-accent hover:bg-accent-soft transition'
+                  'inline-flex items-center gap-1.5 text-[12px] font-medium rounded-full px-2.5 py-1 max-md:w-8 max-md:h-8 max-md:p-0 max-md:justify-center border border-dashed border-border-strong text-ink-muted hover:text-accent hover:border-accent hover:bg-accent-soft transition'
           }
           title={
             count > 0
@@ -857,7 +857,7 @@ export function MemberDaysOffButton({
               {fmtDays(effDays)}d off
             </span>
           ) : (
-            <span className="whitespace-nowrap">Days off</span>
+            <span className="whitespace-nowrap max-md:hidden">Days off</span>
           )}
         </button>
         </span>

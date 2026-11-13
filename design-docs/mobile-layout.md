@@ -1,13 +1,18 @@
 # Mobile layout
 
 **Status:** Implemented (v1: sprint List + Board + shell; Collections để sau)
-**Last updated:** 2026-11-13
+**Last updated:** 2026-11-13 (**v2 List gọn**: task card ~58pt thay vì ~97pt, meta một dòng có dấu `·`, group thành chữ cuối meta, header member một dòng; xem *List view* và *Header card member*)
 **Code:** `app/src/useIsMobile.ts`, `app/src/MobileActionSheet.tsx`, `app/src/App.tsx` (drawer,
 toolbar), `app/src/SprintView.tsx` (class `lc-*` trên từng cột), `app/src/BoardView.tsx`,
 `app/src/ModalSheet.tsx`, `app/src/DatePicker.tsx`, `app/src/index.css` (khối *Mobile layout*).
 
 > **Quyết định 2026-11-13:** chọn **hướng A · Drawer + task card** từ demo
 > `demo/mobile-layout.html` (3 hướng A/B/C). Nguyên văn user: "A".
+>
+> **Quyết định 2026-11-13 (v2):** sau khi dùng trên iPhone, user thấy "layout mobile khó nhìn quá"
+> (ảnh chụp: mỗi task cao ~97pt, meta giãn lệch, chip group lặp mọi dòng, header member hai dòng).
+> Demo `demo/mobile-list-v2.html` có 3 hướng: A gọn lại giữ bố cục, B agenda theo ngày, C một dòng +
+> sheet chi tiết. User chọn **A** ("A").
 
 ## Purpose
 
@@ -103,14 +108,21 @@ không bao giờ vào layout này.
   sprint (collection: đầu vùng nội dung), giãn hết bề ngang.
 - Lề nội dung: `px-3` (desktop `px-6`); page header sprint `mx-3`.
 
-### List view — task card hai dòng
+### List view — task card hai dòng (v2 gọn)
 Không còn bảng cột. Mỗi row tự xuống dòng bằng CSS, **vẫn dùng đúng các ô sửa của desktop**, nên mọi
 thứ sửa được trên desktop thì trên mobile cũng sửa được (title, ngày, effort, prereq, người làm):
-- **Dòng 1:** status circle (vùng bấm 44×44, bấm để đổi vòng todo → in progress → done) + title
-  (15px, xuống dòng thoải mái, bấm để sửa).
-- **Dòng 2** (thụt vào thẳng hàng với title, chữ 13px): `#số` · người làm (chỉ ở chế độ All /
-  Unassigned) · effort kèm đơn vị `d` · `Start → End` (milestone: một ngày) · prereq. Mỗi ô cao tối
-  thiểu 36px. Ô ngày trống hiện luôn pill `＋ Start` / `＋ Due` (desktop chỉ hiện khi hover).
+- **Dòng 1:** status circle (vùng bấm vẫn 44×44 nhưng chỉ chiếm 32px chiều cao) + title (16px, xuống
+  dòng thoải mái, bấm để sửa).
+- **Dòng 2** (thụt vào thẳng hàng với title, chữ 13px, **một dòng**, các ô cách nhau bằng `·`):
+  `#số` · người làm (chỉ ở chế độ All / Unassigned) · effort liền đơn vị (`2.5d`, ô nhập rộng theo số)
+  · `Start → End` (milestone: một ngày) · `sau #3` (prereq) · tên group. Mỗi ô cao 28px. Dòng quá dài
+  thì tên group (ô cuối) bị cắt `…`, các ô trước giữ nguyên.
+- **Group của task** (trước là chip `↳ #12 build 1: 2 games` cạnh tiêu đề) thành **chữ nhạt cuối dòng
+  meta**. Desktop giữ chip.
+- Một task không có prereq/ngày trống cao khoảng **58pt** (v1: ~97pt).
+- Ô ngày trống hiện luôn pill `＋ Start` / `＋ Due` (desktop chỉ hiện khi hover).
+- Màn hình cảm ứng (`hover: none`) không tô nền ô sửa khi "hover", vì iOS giữ trạng thái hover sau
+  khi chạm làm ô tiêu đề dính nền xám.
 - Ẩn trên mobile: thanh tiêu đề cột (nên **không sort được** trên mobile; sort đã chọn trên desktop vẫn
   áp dụng), cột Status dạng pill (trùng với status circle), checkbox chọn nhiều, tay nắm kéo thả, tam giác
   cảnh báo trùng lịch.
@@ -118,8 +130,10 @@ thứ sửa được trên desktop thì trên mobile cũng sửa được (title
 - Dòng **Add task** chỉ còn icon `+` và ô nhập.
 
 ### Header card member
-Tên + số task ở dòng đầu; số liệu (trùng lịch, overdue, due, nút Days off) xuống dòng thứ hai,
-thẳng hàng với tên. Không còn bị cắt ở mép card. Tay nắm kéo đổi thứ tự lane bị ẩn trên mobile.
+**Một dòng** (v2): avatar + tên + `x/y` bên trái; bên phải các chip `N today`, `N overdue`,
+`N trùng lịch` và nút Days off chỉ còn icon lịch (đã đặt ngày nghỉ thì vẫn ghi `2d off`). Ẩn trên
+mobile: chức danh member và chữ `due Nov 13`. Nhiều chip quá thì phần phải xuống dòng. Tay nắm kéo
+đổi thứ tự lane bị ẩn trên mobile.
 
 ### Board view
 Ba cột xếp **ngang, mỗi cột rộng 86%** màn hình, vuốt ngang có snap từng cột (thấy mép cột kế bên

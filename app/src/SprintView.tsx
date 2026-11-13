@@ -2082,7 +2082,7 @@ function GroupHeader({
       </span>
       {title && title.trim() && (
         <span
-          className="text-sm text-ink-faint select-none truncate min-w-0"
+          className="max-md:hidden text-sm text-ink-faint select-none truncate min-w-0"
           title={title}
         >
           · {title}
@@ -2091,16 +2091,19 @@ function GroupHeader({
       <span className="text-xs text-ink-faint select-none font-mono shrink-0">
         {countText ?? count}
       </span>
-      {/* Phone: the stats drop to their own line under the name, aligned with it
-          (mobile-layout.md) — side by side they ran past the card edge. */}
-      <div className="ml-auto flex items-center gap-2.5 max-md:flex-wrap max-md:basis-full max-md:ml-0 max-md:pl-[50px] max-md:-mt-1 max-md:empty:hidden">
+      {/* Phone (mobile-layout.md v2): stats stay on the name's line, right-aligned;
+          the job title and "due …" hide and Days off is icon-only so they fit. If
+          they still don't, the whole block wraps under the name. */}
+      <div className="ml-auto flex items-center gap-2.5 max-md:gap-1.5 max-md:flex-wrap max-md:justify-end">
         {conflictCount !== undefined && conflictCount > 0 && (
           <span
             className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[12px] md:text-[11px] font-semibold tabular-nums bg-priority-high/15 text-priority-high"
             title="Task trùng lịch: chồng thời gian, cùng giờ bắt đầu/kết thúc, hoặc chung prereq"
           >
             <AlertTriangle size={12} />
-            {conflictCount} trùng lịch
+            {conflictCount}
+            {/* Phone: icon + number only, so the header stays on one line. */}
+            <span className="max-md:hidden">trùng lịch</span>
           </span>
         )}
         {stats}
@@ -2171,7 +2174,7 @@ function MemberStatsBar({
       )}
       {nextDue && (
         <span
-          className="text-[12px] md:text-[11px] font-medium text-ink-faint select-none whitespace-nowrap"
+          className="max-md:hidden text-[12px] md:text-[11px] font-medium text-ink-faint select-none whitespace-nowrap"
           title="Next upcoming deadline"
         >
           due {formatShortDate(nextDue)}
@@ -2308,7 +2311,7 @@ function PriorityChip({ priority }: { priority: string }) {
 function GroupRefChip({ group }: { group: Task }) {
   return (
     <span
-      className="inline-flex items-center gap-0.5 max-w-[180px] shrink-0 rounded-full bg-fill px-1.5 py-px text-[11px] font-medium text-ink-faint align-middle"
+      className="inline-flex max-md:hidden items-center gap-0.5 max-w-[180px] shrink-0 rounded-full bg-fill px-1.5 py-px text-[11px] font-medium text-ink-faint align-middle"
       title={`In group #${group.sequence} ${group.title}`}
     >
       <span aria-hidden>↳</span>
@@ -2518,7 +2521,7 @@ function TitleTextarea({
 
   return (
     <div
-      className={`${nested ? 'flex-1 min-w-0' : COL.title} flex items-start gap-1.5 ${indent ? 'pl-5' : ''}`}
+      className={`${nested ? 'flex-1 min-w-0' : COL.title} flex items-start gap-1.5 ${indent ? 'pl-5 max-md:pl-0' : ''}`}
     >
       <PriorityChip priority={priority} />
       {/* flex-1 fills the whole Task column so the title (and its click-to-edit
@@ -3433,6 +3436,14 @@ const TaskRow = memo(function TaskRow({
       <div className={COL.prereq}>
         <PrereqInput task={task} currentLabel={prereqLabel} />
       </div>
+
+      {/* Phone only: the group this task sits in, as the last word of the meta
+          line (mobile-layout.md v2). Desktop shows the GroupRefChip instead. */}
+      {groupRef && (
+        <div className="lc-groupref hidden" title={`In group #${groupRef.sequence} ${groupRef.title}`}>
+          {groupRef.title}
+        </div>
+      )}
     </div>
   )
 }, taskRowPropsEqual)
@@ -3855,6 +3866,9 @@ export function EffortCell({
       title="Effort in days"
       aria-label="Effort in days"
       className="editable w-full text-sm text-center tabular-nums bg-transparent placeholder:text-ink-faint placeholder:opacity-40"
+      // Phone sizes the field to its digits so the `d` unit sits right after
+      // the number ("2.5d", not "2  d") — mobile-layout.md v2.
+      style={{ '--effort-ch': Math.max(1, draft.replace('.', '').length + (draft.includes('.') ? 0.4 : 0)) } as React.CSSProperties}
     />
   )
 }

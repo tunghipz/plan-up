@@ -1,7 +1,7 @@
 # List view
 
 **Status:** Implemented
-**Last updated:** 2026-11-13 (task hôm nay: nền xanh nhạt + tiêu đề đậm, hạn hôm nay thêm nhãn Due today, header member có chip "N today" — xem [today-marker.md](./today-marker.md)). Trước đó cùng ngày (phone width < 768px: each row re-flows into a two-line card, column header hidden — see [mobile-layout.md](./mobile-layout.md)). Trước đó: 2026-11-09 (card **Group nhiều người** tách khỏi Unassigned — xem task-groups.md). Trước đó: 2026-11-09 (**perf**: `TaskRow` memo thật sự bỏ qua row không đổi: structural sharing + prop dẫn xuất từng row, xem *Hiệu năng*). Trước đó: 2026-11-09 (**chip member gọn**: dải chip của All xuống dòng dưới `Group by`,
+**Last updated:** 2026-11-13 (phone v2: task card gọn ~58pt, meta một dòng, group thành chữ cuối meta — xem [mobile-layout.md](./mobile-layout.md)). Trước đó cùng ngày (task hôm nay: nền xanh nhạt + tiêu đề đậm, hạn hôm nay thêm nhãn Due today, header member có chip "N today" — xem [today-marker.md](./today-marker.md)). Trước đó cùng ngày (phone width < 768px: each row re-flows into a two-line card, column header hidden — see [mobile-layout.md](./mobile-layout.md)). Trước đó: 2026-11-09 (card **Group nhiều người** tách khỏi Unassigned — xem task-groups.md). Trước đó: 2026-11-09 (**perf**: `TaskRow` memo thật sự bỏ qua row không đổi: structural sharing + prop dẫn xuất từng row, xem *Hiệu năng*). Trước đó: 2026-11-09 (**chip member gọn**: dải chip của All xuống dòng dưới `Group by`,
 chip chỉ còn avatar · tên · done/total + chấm báo, phần còn lại trong thẻ rê chuột — xem *Chip
 member gọn*; trước đó cùng ngày: toggle `By member · All` **rời top bar** xuống hàng **`Group by`**
 đầu List — xem *Chỗ đặt toggle*;

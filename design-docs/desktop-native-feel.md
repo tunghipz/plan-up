@@ -95,9 +95,10 @@ Riêng Tauri (`IS_TAURI`, không áp cho preview để còn Inspect Element):
 
 ## 3. Nhớ kích thước và vị trí cửa sổ
 
-`tauri-plugin-window-state` (chỉ phía Rust, không cần quyền JS), ghim `~2.4`: bản 2.5
-đòi tauri 2.12, sẽ kéo crate `tauri` lệch minor với `@tauri-apps/api` 2.11 và
-`tauri build` báo lỗi version mismatch. Lưu khi thoát, khôi
+`tauri-plugin-window-state` (chỉ phía Rust, không cần quyền JS). Từng ghim `~2.4` vì 2.5 đòi
+tauri 2.12; từ 2026-11-13 cả crate `tauri` lẫn `@tauri-apps/api` đã lên 2.12 (cho app iOS, xem
+[ios-app.md](./ios-app.md)) nên bỏ ghim. Giữ hai bên cùng minor, lệch thì `tauri build` báo lỗi
+version mismatch. Lưu khi thoát, khôi
 phục khi mở: `SIZE | POSITION | MAXIMIZED | FULLSCREEN`. **Không** lưu `DECORATIONS` và
 `VISIBLE`: khôi phục decorations có thể đè overlay title bar; khôi phục visible có thể
 mở app ở trạng thái ẩn (vì ⌘W giờ là ẩn). Lần mở đầu tiên vẫn 1280×800.

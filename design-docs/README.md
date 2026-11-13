@@ -92,6 +92,7 @@ Non-obvious behaviors, defaults, persistence keys.
 | [status-and-priority.md](./status-and-priority.md) | Status circle/pill, priority chip |
 | [date-picker.md](./date-picker.md) | Custom Cupertino calendar picker (sprint-aware, days-off dots + list; **range mode** for collection items) |
 | [list-view.md](./list-view.md) | Grouped cards **or one All table** (`Group by` row at the top of the List with the `By member · All` toggle, compact member chips under it that filter and open a hover card, Assignee sort), sortable columns, column widths, drag-to-reorder |
+| [today-marker.md](./today-marker.md) | Task chưa xong mà hôm nay nằm trong start → due: dòng List và card Board nền xanh nhạt + tiêu đề đậm, hạn hôm nay đậm hơn + nhãn Due today, header member đếm "N today" |
 | [member-header-summary.md](./member-header-summary.md) | Progress ring, overdue, next deadline, days off |
 | [board-view.md](./board-view.md) | Cupertino kanban |
 | [gantt-view.md](./gantt-view.md) | Timeline — Apple-Calendar swimlanes (one event block per task), per sprint |

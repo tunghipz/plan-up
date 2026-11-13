@@ -676,6 +676,19 @@ html.desktop :is(img, a) {
   .animate-sprint-live { animation: none; opacity: 0.18; }
 }
 
+/* Today mark (design-docs/today-marker.md): a task whose plan covers today gets a
+   light accent wash; due today washes deeper. Unlayered, so it beats the row's
+   hover:bg-surface-hover utility — hover is restated here. Used by List rows
+   (.task-row) and Board cards. */
+.today-live { background-color: color-mix(in srgb, var(--color-accent) 6%, transparent); }
+.today-live:hover { background-color: color-mix(in srgb, var(--color-accent) 9%, transparent); }
+.today-due { background-color: color-mix(in srgb, var(--color-accent) 11%, transparent); }
+.today-due:hover { background-color: color-mix(in srgb, var(--color-accent) 14%, transparent); }
+/* Board cards are opaque (bg-surface) — lay the wash over the surface instead of
+   replacing it, or the column behind would show through. */
+.today-card { background-image: linear-gradient(color-mix(in srgb, var(--color-accent) 6%, transparent), color-mix(in srgb, var(--color-accent) 6%, transparent)); }
+.today-card-due { background-image: linear-gradient(color-mix(in srgb, var(--color-accent) 11%, transparent), color-mix(in srgb, var(--color-accent) 11%, transparent)); }
+
 /* ───────────────────────── Mobile layout (< 768px) ─────────────────────────
  * design-docs/mobile-layout.md. A task row re-flows into a two-line card:
  *   line 1  [status circle 44×44] [title — wraps freely]

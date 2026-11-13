@@ -127,6 +127,28 @@ export function isOverdue(dateStr: string | null, isDone: boolean): boolean {
 }
 
 /**
+ * Is this task "today"? (design-docs/today-marker.md) — unfinished and today
+ * falls inside its plan's start → due. `'due'` when the span ends today (the
+ * stronger mark), `'live'` when today is inside it, null otherwise. A task with
+ * only one date is a one-day task; a milestone (effort 0) uses its date (start).
+ * Dates are local `yyyy-mm-dd`, so plain string comparison orders them.
+ */
+export function todayMark(
+  start: string | null,
+  due: string | null,
+  isDone: boolean,
+  isMilestone = false,
+  today: string = todayLocalISO()
+): 'due' | 'live' | null {
+  if (isDone) return null
+  const from = start ?? due
+  const to = isMilestone ? from : (due ?? start)
+  if (!from || !to) return null
+  if (to === today) return 'due'
+  return from <= today && today <= to ? 'live' : null
+}
+
+/**
  * Parse a prerequisite input string into a sorted, de-duplicated list of
  * positive sequence numbers. Accepts comma/space-separated singles AND
  * inclusive ranges written `a-b` (e.g. "2-5, 8" → [2,3,4,5,8]; "5-2" → 2..5).

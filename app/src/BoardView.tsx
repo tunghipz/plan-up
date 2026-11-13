@@ -14,7 +14,7 @@ import {
   type Task,
 } from './db'
 import { useProjectHolidays } from './scheduling-context'
-import { formatShortDate, dayDiff } from './lib'
+import { formatShortDate, dayDiff, todayMark } from './lib'
 import { Avatar } from './members'
 import { SprintRangeContext } from './DatePicker'
 import { StatusIcon, DatePickCell, EffortCell } from './SprintView'
@@ -1023,6 +1023,10 @@ const BoardCard = memo(function BoardCard({
   const prio = PRIO_TAG[task.priority ?? 'none']
   const isParent = group !== null
   const [dateOpen, setDateOpen] = useState(false)
+  // Today mark (design-docs/today-marker.md) — leaf cards only, same rule as the List.
+  const today = isParent
+    ? null
+    : todayMark(plan?.startDate ?? null, plan?.dueDate ?? null, displayStatus === 'done', task.estimate === 0)
 
   // Due chip — uses the live computed plan (date + time, e.g. "Jun 11, 17:00"),
   // consistent with the List/Timeline. Soft-tinted by urgency via tokens (dark-safe).
@@ -1032,7 +1036,9 @@ const BoardCard = memo(function BoardCard({
     const c =
       displayStatus === 'done'
         ? 'var(--color-status-done)'
-        : (() => {
+        : today === 'due'
+          ? 'var(--color-accent)'
+          : (() => {
             const days = dayDiff(dd) // local-day-accurate, TZ-safe
             if (days < 0) return 'var(--color-priority-urgent)'
             if (days < 3) return 'var(--color-priority-high)'
@@ -1041,7 +1047,10 @@ const BoardCard = memo(function BoardCard({
     return {
       bg: `color-mix(in srgb, ${c} 13%, transparent)`,
       fg: `color-mix(in srgb, ${c} 75%, var(--color-ink))`,
-      label: plan.endTime ? `${formatShortDate(dd)}, ${plan.endTime}` : formatShortDate(dd),
+      label: (() => {
+        const day = today === 'due' ? 'Due today' : formatShortDate(dd)
+        return plan.endTime ? `${day}, ${plan.endTime}` : day
+      })(),
       title: `Due ${dd}${plan.endTime ? ' ' + plan.endTime : ''}`,
     }
   })()
@@ -1075,7 +1084,7 @@ const BoardCard = memo(function BoardCard({
       onDragOver={onDragOver}
       className={`group relative bg-surface rounded-[12px] p-3 shadow-[0_1px_2px_rgba(0,0,0,0.05),0_3px_10px_rgba(0,0,0,0.05),inset_0_1px_0_var(--glass-edge),inset_0_0_0_0.5px_var(--glass-ring)] hover:shadow-[0_2px_4px_rgba(0,0,0,0.06),0_10px_24px_rgba(0,0,0,0.08),inset_0_1px_0_var(--glass-edge),inset_0_0_0_0.5px_var(--glass-ring)] transition ${
         draggable ? 'cursor-grab active:cursor-grabbing' : ''
-      } ${dragging ? 'hidden' : ''}`}
+      } ${today ? (today === 'due' ? 'today-card today-card-due' : 'today-card') : ''} ${dragging ? 'hidden' : ''}`}
     >
       {/* hover quick-edit toolbar — leaf tasks only (groups are derived containers) */}
       {!isParent && (
@@ -1137,7 +1146,7 @@ const BoardCard = memo(function BoardCard({
         )}
         <div
           className={`flex-1 min-w-0 text-[14px] leading-snug break-words ${
-            isParent ? 'font-semibold text-ink' : displayStatus === 'done' ? 'text-ink-faint' : 'text-ink'
+            isParent || today ? 'font-semibold text-ink' : displayStatus === 'done' ? 'text-ink-faint' : 'text-ink'
           }`}
         >
           {isParent && <LayersGlyph />}

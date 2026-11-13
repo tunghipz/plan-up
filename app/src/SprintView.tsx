@@ -75,6 +75,7 @@ import {
   formatRelativeDate,
   formatShortDate,
   isOverdue,
+  todayMark,
   parsePrereqSeqs,
   formatSeqRanges,
   flattenDisplayOrder,
@@ -1324,7 +1325,7 @@ function MemberCard({
   // they don't recompute (incl. the O(n²) conflict scan + a computeWorkingPlan
   // per task) on every unrelated re-render of this card (e.g. a selection toggle
   // elsewhere). Recomputes only when this member's tasks/members actually change.
-  const { total, done, pct, overdue, nextDue, conflictTips, earliestDate, latestDate } = useMemo(
+  const { total, done, pct, overdue, today, nextDue, conflictTips, earliestDate, latestDate } = useMemo(
     () => memberHeaderStats(tasks, tasksById, memberById, planById, holidays),
     [tasks, tasksById, memberById, planById, holidays]
   )
@@ -1349,7 +1350,7 @@ function MemberCard({
         title={member.title}
         count={total}
         countText={`${done}/${total}`}
-        stats={<MemberStatsBar overdue={overdue} nextDue={nextDue} />}
+        stats={<MemberStatsBar overdue={overdue} today={today} nextDue={nextDue} />}
         conflictCount={conflictTips.size}
         collapsed={collapsed}
         onToggleCollapse={onToggleCollapse}
@@ -1409,6 +1410,8 @@ type MemberHeaderStats = {
   done: number
   pct: number
   overdue: number
+  /** Unfinished leaf tasks whose plan covers today (today-marker.md). */
+  today: number
   nextDue: string | null
   conflictTips: Map<string, string>
   earliestDate: string | null
@@ -1442,10 +1445,12 @@ function memberHeaderStats(
   // never disagrees with the rows. overdue = past-due unfinished; nextDue =
   // earliest unfinished end that is today-or-later (the next upcoming deadline).
   let overdue = 0
+  let today = 0
   let nextDue: string | null = null
   for (const t of leafTasks) {
     if (t.status === 'done') continue
     const plan = planById.get(t.id) ?? computeWorkingPlan(t, tasksById, memberById, holidays)
+    if (todayMark(plan.startDate, plan.dueDate, false, t.estimate === 0)) today++
     // Milestones (effort 0) have no due span — their deadline is the milestone
     // date (start), so they count toward overdue / next-due like any task.
     const due = t.estimate === 0 ? plan.startDate : plan.dueDate
@@ -1469,7 +1474,7 @@ function memberHeaderStats(
   )
   const earliestDate = span?.start ?? null
   const latestDate = span?.end ?? null
-  return { total, done, pct, overdue, nextDue, conflictTips, earliestDate, latestDate }
+  return { total, done, pct, overdue, today, nextDue, conflictTips, earliestDate, latestDate }
 }
 
 /**
@@ -2129,9 +2134,29 @@ function AvatarRing({ member, pct }: { member: Member; pct: number }) {
  * overdue alert (only when > 0) + the next upcoming deadline. Progress lives in
  * the AvatarRing; days-off lives in MemberDaysOffButton.
  */
-function MemberStatsBar({ overdue, nextDue }: { overdue: number; nextDue: string | null }) {
+function MemberStatsBar({
+  overdue,
+  today,
+  nextDue,
+}: {
+  overdue: number
+  today: number
+  nextDue: string | null
+}) {
   return (
     <>
+      {today > 0 && (
+        <span
+          className="inline-flex items-center text-[12px] md:text-[11px] font-semibold px-2 py-0.5 rounded-full select-none"
+          style={{
+            background: 'color-mix(in srgb, var(--color-accent) 12%, transparent)',
+            color: 'var(--color-accent-strong)',
+          }}
+          title={`${today} task${today === 1 ? '' : 's'} on today`}
+        >
+          {today} today
+        </span>
+      )}
       {overdue > 0 && (
         <span
           className="inline-flex items-center text-[12px] md:text-[11px] font-semibold px-2 py-0.5 rounded-full select-none"
@@ -2289,6 +2314,21 @@ function GroupRefChip({ group }: { group: Task }) {
       <span aria-hidden>↳</span>
       <span className="font-mono">#{group.sequence}</span>
       <span className="truncate">{group.title}</span>
+    </span>
+  )
+}
+
+/** "Due today" chip beside the title (design-docs/today-marker.md). */
+function DueTodayTag() {
+  return (
+    <span
+      className="inline-flex items-center shrink-0 rounded-[5px] px-1.5 py-px text-[11px] font-semibold select-none whitespace-nowrap"
+      style={{
+        background: 'color-mix(in srgb, var(--color-accent) 16%, transparent)',
+        color: 'var(--color-accent-strong)',
+      }}
+    >
+      Due today
     </span>
   )
 }
@@ -3203,6 +3243,10 @@ const TaskRow = memo(function TaskRow({
   // A milestone has no due span, so its overdue check uses the milestone date
   // (its start) — otherwise a past, unfinished milestone never reads as overdue.
   const overdue = isOverdue(isMilestone ? liveStart : liveDue, task.status === 'done')
+  // Today mark (design-docs/today-marker.md): tinted row + bold title; due today
+  // tints deeper and adds a chip. Selection keeps its own fill.
+  const today = todayMark(liveStart, liveDue, task.status === 'done', isMilestone)
+  const todayCls = today && !selected ? (today === 'due' ? 'today-live today-due' : 'today-live') : ''
 
   return (
     <div
@@ -3210,7 +3254,7 @@ const TaskRow = memo(function TaskRow({
       data-task-id={task.id}
       className={`task-row group/row relative flex items-center gap-3 px-4 py-1.5 text-sm transition ${
         selected ? 'bg-accent-soft' : 'hover:bg-surface-hover'
-      } ${dragging ? 'opacity-40' : ''}`}
+      } ${todayCls} ${dragging ? 'opacity-40' : ''}`}
       title={blocked ? 'Blocked — waiting on a prerequisite task' : undefined}
     >
       {grip}
@@ -3279,9 +3323,11 @@ const TaskRow = memo(function TaskRow({
         welcomeHint={isWelcome}
         priority={task.priority}
         indent={isChild}
+        bold={today !== null}
         trailing={
-          isMilestone || groupRef ? (
+          isMilestone || groupRef || today === 'due' ? (
             <>
+              {today === 'due' && <DueTodayTag />}
               {isMilestone && <MilestoneTag />}
               {groupRef && <GroupRefChip group={groupRef} />}
             </>

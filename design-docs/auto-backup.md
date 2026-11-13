@@ -1,7 +1,7 @@
 # Auto backup (desktop only)
 
 **Status:** Implemented
-**Last updated:** 2026-11-09 (**security**: folder backup do Rust chọn và giữ; command không còn nhận `dir` từ webview — xem *Security model*). Trước đó: 2026-08-18 (**disk-footprint pass** — `versions/` snapshots are now
+**Last updated:** 2026-11-13 (folder backup có thêm subfolder `sync/` cho đồng bộ Mac ↔ iPhone, Rust chỉ nhận tên `plan-up-sync-*.json.gz` ở đó; file ghi qua file tạm rồi đổi tên — xem [folder-sync.md](./folder-sync.md)). Trước đó: 2026-11-09 (**security**: folder backup do Rust chọn và giữ; command không còn nhận `dir` từ webview — xem *Security model*). Trước đó: 2026-08-18 (**disk-footprint pass** — `versions/` snapshots are now
 **gzipped** (`…-HHMMSS.json.gz`, ≈3.5× smaller, compressed in Rust so the tier stays
 self-describing and old `.json` snapshots keep working) and the tier's retention drops
 **200 → 50**. Together ≈10× less disk. The daily tier is untouched: still plain,

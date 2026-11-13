@@ -2,6 +2,7 @@ import { exportAll, importAll, type ExportPayload } from './io'
 import { parseVersionFilename, VERSIONS_DIR } from './backup'
 import { saveToNativeFiles } from './native-save'
 import type { VersionEntry } from './backup-tauri'
+import type { SyncTransport } from './sync'
 
 /**
  * iPhone: open a backup from the Mac's auto-backup folder in iCloud Drive
@@ -65,4 +66,20 @@ export async function openFolderVersion(file: string): Promise<void> {
     throw new Error(`Không lưu được bản an toàn của iPhone: ${String(e)}`, { cause: e })
   }
   await importAll(payload)
+}
+
+/**
+ * Folder sync on the iPhone (design-docs/folder-sync.md): this device's snapshot
+ * and the others' live in the picked folder's `sync/`. Null until a folder is
+ * picked.
+ */
+export async function mobileSyncTransport(): Promise<SyncTransport | null> {
+  const name = await getFolderName().catch(() => null)
+  if (!name) return null
+  return {
+    list: () => invoke<string[]>('backup_folder_list', { subdir: 'sync' }),
+    read: (fileName) => invoke<string>('backup_folder_read', { fileName, subdir: 'sync' }),
+    write: (fileName, contents) =>
+      invoke<void>('backup_folder_write', { fileName, subdir: 'sync', contents }),
+  }
 }

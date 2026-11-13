@@ -1,6 +1,7 @@
 import { liveQuery } from 'dexie'
 import { db } from './db'
 import { exportAll, importAll, type ExportPayload } from './io'
+import type { SyncTransport } from './sync'
 import {
   BACKUP_KEEP,
   BACKUP_QUIET_MS,
@@ -204,4 +205,22 @@ export async function restoreVersion(file: string): Promise<void> {
   }
   // Destructive replace: importAll validates before clearing and rolls back on error.
   await importAll(payload)
+}
+
+/**
+ * Folder sync on the Mac (design-docs/folder-sync.md): the device snapshots live
+ * in the backup folder's `sync/` subfolder, through the same Rust file commands
+ * (Rust gzips / gunzips by the `.gz` name and only accepts sync names there).
+ * Null when no backup folder is chosen yet.
+ */
+export async function desktopSyncTransport(): Promise<SyncTransport | null> {
+  const dir = getBackupDir()
+  if (!IS_TAURI || !dir) return null
+  const { invoke } = await import('@tauri-apps/api/core')
+  await ensureRustBackupDir(invoke, dir)
+  return {
+    list: () => invoke<string[]>('list_backups', { subdir: 'sync' }),
+    read: (fileName) => invoke<string>('read_backup', { fileName, subdir: 'sync' }),
+    write: (fileName, contents) => invoke<void>('write_backup', { fileName, contents, subdir: 'sync' }),
+  }
 }

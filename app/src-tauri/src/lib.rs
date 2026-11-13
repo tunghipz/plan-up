@@ -57,8 +57,31 @@ fn is_backup_filename(name: &str) -> bool {
     }
 }
 
-/// Resolve the write/prune target: the picked folder, or its `versions/`
-/// subfolder. `subdir` is a hard-coded allow-list — the frontend can never name
+/// Folder sync (folder-sync.md): each device's own snapshot in `sync/`,
+/// `plan-up-sync-<device id>.json.gz` with a device id of 4–40 `[a-z0-9-]`.
+fn is_sync_filename(name: &str) -> bool {
+    let Some(id) = name
+        .strip_prefix("plan-up-sync-")
+        .and_then(|r| r.strip_suffix(".json.gz"))
+    else {
+        return false;
+    };
+    (4..=40).contains(&id.len())
+        && id.bytes().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'-')
+}
+
+/// Which names a subfolder may hold: `sync/` only sync snapshots, the folder
+/// itself and `versions/` only backups — the two never mix.
+fn name_ok(subdir: Option<&str>, name: &str) -> bool {
+    if subdir == Some("sync") {
+        is_sync_filename(name)
+    } else {
+        is_backup_filename(name)
+    }
+}
+
+/// Resolve the write/prune target: the picked folder, or its `versions/` /
+/// `sync/` subfolder. `subdir` is a hard-coded allow-list — the frontend can never name
 /// an arbitrary subdirectory, so path traversal via `subdir` is impossible too.
 fn resolve_dir(dir: &str, subdir: Option<&str>) -> Result<PathBuf, String> {
     let base = Path::new(dir);
@@ -68,6 +91,7 @@ fn resolve_dir(dir: &str, subdir: Option<&str>) -> Result<PathBuf, String> {
     match subdir {
         None | Some("") => Ok(base.to_path_buf()),
         Some("versions") => Ok(base.join("versions")),
+        Some("sync") => Ok(base.join("sync")),
         Some(other) => Err(format!("backup subdir not allowed: {other}")),
     }
 }
@@ -183,20 +207,28 @@ fn write_backup_at(
     contents: String,
     subdir: Option<String>,
 ) -> Result<(), String> {
-    if !is_backup_filename(&file_name) {
+    if !name_ok(subdir.as_deref(), &file_name) {
         return Err(format!("invalid backup filename: {file_name}"));
     }
     let target = resolve_dir(&dir, subdir.as_deref())?;
     fs::create_dir_all(&target).map_err(|e| e.to_string())?;
-    let path = target.join(&file_name);
-    if !is_gzipped(&file_name) {
-        return fs::write(path, contents).map_err(|e| e.to_string());
+    let bytes = encode_backup(&file_name, contents)?;
+    // Write a temp file then rename, so the other device (via iCloud) never
+    // reads a half-written snapshot.
+    let tmp = target.join(format!(".{file_name}.tmp"));
+    fs::write(&tmp, bytes).map_err(|e| e.to_string())?;
+    fs::rename(&tmp, target.join(&file_name)).map_err(|e| e.to_string())
+}
+
+/// JSON text → file bytes: gzipped when the name ends in `.gz`. The frontend
+/// always hands plain JSON; compression is ours to do.
+fn encode_backup(file_name: &str, contents: String) -> Result<Vec<u8>, String> {
+    if !is_gzipped(file_name) {
+        return Ok(contents.into_bytes());
     }
-    // The frontend always hands us plain JSON; compression is ours to do.
     let mut enc = GzEncoder::new(Vec::new(), Compression::default());
     enc.write_all(contents.as_bytes()).map_err(|e| e.to_string())?;
-    let bytes = enc.finish().map_err(|e| e.to_string())?;
-    fs::write(path, bytes).map_err(|e| e.to_string())
+    enc.finish().map_err(|e| e.to_string())
 }
 
 fn prune_backups_at(dir: String, keep: usize, subdir: Option<String>) -> Result<Vec<String>, String> {
@@ -210,7 +242,7 @@ fn prune_backups_at(dir: String, keep: usize, subdir: Option<String>) -> Result<
         .filter_map(|e| e.ok())
         .filter(|e| e.path().is_file())
         .filter_map(|e| e.file_name().into_string().ok())
-        .filter(|n| is_backup_filename(n))
+        .filter(|n| name_ok(subdir.as_deref(), n))
         .collect();
     // name == date[-time], fixed width → lexicographic desc is newest-first
     names.sort_by(|a, b| b.cmp(a));
@@ -234,13 +266,13 @@ fn list_backups_at(dir: String, subdir: Option<String>) -> Result<Vec<String>, S
         .filter(|e| e.path().is_file())
         .filter_map(|e| e.file_name().into_string().ok())
         .collect();
-    Ok(backup_names_newest_first(names))
+    Ok(backup_names_newest_first(names, subdir.as_deref()))
 }
 
 /// Keep only our backup names, newest first. Shared by the desktop folder and the
 /// iPhone's iCloud folder (ios-backup-folder.md), whose listing comes from Swift.
-fn backup_names_newest_first(names: Vec<String>) -> Vec<String> {
-    let mut names: Vec<String> = names.into_iter().filter(|n| is_backup_filename(n)).collect();
+fn backup_names_newest_first(names: Vec<String>, subdir: Option<&str>) -> Vec<String> {
+    let mut names: Vec<String> = names.into_iter().filter(|n| name_ok(subdir, n)).collect();
     // name == date[-time], fixed width → lexicographic desc is newest-first
     names.sort_by(|a, b| b.cmp(a));
     names
@@ -259,7 +291,7 @@ fn decode_backup(file_name: &str, bytes: Vec<u8>) -> Result<String, String> {
 }
 
 fn read_backup_at(dir: String, file_name: String, subdir: Option<String>) -> Result<String, String> {
-    if !is_backup_filename(&file_name) {
+    if !name_ok(subdir.as_deref(), &file_name) {
         return Err(format!("invalid backup filename: {file_name}"));
     }
     let target = resolve_dir(&dir, subdir.as_deref())?;
@@ -356,6 +388,22 @@ fn save_export(
     Ok(file_name)
 }
 
+/// Bytes → standard base64 with padding (the iPhone sync write, folder-sync.md).
+#[cfg_attr(not(target_os = "ios"), allow(dead_code))]
+fn encode_base64(bytes: &[u8]) -> String {
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity((bytes.len() + 2) / 3 * 4);
+    for chunk in bytes.chunks(3) {
+        let b = [chunk[0], *chunk.get(1).unwrap_or(&0), *chunk.get(2).unwrap_or(&0)];
+        let n = (b[0] as u32) << 16 | (b[1] as u32) << 8 | b[2] as u32;
+        out.push(T[(n >> 18) as usize & 63] as char);
+        out.push(T[(n >> 12) as usize & 63] as char);
+        out.push(if chunk.len() > 1 { T[(n >> 6) as usize & 63] as char } else { '=' });
+        out.push(if chunk.len() > 2 { T[n as usize & 63] as char } else { '=' });
+    }
+    out
+}
+
 /// Standard base64 (with or without padding) → bytes. Small and dependency-free;
 /// only used for PNG exports on mobile.
 #[cfg_attr(desktop, allow(dead_code))]
@@ -400,7 +448,10 @@ fn decode_base64(s: &str) -> Result<Vec<u8>, String> {
 /// the picker needs the main thread, which a sync command would block.
 #[cfg(target_os = "ios")]
 mod ios_folder {
-    use super::{backup_names_newest_first, decode_backup, decode_base64, is_backup_filename};
+    use super::{
+        backup_names_newest_first, decode_backup, decode_base64, encode_backup, encode_base64,
+        name_ok,
+    };
     use serde::Deserialize;
     use serde_json::json;
     use tauri::{AppHandle, Manager, Runtime};
@@ -423,8 +474,13 @@ mod ios_folder {
         match subdir.as_deref() {
             None | Some("") => Ok(String::new()),
             Some("versions") => Ok("versions".into()),
+            Some("sync") => Ok("sync".into()),
             Some(other) => Err(format!("invalid backup subfolder: {other}")),
         }
+    }
+
+    fn sub(s: &str) -> Option<&str> {
+        if s.is_empty() { None } else { Some(s) }
     }
 
     async fn call<R: Runtime, T: serde::de::DeserializeOwned>(
@@ -459,7 +515,7 @@ mod ios_folder {
     pub async fn backup_folder_list(app: AppHandle, subdir: Option<String>) -> Result<Vec<String>, String> {
         let subdir = check_subdir(&subdir)?;
         let r: ListResponse = call(&app, "list", json!({ "subdir": subdir })).await?;
-        Ok(backup_names_newest_first(r.files))
+        Ok(backup_names_newest_first(r.files, sub(&subdir)))
     }
 
     /// One backup file as JSON text (`.json.gz` inflated).
@@ -469,12 +525,35 @@ mod ios_folder {
         file_name: String,
         subdir: Option<String>,
     ) -> Result<String, String> {
-        if !is_backup_filename(&file_name) {
+        let subdir = check_subdir(&subdir)?;
+        if !name_ok(sub(&subdir), &file_name) {
             return Err(format!("invalid backup filename: {file_name}"));
         }
-        let subdir = check_subdir(&subdir)?;
         let r: ReadResponse = call(&app, "read", json!({ "fileName": file_name, "subdir": subdir })).await?;
         decode_backup(&file_name, decode_base64(&r.data)?)
+    }
+
+    /// Write this device's sync snapshot (folder-sync.md). Only `sync/` and only
+    /// a sync file name — the phone never writes a backup or anything else.
+    #[tauri::command]
+    pub async fn backup_folder_write(
+        app: AppHandle,
+        file_name: String,
+        subdir: Option<String>,
+        contents: String,
+    ) -> Result<(), String> {
+        let subdir = check_subdir(&subdir)?;
+        if subdir != "sync" || !name_ok(Some("sync"), &file_name) {
+            return Err(format!("invalid sync filename: {file_name}"));
+        }
+        let data = encode_base64(&encode_backup(&file_name, contents)?);
+        call::<_, serde_json::Value>(
+            &app,
+            "write",
+            json!({ "fileName": file_name, "subdir": subdir, "data": data }),
+        )
+        .await?;
+        Ok(())
     }
 }
 
@@ -497,6 +576,7 @@ pub fn run() {
             ios_folder::backup_folder_status,
             ios_folder::backup_folder_list,
             ios_folder::backup_folder_read,
+            ios_folder::backup_folder_write,
         ]);
     #[cfg(not(target_os = "ios"))]
     let builder = builder.invoke_handler(tauri::generate_handler![save_export]);
@@ -581,7 +661,7 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        backup_names_newest_first, decode_backup,
+        backup_names_newest_first, decode_backup, encode_base64, is_sync_filename, name_ok,
         decode_base64, is_backup_filename, list_backups_at as list_backups,
         prune_backups_at as prune_backups,
         read_backup_at as read_backup, read_import_file_at as read_import_file,
@@ -604,7 +684,7 @@ mod tests {
             "plan-up-2026-07-01-080000.json".to_string(),
         ];
         assert_eq!(
-            backup_names_newest_first(names),
+            backup_names_newest_first(names, None),
             vec![
                 "plan-up-2026-11-13-093554.json.gz",
                 "plan-up-2026-11-12-145959.json.gz",
@@ -624,6 +704,43 @@ mod tests {
             "{\"a\":1}"
         );
         assert!(decode_backup("plan-up-2026-11-13-093554.json.gz", b"not gzip".to_vec()).is_err());
+    }
+
+    #[test]
+    fn sync_names_and_folders_do_not_mix() {
+        assert!(is_sync_filename("plan-up-sync-mac-k3j9x2.json.gz"));
+        assert!(is_sync_filename("plan-up-sync-iphone-a8b2c1.json.gz"));
+        assert!(!is_sync_filename("plan-up-sync-../x.json.gz"));
+        assert!(!is_sync_filename("plan-up-sync-ABC123.json.gz")); // lowercase only
+        assert!(!is_sync_filename("plan-up-sync-abc.json.gz")); // too short
+        assert!(!is_sync_filename("plan-up-sync-mac-1.json")); // must be .gz
+        assert!(name_ok(Some("sync"), "plan-up-sync-mac-k3j9x2.json.gz"));
+        assert!(!name_ok(Some("sync"), "plan-up-2026-11-13.json"));
+        assert!(!name_ok(None, "plan-up-sync-mac-k3j9x2.json.gz"));
+        assert!(!name_ok(Some("versions"), "plan-up-sync-mac-k3j9x2.json.gz"));
+    }
+
+    #[test]
+    fn sync_snapshot_round_trips_through_the_folder() {
+        let dir = temp_dir("sync-rt");
+        let d = dir.to_string_lossy().to_string();
+        let name = "plan-up-sync-mac-k3j9x2.json.gz".to_string();
+        write_backup(d.clone(), name.clone(), "{\"format\":1}".into(), Some("sync".into())).unwrap();
+        assert_eq!(list_backups(d.clone(), Some("sync".into())).unwrap(), vec![name.clone()]);
+        assert_eq!(read_backup(d.clone(), name.clone(), Some("sync".into())).unwrap(), "{\"format\":1}");
+        // a backup name is refused in sync/, a sync name outside it
+        assert!(write_backup(d.clone(), "plan-up-2026-11-13.json".into(), "{}".into(), Some("sync".into())).is_err());
+        assert!(write_backup(d.clone(), name.clone(), "{}".into(), None).is_err());
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn encode_base64_round_trips() {
+        for s in ["", "a", "ab", "abc", "abcd", "plan-up sync ✓"] {
+            assert_eq!(decode_base64(&encode_base64(s.as_bytes())).unwrap(), s.as_bytes());
+        }
+        assert_eq!(encode_base64(b"Man"), "TWFu");
+        assert_eq!(encode_base64(b"Ma"), "TWE=");
     }
 
     #[test]

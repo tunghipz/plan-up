@@ -1,7 +1,7 @@
 # Mở từ folder backup trên iPhone
 
 **Status:** Implemented
-**Last updated:** 2026-11-13
+**Last updated:** 2026-11-13 (thêm đồng bộ qua folder: iPhone ghi file của nó vào `sync/`, xem [folder-sync.md](./folder-sync.md); phần mở bản backup vẫn chỉ đọc)
 **Code:** `app/src-tauri/plugins/backup-folder/` (plugin Swift), `app/src-tauri/src/lib.rs`
 (`backup_folder_*`), `app/src/backup-folder-mobile.ts`, `app/src/BackupFolderModal.tsx`,
 `app/src/BackupSettingsModal.tsx` (`RestoreSection` dùng chung), `app/src/App.tsx` (menu `⋯`)

@@ -11,6 +11,7 @@ import type {
   Task,
 } from './types'
 import { buildPersonBackfill } from './people'
+import { installSyncHooks } from './sync-stamp'
 
 export class PlanDB extends Dexie {
   projects!: Table<Project, string>
@@ -279,6 +280,8 @@ export class PlanDB extends Dexie {
 }
 
 export const db = new PlanDB()
+// Stamp modifiedAt + tombstones on every local write (design-docs/folder-sync.md).
+installSyncHooks(db)
 
 export const uid = () =>
   typeof crypto !== 'undefined' && crypto.randomUUID

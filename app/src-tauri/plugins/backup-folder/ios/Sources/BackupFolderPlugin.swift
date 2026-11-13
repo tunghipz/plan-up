@@ -1,9 +1,10 @@
 // plan-up iOS: the Mac's auto-backup folder, read from the phone
-// (design-docs/ios-backup-folder.md).
+// (design-docs/ios-backup-folder.md), and the phone's own sync snapshot written
+// into its `sync/` subfolder (design-docs/folder-sync.md).
 //
 // The user picks the folder once (usually in iCloud Drive). We keep a bookmark of
-// it in UserDefaults so the pick survives relaunches, and only ever LIST and READ
-// inside it — there is no write command. Names arriving here were already checked
+// it in UserDefaults so the pick survives relaunches. Reads cover the folder,
+// `versions/` and `sync/`; the only write is a file in `sync/`. Names arriving here were already checked
 // in Rust (lib.rs, `is_backup_filename` + subdir allow-list); the checks below are
 // a second fence, not the only one.
 
@@ -19,6 +20,12 @@ struct ListArgs: Decodable {
 struct ReadArgs: Decodable {
   let fileName: String
   let subdir: String?
+}
+
+struct WriteArgs: Decodable {
+  let fileName: String
+  let subdir: String
+  let data: String
 }
 
 private let bookmarkKey = "plan-up.backupFolderBookmark"
@@ -73,6 +80,10 @@ class BackupFolderPlugin: Plugin, UIDocumentPickerDelegate {
       do {
         let args = try invoke.parseArgs(ListArgs.self)
         let names = try self.withFolder(subdir: args.subdir) { dir -> [String] in
+          // versions/ or sync/ not created yet: nothing to list (not an error).
+          if !(args.subdir ?? "").isEmpty && !FileManager.default.fileExists(atPath: dir.path) {
+            return []
+          }
           var listed: [String] = []
           var coordError: NSError?
           var readError: Error?
@@ -126,6 +137,36 @@ class BackupFolderPlugin: Plugin, UIDocumentPickerDelegate {
     }
   }
 
+  @objc public func write(_ invoke: Invoke) {
+    io.async {
+      do {
+        let args = try invoke.parseArgs(WriteArgs.self)
+        let name = args.fileName
+        // Second fence after Rust's `is_sync_filename`: sync/ only, our names only.
+        guard args.subdir == "sync", name.hasPrefix("plan-up-sync-"), name.hasSuffix(".json.gz"),
+          !name.contains("/"), !name.contains("..")
+        else { throw FolderError.badName(name) }
+        guard let bytes = Data(base64Encoded: args.data) else { throw FolderError.badName("data") }
+        try self.withFolder(subdir: "sync", create: true) { dir in
+          let file = dir.appendingPathComponent(name)
+          var coordError: NSError?
+          var writeError: Error?
+          NSFileCoordinator().coordinate(writingItemAt: file, options: .forReplacing, error: &coordError) { url in
+            do {
+              try bytes.write(to: url, options: .atomic)
+            } catch {
+              writeError = error
+            }
+          }
+          if let e = coordError ?? writeError { throw e }
+        }
+        invoke.resolve(["ok": true])
+      } catch {
+        invoke.reject(error.localizedDescription)
+      }
+    }
+  }
+
   // MARK: document picker
 
   public func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
@@ -171,13 +212,17 @@ class BackupFolderPlugin: Plugin, UIDocumentPickerDelegate {
 
   /// Run `body` on the folder (or its `versions/` subfolder) inside the
   /// security scope the bookmark grants.
-  private func withFolder<T>(subdir: String?, _ body: (URL) throws -> T) throws -> T {
+  private func withFolder<T>(subdir: String?, create: Bool = false, _ body: (URL) throws -> T) throws -> T {
     guard let root = try resolveFolder() else { throw FolderError.notChosen }
     let sub = subdir ?? ""
-    guard sub == "" || sub == "versions" else { throw FolderError.badName(sub) }
+    guard sub == "" || sub == "versions" || sub == "sync" else { throw FolderError.badName(sub) }
     let scoped = root.startAccessingSecurityScopedResource()
     defer { if scoped { root.stopAccessingSecurityScopedResource() } }
-    return try body(sub.isEmpty ? root : root.appendingPathComponent(sub, isDirectory: true))
+    let dir = sub.isEmpty ? root : root.appendingPathComponent(sub, isDirectory: true)
+    if create && !sub.isEmpty {
+      try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    }
+    return try body(dir)
   }
 
   /// iCloud keeps a not-yet-downloaded file as `.<name>.icloud`; report its real name.

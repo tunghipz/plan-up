@@ -874,7 +874,11 @@ export async function restoreProjectPlan(snap: ProjectPlanSnapshot): Promise<voi
 export async function projectPlanSignature(projectId: string): Promise<string> {
   const { tasks, sprints } = await snapshotProjectPlan(projectId)
   const byId = (a: { id: string }, b: { id: string }) => a.id.localeCompare(b.id)
-  return JSON.stringify([tasks.sort(byId), sprints.sort(byId)])
+  // modifiedAt is sync bookkeeping (folder-sync.md), not plan content: a
+  // restore re-stamps every row, which must still read as "unchanged".
+  return JSON.stringify([tasks.sort(byId), sprints.sort(byId)], (k, v) =>
+    k === 'modifiedAt' ? undefined : v
+  )
 }
 
 /**

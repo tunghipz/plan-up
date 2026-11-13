@@ -97,7 +97,9 @@ import {
   type MenuCommand,
   type MenuState,
 } from './native-shell'
-import { startAutoBackup } from './backup-tauri'
+import { desktopSyncTransport, startAutoBackup } from './backup-tauri'
+import { mobileSyncTransport } from './backup-folder-mobile'
+import { setSyncTransportFactory, startSync } from './sync'
 import { BackupSettingsModal } from './BackupSettingsModal'
 import { BackupFolderModal } from './BackupFolderModal'
 import { IS_NATIVE_MOBILE } from './platform'
@@ -612,6 +614,12 @@ function App() {
   // Desktop only: change-driven auto backup (design-docs/auto-backup.md).
   // No-ops on web; the disposer keeps StrictMode's double-mount clean.
   useEffect(() => startAutoBackup(), [])
+  // Mac ↔ iPhone sync through the iCloud folder (design-docs/folder-sync.md).
+  useEffect(() => {
+    if (IS_TAURI) setSyncTransportFactory(desktopSyncTransport)
+    else if (IS_NATIVE_MOBILE) setSyncTransportFactory(mobileSyncTransport)
+    return startSync()
+  }, [])
 
   // Ask the browser to exempt this origin from storage eviction (Safari ITP
   // wipes unpersisted site data after 7 days without interaction). Best-effort:

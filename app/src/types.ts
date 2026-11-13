@@ -298,6 +298,8 @@ export interface ShareRecord {
 }
 
 export interface Task {
+  /** Last local write, ms — stamped by the sync hooks (design-docs/folder-sync.md). */
+  modifiedAt?: number
   id: string
   projectId: string
   /** Stable, never-reused sequence number (per-project). UI prereq input. */

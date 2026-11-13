@@ -8,12 +8,18 @@ import {
   openFolderVersion,
   pickFolder,
   readFolderVersion,
+  safetyCopyFilename,
 } from './backup-folder-mobile'
+import { SyncSection } from './SyncSection'
+import { isSyncEnabled } from './sync'
+import { exportAll } from './io'
+import { saveToNativeFiles } from './native-save'
 
 /**
  * iPhone `⋯ → Folder backup…` (design-docs/ios-backup-folder.md): pick the Mac's
- * auto-backup folder in iCloud Drive once, then open its newest snapshot (or an
- * older one) in place of the phone's data. Read-only on the folder.
+ * auto-backup folder in iCloud Drive once, then sync through it
+ * (folder-sync.md — the only write, into `sync/`) and/or open one of its
+ * snapshots in place of the phone's data.
  */
 
 const FOLDER_SOURCE: RestoreSource = {
@@ -23,7 +29,9 @@ const FOLDER_SOURCE: RestoreSource = {
   actionLabel: 'Mở bản này',
   confirmTitle: 'Thay dữ liệu trên iPhone?',
   confirmMessage: (when) =>
-    `Dữ liệu trên iPhone sẽ được thay bằng bản backup lúc ${when}. Dữ liệu hiện tại được lưu trước vào Files › On My iPhone › plan-up, mở nhầm vẫn Import lại được.`,
+    `Dữ liệu trên iPhone sẽ được thay bằng bản backup lúc ${when}. Dữ liệu hiện tại được lưu trước vào Files › On My iPhone › plan-up, mở nhầm vẫn Import lại được.${
+      isSyncEnabled() ? ' Đồng bộ đang bật: Mac cũng sẽ thành bản này.' : ''
+    }`,
   confirmLabel: 'Mở',
   emptyText: 'Folder này chưa có versions/. Chọn folder auto backup của bản Mac.',
 }
@@ -59,7 +67,8 @@ export function BackupFolderModal({ onClose }: { onClose: () => void }) {
   return (
     <ModalSheet title="Folder backup" onClose={onClose}>
       <p className="text-[13px] text-ink-muted leading-snug">
-        Mở bản backup mà app Mac tự ghi vào iCloud Drive. Chỉ đọc, app không ghi gì vào folder.
+        Folder backup của app Mac trong iCloud Drive. Bật đồng bộ để Mac và iPhone cùng sửa; hoặc mở
+        một bản backup thay cho dữ liệu trên iPhone.
       </p>
 
       <div className="flex items-center gap-2.5 min-w-0">
@@ -77,6 +86,21 @@ export function BackupFolderModal({ onClose }: { onClose: () => void }) {
       </div>
 
       {err && <p className="text-[12px] text-overdue leading-snug break-words">{err}</p>}
+
+      {name && (
+        <SyncSection
+          key={`sync#${pickCount}`}
+          safetyCopyWhere="Files › On My iPhone › plan-up"
+          saveSafetyCopy={async () => {
+            const current = await exportAll()
+            await saveToNativeFiles(
+              safetyCopyFilename(new Date()),
+              { text: JSON.stringify(current) },
+              { quiet: true }
+            )
+          }}
+        />
+      )}
 
       {name && (
         <RestoreSection

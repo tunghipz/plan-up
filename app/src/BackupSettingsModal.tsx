@@ -14,6 +14,8 @@ import {
 import { useConfirm } from './confirm-context'
 import { pickBackupDir, runBackupNow, listVersions, readVersion, restoreVersion, type VersionEntry } from './backup-tauri'
 import type { ExportPayload } from './io'
+import { SyncSection } from './SyncSection'
+import { isSyncEnabled } from './sync'
 
 /**
  * Auto-backup settings (desktop only) — design-docs/auto-backup.md. State
@@ -79,7 +81,9 @@ const DESKTOP_SOURCE: RestoreSource = {
   actionLabel: 'Restore bản này',
   confirmTitle: 'Thay toàn bộ dữ liệu?',
   confirmMessage: (when) =>
-    `Khôi phục về ${when} sẽ thay toàn bộ dữ liệu hiện tại bằng bản đó. State hiện tại được tự backup vào versions/ trước — restore nhầm vẫn quay lại được.`,
+    `Khôi phục về ${when} sẽ thay toàn bộ dữ liệu hiện tại bằng bản đó. State hiện tại được tự backup vào versions/ trước — restore nhầm vẫn quay lại được.${
+      isSyncEnabled() ? ' Đồng bộ đang bật: máy kia cũng sẽ thành bản này.' : ''
+    }`,
   confirmLabel: 'Restore',
   emptyText: 'Chưa có version nào. Bản đầu tiên được ghi sau thay đổi dữ liệu đầu tiên.',
 }
@@ -373,6 +377,16 @@ export function BackupSettingsModal({ onClose }: { onClose: () => void }) {
           Back up now
         </button>
       </div>
+
+      {dir && (
+        <SyncSection
+          safetyCopyWhere="versions/ của folder backup"
+          saveSafetyCopy={async () => {
+            const st = await runBackupNow()
+            if (!st.ok) throw new Error(`Không backup được dữ liệu hiện tại: ${st.error ?? ''}`)
+          }}
+        />
+      )}
 
       {dir && <RestoreSection key={dir} />}
 

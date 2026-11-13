@@ -1,7 +1,7 @@
 # Data model
 
 **Status:** Implemented
-**Last updated:** 2026-09-21 (`Holiday.exceptMemberIds` — miễn kỳ nghỉ cho từng member)
+**Last updated:** 2026-11-13 (mọi bản ghi của 8 bảng có thêm `modifiedAt?: number` do hook đồng bộ gắn, không đổi schema version; tombstone xoá nằm trong localStorage — xem [folder-sync.md](./folder-sync.md)). Trước đó: 2026-09-21 (`Holiday.exceptMemberIds` — miễn kỳ nghỉ cho từng member)
 **Code:** `app/src/types.ts` (entity types) + `app/src/schema.ts` (Dexie schema & migrations); `app/src/db.ts` is the facade re-exporting both
 
 ## Purpose

@@ -1,7 +1,7 @@
 # Mobile layout
 
 **Status:** Implemented (v1: sprint List + Board + shell; Collections để sau)
-**Last updated:** 2026-11-13 (**v2 List gọn**: task card ~58pt thay vì ~97pt, meta một dòng có dấu `·`, group thành chữ cuối meta, header member một dòng; xem *List view* và *Header card member*)
+**Last updated:** 2026-11-13 (sửa vuốt bị kẹt trong card trên iPhone, xem *Rules*; **v2 List gọn**: task card ~58pt thay vì ~97pt, meta một dòng có dấu `·`, group thành chữ cuối meta, header member một dòng; xem *List view* và *Header card member*)
 **Code:** `app/src/useIsMobile.ts`, `app/src/MobileActionSheet.tsx`, `app/src/App.tsx` (drawer,
 toolbar), `app/src/SprintView.tsx` (class `lc-*` trên từng cột), `app/src/BoardView.tsx`,
 `app/src/ModalSheet.tsx`, `app/src/DatePicker.tsx`, `app/src/index.css` (khối *Mobile layout*).
@@ -191,6 +191,11 @@ Playwright, khung iPhone 13 (390×664), đo bằng DOM:
   với bản trước khi sửa.
 
 ## Rules & edge cases
+
+- **Không có vùng cuộn lồng trên điện thoại** (sửa 2026-11-13). Card member/Unassigned/All bọc rows
+  trong `overflow-x-auto` (desktop cần để cuộn ngang bảng rộng). Khung đó dư 2px chiều dọc nên thành
+  vùng cuộn dọc riêng; trên iOS, vuốt bắt đầu trong card (thấy rõ nhất ở card group task) bị khung đó
+  giữ, trang không cuộn. Dưới 768px khung là `overflow-visible` (không còn bảng rộng để cuộn ngang).
 
 - Từ 768px trở lên: không có thay đổi gì so với hiện tại.
 - Bàn phím ảo che input: các input inline và composer phải cuộn vào vùng nhìn thấy khi focus.

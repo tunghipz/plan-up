@@ -522,7 +522,7 @@ export function SprintView({
               wide Assignee column — mirrors the card's min-w so columns align. */}
           <div className="sticky top-2 z-20 hidden md:block">
             <div className="glass-toolbar rounded-full overflow-hidden">
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto max-md:overflow-visible">
                 <div className="md:min-w-[960px]">
                   <TaskColumnHeader sort={sort} setSort={setSort} assigneeWide bare />
                 </div>
@@ -554,7 +554,7 @@ export function SprintView({
       {!allTable && groups.length > 0 && (
         <div className="sticky top-2 z-20 hidden md:block">
           <div className="glass-toolbar rounded-full overflow-hidden">
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto max-md:overflow-visible">
               <div className="md:min-w-[820px]">
                 <TaskColumnHeader sort={sort} setSort={setSort} showAssignee={false} bare />
               </div>
@@ -1372,7 +1372,7 @@ function MemberCard({
         // size and the table scrolls instead of crushing the title column.
         // Assignee column is omitted — every row in a member group is the same
         // person (shown in the group header avatar).
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto max-md:overflow-visible">
           <div className="md:min-w-[820px]">
             {/* Column header hoisted to a single sticky header above the whole
                 list (see SprintView top). Member cards no longer carry their own. */}
@@ -1528,7 +1528,7 @@ function UnassignedCard({
         countText={kind === 'shared' ? `${count} group` : undefined}
         muted
       />
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto max-md:overflow-visible">
         <div className="md:min-w-[896px]">
           {tasks.length > 0 && (
             <div className="hidden md:block">
@@ -1592,7 +1592,7 @@ function AllTasksCard({
 }) {
   return (
     <Card>
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto max-md:overflow-visible">
         <div className="md:min-w-[960px]">
           <div className="divide-y divide-border">
             {rows.length === 0 && (

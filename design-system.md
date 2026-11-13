@@ -191,8 +191,11 @@ Một breakpoint duy nhất: Tailwind `md` (768px). Dưới mức đó app dùng
 [`design-docs/mobile-layout.md`](design-docs/mobile-layout.md). Luật chung:
 - **Chỉ đổi hình bằng CSS** (`md:` / `max-md:` hoặc khối *Mobile layout* trong `index.css`); `useIsMobile()`
   chỉ dùng khi **hành vi** khác (drawer, menu `⋯`). Desktop không được lệch một pixel nào.
-- Vùng bấm chính 44×44 (status circle, ☰, Search, `⋯`); ô meta trong row tối thiểu 36px cao.
-- Chữ tối thiểu 12px. Ô nhập 16px (tránh iOS tự zoom khi focus).
+- Vùng bấm chính 44×44 (status circle, ☰, Search, `⋯`). Từ v2 (List gọn): ô meta trong row cao 24px
+  nhưng vùng bấm 32px (tràn lên xuống), task card ~60pt.
+- Chữ tối thiểu 12px. Ô nhập 16px khi đang gõ (tránh iOS tự zoom khi focus); lúc nghỉ ô effort 13px như
+  phần còn lại của dòng meta.
+- Màn hình cảm ứng (`hover: none`) không tô nền `.editable` khi hover: iOS giữ hover sau khi chạm.
 - Không có hover trên cảm ứng: thứ gì desktop chỉ hiện khi hover thì trên mobile phải hiện sẵn hoặc
   nằm trong menu `⋯`.
 - Không cuộn ngang cả trang. Bảng nhiều cột re-flow thành card hai dòng thay vì cuộn ngang.

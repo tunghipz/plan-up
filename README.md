@@ -1,6 +1,6 @@
 # plan-up
 
-ClickUp without the seat tax — a single-user, local-first task & sprint planner. Multi-project, no auth, no backend, no team plan. Members are just labels you create. Data lives in your browser (IndexedDB); export/import JSON for backup. Also ships as a **macOS desktop app** (Tauri 2) with **auto backup** to a folder you pick.
+ClickUp without the seat tax — a single-user, local-first task & sprint planner. Multi-project, no auth, no backend, no team plan. Members are just labels you create. Data lives in your browser (IndexedDB); export/import JSON for backup. Also ships as a **macOS desktop app** (Tauri 2) with **auto backup** to a folder you pick, and as an **iPhone app** (same Tauri shell, installed over USB) that can open those backups from iCloud Drive.
 
 ## Stack
 
@@ -73,7 +73,28 @@ See [`design-docs/desktop-app-tauri.md`](./design-docs/desktop-app-tauri.md),
 [`design-docs/auto-backup.md`](./design-docs/auto-backup.md) and
 [`design-docs/restore-versions.md`](./design-docs/restore-versions.md).
 
+### iPhone app (Tauri 2, installed over USB)
+
+```bash
+# prereq: Xcode, rustup target aarch64-apple-ios, `rustup component add llvm-tools`,
+# brew install xcodegen cocoapods; iPhone in Developer Mode, plugged in and unlocked
+cd app
+npm run ios:device    # build (signed, team ZINGPLAY) + install + launch on the plugged-in iPhone
+npm run ios:install   # re-install the last build only
+```
+
+The same web UI in the phone layout (drawer sidebar, two-line task cards, swipeable Board,
+`⋯` menu). Data lives inside the app. **`⋯ → Folder backup…`** picks the Mac's auto-backup
+folder in iCloud Drive once, then opens its newest snapshot (or any older one in `versions/`)
+— read-only on the folder, the phone's current data is saved to Files › plan-up first.
+Export writes to Files › On My iPhone › plan-up. Needs Tauri ≥ 2.12 (iOS 27 UIScene) and
+swift-rs ≥ 1.0.9 (Xcode 27). See [`design-docs/ios-app.md`](./design-docs/ios-app.md) and
+[`design-docs/ios-backup-folder.md`](./design-docs/ios-backup-folder.md).
+
 ## What's inside
+
+- **Today at a glance** — a task that isn't done and whose plan covers today gets a light blue wash and a bold title in the List and on Board cards; **due today** washes deeper and shows `Due today`; member headers count `N today` ([`design-docs/today-marker.md`](./design-docs/today-marker.md))
+- **Phone layout** (< 768px) — drawer sidebar, each task a compact two-line card (~60pt: title, then one `#4 · 2.5d · Nov 11 → Nov 13 · sau #3 · build 1` meta line, every field still editable in place), one-line member headers, Board columns swiped side by side, dialogs as bottom sheets ([`design-docs/mobile-layout.md`](./design-docs/mobile-layout.md))
 
 - **Home dashboard** *(temporarily hidden — feature-flagged off `HOME_ENABLED = false` in `App.tsx`; flip to restore)* — opens a read-first portfolio overview (a top-level screen, never forced — reload still lands you back on whatever screen you left). Two parts: a **projects grid** (the hero) — one card per project showing its active sprint + date range, **% done / tasks left** with a progress bar, a `⚠ N overdue` chip when anything's slipping, and a member avatar stack (click a card to jump into that project) — and a **People roster** on the right: every recurring teammate shown **once across all projects**, sorted by combined load (`N tasks · Xd`), with project spread (`in K projects`) and their next day off. A `⋯` menu **renames / recolors / merges** people (merge is confirm-gated). See [`design-docs/home-dashboard.md`](./design-docs/home-dashboard.md)
 - **Cross-project People** — a member is one project's membership for a **person**; the same human in several projects is several members but **one** `Person`. New members link to a person by name automatically (existing same-name person reused, else created), so the Home roster shows real combined load. Identity only — days-off and scheduling stay per-member, untouched

@@ -1,7 +1,7 @@
 # Task groups (parent task with nested children)
 
 **Status:** Implemented
-**Last updated:** 2026-11-09 (**card "Group nhiều người"** ở By member: group không có người giữ mà có task con đã giao thì không còn nằm trong card Unassigned — xem *Group nhiều người*; trước đó cùng ngày: **group không có người giữ** không pha xám nữa: thẻ trắng viền
+**Last updated:** 2026-11-27 (**task con của người khác gom thành khối group** trong card của họ thay vì dòng lẻ + chip — xem *Group nhiều người*). Trước đó: 2026-11-09 (**card "Group nhiều người"** ở By member: group không có người giữ mà có task con đã giao thì không còn nằm trong card Unassigned — xem *Group nhiều người*; trước đó cùng ngày: **group không có người giữ** không pha xám nữa: thẻ trắng viền
 mảnh, head hiện avatar chồng của những người trong group — xem *Nền group*; trước đó cùng ngày:
 **group một người đi cùng nhau**: giao hết task con cho một người
 thì group head theo sang người đó, đổi người cho head của group một người thì task con theo — xem
@@ -83,10 +83,26 @@ User hỏi *"task của người khác không push vô group được ah"*, rồ
 hướng đó đi"*.
 
 - **Ở All**: group hiện đủ mọi task con, của ai cũng được. Đây là chỗ chính để xem group.
-- **Ở By member**: group head nằm trong card của người giữ group (`assigneeId` của head). Task
-  con của **người khác** nằm trong card của chính họ như một dòng lẻ, kèm chip **`↳ #N tên
-  group`** sau title để biết thuộc group nào. Group head vẫn là dòng group (chevron, roll-up) kể
-  cả khi card đó không có task con nào của người giữ group.
+- **Ở By member**: group head nằm trong card của người giữ group (`assigneeId` của head). Group
+  head vẫn là dòng group (chevron, roll-up) kể cả khi card đó không có task con nào của người giữ
+  group.
+- **Task con của người khác gom thành khối group trong card của họ** (2026-11-27). Trước đó chúng
+  là dòng lẻ kèm chip `↳ #N tên group`. User: *"sao xem task theo member, build 3 thì người này
+  hiện như này, người khác hiện như này, tao muốn hiện group như ảnh đầu"* (ảnh đầu: card của người
+  giữ group, khối nền màu có dòng head `build 3 … 0/12` và các task con thụt bên dưới). Giờ card
+  nào có task con của group mà head nằm ở card khác cũng có **khối group y như vậy**:
+  - Dòng head là **chính group head** (cùng tên, `#`, chevron, roll-up trên **mọi** task con như ở
+    card người giữ), nền khối theo màu **người giữ group**, nên một group trông giống nhau ở mọi card.
+  - Bên dưới chỉ có task con **của người trong card**, thêm dòng *Add task to #N* (task thêm vào giao
+    cho người của card).
+  - Khối nằm ở chỗ task con đầu tiên của nó trong card. Thu gọn dùng chung trạng thái với khối ở card
+    người giữ (cùng key `plan-up:taskgroup-collapsed:{id}`).
+  - Dòng head ở khối này **không kéo thả được** (thứ tự head thuộc card người giữ); task con vẫn kéo
+    đổi thứ tự trong khối.
+  - Head không có người giữ (nằm ở card *Group nhiều người*) cũng vậy: mỗi member thấy khối group của
+    phần việc mình.
+  - Chip `↳ #N` chỉ còn khi không tìm thấy head trong sprint đang xem.
+  - Đếm số task của member không đổi (vẫn chỉ đếm leaf), head không bị đếm thêm.
 - **Card "Group nhiều người"** (2026-11-09). Group head không có người giữ mà **có ít nhất một
   task con đã giao cho member** thì nằm trong card riêng tên **Group nhiều người**, xếp trước
   card Unassigned. Trước đó các head này nằm trong card **Unassigned** và được đếm vào số của

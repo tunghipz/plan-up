@@ -2905,19 +2905,36 @@ function TaskRows({
   /** Drag-to-reorder is only offered in the default (seq) order. */
   canReorder?: boolean
 }) {
-  const { topLevel, childrenByParent } = useMemo(() => {
+  const { topLevel, childrenByParent, foreignHeadIds } = useMemo(() => {
     const idSet = new Set(tasks.map((t) => t.id))
+    // A child whose group head sits in ANOTHER card (someone else holds the
+    // group) still renders as a group block here, under that head — task-groups.md
+    // "Group nhiều người" (2026-11-27). The head is borrowed from tasksById.
+    const headOf = (t: Task) =>
+      t.parentId && (idSet.has(t.parentId) || tasksById.has(t.parentId)) ? t.parentId : null
     const childrenByParent = new Map<string, Task[]>()
     for (const t of tasks) {
-      if (t.parentId && idSet.has(t.parentId)) {
-        const arr = childrenByParent.get(t.parentId) ?? []
+      const pid = headOf(t)
+      if (pid) {
+        const arr = childrenByParent.get(pid) ?? []
         arr.push(t)
-        childrenByParent.set(t.parentId, arr)
+        childrenByParent.set(pid, arr)
       }
     }
-    const isChild = (t: Task) => !!(t.parentId && idSet.has(t.parentId))
-    return { topLevel: tasks.filter((t) => !isChild(t)), childrenByParent }
-  }, [tasks])
+    const topLevel: Task[] = []
+    const foreignHeadIds = new Set<string>()
+    for (const t of tasks) {
+      const pid = headOf(t)
+      if (!pid) {
+        topLevel.push(t)
+      } else if (!idSet.has(pid) && !foreignHeadIds.has(pid)) {
+        // The borrowed head takes the place of its first child in this card.
+        foreignHeadIds.add(pid)
+        topLevel.push(tasksById.get(pid)!)
+      }
+    }
+    return { topLevel, childrenByParent, foreignHeadIds }
+  }, [tasks, tasksById])
   // Children across the WHOLE sprint. A group may hold several people's tasks
   // (task-groups.md "Group nhiều người"): a head is a group row even when this
   // card holds none of its children, and its roll-up covers every child.
@@ -2973,10 +2990,18 @@ function TaskRows({
   // tested reorder.ts; this owner keeps only lane rules + persistence.
   const { over, hover, clear, cancel } = useDragHover()
 
+  // A borrowed head is in no lane of this card: never a drop target, never a
+  // neighbour in the slot math.
   const laneOf = (t: Task) =>
-    t.parentId && childrenByParent.has(t.parentId) ? t.parentId : '__top__'
+    foreignHeadIds.has(t.id)
+      ? '__foreign__'
+      : t.parentId && childrenByParent.has(t.parentId)
+        ? t.parentId
+        : '__top__'
   const laneArray = (lane: string) =>
-    lane === '__top__' ? topLevel : childrenByParent.get(lane) ?? []
+    lane === '__top__'
+      ? topLevel.filter((t) => !foreignHeadIds.has(t.id))
+      : (childrenByParent.get(lane) ?? [])
   const effOrder = (t: Task) => t.listOrder ?? t.sequence
 
   const endDrag = () => {
@@ -3043,7 +3068,8 @@ function TaskRows({
     }
   }
   const dragFor = (t: Task): RowDrag | undefined =>
-    canReorder
+    // A borrowed group head's order belongs to its holder's card.
+    canReorder && !foreignHeadIds.has(t.id)
       ? {
           id: t.id,
           enabled: true,

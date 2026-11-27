@@ -7,7 +7,7 @@ export { MAX_EVENTS_PER_SPRINT, logEvent, createSprint, sprintEvents } from './a
 export * from './io'
 export { resizeImageToDataURL } from './image-utils'
 
-import { formatSeqRanges, todayLocalISO } from './lib'
+import { formatSeqRanges } from './lib'
 import { normalizePersonName } from './people'
 import {
   LOGGABLE_FIELDS,
@@ -198,7 +198,8 @@ export async function deleteStatus(collectionId: string, statusId: string): Prom
 
 /**
  * Tạo một collection-item (Task ngoài sprint). status mặc định = status đầu tiên
- * của collection (hoặc null nếu chưa có status), startDate = hôm nay, dueDate=null,
+ * của collection (hoặc null nếu chưa có status), startDate = dueDate = null (từ
+ * 2026-11-28 — mặc định hôm nay làm range picker mở ở bước chờ ngày kết thúc),
  * sprintId=null. sequence per-project (collection không có numbering riêng).
  */
 export async function addCollectionItem(
@@ -206,8 +207,6 @@ export async function addCollectionItem(
   sectionId: string,
   patch: Partial<Task> & { title: string }
 ): Promise<Task> {
-  // Local-calendar today, NOT the UTC slice — see todayLocalISO's docstring.
-  const today = todayLocalISO()
   // One transaction so the maxSeq read + add can't interleave with another add:
   // two rapid "add item" clicks would otherwise read the same maxSeq and produce
   // duplicate per-project sequences.
@@ -232,7 +231,7 @@ export async function addCollectionItem(
       sprintId: null,
       status: 'todo',
       priority: 'normal',
-      startDate: today,
+      startDate: null,
       dueDate: null,
       estimate: null,
       createdAt: Date.now(),

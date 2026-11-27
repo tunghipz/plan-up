@@ -67,6 +67,8 @@ export function CalendarGrid({
   rangeStart,
   rangeEnd,
   selectingEnd,
+  ghostStart,
+  ghostEnd,
   month,
   onMonthChange,
   nav = 'both',
@@ -87,6 +89,12 @@ export function CalendarGrid({
   rangeStart?: string | null
   rangeEnd?: string | null
   selectingEnd?: boolean
+  /**
+   * The item's CURRENT range while a new one is being picked: a faint band with
+   * dashed ends, so re-picking is easy to aim. Hidden once a new start is set.
+   */
+  ghostStart?: string | null
+  ghostEnd?: string | null
   /**
    * Controlled month. Absent → the grid owns its own view (every existing
    * caller). Present → the caller drives it, which is what lets a two-month
@@ -235,6 +243,10 @@ export function CalendarGrid({
           const inBand =
             isRange && !!rangeStart && !!effEnd && c.iso > rangeStart && c.iso < effEnd
           const endpoint = isStart || isEnd
+          const showGhost = isRange && !rangeStart && !!ghostStart
+          const ghostEndIso = ghostEnd ?? ghostStart
+          const inGhost = showGhost && c.iso >= ghostStart! && c.iso <= ghostEndIso!
+          const ghostEdge = inGhost && (c.iso === ghostStart || c.iso === ghostEndIso)
 
           const sel = !isRange && c.iso === value
           const isToday = c.iso === today && !sel && !endpoint
@@ -249,6 +261,8 @@ export function CalendarGrid({
             cls.push('cursor-pointer hover:bg-surface-hover')
             if (inBand) cls.push('bg-accent-soft')
             else if (inSprint) cls.push('bg-accent-soft')
+            else if (inGhost) cls.push('bg-canvas-sunk')
+            if (ghostEdge) cls.push('outline-dashed outline-1 -outline-offset-2 outline-ink-faint')
             cls.push(c.out ? 'text-ink-faint opacity-40' : c.weekend ? 'text-ink-faint' : 'text-ink')
             if (isToday) cls.push('ring-[1.5px] ring-inset ring-accent')
             else if (isFocus) cls.push('ring-[1.5px] ring-inset ring-accent/40')
@@ -542,58 +556,36 @@ function RangeCalendarPopover({
   end,
   onChange,
   onClose,
+  openOn = null,
 }: {
   anchorRef: React.RefObject<HTMLElement | null>
   start: string | null
   end: string | null
   onChange: (r: { start: string | null; end: string | null }) => void
   onClose: () => void
+  /** `yyyy-mm` to open on when the item has no start yet. */
+  openOn?: string | null
 }) {
   const popRef = useRef<HTMLDivElement>(null)
-  const [draftStart, setDraftStart] = useState<string | null>(start)
-  const [draftEnd, setDraftEnd] = useState<string | null>(end)
-  // Wait for the end click when we already have a start but no end.
-  const [selectingEnd, setSelectingEnd] = useState<boolean>(!!start && !end)
+  // Always opens on "pick a start" (date-picker.md, 2026-11-28): the current
+  // range is only a ghost. Nothing is written until the second click.
+  const [draftStart, setDraftStart] = useState<string | null>(null)
   const WIDTH = 248
   const HEIGHT = 340
 
-  // Refs so the commit-on-close handler (bound once) reads the latest draft.
-  // Synced in an effect (not during render — React forbids ref writes there);
-  // passive effects flush before the next discrete event, so the handler still
-  // sees the draft from the latest committed render.
-  const draftStartRef = useRef(draftStart)
-  const draftEndRef = useRef(draftEnd)
-  useEffect(() => {
-    draftStartRef.current = draftStart
-    draftEndRef.current = draftEnd
-  })
-
   const pick = (iso: string) => {
-    if (!selectingEnd || !draftStart) {
-      // Begin a fresh range.
+    if (!draftStart || iso < draftStart) {
+      // First click, or a click before the start → (new) start, wait for the end.
       setDraftStart(iso)
-      setDraftEnd(null)
-      setSelectingEnd(true)
-      return
-    }
-    if (iso < draftStart) {
-      // Clicked before the start → treat as a new start, keep waiting for the end.
-      setDraftStart(iso)
-      setDraftEnd(null)
       return
     }
     // Complete the range (iso === start → 1-day). Commit once and close.
-    setDraftEnd(iso)
-    setSelectingEnd(false)
     onChange({ start: draftStart, end: iso })
     onClose()
   }
 
-  // Outside-click / Esc commit the current draft (allows start with no end).
-  const commitClose = () => {
-    onChange({ start: draftStartRef.current, end: draftEndRef.current })
-    onClose()
-  }
+  // Outside-click / Esc keep the old value — a half-picked range is dropped.
+  const commitClose = () => onClose()
   const pos = usePinnedPopover({
     onClose: commitClose,
     anchorRef,
@@ -614,11 +606,7 @@ function RangeCalendarPopover({
     },
   }) ?? { top: -9999, left: -9999 }
 
-  const hint = !draftStart
-    ? 'Pick a start'
-    : selectingEnd || !draftEnd
-      ? `${formatShortDate(draftStart)} – …`
-      : `${formatShortDate(draftStart)} – ${formatShortDate(draftEnd)}`
+  const hint = !draftStart ? 'Pick a start' : `${formatShortDate(draftStart)} – pick an end`
 
   return createPortal(
     <div
@@ -629,11 +617,13 @@ function RangeCalendarPopover({
       className="z-50 glass-popover rounded-[14px] p-3"
     >
       <CalendarGrid
-        value={draftStart ?? draftEnd ?? null}
+        value={draftStart ?? start ?? (openOn ? `${openOn}-01` : null)}
         onSelect={pick}
         rangeStart={draftStart}
-        rangeEnd={draftEnd}
-        selectingEnd={selectingEnd}
+        rangeEnd={null}
+        selectingEnd={!!draftStart}
+        ghostStart={start}
+        ghostEnd={end}
       />
       <div className="flex items-center justify-between mt-2.5 pt-2.5 border-t border-border-hair">
         <span className="text-[12px] font-medium text-ink-muted tabular-nums px-2">{hint}</span>
@@ -705,6 +695,96 @@ export function DateRangePickCell({
           start={start}
           end={end}
           onChange={onChange}
+          onClose={() => setOpen(false)}
+        />
+      )}
+    </>
+  )
+}
+
+/**
+ * Collection List date cell (collections.md "List cho lịch event"): ONE trigger
+ * for the whole range — `Dec 1 – 3` over `3 days`, `◆ Dec 7`, or a dashed
+ * `＋ Dates` pill — opening the shared range popover. `autoOpen` opens it on
+ * mount (an item just added from a month card).
+ */
+export function DateRangeCell({
+  start,
+  end,
+  onChange,
+  label,
+  sub,
+  autoOpen = false,
+  openMonth = null,
+  onAutoOpened,
+}: {
+  start: string | null
+  end: string | null
+  onChange: (r: { start: string | null; end: string | null }) => void
+  /** The merged label (`formatRange`), null when empty. */
+  label: string | null
+  /** Second line (`3 days`), optional. */
+  sub?: string | null
+  autoOpen?: boolean
+  /** `yyyy-mm` an empty picker opens on (the month card the item was added from). */
+  openMonth?: string | null
+  /** Called once the auto-open happened, so the owner can clear its flag. */
+  onAutoOpened?: () => void
+}) {
+  const [open, setOpen] = useState(autoOpen)
+  // autoOpen flipping on after mount opens too (state adjusted during render).
+  const [prevAuto, setPrevAuto] = useState(autoOpen)
+  // The month survives the owner clearing its flag right after the open.
+  const [viewMonth, setViewMonth] = useState<string | null>(autoOpen ? openMonth : null)
+  if (autoOpen !== prevAuto) {
+    setPrevAuto(autoOpen)
+    if (autoOpen) {
+      setOpen(true)
+      setViewMonth(openMonth)
+    }
+  }
+  const ref = useRef<HTMLButtonElement>(null)
+  useEffect(() => {
+    if (!autoOpen) return
+    ref.current?.scrollIntoView({ block: 'center' })
+    onAutoOpened?.()
+    // Fires on the false → true edge only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoOpen])
+  return (
+    <>
+      <button
+        ref={ref}
+        type="button"
+        onClick={(e) => {
+          e.preventDefault()
+          e.stopPropagation()
+          setViewMonth(null)
+          setOpen((o) => !o)
+        }}
+        aria-label="Dates"
+        className={`group w-full min-h-8 px-2 -mx-2 py-0.5 rounded-md border border-transparent text-left transition cursor-pointer hover:border-border-strong hover:bg-canvas ${
+          open ? 'border-border-strong bg-canvas' : ''
+        }`}
+      >
+        {label ? (
+          <>
+            <span className="block text-[13px] text-ink tabular-nums whitespace-nowrap">{label}</span>
+            {sub && <span className="block text-[11.5px] text-ink-faint tabular-nums leading-tight">{sub}</span>}
+          </>
+        ) : (
+          <span className="inline-flex items-center rounded-full border border-dashed border-border px-2.5 py-0.5 text-[11.5px] font-medium text-ink-faint group-hover:border-accent group-hover:text-accent transition">
+            ＋ Dates
+          </span>
+        )}
+      </button>
+      {open && (
+        <RangeCalendarPopover
+          anchorRef={ref}
+          start={start}
+          end={end}
+          onChange={onChange}
+          openOn={viewMonth}
           onClose={() => setOpen(false)}
         />
       )}

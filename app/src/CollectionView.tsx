@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { ChevronDown, X, Plus, Trash2, Layers, Pencil } from 'lucide-react'
+import { ChevronDown, X, Plus, Trash2, Layers, Pencil, Table2, CalendarRange } from 'lucide-react'
 import {
   db,
   addSection,
@@ -22,7 +22,23 @@ import {
   type Task,
 } from './db'
 import { CollectionCalendar } from './CollectionCalendar'
-import { DateRangePickCell } from './DatePicker'
+import { DateRangeCell } from './DatePicker'
+import { ViewToggle } from './ViewToggle'
+import { todayLocalISO } from './lib'
+import {
+  dayNum,
+  eventTiming,
+  formatLength,
+  formatRange,
+  freeRuns,
+  isLongRunning,
+  isWeekendDay,
+  monthBounds,
+  overlapsById,
+  rangeDays,
+  windowFor,
+  type EventTiming,
+} from './event-timeline'
 import { AddGroupButton } from './AddGroupButton'
 import { useDragHandle, useDragHover, type RowDrag } from './DragHandle'
 import { computeDropSlot, computeAppendSlot, resolveDropOrder, type DropSlot } from './reorder'
@@ -52,9 +68,36 @@ const COL = {
   lead: 'w-5 shrink-0 flex justify-center items-center',
   dot: 'w-4 shrink-0 flex justify-center',
   title: 'flex-1 min-w-[150px]',
-  start: 'w-28 flex justify-end shrink-0',
-  due: 'w-28 flex justify-end shrink-0',
+  // One merged date cell + a time track + the date-derived "When" — the List as an
+  // event calendar (collections.md "List cho lịch event", 2026-11-28).
+  dates: 'w-[118px] shrink-0 flex items-center',
+  track: 'w-[210px] shrink-0 max-lg:hidden',
+  when: 'w-[112px] shrink-0 max-md:hidden',
   status: 'w-28 flex justify-start shrink-0 pl-2',
+}
+
+/** `Group by  Table · Month`, remembered per collection. */
+type CollGroupBy = 'table' | 'month'
+const GROUP_KEY = (collectionId: string) => `plan-up:collGroup:${collectionId}`
+const GROUP_OPTIONS: { value: CollGroupBy; label: string; Icon: typeof Table2; title: string }[] = [
+  { value: 'table', label: 'Table', Icon: Table2, title: 'Your own tables' },
+  { value: 'month', label: 'Month', Icon: CalendarRange, title: 'One card per month, by start date' },
+]
+function loadGroupBy(collectionId: string): CollGroupBy {
+  try {
+    return localStorage.getItem(GROUP_KEY(collectionId)) === 'month' ? 'month' : 'table'
+  } catch {
+    return 'table'
+  }
+}
+
+/** What every row needs to draw its track, When and overlap line. */
+type RowCtx = {
+  today: string
+  overlaps: Map<string, string[]>
+  /** Item whose date picker opens by itself, and the month it opens on (the card it was added from). */
+  autoOpen: { id: string; month: string | null } | null
+  onAutoOpened: () => void
 }
 
 // Click-to-sort columns — mirrors the sprint list (SprintView.tsx), minus the
@@ -161,6 +204,40 @@ export function CollectionView({
 
   const [addingTable, setAddingTable] = useState(false)
 
+  // Keyed by collection, so switching collection reads that one's preference.
+  const [groupState, setGroupState] = useState(() => ({ id: collectionId, g: loadGroupBy(collectionId) }))
+  const groupBy = groupState.id === collectionId ? groupState.g : loadGroupBy(collectionId)
+  const setGroupBy = (g: CollGroupBy) => {
+    setGroupState({ id: collectionId, g })
+    try {
+      localStorage.setItem(GROUP_KEY(collectionId), g)
+    } catch {
+      // localStorage unavailable, swallow
+    }
+  }
+  // An item just added from a month card has no dates yet: its date picker
+  // opens by itself (collections.md "List cho lịch event").
+  const [autoOpen, setAutoOpen] = useState<{ id: string; month: string | null } | null>(null)
+  const today = todayLocalISO()
+  const overlaps = useMemo(() => overlapsById(items, (t) => stripRich(t.title).trim() || 'Untitled'), [items])
+  const rowCtx: RowCtx = {
+    today,
+    overlaps,
+    autoOpen,
+    onAutoOpened: () => setAutoOpen(null),
+  }
+  // Month cards: items by the month of their start (undated → 'none').
+  const months = useMemo(() => {
+    const m = new Map<string, Task[]>()
+    for (const t of items) {
+      const k = t.startDate ? t.startDate.slice(0, 7) : 'none'
+      const arr = m.get(k)
+      if (arr) arr.push(t)
+      else m.set(k, [t])
+    }
+    return [...m.entries()].sort(([a], [b]) => (a === 'none' ? -1 : b === 'none' ? 1 : a.localeCompare(b)))
+  }, [items])
+
   // Delete-item undo toast (collections.md 2026-07-07): the trash button sits in
   // the status dot's hover slot, so a stray click is easy — deletion stays
   // 1-click/no-confirm, but the item is restorable for ~6s.
@@ -221,7 +298,7 @@ export function CollectionView({
   // reordering within a table and moving an item to another table are the same
   // gesture. Only offered in the natural order (sort === null), like the sprint
   // list's `canReorder`. See design-docs/collections.md.
-  const canReorder = sort === null
+  const canReorder = sort === null && groupBy === 'table'
   const [dragId, setDragId] = useState<string | null>(null)
   // Section under the cursor — highlights an empty table (which has no row to show
   // a drop-slot line on) as a valid drop target.
@@ -334,7 +411,45 @@ export function CollectionView({
     <div className="max-w-5xl mx-auto px-1 pt-4">
       {view === 'list' ? (
         <div className="space-y-4">
-          {collection.sections.map((sec) => (
+          <div className="flex items-center gap-2">
+            <span className="shrink-0 text-[12px] font-medium text-ink-faint">Group by</span>
+            <ViewToggle value={groupBy} options={GROUP_OPTIONS} onChange={setGroupBy} />
+          </div>
+          {groupBy === 'month' &&
+            months.map(([key, list]) => (
+              <MonthCard
+                key={key}
+                collectionId={collectionId}
+                monthKey={key}
+                items={list}
+                addToSectionId={collection.sections[collection.sections.length - 1].id}
+                statusById={statusById}
+                statuses={collection.statuses}
+                sort={sort}
+                setSort={setSort}
+                statusRank={statusRank}
+                rowCtx={rowCtx}
+                onAdded={(id) => setAutoOpen({ id, month: key === 'none' ? null : key })}
+                onDeleteItem={handleDeleteItem}
+              />
+            ))}
+          {groupBy === 'month' && months.length === 0 && (
+            <MonthCard
+              collectionId={collectionId}
+              monthKey={today.slice(0, 7)}
+              items={EMPTY_ITEMS}
+              addToSectionId={collection.sections[collection.sections.length - 1].id}
+              statusById={statusById}
+              statuses={collection.statuses}
+              sort={sort}
+              setSort={setSort}
+              statusRank={statusRank}
+              rowCtx={rowCtx}
+              onAdded={(id) => setAutoOpen({ id, month: today.slice(0, 7) })}
+              onDeleteItem={handleDeleteItem}
+            />
+          )}
+          {groupBy === 'table' && collection.sections.map((sec) => (
             <SectionCard
               key={sec.id}
               collectionId={collectionId}
@@ -349,13 +464,16 @@ export function CollectionView({
               dragFor={dragFor}
               dropHint={dragId !== null && overSectionId === sec.id}
               onDeleteItem={handleDeleteItem}
+              rowCtx={rowCtx}
             />
           ))}
-          <AddGroupButton
-            icon={Plus}
-            label="Add table"
-            onClick={() => setAddingTable(true)}
-          />
+          {groupBy === 'table' && (
+            <AddGroupButton
+              icon={Plus}
+              label="Add table"
+              onClick={() => setAddingTable(true)}
+            />
+          )}
         </div>
       ) : (
         <CollectionCalendar
@@ -626,6 +744,7 @@ function SectionCard({
   dragFor,
   dropHint,
   onDeleteItem,
+  rowCtx,
 }: {
   collectionId: string
   section: { id: string; name: string; color?: string }
@@ -642,7 +761,10 @@ function SectionCard({
   dropHint: boolean
   /** Delete + arm the undo toast (owned by CollectionView). */
   onDeleteItem: (t: Task) => void
+  rowCtx: RowCtx
 }) {
+  // Track window: whole months spanning this table's dated items.
+  const trackWin = useMemo(() => windowFor(items), [items])
   // Apply the active sort; `null` keeps natural (insertion) order. JS sort is
   // stable, so a copy preserves order for equal rows. See list-view.md.
   const sortedItems = useMemo(
@@ -750,42 +872,7 @@ function SectionCard({
           {/* Quiet column header — same look as the sprint list (canvas-sunk
               tint + hairline), labels aligned to the row columns via COL. Hidden
               while the table is empty (mirrors the sprint list, §5.8). */}
-          {items.length > 0 && (
-            <div className="flex items-center gap-3 px-4 py-1.5 border-b border-border-hair bg-canvas-sunk/40">
-              <div className={COL.lead} />
-              <div className={COL.dot} />
-              <SortHeader
-                className={COL.title}
-                field="title"
-                label="Name"
-                sort={sort}
-                onSort={onSort}
-              />
-              <SortHeader
-                className={COL.start}
-                field="startDate"
-                label="Start"
-                sort={sort}
-                onSort={onSort}
-                align="end"
-              />
-              <SortHeader
-                className={COL.due}
-                field="dueDate"
-                label="End"
-                sort={sort}
-                onSort={onSort}
-                align="end"
-              />
-              <SortHeader
-                className={COL.status}
-                field="status"
-                label="Status"
-                sort={sort}
-                onSort={onSort}
-              />
-            </div>
-          )}
+          {items.length > 0 && <ColumnHeader sort={sort} onSort={onSort} trackLabel="" />}
 
           {items.length === 0 && (
             <div className="px-4 pt-6 pb-1 text-center text-[13.5px] text-ink-faint">
@@ -802,12 +889,334 @@ function SectionCard({
                 statuses={statuses}
                 drag={dragFor(t)}
                 onDelete={onDeleteItem}
+                trackWin={trackWin}
+                ctx={rowCtx}
               />
             ))}
             <AddItemRow collectionId={collectionId} sectionId={section.id} />
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+/** Quiet column header shared by table and month cards (canvas-sunk tint, §5.8). */
+function ColumnHeader({
+  sort,
+  onSort,
+  trackLabel,
+}: {
+  sort: CollSort
+  onSort: (f: CollSortField) => void
+  trackLabel: string
+}) {
+  // `Dates` sorts by start; an older persisted End sort still lights it.
+  const datesSort: CollSort =
+    sort && (sort.field === 'startDate' || sort.field === 'dueDate')
+      ? { field: 'startDate', dir: sort.dir }
+      : sort
+  return (
+    <div className="flex items-center gap-3 px-4 py-1.5 border-b border-border-hair bg-canvas-sunk/40">
+      <div className={COL.lead} />
+      <div className={COL.dot} />
+      <SortHeader className={COL.title} field="title" label="Name" sort={sort} onSort={onSort} />
+      <SortHeader
+        className={COL.dates}
+        field="startDate"
+        label="Dates"
+        sort={datesSort}
+        onSort={onSort}
+      />
+      <div className={`${COL.track} text-[11px] font-semibold text-ink-faint`}>{trackLabel}</div>
+      <div className={`${COL.when} text-[11px] font-semibold text-ink-faint`}>When</div>
+      <SortHeader className={COL.status} field="status" label="Status" sort={sort} onSort={onSort} />
+    </div>
+  )
+}
+
+/**
+ * One item's span inside the card's date window: weekends shaded (windows up to
+ * ~2 months), a bar in the status colour (a diamond for a 1-day item), and a red
+ * hairline at today when today falls in the window.
+ */
+function TimeTrack({
+  start,
+  end,
+  color,
+  trackWin,
+  today,
+  faded,
+}: {
+  start: string | null
+  end: string | null
+  color: string
+  trackWin: { start: string; end: string } | null
+  today: string
+  faded?: boolean
+}) {
+  if (!trackWin) return null
+  const lo = dayNum(trackWin.start)
+  const hi = dayNum(trackWin.end)
+  const len = hi - lo + 1
+  const pct = (n: number) => ((n - lo) / len) * 100
+  const weekends: number[] = []
+  if (len <= 62) for (let d = lo; d <= hi; d++) if (isWeekendDay(d)) weekends.push(d)
+  const t = dayNum(today)
+  let bar: React.ReactNode = null
+  if (start) {
+    const s = dayNum(start)
+    const e = dayNum(end ?? start)
+    if (e >= lo && s <= hi) {
+      bar =
+        start === (end ?? start) ? (
+          <span
+            className="absolute top-[5px] w-[10px] h-[10px] rotate-45 rounded-[2px]"
+            style={{ left: `calc(${pct(s) + 50 / len}% - 5px)`, background: color }}
+          />
+        ) : (
+          <span
+            className="absolute top-[4px] h-3 rounded-[4px]"
+            style={{
+              left: `${pct(Math.max(s, lo))}%`,
+              width: `${((Math.min(e, hi) - Math.max(s, lo) + 1) / len) * 100}%`,
+              background: color,
+            }}
+          />
+        )
+    }
+  }
+  return (
+    <div
+      className={`relative h-5 rounded-[5px] bg-canvas overflow-hidden ${faded ? 'opacity-45' : ''}`}
+      aria-hidden
+    >
+      {weekends.map((d) => (
+        <span
+          key={d}
+          className="absolute inset-y-0 bg-ink/[0.035]"
+          style={{ left: `${pct(d)}%`, width: `${100 / len}%` }}
+        />
+      ))}
+      {bar}
+      {t >= lo && t <= hi && (
+        <span
+          className="absolute inset-y-0 w-[2px] rounded-[1px] bg-overdue"
+          style={{ left: `calc(${pct(t) + 50 / len}% - 1px)` }}
+        />
+      )}
+    </div>
+  )
+}
+
+/** The date-derived "When": Done / 3 days left / Starts in 4 days. */
+function WhenLabel({ timing }: { timing: EventTiming | null }) {
+  if (!timing) return null
+  const cls =
+    timing.kind === 'live'
+      ? 'text-status-done font-semibold'
+      : timing.kind === 'soon'
+        ? 'text-accent'
+        : 'text-ink-faint'
+  const dot =
+    timing.kind === 'live' ? 'bg-status-done' : timing.kind === 'soon' ? 'bg-accent' : 'bg-ink-faint'
+  return (
+    <span className={`inline-flex items-center gap-1.5 text-[12.5px] whitespace-nowrap ${cls}`}>
+      <span className={`w-[6px] h-[6px] rounded-full ${dot}`} aria-hidden />
+      {timing.label}
+    </span>
+  )
+}
+
+/**
+ * Group by Month (collections.md "List cho lịch event"): one card per start month,
+ * `No dates` first. Backdrops (≥ 20 days) pinned on top; days with no event as a
+ * dashed `No event` line between rows; past months collapse by default.
+ */
+function MonthCard({
+  collectionId,
+  monthKey,
+  items,
+  addToSectionId,
+  statusById,
+  statuses,
+  sort,
+  setSort,
+  statusRank,
+  rowCtx,
+  onAdded,
+  onDeleteItem,
+}: {
+  collectionId: string
+  /** `yyyy-mm`, or 'none' for undated items. */
+  monthKey: string
+  items: Task[]
+  addToSectionId: string
+  statusById: Map<string, CollectionStatus>
+  statuses: CollectionStatus[]
+  sort: CollSort
+  setSort: React.Dispatch<React.SetStateAction<CollSort>>
+  statusRank: Map<string, number>
+  rowCtx: RowCtx
+  onAdded: (id: string) => void
+  onDeleteItem: (t: Task) => void
+}) {
+  const undated = monthKey === 'none'
+  const bounds = undated ? null : monthBounds(monthKey)
+  const { today } = rowCtx
+  const past = !!bounds && bounds.end < today
+  const collapseKey = `${COLLAPSE_KEY(collectionId)}:m:${monthKey}`
+  const [collapsed, setCollapsed] = useState(() => {
+    try {
+      const v = localStorage.getItem(collapseKey)
+      return v === null ? past : v === '1'
+    } catch {
+      return past
+    }
+  })
+  const toggle = () =>
+    setCollapsed((prev) => {
+      try {
+        localStorage.setItem(collapseKey, prev ? '0' : '1')
+      } catch {
+        // localStorage unavailable, swallow
+      }
+      return !prev
+    })
+  const onSort = (field: CollSortField) =>
+    setSort((prev) => {
+      if (!prev || prev.field !== field) return { field, dir: 'asc' }
+      if (prev.dir === 'asc') return { field, dir: 'desc' }
+      return null
+    })
+
+  const { pinned, rows, gaps } = useMemo(() => {
+    const byDate = (a: Task, b: Task) =>
+      (a.startDate ?? '').localeCompare(b.startDate ?? '') ||
+      (a.dueDate ?? '').localeCompare(b.dueDate ?? '') ||
+      effOrder(a) - effOrder(b)
+    const ordered = [...items].sort(sort ? (a, b) => compareItems(a, b, sort, statusRank) : byDate)
+    const pinned = undated ? [] : ordered.filter((t) => isLongRunning(t))
+    const rows = ordered.filter((t) => !pinned.includes(t))
+    // `No event` lines only make sense in date order.
+    const gaps = bounds && !sort ? freeRuns(items, bounds.start, bounds.end) : []
+    return { pinned, rows, gaps }
+    // bounds is derived from monthKey
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items, sort, statusRank, undated, monthKey])
+
+  const live = items.filter((t) => eventTiming(t.startDate, t.dueDate, today)?.kind === 'live').length
+  const status = undated
+    ? 'Pick dates to place them'
+    : past
+      ? 'Past'
+      : live
+        ? `${live} live`
+        : bounds!.start > today
+          ? `Starts in ${dayNum(bounds!.start) - dayNum(today)} days`
+          : ''
+  const trackWin = bounds ? { start: bounds.start, end: bounds.end } : null
+
+  // Rows and gap lines interleaved by date.
+  const body: { at: string; node: React.ReactNode }[] = rows.map((t, i) => ({
+    at: sort ? String(i).padStart(5, '0') : (t.startDate ?? ''),
+    node: (
+      <ItemRow
+        key={t.id}
+        task={t}
+        statusById={statusById}
+        statuses={statuses}
+        onDelete={onDeleteItem}
+        trackWin={trackWin}
+        ctx={rowCtx}
+      />
+    ),
+  }))
+  for (const [a, b] of gaps) {
+    body.push({
+      at: a + '!', // before an item starting the day after the gap, after one starting that day
+      node: <GapLine key={`gap-${a}`} from={a} to={b} trackWin={trackWin!} />,
+    })
+  }
+  if (!sort) body.sort((x, y) => x.at.localeCompare(y.at))
+
+  return (
+    <div data-month-card={monthKey} className="glass-card rounded-[18px] overflow-hidden">
+      <div
+        onClick={toggle}
+        role="button"
+        aria-expanded={!collapsed}
+        className={`flex items-center gap-2.5 px-[18px] py-[13px] select-none cursor-pointer transition hover:bg-surface-hover ${
+          collapsed ? '' : 'border-b border-border'
+        }`}
+      >
+        <ChevronDown
+          size={14}
+          className={`text-ink-faint shrink-0 transition-transform ${collapsed ? '-rotate-90' : ''}`}
+        />
+        <span className="text-[15.5px] font-semibold text-ink tracking-[-0.01em]">
+          {undated ? 'No dates' : bounds!.label}
+        </span>
+        <span className="text-[13px] font-medium text-ink-faint tabular-nums">{items.length}</span>
+        <span className="flex-1" />
+        <span className={`text-[12px] ${live && !past ? 'text-status-done font-medium' : 'text-ink-faint'}`}>
+          {status}
+        </span>
+      </div>
+      {!collapsed && (
+        <div>
+          {items.length > 0 && (
+            <ColumnHeader sort={sort} onSort={onSort} trackLabel={undated ? '' : bounds!.label.split(' ')[0]} />
+          )}
+          <div className="divide-y divide-border">
+            {pinned.map((t) => (
+              <ItemRow
+                key={t.id}
+                task={t}
+                statusById={statusById}
+                statuses={statuses}
+                onDelete={onDeleteItem}
+                trackWin={trackWin}
+                ctx={rowCtx}
+                pinnedLabel="LONG-RUNNING"
+              />
+            ))}
+            {body.map((b) => b.node)}
+            <AddItemRow collectionId={collectionId} sectionId={addToSectionId} onAdded={onAdded} />
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** `No event · Dec 4 · 1 day` between rows of a month card. */
+function GapLine({ from, to, trackWin }: { from: string; to: string; trackWin: { start: string; end: string } }) {
+  const n = rangeDays(from, to)
+  const lo = dayNum(trackWin.start)
+  const len = dayNum(trackWin.end) - lo + 1
+  const label = from === to ? formatRange(from, from)!.slice(2) : formatRange(from, to)
+  return (
+    <div className="flex items-center gap-3 px-4 py-1 text-[11.5px] text-overdue/80 border-dashed">
+      <div className={COL.lead} />
+      <div className={COL.dot} />
+      <div className={`${COL.title} min-w-0`}>No event</div>
+      <div className={`${COL.dates} tabular-nums`}>
+        {label} · {n === 1 ? '1 day' : `${n} days`}
+      </div>
+      <div className={COL.track}>
+        <div className="relative h-2">
+          <span
+            className="absolute inset-y-0 rounded-[2px] bg-[repeating-linear-gradient(135deg,color-mix(in_srgb,var(--color-overdue)_30%,transparent)_0_3px,transparent_3px_6px)]"
+            style={{
+              left: `${((dayNum(from) - lo) / len) * 100}%`,
+              width: `${(n / len) * 100}%`,
+            }}
+          />
+        </div>
+      </div>
+      <div className={COL.when} />
+      <div className={COL.status} />
     </div>
   )
 }
@@ -946,6 +1355,9 @@ function ItemRow({
   statuses,
   drag,
   onDelete,
+  trackWin,
+  ctx,
+  pinnedLabel,
 }: {
   task: Task
   statusById: Map<string, CollectionStatus>
@@ -953,7 +1365,14 @@ function ItemRow({
   /** Pointer-drag wiring (undefined → not draggable, e.g. a column sort is on). */
   drag?: RowDrag
   onDelete: (t: Task) => void
+  /** The card's date window for the time track (null → empty track). */
+  trackWin: { start: string; end: string } | null
+  ctx: RowCtx
+  /** Small caps label over the title (`LONG-RUNNING` for a pinned backdrop). */
+  pinnedLabel?: string
 }) {
+  const timing = eventTiming(task.startDate, task.dueDate, ctx.today)
+  const clash = timing && timing.kind !== 'past' ? ctx.overlaps.get(task.id) : undefined
   const status = task.collectionStatusId
     ? statusById.get(task.collectionStatusId)
     : undefined
@@ -968,9 +1387,9 @@ function ItemRow({
   return (
     <div
       data-item-id={task.id}
-      className={`task-row group/row relative flex items-center gap-3 px-4 py-2 text-sm transition hover:bg-surface-hover ${
-        dragging ? 'opacity-40' : ''
-      }`}
+      className={`task-row group/row relative flex items-center gap-3 px-4 py-2 text-sm transition ${
+        timing?.kind === 'live' ? 'today-live' : 'hover:bg-surface-hover'
+      } ${pinnedLabel ? 'bg-canvas-sunk/40' : ''} ${dragging ? 'opacity-40' : ''}`}
     >
       {grip}
       {indicator}
@@ -998,30 +1417,45 @@ function ItemRow({
           <Trash2 size={13} />
         </button>
       </div>
-      <ItemTitle task={task} />
-      <div className={COL.start}>
-        <DateRangePickCell
-          which="start"
+      <div className={`${COL.title} min-w-0 ${timing?.kind === 'past' ? 'opacity-60' : ''}`}>
+        {pinnedLabel && (
+          <span className="block text-[10.5px] font-semibold tracking-[0.04em] text-ink-faint">
+            {pinnedLabel}
+          </span>
+        )}
+        <ItemTitle task={task} />
+        {clash && (
+          <span className="block text-[11.5px] leading-snug text-[color:var(--color-priority-high)] truncate">
+            Overlaps {clash.join(', ')}
+          </span>
+        )}
+      </div>
+      <div className={COL.dates}>
+        <DateRangeCell
           start={task.startDate}
           end={task.dueDate}
+          label={formatRange(task.startDate, task.dueDate)}
+          sub={formatLength(task.startDate, task.dueDate)}
           onChange={({ start, end }) =>
             db.tasks.update(task.id, { startDate: start, dueDate: end })
           }
-          ariaLabel="Start date"
-          emptyHint="Start"
+          autoOpen={ctx.autoOpen?.id === task.id}
+          openMonth={ctx.autoOpen?.id === task.id ? ctx.autoOpen.month : null}
+          onAutoOpened={ctx.onAutoOpened}
         />
       </div>
-      <div className={COL.due}>
-        <DateRangePickCell
-          which="end"
+      <div className={COL.track}>
+        <TimeTrack
           start={task.startDate}
           end={task.dueDate}
-          onChange={({ start, end }) =>
-            db.tasks.update(task.id, { startDate: start, dueDate: end })
-          }
-          ariaLabel="End date"
-          emptyHint="End"
+          color={dotColor}
+          trackWin={trackWin}
+          today={ctx.today}
+          faded={timing?.kind === 'past'}
         />
+      </div>
+      <div className={COL.when}>
+        <WhenLabel timing={timing} />
       </div>
       <div className={COL.status}>
         <StatusPill task={task} status={status} statuses={statuses} />
@@ -1095,7 +1529,7 @@ function ItemTitle({ task }: { task: Task }) {
     'flex-1 min-w-0 editable text-ink bg-transparent leading-snug whitespace-pre-wrap break-words'
 
   return (
-    <div className={`${COL.title} flex items-start`}>
+    <div className="w-full flex items-start">
       {editing ? (
         <textarea
           ref={ref}
@@ -1172,16 +1606,20 @@ function ItemTitle({ task }: { task: Task }) {
 function AddItemRow({
   collectionId,
   sectionId,
+  onAdded,
 }: {
   collectionId: string
   sectionId: string
+  /** Month cards open the new item's date picker (collections.md "List cho lịch event"). */
+  onAdded?: (id: string) => void
 }) {
   const [title, setTitle] = useState('')
   const add = async () => {
     const t = title.trim()
     if (!t) return
-    await addCollectionItem(collectionId, sectionId, { title: t })
+    const item = await addCollectionItem(collectionId, sectionId, { title: t })
     setTitle('')
+    onAdded?.(item.id)
   }
   return (
     <div className="flex items-center gap-3 px-4 py-2 text-sm">
@@ -1197,8 +1635,9 @@ function AddItemRow({
         className={`${COL.title} editable placeholder:text-ink-faint bg-transparent`}
         aria-label="Add item"
       />
-      <div className={COL.start} />
-      <div className={COL.due} />
+      <div className={COL.dates} />
+      <div className={COL.track} />
+      <div className={COL.when} />
       <div className={COL.status} />
     </div>
   )

@@ -1,7 +1,7 @@
 # Date picker (custom calendar)
 
 **Status:** Implemented
-**Last updated:** 2026-07-21 (days-off entry range widens to the member's task span)
+**Last updated:** 2026-11-28 (range picker always opens on "pick a start" with the current range as a ghost; closing mid-pick keeps the old value; one merged `DateRangeCell` in the collection List). Before: 2026-07-21 (days-off entry range widens to the member's task span)
 **Code:** `app/src/DatePicker.tsx` (component) · consumers: `SprintView.tsx` (List), `BoardView.tsx` (Board quick-edit), `App.tsx` (sprint dialog), `members.tsx` (days-off), `CollectionView.tsx` (collection items — **range** mode)
 
 ## Purpose
@@ -48,23 +48,31 @@ user explicitly didn't want clock times). A single calendar popover picks **both
 in two clicks, replacing the two independent single-date cells. Opt-in only — sprint/board/
 days-off keep the single-date behavior unchanged.
 
-- **Trigger** — `DateRangePickCell` renders the same right-aligned cell as `DatePickCell`.
+- **Trigger** — `DateRangeCell` (List, 2026-11-28): ONE cell showing the whole range
+  (`Dec 1 – 3` + `3 days`, `◆ Dec 7`, `＋ Dates` when empty), see [collections.md](./collections.md)
+  *List cho lịch event*. `DateRangePickCell` (Calendar's bar editor) keeps two cells:
   Two cells share one range: the **Start** cell shows `startDate`, the **End** cell shows
   `dueDate`; **both open the same range popover**. Empty cells show the quiet dashed pill
   (`＋ Start` / `＋ End`) via the existing `emptyHint`.
 - **Two-click cycle** (`RangeCalendarPopover`):
-  1. Click 1 → set **start**, clear end, wait for end.
+  1. Click 1 → set **start**, wait for end.
   2. Click 2 → if `≥ start`: set **end**, write `{startDate, dueDate}` once, close. If `< start`:
      treat as a new start (re-pick). Clicking the **same day twice** = a 1-day event (start = end).
-  - **Init**: have start but no end → open straight into "waiting for end"; have both → reopening
-     starts a fresh range (old range stays highlighted so re-picking is easy); have neither → wait
-     for start.
-  - **Closing mid-pick** (outside-click / Esc) commits the draft as-is (start may have no end).
+  - **Init (2026-11-28): always "pick a start"**, whatever the item already holds. The current range
+    shows as a **ghost** (`canvas-sunk` band, dashed ring on its ends) so re-picking is easy to aim,
+    and the grid opens on its month. Before: an item with a start but no end opened straight into
+    "waiting for end", and every new item had `startDate = today`, so the first click (any day after
+    today) became the END: clicking Dec 5 gave `Nov 28 – Dec 5`; the user had to Clear and start
+    over (*"mặc định là có start date, phải clear rùi chỉnh lại"*). Of three options in
+    `demo/collection-date-picker.html` the user chose **1** (*"1, code đi"*).
+  - **Closing mid-pick** (outside-click / Esc) **keeps the old value**: nothing is written until the
+    second click (or Clear). Before 2026-11-28 it committed the half-picked draft.
+  - `autoOpen` — the trigger opens itself on mount (the item just added from a month card).
 - **Grid visuals** — `CalendarGrid` gains optional `rangeStart` / `rangeEnd` / `selectingEnd`:
   the two endpoints fill accent (white text), days **between** tint `accent-soft` (same tint as
   the sprint shade), and while waiting for the end click the grid shows a **hover preview** band
   from start to the hovered day. Absent these props → single-date rendering, byte-for-byte as before.
-- **Footer (range mode)** — left shows a live hint (`Pick a start` → `Jul 3 – …` → `Jul 3 – Jul 5`);
+- **Footer (range mode)** — left shows a live hint (`Pick a start` → `Jul 3 – pick an end`);
   right is **Clear** (clears *both* endpoints). **No "Today"** in range mode (a single jump-select
   is meaningless for a range).
 

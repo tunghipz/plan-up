@@ -161,7 +161,7 @@ describe('section CRUD', () => {
 
 describe('addCollectionItem', () => {
   beforeEach(clearAll)
-  it('creates a Task with sprintId=null, default status = first, startDate=today', async () => {
+  it('creates a Task with sprintId=null, default status = first, no dates', async () => {
     await db.projects.add({ id: 'p1', name: 'P', createdAt: 1 })
     const c = await createCollection('p1', 'X')
     const t = await addCollectionItem(c.id, c.sections[0].id, { title: 'Đập trứng' })
@@ -169,7 +169,8 @@ describe('addCollectionItem', () => {
     expect(t.collectionId).toBe(c.id)
     expect(t.sectionId).toBe(c.sections[0].id)
     expect(t.collectionStatusId).toBe(c.statuses[0].id) // status đầu tiên
-    expect(t.startDate).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+    expect(t.startDate).toBeNull()
+    expect(t.dueDate).toBeNull()
     expect(t.title).toBe('Đập trứng')
     expect((await db.tasks.get(t.id))?.title).toBe('Đập trứng')
   })

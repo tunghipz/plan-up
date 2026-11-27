@@ -1,12 +1,13 @@
 # Collections (task ngoài sprint)
 
 **Status:** Implemented
-**Last updated:** 2026-11-09 (**perf**: item collection đến từ một live query ở App thay vì 3). Trước đó: 2026-09-21 (scheduler exemption: `planFor` + cả hai vòng recompute bỏ qua
+**Last updated:** 2026-11-28 (**List thành lịch event**: một ô ngày gộp, thanh thời gian, trạng thái tính từ ngày, cảnh báo trùng, `Group by Table · Month`; item mới không còn mặc định ngày hôm nay — xem *List cho lịch event*). Trước đó: 2026-11-09 (**perf**: item collection đến từ một live query ở App thay vì 3). Trước đó: 2026-09-21 (scheduler exemption: `planFor` + cả hai vòng recompute bỏ qua
 item có `collectionId` — xem "Cách ly khỏi sprint engine")
 **Previously:** 2026-07-15 (collection **Share link** on the top bar next to Export —
 see [share-link-snapshot.md](./share-link-snapshot.md) "Collections (v3)"; the old **Export as
 image…** menu item was removed — a collection PNG is now reached via its Share link viewer)
-**Code:** `app/src/db.ts` (schema v9 + collection/section/status/item CRUD, export v3),
+**Code:** `app/src/event-timeline.ts` (nhãn ngày gộp, When, trùng, ngày trống, tháng — pure),
+`app/src/db.ts` (schema v9 + collection/section/status/item CRUD, export v3),
 `app/src/lib.ts` (buildMonthGrid/assignLanes/computeBarSegments — pure calendar helpers),
 `app/src/CollectionView.tsx` (List card-per-section + status editor + click-assign +
 editable Start/End dates via shared `DateRangePickCell` — a **date-range** picker, one popover
@@ -81,6 +82,45 @@ là adaptive theo container đang xem: sprint → `List / Board / Timeline`; col
 > theo container: xem collection thì bên trái là identity collection (icon stack + tên đổi-được +
 > summary), bên phải là `Statuses` + toggle `List/Calendar`. `CollectionView` chỉ còn render nội
 > dung — bỏ hẳn sub-header. View state của collection persist qua `plan-up:collectionView`.
+
+### List cho lịch event (2026-11-28)
+
+Collection chủ yếu dùng để xếp lịch event live-ops và milestone. Bảng cũ có hai cột Start/End nằm
+xa tên, nên người dùng phải tự nhẩm độ dài event, chỗ trùng, ngày trống, và không biết event nào đang
+chạy. Review + 3 hướng ở `demo/collection-events.html`. User chọn **A** (*"A okie"*): giữ bảng, thêm trục
+thời gian.
+
+- **Một ô ngày gộp** thay cho Start + End: `Dec 1 – 3` / `Nov 28 – Dec 3` (khác tháng), dòng phụ
+  `3 days`. Event 1 ngày: `◆ Dec 7`, dòng phụ `1 day`. Có start chưa có end: `Dec 1 – …`. Trống:
+  pill nét đứt `＋ Dates`. Bấm ô mở range picker (xem [date-picker.md](./date-picker.md) *Range mode*).
+  Header cột `Dates` sort theo ngày bắt đầu (asc → desc → off như cũ).
+- **Thanh thời gian** (cột rộng, ẩn trên phone): một thanh trong *cửa sổ* của card, màu = màu status
+  của item, nền gạch ngày cuối tuần, vạch đỏ ở hôm nay khi hôm nay nằm trong cửa sổ. Cửa sổ = tháng
+  của card (Group by Month) hoặc từ đầu tháng của ngày sớm nhất tới cuối tháng của ngày muộn nhất
+  trong bảng (Group by Table).
+- **Cột `When`** (trạng thái theo ngày, app tự tính, không lưu): `Done` (đã qua, cả dòng mờ),
+  `Ends today` / `N days left` (đang chạy: chữ xanh lá, nền dòng xanh nhạt như dấu hôm nay của sprint),
+  `Starts tomorrow` / `Starts in N days` (accent), trống khi chưa có ngày.
+- **Cảnh báo trùng**: dòng chữ cam nhỏ dưới tên, `Overlaps Heist event, Đập trứng`, khi item chưa
+  qua và có ngày chung với item khác cùng collection. Bỏ qua event dài ≥ 20 ngày (event nền, ví dụ
+  "Hành trình sự kiện" cả tháng), vì nó trùng với mọi thứ.
+- **Cột Status giữ nguyên** (status do user tự tạo, thực tế là *loại* event).
+- **`Group by  Table · Month`** — hàng điều khiển trên cùng của List, nhớ theo từng collection
+  (`localStorage` `plan-up:collGroup:<collectionId>`), mặc định `Table` (collection như "Builds" vẫn
+  nhóm theo bảng tự đặt).
+  - **Month**: app tự nhóm theo tháng của ngày bắt đầu, card `December 2026`, mới nhất ở dưới. Item
+    chưa có ngày gom vào card `No dates` trên cùng. Tháng đã qua thu gọn mặc định (bấm header để mở,
+    lựa chọn được nhớ). Header card ghi `2 live` / `Starts in 3 days` / `Past`.
+  - Event ≥ 20 ngày ghim đầu card, nhãn `LONG-RUNNING`.
+  - Giữa các event xen dòng `No event · Dec 4 · 1 day` (chữ đỏ nhạt, thanh gạch chéo) cho ngày
+    không có event nào chạy (không tính event ≥ 20 ngày). Chỉ tính trong tháng của card.
+  - Thứ tự: ngày bắt đầu rồi ngày kết thúc; sort cột vẫn đè lên được. Không kéo thả (thứ tự là ngày).
+  - **Add item** trong card tháng: item vào bảng (section) cuối của collection, chưa có ngày, nên nằm ở
+    card `No dates` (dòng phụ `Pick dates to place them`) và **range picker tự mở** trên dòng đó, ở tháng
+    của card vừa thêm; chọn xong ngày, item chuyển sang tháng của nó.
+- **Group by Table** giữ hành vi cũ (bảng tự đặt, kéo thả khi không sort), chỉ đổi ô ngày, thêm thanh,
+  cột When và cảnh báo trùng. Không ghim, không dòng "No event".
+- Calendar view không đổi.
 
 ### UX refinements (2026-06-08)
 Một loạt chỉnh nhỏ để Collections bám sát design-system constitution (đọc kèm
@@ -242,8 +282,9 @@ ngay lần mở app kế tiếp — cột End giữ nguyên, ngày gốc mất l
 ## Rules & edge cases
 - **Tạo collection** → tự có 1 section "All".
 - **Add item** → vào section vừa bấm "Add item"; default `collectionStatusId` = status **đầu tiên**
-  của collection (hoặc `null` nếu collection chưa có status nào), `startDate=today`, `dueDate=null`,
-  `sprintId=null`.
+  của collection (hoặc `null` nếu collection chưa có status nào), `startDate=null`, `dueDate=null`
+  (đến 2026-11-28 là `startDate=today`: picker mở ra ở bước chờ ngày kết thúc, user phải Clear rồi
+  chọn lại), `sprintId=null`.
 - **Xoá status** đang được item dùng → confirm; item đó về `collectionStatusId=null` (hiện ô Status
   trống), không mất item. Không bắt buộc collection phải có ≥1 status.
 - **Xoá section** còn item → confirm; item **dồn về section đầu** (không mất). Không cho xoá

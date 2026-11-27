@@ -350,19 +350,36 @@ export function buildSnapshot(
  * a child whose parent isn't in the lane reads as top-level. Shared by the
  * snapshot board and the sender preview so both nest + order identically. Pure.
  */
-export function laneRows(tasks: Task[]): { task: Task; child: boolean }[] {
+export function laneRows(
+  tasks: Task[],
+  allTasks: Task[] = tasks
+): { task: Task; child: boolean }[] {
   const idSet = new Set(tasks.map((t) => t.id))
+  const byId = new Map(allTasks.map((t) => [t.id, t]))
+  // A subtask whose group head sits in another member's lane borrows that head
+  // here, so the lane shows it as a group like the List does (task-groups.md
+  // "Group nhiều người", 2026-11-27). The head's roll-up is frozen at build.
+  const headOf = (t: Task) =>
+    t.parentId && (idSet.has(t.parentId) || byId.has(t.parentId)) ? t.parentId : null
   const kidsByParent = new Map<string, Task[]>()
+  const top: Task[] = []
+  const borrowed = new Set<string>()
   for (const t of tasks) {
-    if (t.parentId && idSet.has(t.parentId)) {
-      const arr = kidsByParent.get(t.parentId) ?? []
-      arr.push(t)
-      kidsByParent.set(t.parentId, arr)
+    const pid = headOf(t)
+    if (!pid) {
+      top.push(t)
+      continue
+    }
+    const arr = kidsByParent.get(pid) ?? []
+    arr.push(t)
+    kidsByParent.set(pid, arr)
+    if (!idSet.has(pid) && !borrowed.has(pid)) {
+      borrowed.add(pid)
+      top.push(byId.get(pid)!)
     }
   }
-  const isChild = (t: Task) => !!(t.parentId && idSet.has(t.parentId))
   const rows: { task: Task; child: boolean }[] = []
-  for (const t of tasks.filter((x) => !isChild(x)).sort(byEnd)) {
+  for (const t of top.sort(byEnd)) {
     rows.push({ task: t, child: false })
     for (const k of (kidsByParent.get(t.id) ?? []).slice().sort(byEnd)) rows.push({ task: k, child: true })
   }

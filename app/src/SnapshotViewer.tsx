@@ -402,7 +402,7 @@ export function SnapshotViewer({ raw }: { raw: string }) {
               {groups.map((g, gi) => {
                 const name = g.member?.name ?? 'Unassigned'
                 const color = g.member ? g.member.color || colorForName(name) : 'var(--color-ink-faint)'
-                const rows = laneRows(g.tasks)
+                const rows = laneRows(g.tasks, data.tasks)
                 const { done, total } = memberStats(g.tasks, parentIds)
                 const offList = g.member ? offById.get(g.member.id) ?? [] : []
                 const offCount = effectiveDaysOff(offList)

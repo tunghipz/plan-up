@@ -7,7 +7,7 @@
 > verbatim by the hosted mode.
 
 **Status:** Implemented
-**Last updated:** 2026-11-09 (**security**: decompress có trần, trần số dòng sau giải nén, màu chỉ nhận hex — xem *Rules & edge cases*). Trước đó: 2026-08-18 (+ **fix từ `/review`**: chặn vòng lặp vô hạn khi span
+**Last updated:** 2026-11-27 (subtask của group người khác giữ có dòng group head đứng trên trong block member, như List). Trước đó: 2026-11-09 (**security**: decompress có trần, trần số dòng sau giải nén, màu chỉ nhận hex — xem *Rules & edge cases*). Trước đó: 2026-08-18 (+ **fix từ `/review`**: chặn vòng lặp vô hạn khi span
 đi quá 9999-12-31 — `hd` là thứ đầu tiên đẩy ngày do người ngoài kiểm soát vào
 `holidayLoadInSpan`, và một link 168 ký tự khoá cứng tab; `decodeSnapshot` giờ không
 throw nữa; `hd` **clip** theo range nên nhãn và số khớp nhau; bỏ `half` thừa; sort;
@@ -210,7 +210,9 @@ phía server, không auth.
     màn bọc trong glass card; PNG xuất ra vẫn là card trắng riêng): **một bảng
     hairline** — Member gutter (rowSpan: avatar + tên + `done/total`) · cột **# ·
     Task · Start · End · Effort · Status**, đánh số liên tục 1..N, separator 2px giữa
-    block member. Task: `↳` indent cho subtask, done gạch ngang, priority pill
+    block member. Task: `↳` indent cho subtask (kể cả subtask của group mà **người khác giữ**: từ
+    2026-11-27 block member đó cũng có dòng group head đứng trên, như List By member — xem
+    [task-groups.md](./task-groups.md) *Group nhiều người*; trước đó chúng là dòng thường), done gạch ngang, priority pill
     (`PRIORITY_TAG`), `◆ Milestone` khi effort 0. **Status = pill công thức List**
     (`StatusPill`, color-mix 15%/78% trên `STATUS_META`). Task trong mỗi lane (và
     subtask trong mỗi parent) **tự sort theo end date** (`byEnd`, undated cuối).

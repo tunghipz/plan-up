@@ -11,6 +11,7 @@ import {
   SHARE_MAX_BYTES,
   SNAPSHOT_VERSION,
   COLLECTION_SNAPSHOT_VERSION,
+  laneRows,
 } from './share-snapshot'
 import { holidayChipParts, holidayLoadInSpan, holidayWorkDays } from './lib'
 import type { Collection, Holiday, Member, Project, Sprint, Task } from './types'
@@ -662,3 +663,25 @@ import LZString from 'lz-string'
 function encodeRaw(json: string): string {
   return LZString.compressToEncodedURIComponent(json)
 }
+
+describe('laneRows — groups held by someone else (task-groups.md, 2026-11-27)', () => {
+  const t = (id: string, extra: Record<string, unknown> = {}) =>
+    ({ id, title: id, status: 'todo', startDate: null, dueDate: null, estimate: null, dependsOn: [], ...extra }) as never
+  it("borrows the head so another member's subtasks show under it", () => {
+    const head = t('head')
+    const mine1 = t('m1', { parentId: 'head', dueDate: '2026-12-02' })
+    const mine2 = t('m2', { parentId: 'head', dueDate: '2026-12-01' })
+    const loose = t('x', { dueDate: '2026-11-30' })
+    const rows = laneRows([mine1, loose, mine2], [head, mine1, mine2, loose])
+    expect(rows.map((r) => [(r.task as { id: string }).id, r.child])).toEqual([
+      ['x', false],
+      ['head', false],
+      ['m2', true],
+      ['m1', true],
+    ])
+  })
+  it('keeps a subtask as a plain row when its head is not in the snapshot', () => {
+    const orphan = t('o', { parentId: 'gone' })
+    expect(laneRows([orphan], [orphan]).map((r) => r.child)).toEqual([false])
+  })
+})

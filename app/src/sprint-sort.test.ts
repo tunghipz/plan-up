@@ -134,6 +134,29 @@ describe('orderLane — sort then pull', () => {
     expect(out.map((x) => x.id)).toEqual(['one', 'dep', 'two'])
   })
 
+  it('Start/End: a dated dependent follows its own date, both directions', () => {
+    // A group with two people's chains: a1 → a2, b1 → b2. End sort must interleave
+    // them by date (and reverse on desc) instead of gluing each chain together.
+    const head = t('g', { sequence: 1 })
+    const a1 = t('a1', { sequence: 2, parentId: 'g' })
+    const a2 = t('a2', { sequence: 3, parentId: 'g', dependsOn: ['a1'] })
+    const b1 = t('b1', { sequence: 4, parentId: 'g' })
+    const b2 = t('b2', { sequence: 5, parentId: 'g', dependsOn: ['b1'] })
+    const plans = new Map<string, WorkingPlan>([
+      ['a1', plan('2026-11-23')],
+      ['b1', plan('2026-11-24')],
+      ['a2', plan('2026-11-25')],
+      ['b2', plan('2026-11-26')],
+    ])
+    const lane = [head, a1, a2, b1, b2]
+    const kids = (dir: 'asc' | 'desc') =>
+      orderLane(lane, { field: 'dueDate', dir }, plans)
+        .filter((x) => x.parentId === 'g')
+        .map((x) => x.id)
+    expect(kids('asc')).toEqual(['a1', 'b1', 'a2', 'b2'])
+    expect(kids('desc')).toEqual(['b2', 'a2', 'b1', 'a1'])
+  })
+
   it('does the same in the neutral (manual) order', () => {
     const one = t('one', { sequence: 1 })
     const two = t('two', { sequence: 2 })

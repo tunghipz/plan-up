@@ -1,7 +1,7 @@
 # List view
 
 **Status:** Implemented
-**Last updated:** 2026-11-13 (phone v2: task card gọn ~58pt, meta một dòng, group thành chữ cuối meta — xem [mobile-layout.md](./mobile-layout.md)). Trước đó cùng ngày (task hôm nay: nền xanh nhạt + tiêu đề đậm, hạn hôm nay thêm nhãn Due today, header member có chip "N today" — xem [today-marker.md](./today-marker.md)). Trước đó cùng ngày (phone width < 768px: each row re-flows into a two-line card, column header hidden — see [mobile-layout.md](./mobile-layout.md)). Trước đó: 2026-11-09 (card **Group nhiều người** tách khỏi Unassigned — xem task-groups.md). Trước đó: 2026-11-09 (**perf**: `TaskRow` memo thật sự bỏ qua row không đổi: structural sharing + prop dẫn xuất từng row, xem *Hiệu năng*). Trước đó: 2026-11-09 (**chip member gọn**: dải chip của All xuống dòng dưới `Group by`,
+**Last updated:** 2026-11-27 (sort Start / End: task trong group xếp đúng theo ngày, chỉ dependent chưa có ngày còn bị kéo dưới prereq). Trước đó: 2026-11-13 (phone v2: task card gọn ~58pt, meta một dòng, group thành chữ cuối meta — xem [mobile-layout.md](./mobile-layout.md)). Trước đó cùng ngày (task hôm nay: nền xanh nhạt + tiêu đề đậm, hạn hôm nay thêm nhãn Due today, header member có chip "N today" — xem [today-marker.md](./today-marker.md)). Trước đó cùng ngày (phone width < 768px: each row re-flows into a two-line card, column header hidden — see [mobile-layout.md](./mobile-layout.md)). Trước đó: 2026-11-09 (card **Group nhiều người** tách khỏi Unassigned — xem task-groups.md). Trước đó: 2026-11-09 (**perf**: `TaskRow` memo thật sự bỏ qua row không đổi: structural sharing + prop dẫn xuất từng row, xem *Hiệu năng*). Trước đó: 2026-11-09 (**chip member gọn**: dải chip của All xuống dòng dưới `Group by`,
 chip chỉ còn avatar · tên · done/total + chấm báo, phần còn lại trong thẻ rê chuột — xem *Chip
 member gọn*; trước đó cùng ngày: toggle `By member · All` **rời top bar** xuống hàng **`Group by`**
 đầu List — xem *Chỗ đặt toggle*;
@@ -100,7 +100,9 @@ inset-grouped cards, fully editable inline.
   hợp đồng mà group children đã có: nesting được áp **sau** khi sort, nên List chỉ có một luật
   chứ không phải hai. Hệ quả có chủ đích: cột đang sort **không còn đơn điệu** từ trên xuống —
   một dependent End trống có thể nằm giữa hai row có ngày. Chi tiết + lý do ở
-  [dependencies.md](./dependencies.md).
+  [dependencies.md](./dependencies.md). **Riêng sort Start / End (2026-11-27):** chỉ kéo dependent
+  có ô ngày trống; row có ngày đứng đúng theo ngày, nên task trong group (và ở All, task của nhiều
+  người trong cùng group) xếp đúng theo ngày cả tăng lẫn giảm.
 - Member cards omit the **Assignee** column (everyone in the group is the same person);
   the Unassigned card keeps it.
 - **Group nhiều người** (2026-11-09, [task-groups.md](./task-groups.md)): ở By member, task con

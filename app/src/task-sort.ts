@@ -216,11 +216,13 @@ export function saveSort(sort: Sort) {
  * lands below all of them. `sameAssignee` narrows the scope further to one
  * person — the List's Assignee sort uses it so each member stays one contiguous
  * block (a prereq owned by someone else no longer drags a row out of its block).
- * See design-docs/dependencies.md.
+ * `pullable` limits WHICH rows get pulled — the Start/End sort passes "only rows
+ * with an empty date", since a dated dependent already sorts by its own date
+ * (the scheduler puts it after its prereq). See design-docs/dependencies.md.
  */
 export function pullDependentsUnderPrereqs(
   lane: Task[],
-  opts: { sameAssignee?: boolean } = {}
+  opts: { sameAssignee?: boolean; pullable?: (t: Task) => boolean } = {}
 ): Task[] {
   if (lane.length < 2) return lane
   const pos = new Map<string, number>()
@@ -231,6 +233,7 @@ export function pullDependentsUnderPrereqs(
       : (t.parentId ?? null)
 
   const anchorOf = (t: Task): string | null => {
+    if (opts.pullable && !opts.pullable(t)) return null
     let best: string | null = null
     let bestPos = -1
     for (const id of t.dependsOn ?? []) {
@@ -305,5 +308,13 @@ export function orderLane(
     )
   )
   // Assignee sort: pull only within one person, so every member stays one block.
-  return pullDependentsUnderPrereqs(sorted, { sameAssignee: sort.field === 'assignee' })
+  // Start/End sort: pull only dependents with no date in that column — a dated row
+  // stays where its date puts it, so a group's children follow the date both ways.
+  const dateField = sort.field === 'startDate' || sort.field === 'dueDate' ? sort.field : null
+  return pullDependentsUnderPrereqs(sorted, {
+    sameAssignee: sort.field === 'assignee',
+    pullable: dateField
+      ? (t) => (dateKeys?.get(t.id)?.[dateField] ?? EMPTY_DATE_KEY) === EMPTY_DATE_KEY
+      : undefined,
+  })
 }

@@ -1,7 +1,7 @@
 # Dependencies (prerequisites)
 
 **Status:** Implemented
-**Last updated:** 2026-11-09 (**perf**: List tính `blocked` một pass bằng `computeBlockedIds`; `PrereqInput` đọc task mới nhất lúc commit). Trước đó: 2026-11-09 (List chế độ **All**: lane là cả sprint nên prereq khác người cũng
+**Last updated:** 2026-11-27 (sort **Start / End** chỉ kéo dependent chưa có ngày; dependent có ngày theo đúng ngày của nó — xem *Dependents stick to their prerequisite*). Trước đó: 2026-11-09 (**perf**: List tính `blocked` một pass bằng `computeBlockedIds`; `PrereqInput` đọc task mới nhất lúc commit). Trước đó: 2026-11-09 (List chế độ **All**: lane là cả sprint nên prereq khác người cũng
 kéo dependent; **sort theo Assignee** chỉ kéo trong cùng một người — see *Dependents stick to
 their prerequisite*)
 **Previously:** 2026-09-21 (a dependent now renders **directly under its prerequisite in
@@ -88,6 +88,12 @@ UI can flag blocked work.
     `assigneeId`**: prereq khác người không kéo, để mỗi người là một khối liền (user chọn,
     2026-11-09: *"bỏ pull khi sort Assignee"*). Prereq cùng người vẫn kéo, nên khối của một người
     giống hệt card của họ ở By member. Mọi sort khác giữ nguyên luật.
+  - **Ngoại lệ: sort theo Start / End (2026-11-27).** Chỉ kéo dependent **chưa có ngày** ở cột
+    đang sort (ô trống). Dependent đã có ngày nằm đúng chỗ ngày của nó: scheduler luôn xếp nó
+    sau prereq, nên sort tăng dần tự đặt nó dưới prereq; sort giảm dần thì nó lên trên, đúng
+    nghĩa "giảm dần". Trước đó pull ghi đè ngày: sort End giảm dần thì task trong group vẫn ra
+    thứ tự tăng, và ở All chuỗi của từng người bị gom thành khối thay vì xen kẽ theo ngày
+    (user: *"khi sort theo enddate hay start date, sao task trong group không sort theo"*).
 - A task waiting on an unfinished prereq is **blocked** (row tooltip: "Blocked — waiting on
   a prerequisite task"). A prereq that is a **group (parent) task** counts as done only when
   **every child** of that group is done.

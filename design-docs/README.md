@@ -74,7 +74,7 @@ Non-obvious behaviors, defaults, persistence keys.
 | [sprint-cadence.md](./sprint-cadence.md) | Sprint start locked to Monday + fixed 2-week duration (Monday-strip picker, derived read-only end) |
 | [sprint-archive.md](./sprint-archive.md) | Reversible archive to declutter the sprint list (collapsible `Archived (N)` section, hover action, out of active flow) |
 | [sprint-expiry-signal.md](./sprint-expiry-signal.md) | Signal a lapsed/lapsing sprint — header banner (roll over / go to next / create+carry) + amber sidebar dot; fires when past end date or ending today/tomorrow |
-| [collections.md](./collections.md) | Task ngoài sprint — collection tự đặt tên, nhiều bảng (sections), view List (giống sprint, tap-to-edit, **sortable columns** + **date-range picker**) + Calendar liền mạch, status do user tự tạo per-collection |
+| [collections.md](./collections.md) | Task ngoài sprint — collection tự đặt tên, nhiều bảng (sections), view List (giống sprint, tap-to-edit, **sortable columns**, đọc như lịch event: ô ngày gộp + thanh thời gian + When + cảnh báo trùng, **Group by Table · Month**, **date-range picker** luôn chọn lại từ đầu) + Calendar liền mạch, status do user tự tạo per-collection |
 | [sprint-rollover.md](./sprint-rollover.md) | Move unfinished tasks to next sprint — preview popover |
 | [members-and-days-off.md](./members-and-days-off.md) | Member labels, colors, off-days |
 | [project-holidays.md](./project-holidays.md) | Project-wide days off (Tết, lễ, offsite) — two-tap range picker over a 2-month calendar, unioned into every task by the scheduler, **per-member exemptions** (`exceptMemberIds`, one click on an avatar in the holiday row), `Nd holiday` chip on member cards that a period actually overlaps, hatched in the Timeline |
